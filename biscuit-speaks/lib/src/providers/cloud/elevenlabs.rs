@@ -5,9 +5,12 @@
 //!
 //! ## Environment Variables
 //!
-//! The API key is read from:
-//! - `ELEVEN_LABS_API_KEY` (preferred by schematic)
-//! - `ELEVENLABS_API_KEY` (alternative)
+//! The API key is read once, at construction, from the first one set of:
+//! - `ELEVEN_LABS_API_KEY`
+//! - `ELEVENLABS_API_KEY`
+//!
+//! The key is handed to the client as its credential, so the generated
+//! client's own environment fallback is never consulted.
 //!
 //! ## Examples
 //!
@@ -23,9 +26,13 @@ use std::path::PathBuf;
 
 use schematic_schema::elevenlabs::{
     CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
-    ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel, VoiceSettings,
+    ListModelsRequest, ListVoicesRequest, ListVoicesResponse, ModelInfo, VoiceResponseModel,
+    VoiceSettings,
 };
-use schematic_schema::shared::{SchematicError, reqwest};
+use schematic_schema::prelude::{
+    CallOptions, Credential, ElevenLabs, ElevenLabsClient, TransportError,
+};
+use schematic_schema::schematic_runtime::{ApiError, EndpointSpec, ErrorKind, NoDeclaredError};
 
 use crate::audio_cache::{CacheKey, write_atomic};
 use crate::errors::TtsError;
@@ -41,6 +48,9 @@ const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
 
 /// Default ElevenLabs model for multilingual support.
 const DEFAULT_MODEL_ID: &str = "eleven_multilingual_v2";
+
+/// Voices requested per `/v2/voices` page; the API's maximum.
+const VOICES_PAGE_SIZE: i64 = 100;
 
 /// ElevenLabs cloud TTS provider.
 ///
@@ -64,7 +74,7 @@ const DEFAULT_MODEL_ID: &str = "eleven_multilingual_v2";
 /// ```
 pub struct ElevenLabsProvider {
     /// The schematic-generated ElevenLabs client.
-    client: ElevenLabs,
+    client: ElevenLabsClient,
     /// Default voice ID to use when none specified.
     default_voice_id: String,
     /// Default model ID to use.
@@ -95,25 +105,19 @@ impl ElevenLabsProvider {
     /// let provider = ElevenLabsProvider::new()?;
     /// ```
     pub fn new() -> Result<Self, TtsError> {
-        // Verify API key exists before creating the client
-        if std::env::var("ELEVEN_LABS_API_KEY").is_err()
-            && std::env::var("ELEVENLABS_API_KEY").is_err()
-        {
-            return Err(TtsError::MissingApiKey {
-                provider: "elevenlabs".into(),
-            });
-        }
-
-        Ok(Self {
-            client: ElevenLabs::new(),
-            default_voice_id: DEFAULT_VOICE_ID.into(),
-            default_model_id: DEFAULT_MODEL_ID.into(),
-        })
+        Self::build(None)
     }
 
     /// Create a new ElevenLabs provider with a custom base URL.
     ///
-    /// Useful for testing with mock servers.
+    /// Useful for testing with mock servers. The API key is still read from
+    /// the environment.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError::MissingApiKey` if no API key is found in the
+    /// environment, or `TtsError::HttpError` if `url` is not a usable HTTP(S)
+    /// base URL.
     ///
     /// ## Examples
     ///
@@ -121,17 +125,28 @@ impl ElevenLabsProvider {
     /// let provider = ElevenLabsProvider::with_base_url("http://localhost:8080")?;
     /// ```
     pub fn with_base_url(url: impl Into<String>) -> Result<Self, TtsError> {
-        // Verify API key exists before creating the client
-        if std::env::var("ELEVEN_LABS_API_KEY").is_err()
-            && std::env::var("ELEVENLABS_API_KEY").is_err()
-        {
-            return Err(TtsError::MissingApiKey {
+        Self::build(Some(url.into()))
+    }
+
+    fn build(base_url: Option<String>) -> Result<Self, TtsError> {
+        // Same variable order as the generated definition's env fallback.
+        let api_key = std::env::var("ELEVEN_LABS_API_KEY")
+            .or_else(|_| std::env::var("ELEVENLABS_API_KEY"))
+            .map_err(|_| TtsError::MissingApiKey {
                 provider: "elevenlabs".into(),
-            });
+            })?;
+
+        let mut builder = ElevenLabs::builder().credentials(Credential::api_key(api_key));
+        if let Some(url) = base_url {
+            builder = builder.base_url(url);
         }
+        let client = builder.build().map_err(|e| TtsError::HttpError {
+            provider: "elevenlabs".into(),
+            message: format!("Failed to build HTTP client: {e}"),
+        })?;
 
         Ok(Self {
-            client: ElevenLabs::with_base_url(url),
+            client,
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
         })
@@ -279,21 +294,57 @@ impl ElevenLabsProvider {
         std::env::var("ELEVEN_LABS_API_KEY").is_ok() || std::env::var("ELEVENLABS_API_KEY").is_ok()
     }
 
-    /// Map a `SchematicError` to a `TtsError`, detecting 402 Payment Required.
-    fn map_api_error(e: SchematicError) -> TtsError {
-        if let SchematicError::ApiError {
-            status: 402,
-            ref body,
-        } = e
-        {
+    /// Send `request` and return its decoded success value.
+    ///
+    /// ## Errors
+    ///
+    /// Any non-2xx reply, undecodable body, or transport failure, mapped by
+    /// [`Self::map_api_error`] and [`Self::map_transport_error`].
+    async fn send<R>(&self, request: R) -> Result<R::Success, TtsError>
+    where
+        R: EndpointSpec<Api = ElevenLabs, Failure = NoDeclaredError>,
+    {
+        let response = self
+            .client
+            .send(request, &CallOptions::default())
+            .await
+            .map_err(Self::map_transport_error)?;
+        let status = response.meta.status.as_u16();
+        response
+            .into_result()
+            .map_err(|error| Self::map_api_error(status, &error))
+    }
+
+    /// Map a failed reply to a `TtsError`: 402 Payment Required becomes
+    /// `PaidPlanRequired` carrying the body, everything else `HttpError`.
+    ///
+    /// The response body is included in the message as the API sent it; the
+    /// request's headers (and therefore the API key) never are.
+    fn map_api_error(status: u16, error: &ApiError<NoDeclaredError>) -> TtsError {
+        let body = String::from_utf8_lossy(&error.body);
+        if status == 402 {
             return TtsError::PaidPlanRequired {
                 provider: "ElevenLabs".into(),
-                detail: body.clone(),
+                detail: body.into_owned(),
             };
         }
+        let message = match error.kind {
+            ErrorKind::MalformedSuccess => format!("Failed to parse response: {error}"),
+            ErrorKind::Undeclared => format!("API error ({status}): {body}"),
+            _ => format!("API error ({status}): {error}"),
+        };
         TtsError::HttpError {
             provider: "elevenlabs".into(),
-            message: e.to_string(),
+            message,
+        }
+    }
+
+    /// Map a request that received no response to a `TtsError`, using the
+    /// transport error's redacted `Display`.
+    fn map_transport_error(error: TransportError) -> TtsError {
+        TtsError::HttpError {
+            provider: "elevenlabs".into(),
+            message: error.to_string(),
         }
     }
 
@@ -352,12 +403,7 @@ impl ElevenLabsProvider {
 
         let request = CreateSpeechRequest::new(voice_id.to_string(), body);
 
-        // Make the API request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(Self::map_api_error)?;
+        let audio_bytes = self.send(request).await?;
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
@@ -437,8 +483,8 @@ impl ElevenLabsProvider {
     ///
     /// ## Errors
     ///
-    /// Returns `TtsError::HttpError` if the request fails, or
-    /// `TtsError::ApiError` if the API returns an error response.
+    /// Returns `TtsError::PaidPlanRequired` on 402 Payment Required, and
+    /// `TtsError::HttpError` for any other failed request or reply.
     ///
     /// ## Examples
     ///
@@ -485,12 +531,7 @@ impl ElevenLabsProvider {
             "Sending ElevenLabs TTS request"
         );
 
-        // Use the generated client to make the request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(Self::map_api_error)?;
+        let audio_bytes = self.send(request).await?;
 
         tracing::debug!(
             audio_size = audio_bytes.len(),
@@ -511,7 +552,8 @@ impl ElevenLabsProvider {
     ///
     /// ## Errors
     ///
-    /// Returns `TtsError::HttpError` if the request fails.
+    /// Returns `TtsError::PaidPlanRequired` on 402 Payment Required, and
+    /// `TtsError::HttpError` for any other failed request or reply.
     ///
     /// ## Examples
     ///
@@ -523,36 +565,13 @@ impl ElevenLabsProvider {
     /// }
     /// ```
     pub async fn list_voices_raw(&self) -> Result<ListVoicesResponse, TtsError> {
-        // Get API key header from the schematic client
-        let (header_name, api_key) =
-            self.client
-                .api_key_header()
-                .ok_or_else(|| TtsError::MissingApiKey {
-                    provider: "elevenlabs".into(),
-                })?;
-
-        let http_client = self.client.http_client();
-        let base_url = format!("{}/v2/voices", self.client.api_base_url());
-
         let mut all_voices = Vec::new();
         let mut page_token: Option<String> = None;
-        let mut has_more = true;
         let mut total_count = None;
 
-        // Fetch all pages
         let mut page_num = 0;
-        while has_more {
+        loop {
             page_num += 1;
-            let mut url = reqwest::Url::parse(&base_url).map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: format!("Invalid URL: {}", e),
-            })?;
-
-            // Add pagination parameters
-            url.query_pairs_mut().append_pair("page_size", "100");
-            if let Some(token) = &page_token {
-                url.query_pairs_mut().append_pair("page_token", token);
-            }
 
             tracing::debug!(
                 page = page_num,
@@ -560,39 +579,11 @@ impl ElevenLabsProvider {
                 "Fetching ElevenLabs voices page"
             );
 
-            let response = http_client
-                .get(url)
-                .header(&header_name, &api_key)
-                .send()
-                .await
-                .map_err(|e| TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: e.to_string(),
-                })?;
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "unknown".to_string());
-                if status == reqwest::StatusCode::PAYMENT_REQUIRED {
-                    return Err(TtsError::PaidPlanRequired {
-                        provider: "ElevenLabs".into(),
-                        detail: body,
-                    });
-                }
-                return Err(TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: format!("API error ({}): {}", status, body),
-                });
-            }
-
-            let page: ListVoicesResponse =
-                response.json().await.map_err(|e| TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: format!("Failed to parse response: {}", e),
-                })?;
+            let request = ListVoicesRequest {
+                page_size: Some(VOICES_PAGE_SIZE),
+                page_token: page_token.take(),
+            };
+            let page = self.send(request).await?;
 
             tracing::debug!(
                 page = page_num,
@@ -604,10 +595,14 @@ impl ElevenLabsProvider {
             );
 
             all_voices.extend(page.voices);
-            has_more = page.has_more;
-            page_token = page.next_page_token;
             if total_count.is_none() {
                 total_count = page.total_count;
+            }
+            // A page that claims more without a token to fetch it would
+            // otherwise re-request the first page forever.
+            match page.next_page_token {
+                Some(token) if page.has_more => page_token = Some(token),
+                _ => break,
             }
         }
 
@@ -633,16 +628,10 @@ impl ElevenLabsProvider {
     ///
     /// ## Errors
     ///
-    /// Returns `TtsError::HttpError` if the request fails.
+    /// Returns `TtsError::PaidPlanRequired` on 402 Payment Required, and
+    /// `TtsError::HttpError` for any other failed request or reply.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, TtsError> {
-        use schematic_schema::elevenlabs::ListModelsRequest;
-
-        let request = ListModelsRequest {};
-
-        self.client
-            .request::<Vec<ModelInfo>>(request)
-            .await
-            .map_err(Self::map_api_error)
+        self.send(ListModelsRequest {}).await
     }
 
     /// Create a sound effect from a text description.
@@ -658,7 +647,8 @@ impl ElevenLabsProvider {
     ///
     /// ## Errors
     ///
-    /// Returns `TtsError::HttpError` if the request fails.
+    /// Returns `TtsError::PaidPlanRequired` on 402 Payment Required, and
+    /// `TtsError::HttpError` for any other failed request or reply.
     ///
     /// ## Examples
     ///
@@ -685,11 +675,7 @@ impl ElevenLabsProvider {
             "Creating ElevenLabs sound effect"
         );
 
-        let audio_bytes = self
-            .client
-            .create_sound_effect(request)
-            .await
-            .map_err(Self::map_api_error)?;
+        let audio_bytes = self.send(request).await?;
 
         Ok(audio_bytes.to_vec())
     }
@@ -1260,13 +1246,11 @@ mod tests {
 
     #[test]
     fn test_map_api_error_402_returns_paid_plan_required() {
-        use schematic_schema::shared::SchematicError;
-
-        let err = SchematicError::ApiError {
-            status: 402,
+        let err = ApiError::<NoDeclaredError> {
+            kind: ErrorKind::Undeclared,
             body: "payment required".into(),
         };
-        let mapped = ElevenLabsProvider::map_api_error(err);
+        let mapped = ElevenLabsProvider::map_api_error(402, &err);
         match mapped {
             TtsError::PaidPlanRequired { provider, detail } => {
                 assert_eq!(provider, "ElevenLabs");
@@ -1278,17 +1262,33 @@ mod tests {
 
     #[test]
     fn test_map_api_error_non_402_returns_http_error() {
-        use schematic_schema::shared::SchematicError;
-
-        let err = SchematicError::ApiError {
-            status: 500,
+        let err = ApiError::<NoDeclaredError> {
+            kind: ErrorKind::Undeclared,
             body: "internal server error".into(),
         };
-        let mapped = ElevenLabsProvider::map_api_error(err);
+        let mapped = ElevenLabsProvider::map_api_error(500, &err);
         match mapped {
             TtsError::HttpError { provider, message } => {
                 assert_eq!(provider, "elevenlabs");
-                assert!(message.contains("500"));
+                assert_eq!(message, "API error (500): internal server error");
+            }
+            other => panic!("Expected HttpError, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_map_api_error_malformed_success_reports_parse_failure() {
+        let err = ApiError::<NoDeclaredError> {
+            kind: ErrorKind::MalformedSuccess,
+            body: "not json".into(),
+        };
+        let mapped = ElevenLabsProvider::map_api_error(200, &err);
+        match mapped {
+            TtsError::HttpError { message, .. } => {
+                assert!(
+                    message.starts_with("Failed to parse response: "),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("Expected HttpError, got: {other}"),
         }

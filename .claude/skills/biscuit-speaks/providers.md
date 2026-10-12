@@ -199,7 +199,12 @@ let voices = provider.list_voices().await?;
 
 ### ElevenLabs
 
-**API**: HTTP-based via schematic-generated client.
+**API**: HTTP-based via the schematic-generated `ElevenLabsClient`
+(`schematic_runtime::Client<ElevenLabs>`). Every endpoint, including the
+paginated `/v2/voices` listing behind `list_voices_raw`, is a typed `send`;
+the provider has no hand-rolled HTTP path. A 402 reply maps to
+`TtsError::PaidPlanRequired`; any other failure maps to `TtsError::HttpError`.
+Mock-server coverage lives in `lib/tests/elevenlabs_http.rs`.
 
 ```rust
 use biscuit_speaks::ElevenLabsProvider;
@@ -212,9 +217,11 @@ let models = provider.list_models().await?;
 let sfx = provider.create_sound_effect("dog barking", Some(3.0)).await?;
 ```
 
-**Authentication**:
-- `ELEVENLABS_API_KEY` (preferred)
-- `ELEVEN_LABS_API_KEY` (alternative)
+**Authentication** (read once at construction and passed to the client as
+its credential, sent as the `xi-api-key` header; `MissingApiKey` if neither
+is set):
+- `ELEVEN_LABS_API_KEY` (preferred when both are set)
+- `ELEVENLABS_API_KEY` (alternative)
 
 **Default Voice**: `21m00Tcm4TlvDq8ikWAM` (Rachel)
 

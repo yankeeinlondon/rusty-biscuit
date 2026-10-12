@@ -171,8 +171,8 @@ These providers are often found on hosts and may be added to this library in the
 
 | Variable              | Description                         |
 |-----------------------|-------------------------------------|
-| `ELEVENLABS_API_KEY`  | ElevenLabs API key (preferred)      |
-| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
+| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (preferred when both are set) |
+| `ELEVENLABS_API_KEY`  | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
 | `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
 | `PLAYA_DRY_RUN` | `1`/`true` skips synthesis, playback, cache, and detached-spool side effects |
