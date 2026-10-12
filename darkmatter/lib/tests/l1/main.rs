@@ -27,6 +27,8 @@ mod image_test_support;
 mod layout_matrix_support;
 #[path = "../request_support/mod.rs"]
 mod request_support;
+#[path = "../union_fixtures/mod.rs"]
+mod union_fixtures;
 
 mod absent_property_contract;
 mod alias_lookup_once;
@@ -105,6 +107,7 @@ mod schemas_grammar_proptest;
 mod schemas_literal_expression;
 mod schemas_named_type_merge;
 mod schemas_required_count_matrix;
+mod schemas_union_fixture_controls;
 mod schemas_source_projection;
 mod schemas_validate_table;
 mod semantic_results_never_persist;
