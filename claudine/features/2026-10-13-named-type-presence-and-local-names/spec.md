@@ -31,38 +31,35 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 3 is recorded under "## Phase 3" in implementation-log.md. Facts
-    for Phase 4 (Editor Assistance in DMLS; Claudine Consumers):
-    (1) The resolver now PRODUCES `SchemaError::UnknownNamedType { name,
-    namespace, site }` and `SchemaError::ConstraintConflict { name, kind, site,
-    constraints }` (both wrapped by `ReferencedSchema` when they come from a
-    referenced file). `site.path` is the consuming reference's structural path
-    in `site.source`; anchor the primary range on the `ImportName` span at that
-    path in the projected `$schema`/file source map. File origins already carry
-    `span`; `InlineDocument` origins have `span: None`, so DMLS must fill them
-    with `SchemaSourceMap::constraint_span(text, path, keyword, occurrence)`.
-    (2) DMLS's standalone-schema path still never resolves named types, so a
-    missing bare name (`title: nope`) there publishes no diagnostic; Phase 4
-    must cover it. Passive suggestion lint now skips `suggest` on references
-    (the resolved schema's lint judges them).
-    (3) Remaining single-group `match` consumers: darkmatter
-    `schemas/completion.rs` (`suggestion_from_union` concatenates arms;
-    `kind_for_atom` takes the FIRST `Constraint::Match`; public
-    `CompletionKind::File { patterns }`), and Claudine `supplied.rs`
-    (`admits_arm_files`, `eager_file_target`, `file_reference_target`,
-    `file_match_target`), `classify.rs`, `candidates.rs`,
-    `schema_interactive/*`. Switch them to `file_match_groups` /
-    `FileMatchGroups`; a reused type now carries several `Match` groups.
-    Darkmatter's own root-union validation already requires every group
-    (`x-darkmatter-match` is an array of arrays for >1 group).
-    (4) Behavior changes Phase 4/5 should know: block `$constraints`
-    `required`/`generated` on a property's object are moved onto the atom by
-    the parser; other non-key `$constraints` keys are Convert errors; one-atom
-    contradictory bounds/empty schemes/different defaults are Convert errors;
-    several patterns lower to `allOf`; inherited cross-file `example(...)`
-    references are rewritten to absolute paths in `ResolvedSchema.simplified`
-    (so hover/serialization of resolved atoms may show absolute paths).
-    (5) Docs/skills were intentionally not updated in Phase 3 (Phase 5 Wave 6).
+    Phase 5 is recorded under "## Phase 5" in implementation-log.md. Facts
+    for Phase 6 (Acceptance Gates, Review Handoff):
+    (1) Gates already green at the end of Phase 5 on macOS: darkmatter
+    `just test` 9299 passed / 11 skipped and `just lint` exit 0; claudine
+    `just test` 8682 passed / 9 skipped and `just lint` exit 0. Native
+    Windows cross-checks passed for the new corpus, matrix, and
+    `schema_validate` tests. `messenger` `just test` still has to be run as
+    a Phase 6 gate (only its research tests ran in Phase 5). No shipped
+    schema changed, so no other area needs a gate for an artifact change.
+    (2) New tests: darkmatter lib L1 `shipped_schema_corpus` (5 tests,
+    incl. the research contracts under claudine/docs/research and
+    messenger/docs that Phase 1 missed) and `schemas_constraints_block_matrix`
+    (2); darkmatter-cli L1 `schema_validate` (18 new) and
+    `schema_validate_phase` (2). On Windows the matrix tests take ~3.6 s and
+    the Markdown corpus scans ~3 s: under the 5 s budget, but watch them.
+    (3) Items for the review handoff, all recorded in the log and none
+    blocking: the ConstraintConflict message names bound kinds and
+    origins but not values; pretty CLI output hyphen-wraps long paths;
+    `Markdown::from(String)` drops unparseable frontmatter (pre-existing);
+    `parse_standalone_schema_document` discards YAML parse errors
+    (pre-existing); several shipped files (`darkmatter/schemas/**`,
+    `err.yaml`, `claudine/schemas/partials/lifecycle.yaml`) are not
+    loadable on either tree (pre-existing); exponential resolution time in
+    the lifecycle-grammar spike fixtures is pre-existing (pre-feature md
+    is equally slow), not a regression.
+    (4) The spec says an inline root union keeps an empty `@this`
+    namespace; the code (before and after this feature) resolves `this`
+    per arm against that arm's own entries, never across arms. Docs now
+    describe the code; record it as doc drift, not a spec departure.
 pipeline_step: 3
 related:
     - 2026-10-14-union-type-constraints

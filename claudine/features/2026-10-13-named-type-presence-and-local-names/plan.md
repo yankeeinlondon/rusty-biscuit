@@ -45,11 +45,62 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/supplied.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/completions/shell-completions.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_phase.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/cli-commands.md
 packages:
     - darkmatter
     - dmls
     - claudine
     - claudine-cli
+    - darkmatter-cli
 ---
 
 # Named-Type Presence and Local Names Implementation Plan
@@ -153,13 +204,13 @@ Depends on Phase 3. The two tasks have disjoint package/file ownership and may u
 
 ### Wave 5 — Update Public Consumers
 
-- [ ] **Editor Assistance**
+- [x] **Editor Assistance**
   - Owner: `darkmatter/dmls/`. Offer local names bare, colliding built-ins with `@this`, and external references with their targets. Update cursor scanning, reference discovery, hover formatting, definition lookup, and suggestion checks, rather than adding an editor-only grammar.
   - Project missing-name and contradiction errors as schema-definition diagnostics. Assert exact primary ranges and related declaration URIs/ranges, including quoted/block scalars, inline schemas, and multi-hop referenced errors.
   - Preserve dependency edges for imported definitions. Through the existing in-process L1 LSP harness, edit an imported definition and verify refreshed completion, hover, definition, and diagnostics; local-only references must not invent external edges.
   - Verify same-file names in tagged schemas and top-level `$schema` namespaces, forward references, built-in collisions, and mixed-reference cycles. Retain the empty namespace for root unions and no exports for raw/whole-file reference schemas.
 
-- [ ] **Claudine Consumers**
+- [x] **Claudine Consumers**
   - Owner: `claudine/cli/src/completion/schema_completion/`, `claudine/lib/src/composition/schema/supplied.rs`, and dedicated tests. Update candidate metadata, root walking/preparation, candidate filtering, and supplied-value root-union matching to use all groups.
   - Prove `guide-intro.md` is offered for `*.md` AND `guide*`, while `notes.md` and `guide.txt` are not; test group-local exclusions, caller-origin behavior, and no candidates for an empty intersection.
   - Assert inherited presence and group conjunction through resolved schemas at the consumer boundary, including single-schema passivity and root-union arm selection. Search for remaining consumers expecting one list or one `pattern` keyword.
@@ -173,13 +224,13 @@ Depends on Phase 4. Audit decisions precede corpus acceptance; documentation can
 
 ### Wave 6 — Audit and Document
 
-- [ ] **Artifact Audit**
+- [x] **Artifact Audit**
   - Revisit every inventoried shipped schema and inline block, including the baseline. Record files checked, named-type references, required/generated declarations, duplicate constraints, collisions, intended presence, and any changes in `implementation-log.md`.
   - Where stripping previously supplied optionality, define a separate optional variant directly; aliasing the required type is insufficient. Retain required inner fields where appropriate. Do not introduce planned nullable syntax as an implemented workaround.
   - Compare affected parsed/resolved/lowered forms, metadata, and authored/effective results. Review every test and relevant comment expecting stripping; update assertions and explanations in the same behavior change. Keep deliberate invalid fixtures identifiable and avoid shorthand-only churn.
   - Record changed artifact owner areas and source-reading tests, so final validation covers actual readers. Do not relocate artifacts or update specification decisions to conceal a discrepancy.
 
-- [ ] **Current Documentation**
+- [x] **Current Documentation**
   - Update `darkmatter/docs/topics/schemas/{local-type-references.md,authoring-schemas.md,definition.md,dmls-schema-support.md}` and the Darkmatter README if its public schema summary is affected.
   - Remove unsupported-bare-name and stripping status notes; use actual `min(n)`/`max(n)` grammar. Explain namespace/built-in rules, the full merge table, canonical serialization, description precedence, optional outer objects versus required inner fields, generated phases, examples/suggestions, and match-group intersection/passivity.
   - Use compact examples and a Mermaid flow where it helps explain defining-file resolution. Mark nullable unions as planned until implemented. Current docs must not name or link feature/fix snapshots.
@@ -189,11 +240,11 @@ Depends on Phase 4. Audit decisions precede corpus acceptance; documentation can
 
 ### Wave 7 — Prove Invocation Compatibility
 
-- [ ] **Corpus Validation**
+- [x] **Corpus Validation**
   - Add or extend the passive shipped-artifact corpus check covering both schema folders, the baseline, and inline shipped schemas. Assert parse success and no expression execution, network fetch, file search for local names, or document mutation; use existing effects instrumentation rather than timing guesses.
   - Complete the block-metadata robustness matrix below using fixtures derived from real shipped schemas exercised by `md`. Verify outcomes through normal resolution/validation and public diagnostics; report complete row/column coverage if a cell fails.
 
-- [ ] **Invocation Fixtures**
+- [x] **Invocation Fixtures**
   - Independently extend `darkmatter/cli/tests/l1/schema_validate.rs` and fixtures through its `CliProcessFixture`. Run normal `md schema validate` resolution with bare/local/external imports, inherited required/generated values, and constraints that require both patterns.
   - Assert public verdict/exit behavior and diagnostics for absent required values, authored generated absence, supplied invalid values, a multi-hop contradiction, and a grouped root union. Add direct library phase checks where CLI validation does not expose an effective/runtime phase.
   - Pair a shipped-schema positive control with deliberate invalid document values; do not stop at a parser test or snapshot showing an annotation. Keep corpus test files and CLI fixture ownership separate.

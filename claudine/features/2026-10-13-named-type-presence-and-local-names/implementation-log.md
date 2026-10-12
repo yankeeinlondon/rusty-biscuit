@@ -44,11 +44,62 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/supplied.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/completions/shell-completions.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_phase.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/cli-commands.md
 packages:
     - darkmatter
     - dmls
     - claudine
     - claudine-cli
+    - darkmatter-cli
 ---
 
 # Implementation Log for 2026-10-13-named-type-presence-and-local-names (6 phases)
@@ -413,3 +464,251 @@ Unless prefixed, test names are in `darkmatter/lib/tests/l1/schemas_named_type_m
 - Docs: no topic docs or skills were changed in this phase. Current docs (`local-type-references.md`, `authoring-schemas.md`, `definition.md`, the `darkmatter` skill) still describe stripping and single-group behavior until Phase 5 (Wave 6) updates them, as planned. New `$constraints` key rules and same-atom contradiction errors also belong in Phase 5's docs.
 - The Claudine skill needs no change, because Claudine behavior is unchanged in this phase.
 - Phase 3 complete: resolution, merging, and lowering are implemented. The plan's Wave 4 tasks are checked off.
+
+## Phase 4
+
+- Started 2026-10-11 by claude/opus. Wave 5 ran as two parallel foreground sub-agents with disjoint ownership: **Editor Assistance** owned `darkmatter/dmls/` (plus DMLS-facing test files); **Claudine Consumers** owned `claudine/cli/src/completion/schema_completion/`, `claudine/cli/src/commands/schema_interactive/`, `claudine/lib/src/composition/schema/` and `claudine/lib/src/composition/error/` and their tests.
+
+### Shared contract set by the orchestrator before dispatch
+
+- `darkmatter/lib/src/markdown/schemas/completion.rs`: `CompletionKind::File { patterns: Vec<String> }` became `CompletionKind::File { alternatives: Vec<Vec<Vec<String>>> }` — an OR of AND-ed `match(...)` groups. A single property gives one alternative holding every group (a reused type adds the use site's groups to the inherited ones); a root union gives one alternative per contributing `file` arm, deduplicated. Before, every arm's patterns were concatenated into one list, which let one arm's exclusions leak into another and, with several groups, widened the conjunction into an OR. Empty means no `match` at all (bare `file`).
+  - Tests updated in the same module, plus `repeated_match_groups_stay_separate_groups_of_one_alternative` and `root_union_arm_keeps_its_groups_together`; `root_union_combines_file_patterns_for_shared_property` was renamed `root_union_offers_each_file_arm_as_its_own_alternative`. 22/22 pass.
+  - The only consumer outside Darkmatter's lib is Claudine's `candidates.rs`.
+- `file_match::file_match_groups` became `pub` so Claudine can read every group of a property without touching `Constraint::Match` itself.
+
+### Wave 5 — Editor Assistance (`darkmatter/dmls/`)
+
+- **Library seam (`resolve.rs`):** two new public functions, both reusing the resolver's own path; neither adds a second resolver.
+  - `named_type_reference_path(reference, base_dir, roots, ctx)` returns the canonical file an explicit `Name@target` selects (`None` for `this`). The lookup moved out of `resolve_namespace` into a private `named_type_file_path`, with no behavior change.
+  - `expand_named_types(schema, base_dir, defining_file, roots, ctx)` expands a schema the editor holds in memory. It uses that schema, not the file on disk, as `this`, so an unsaved buffer resolves. Root-union arms expand one at a time with each arm's properties as `this`, as the runtime does.
+  - Unit tests: `expand_named_types_reads_this_from_the_supplied_schema_not_the_file`, `named_type_reference_path_selects_the_resolver_target`.
+- **Completion:**
+  - Local names are offered bare. A local name that is also a built-in is offered as `name@this`, and an imported name with its target (`Name@./types.yaml`).
+  - Forward references are offered.
+  - Root-union, raw JSON Schema, and whole-file-reference files export nothing.
+  - `meta_schema_completion_catalog_is_descriptor_driven` now expects `Base`, and asserts `Base@this` is absent.
+- **Hover and go-to-definition:** both work on bare, `@this`, and cross-file references (new `providers/frontmatter/named_references.rs`, with the catalog of reachable definitions in `overlay/named_types.rs`). Hover shows the selected definition with local references spelled bare. Definition lands on the defining key in the correct file.
+- **Diagnostics (`diagnostics/named_types.rs`):** `UnknownNamedType`, `ConstraintConflict`, and `ImportCycle` are schema-definition diagnostics, `dm.schema.invalid_type_definition`.
+  - The primary range is the consuming reference's `ImportName` span.
+  - Conflicts carry related locations for each origin: the `File` span, or for an inline origin the span from `SchemaSourceMap::constraint_span` over the projected `$schema`.
+  - A block scalar falls back to the property entry's range. An import cycle carries no location, so it is ranged on the whole declaration.
+  - An error inside a schema the document references by file points at the reference inside that file.
+- **Standalone gap from Phase 2 closed:** a standalone schema file now resolves its references, so a missing bare name (`title: nope`) is reported at the reference. As a new consequence, an explicit target in a standalone file that cannot be found or read is reported as `dm.schema.prepare` on the target text; it was silent before.
+- **Suggestion checks:** `suggest(...)` on a reference is checked against the resolved type, and an inherited value is reported in its own file (`overlay/suggestions.rs`).
+- **Dependency refresh:** imported files remain dependency edges. Local references record none (`overlay::tests::local_references_record_no_external_dependency`).
+  - **Pre-existing defect fixed:** a failed schema assembly was cached with no dependencies, so fixing an imported file never cleared the error. A failure now records the files its error names.
+  - **Pre-existing defect fixed:** hover ranges on `$schema` definitions after the first line drifted by the indentation. That path now re-parses the value in place.
+- **Known limitations, left for review:**
+  - In a root-union file, completion offers every inline arm's local names, although each arm resolves `this` against its own properties. A name from another arm can therefore be offered and then reported unknown.
+  - The existing "at most one `suggest`" error, raised when a type and its use site both have one, is still ranged on the whole `$schema`, because an inherited candidate's span belongs to another file.
+
+### Wave 5 — Claudine Consumers
+
+- **Public API:**
+  - `CompositionError::UnresolvedFileReference.patterns` became `alternatives: Vec<Vec<Vec<String>>>`, with the same OR-of-AND meaning as Darkmatter's `CompletionKind::File`. It is never empty for this variant.
+  - `InteractiveShape::File.patterns` became `alternatives` too. It holds one alternative with every group, or is empty for a bare `file`.
+  - Crate-internal: `FileTarget.alternatives` and `FileTarget::merge` (one alternative per arm, deduplicated, arms must agree on array shape). `file_candidate_paths` takes alternatives.
+- **Consumers migrated:**
+  - `candidates.rs`: TAB completion and the ENTER chooser share `match_alternative_files`. It walks each alternative with `FileMatchGroups`/`PreparedFileMatch` and unions the results in authored order, deduplicated by canonical path. An alternative with invalid globs contributes nothing.
+  - `supplied.rs`: `file_match_target` returns every group (it used the first `Match`). `eager_file_target` and `file_reference_target` keep each root-union arm as its own alternative instead of concatenating. `admits_arm_files` passes every group to `file_match_admits` (it passed the first).
+  - `classify.rs`: collects every group (it used the first `Match`).
+  - `schema_interactive/*`: passes the alternatives through.
+- **Remaining single-list consumers:** none. Searched `claudine/` (lib, cli, gen, contract) for `Constraint::Match`, `x-darkmatter-match`, `DARKMATTER_MATCH_KEYWORD`, `FileMatchGlobs`, and `file_match`; the other `pattern(s)` hits (protect, runaway, OpenCode permissions, wrap guards) are unrelated.
+- **Deviation from the spec example's spelling:** a `kind: schema` file cannot carry both `types` and `$schema`, which Darkmatter rejects. The local-spelling fixtures therefore define the type as a sibling property in the prompt's own `$schema`, and the cross-file fixture uses a types-only file. `darkmatter/docs/topics/schemas/authoring-schemas.md` (around line 157) shows the rejected combination: Phase 5 doc drift.
+
+### Requirement-to-test map (Phase 4 behaviors)
+
+DMLS tests are in `darkmatter/dmls/tests/l1/named_type_references.rs` (`N`); Claudine tests are named with their module.
+
+| AC / behavior | Tests |
+|---|---|
+| AC6 completion: bare local, `@this` collision, imported target, forward reference, no exports from root unions/raw/whole-file | N `completion_offers_local_names_bare_collisions_with_this_and_imports_with_their_target`; dmls unit `meta_schema_completion_catalog_is_descriptor_driven` |
+| AC6 hover on bare/`@this`/cross-file references | N `hover_on_a_reference_shows_the_definition_it_selects` |
+| AC6 go-to-definition selects the defining file and key | N `definition_selects_the_defining_file_and_key_for_every_reference_spelling` |
+| AC6 missing name ranged on the reference (standalone, inline plain/quoted/flow/explicit, block-scalar fallback, referenced file) | N `a_missing_local_name_in_a_standalone_schema_is_reported_at_the_reference`, `a_missing_name_in_an_inline_schema_is_a_schema_definition_error_at_the_reference`, `a_block_scalar_reference_falls_back_to_the_property_entry`, `an_error_inside_a_referenced_schema_points_into_that_file` |
+| AC6 contradiction with related locations; mixed bare/explicit cycle chain | N `a_multi_hop_contradiction_names_the_reference_and_both_declarations`, `a_standalone_contradiction_and_a_mixed_cycle_are_schema_definition_errors` |
+| AC6 imported-definition edit refreshes completion/hover/definition/diagnostics; local refs add no edge | N `editing_an_imported_definition_refreshes_every_assistance_without_reopening`; dmls unit `overlay::tests::local_references_record_no_external_dependency` |
+| Suggestion checks on references | N `suggestions_on_a_reference_are_checked_against_the_resolved_target` |
+| Library seam | `resolve::tests::expand_named_types_reads_this_from_the_supplied_schema_not_the_file`, `resolve::tests::named_type_reference_path_selects_the_resolver_target` |
+| Grouped completion metadata (one alternative of every group; one alternative per root-union arm) | darkmatter `completion::tests::repeated_match_groups_stay_separate_groups_of_one_alternative`, `root_union_arm_keeps_its_groups_together`, `root_union_offers_each_file_arm_as_its_own_alternative` |
+| AC10 `guide-intro.md` offered, `notes.md`/`guide.txt` not (cross-file, bare, `@this`; TAB, chooser, typed partial) | `completion::schema_completion::tests::reused_match_groups_offer_only_files_every_group_admits`; CLI L1 `compose_schema_cli::completion_file_match_intersects_a_reused_types_groups` |
+| AC10 exclusion stays in its group and arm | `completion::schema_completion::tests::a_match_exclusion_stays_with_its_own_group_and_arm` |
+| AC10 empty intersection offers nothing, no error | `completion::schema_completion::tests::an_empty_match_intersection_offers_nothing_without_an_error`; `composition::schema::tests::an_empty_match_intersection_parses_and_reports_the_partial` |
+| One file admitted by two arms offered once | `completion::schema_completion::tests::a_file_two_arms_admit_through_different_roots_is_offered_once` |
+| AC3 inherited `required` + every group at the Claudine boundary | `composition::schema::tests::a_reused_file_type_keeps_inherited_presence_and_every_match_group` |
+| AC10 single-schema passivity | `composition::schema::tests::match_groups_stay_passive_for_an_existing_file_in_a_single_schema` |
+| AC10 root-union arm selection needs every group, judged from the caller's origin | `composition::schema::supplied::tests::an_existing_caller_file_selects_an_arm_only_when_every_match_group_admits_it`. The sub-agent confirmed it fails when only the first group is passed. |
+
+- Input Robustness Matrix: not applicable to this phase. It read no new configuration fields; the changes are an editor projection and in-process consumers of already-parsed schemas. The `$constraints` matrix remains Phase 5 (Wave 7).
+
+### Verification and close
+
+- `darkmatter`: `just test` passed 9272 tests with 11 skipped; `just lint` exited 0, including the `zed-dmls` wasm check.
+- `claudine`: `just test` passed 8682 tests with 9 skipped; `just lint` exited 0.
+- `messenger` (reads the schemas API): `just test` passed 710 tests with 2 skipped.
+- All four gates above were rerun by the orchestrator on the combined tree after both sub-agents finished, sequentially with lint after tests.
+- OS evidence: macOS for everything above. Native Windows: `just cross-check dmls --os windows named_type_references` passed 11/11 (canonical-path URIs), and `just cross-check claudine-cli --os windows schema_completion` passed 51/51 (grouped walk, canonical-path dedup). Linux and WSL2 were not run locally; CI covers them.
+- Docs: `claudine/docs/topics/completions/shell-completions.md` described the old behavior, concatenating root-union arms' globs. It now describes grouped intersection, group-local exclusions, empty intersections, and per-arm alternatives. All other docs remain Phase 5 (Wave 6) work. Phase 5 must cover, for `dmls-schema-support.md`:
+  - completion spellings and non-exporting files;
+  - hover and definition on references;
+  - the three diagnostics with their ranges and related locations;
+  - standalone resolution and the new `dm.schema.prepare` for unreadable targets;
+  - suggestion checks on use sites;
+  - refresh after imported-file edits, including clearing cached failures;
+  - the two known limitations.
+
+  For Claudine docs, it must cover the renamed `alternatives` fields and their OR-of-AND meaning.
+- Skill: the `claudine` skill's own files do not describe `match()` completion; its `topics/` link is a symlink to the doc updated above, so no skill file changed.
+- Phase 4 complete: both Wave 5 tasks are checked off in the plan.
+
+## Phase 5
+
+- Started 2026-10-11 by claude/opus. Wave 6 ran as two parallel sub-agents: **Artifact Audit** (read-only probe; no artifact edits) and **Current Documentation** (docs and skills only). Wave 7 ran as three parallel foreground sub-agents with disjoint files: the corpus check (`darkmatter/lib/tests/l1/shipped_schema_corpus.rs`), the `$constraints` robustness matrix (`darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs`), and the invocation fixtures (`darkmatter/cli/tests/l1/schema_validate.rs` plus a new `schema_validate_phase.rs`). The orchestrator declared both new lib modules in `tests/l1/main.rs` before dispatch.
+- Deviation from the plan's wave order: Wave 7 started while the audit was still running. Its tests do not depend on the docs, and the audit changed no artifact, so no Wave 7 result needed to be redone.
+
+### Wave 6 — Artifact Audit
+
+**Method.** A temporary probe linked against `darkmatter` was built on this tree and on a read-only worktree at the pre-feature commit `f1d031f7a`, and both were run on the same input files; the probe and worktree were then removed. For each artifact the probe compared:
+- the whole-file resolution through `DarkmatterSchemas::effective_for` (`$schema: ./<file>`): full JSON Schema, empty-frontmatter verdict, and `completion::for_property` for every completable property;
+- every `types`/`$schema` entry referenced on its own as `name@./<file>` ("synthetic": many are never referenced in practice);
+- 929 Markdown files with a frontmatter `$schema`, by JSON hash and empty-frontmatter verdict.
+
+| Path | References | Presence on referenced types | Duplicates / collisions / `$constraints` | Before vs after | Disposition |
+|---|---|---|---|---|---|
+| `darkmatter/docs/schemas/claudine-types.yaml` | 7 `@this` | none at top level; use sites `lifecycle-action(required)@this`, `lifecycle-action[](required)@this` | `lifecycle-action` has `$constraints: min-keys: 1`; use site adds only `required` | identical (file and all 7 types) | unchanged |
+| `darkmatter/docs/schemas/claudine.yaml` | 9 `@./claudine-types.yaml` | none on referenced types; own `state`, `is_first`, `step`, `_loop_*` are `generated; required` but unreferenced | none | whole-file JSON identical; completion `sequence` is `File { alternatives: [] }` (the Phase 4 rename; still a bare file) | unchanged |
+| `darkmatter/docs/schemas/darkmatter.yaml` (embedded baseline) | none | none | none | identical | unchanged |
+| `darkmatter/docs/schemas/env.yaml` | none; unreferenced anywhere | all `required; generated` or `generated` | none | synthetic references now inherit presence; no real consumer | unchanged (inheritance is the intended meaning) |
+| `darkmatter/docs/schemas/err.yaml` | none | all `required; generated` | none | not loadable on either tree (envelope keys `$schema`, `name`, `description`) | unchanged |
+| `darkmatter/docs/schemas/expression-functions.yaml`, `schema-definition.yaml` (empty) | none | n/a | none | `expression-functions.yaml` fails "could not build JSON Schema validator" on both trees | unchanged |
+| `darkmatter/schemas/darkmatter.yaml` + `partials/*` | 6 `@./partials/…` | `err`/`context` inner-field presence only | none | not loadable on either tree (tagged files with `description`/`$schema`) | unchanged |
+| `content-policy/schemas/content-policy.yaml` | 3 `@./content-policy.yaml` | none on `short_form`/`long_form`; `long_form.action` inner only | none | identical | unchanged |
+| `messenger/docs/platforms.schema.yaml`, `messenger/docs/research/platforms/{_schema,_types,_overrides.schema}.yaml`, `messenger/docs/research/implementation/_schema.yaml` (**missed by Phase 1**) | ~87 `@this`/`@./` | none on any referenced type; presence always at the use site (`Id(required)@this` ×59) | none; no keyword-named types | whole-file JSON identical | unchanged |
+| `claudine/docs/research/_types.yaml`, 20 `*/_schema.yaml`, `agent-cli/_types.yaml`, `reasoning-level/_types.yaml` (**missed by Phase 1**) | ~49, incl. `@../_types.yaml` | none at top level; `evidence` inner only | none | whole-file JSON identical; the 20 research documents using `./_schema.yaml` unchanged | unchanged |
+| `claudine/schemas/{claudine,review}.yaml`, `claudine/schemas/partials/lifecycle.yaml`, `.claudine/schemas/review.yaml`, root `schemas/*.yaml`, `darkmatter/example-docs/schemas/*` | none | `external.yaml` `name: string(required)` unreferenced | none | identical; `partials/lifecycle.yaml` not loadable on either tree | unchanged |
+| `claudine/docs/schemas/**` (drafts) | bare `stack_item`, `terminal_node`, `stack`; `shell@./shell.yaml` (missing); `shell_command @ this` | inner only | `partials/functions.yaml` local `number`/`date` collide with built-ins (built-in wins) | no draft loadable on either tree; 4 empty | recorded only |
+| Feature snapshots (lifecycle-grammar spike, steering-pipeline research-schema, schema-enhancements drafts, `_completed` schema-plus) | many | none at top level | `$constraints` only `min-keys`/`max-keys` | identical | unchanged (snapshots) |
+| `messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/**` | many | `p3_types` `State: enum(…; required)`; `p5_types` `Knowledge` required union arm | none | **differs**: `p3` `items[].state` and `p5` `facts[].knowledge` now required; `p5_missing.md` now fails validation (passed before) | unchanged (spike snapshot; the intended inheritance) |
+| Inline `$schema` in 929 shipped Markdown files | only the messenger probes above and `darkmatter/docs/research/parsing/_fleet_future.md` | — | no `$constraints` key besides `min-keys`/`max-keys` | 925 identical; `_fleet_future.md` error went from Grammar "unknown type `crate`" to `UnknownNamedType` (expected); 3 messenger probes differ as above | unchanged |
+
+- **Changes made: none.** No shipped schema relied on stripping, so no optional variant was needed. No source comment or test needed editing.
+- **Stale stripping search:** no `*.rs`, current doc, skill, or README still asserts or describes stripping. The 7 Phase 1 resolver tests now assert inheritance. The nullable assertions in `schemas_named_type_merge.rs` cover generated-only, unconstrained, and inner-required cases, which are correct. Snapshots that mention stripping were left alone under the snapshot rule: lifecycle-grammar `spike-results.md` Finding 10, messenger schema-pilots `findings.md` L4, and the union-type-constraints spec/plan.
+- **Readers run as evidence (nothing changed):** darkmatter L1 `schema_phase_validation`, `meta_schema_repo_schemas`, `content_policy_editor_schema`, `base_schema_end_to_end`, `meta_schema_phase4` (51 passed); dmls `mapping_only_corpus` (2); claudine-cli `shipped_prompts` (2); messenger `research_corpus` + `research_validation` (15); content-policy (117).
+- **Changed artifact owner areas:** none. Audited areas: darkmatter, claudine, content-policy, messenger, repo-root `schemas/` and `.claudine/schemas/`.
+
+### Wave 6 — Current Documentation
+
+- `darkmatter/docs/topics/schemas/local-type-references.md` (rewritten): bare names ≡ `@this`; where local names live; built-ins win; case sensitivity; forward references; `UnknownNamedType`; cycles and the depth limit of 32; a Mermaid diagram of defining-file resolution; inheritance; canonical serialization.
+- `authoring-schemas.md`: removed both status notes; `min(n)`/`max(n)` grammar; "Presence travels with the type" (optional outer object vs required inner fields, no opt-out, declare the optional variant directly, generated phases); nullable unions marked **planned**.
+- `definition.md`: named-type imports with bare names; the full merge table and rules (target-directed bounds, item vs container, description precedence, conflict provenance, one-atom contradictions); a `$constraints` block table; several patterns lowering to `allOf`; grouped `match`; `CompletionKind::File { alternatives }`; the two new error variants; nullable unions **planned**.
+- `dmls-schema-support.md`: completion spellings, hover/definition on every spelling, named-type diagnostics with ranges and related locations, `dm.schema.prepare` for unreadable targets, `suggest` checks, refresh after imported-file edits, the two known limitations, and the two new `resolve::` functions.
+- `darkmatter/docs/inline/schema-validation.md`: a root-union `match` requires every group.
+- `claudine/docs/topics/composition.md`: `UnresolvedFileReference.alternatives` and `InteractiveShape::File.alternatives` (OR over root-union arms, AND over one property's groups).
+- Skills: `.claude/skills/darkmatter/schema.md`, `.claude/skills/darkmatter/dmls.md`, and `.claude/skills/claudine/cli-commands.md` (it still described merged globs, `MatchGlobs`, and `match_glob_files`).
+- `darkmatter/README.md` was not changed: it does not describe the affected behavior. No dependency docs changed.
+- **Doc drift found and resolved (code wins):**
+  1. `authoring-schemas.md` showed `kind: schema` with `$schema` + `types` and a helpers/exports split. `standalone.rs` accepts exactly `kind` and `types`, and there is no "no exported schema" error. The examples were corrected.
+  2. **Root-union namespace:** the spec says an inline root union keeps "today's empty `@this` namespace". The code, both now and at `f1d031f7a`, expands each inline arm as its own single schema, so `this` is that arm's own entries and nothing is shared across arms. This is not a departure introduced by the feature, since today's behavior is retained. The docs describe the per-arm behavior, and a root-union *file* still exports no names.
+  3. `number(min(1),max(150))` (comma) is a grammar error; the examples now use `;`.
+  4. `definition.md` said root unions return no completion data; `completion.rs` handles them.
+  5. `related_specs` frontmatter and spec links were removed from `definition.md`, `schema-validation.md`, and `composition.md` (current docs must not name specs).
+
+### Wave 7 — Corpus Validation
+
+`darkmatter/lib/tests/l1/shipped_schema_corpus.rs`:
+
+| Test | Asserts | macOS / Windows time |
+|---|---|---|
+| `shipped_schema_artifacts_parse_passively` | 35 YAML files in 8 recursive directories (`darkmatter/docs/schemas`, `darkmatter/schemas`, `content-policy/schemas`, `schemas`, `claudine/schemas`, `.claudine/schemas`, `darkmatter/example-docs/schemas`, `claudine/docs/schemas`) parse passively, or fail exactly as their `EXCEPTIONS` entry says. Floors: 30 files, 10 loadable, 120 definitions | 0.14 s / — |
+| `loadable_shipped_schemas_resolve_and_lower` | each loadable file resolves through `$schema: ./file` from its own directory, anchored in an empty temp context, and lowers; rejected envelopes still fail with `SchemaDocument`, and their bodies resolve inline with no `UnknownNamedType`/`ConstraintConflict` | 0.1 s / — |
+| `shipped_research_contracts_resolve_and_lower` (added by the orchestrator after the audit found the gap) | 30 `_schema.yaml`/`_types.yaml`/`*.schema.yaml` research contracts in `claudine/docs/research` and `messenger/docs` parse passively, resolve with no named-type error, and lower. Floors: 30 files, 550 definitions (623 today), 330 named references (375 today). No effect counter moves and no input changes | 0.21 s / 0.33 s |
+| `shipped_markdown_inline_schemas_parse_passively` | 648 frontmatter `$schema` values from 16 shipped roots parse passively (only files containing `$schema` are decoded; `fixtures`, `target`, `node_modules`, `.git` and the internal `prompts/` folders are skipped). The 4 known named-reference documents are found. Floor: 500 | 1.0 s / 3.0 s |
+| `shipped_markdown_named_type_references_resolve` | those 4 resolve from their own directories; `_fleet_future.md` fails with `UnknownNamedType { name: "crate" }`, and none of the others fails on a named type | 1.0 s / 2.9 s |
+
+- **Passivity is observed:** the effect-engine and network-attempt counters must not move. They count only under `effects-instrumentation`, which CI enables. A standalone parse is repeated with the file's path moved into an empty directory and must give the same result, and every input's bytes and mtime are unchanged afterwards. **Not provable with existing instrumentation:** no counter covers expression evaluation, and no recorder covers filesystem lookups, so "no file search" is shown by result independence, not by an absence of reads.
+- `EXCEPTIONS` is an explicit, reasoned list (placeholders, not-a-schema, envelope-rejected, drafts with their expected error). An entry that no longer matches its file fails the test.
+- `schema_phase_validation.rs::shipped_schema_and_trigger_corpus_parses_passively` is now redundant for schemas. Its trigger half (`darkmatter/tests/fixtures/schema-triggers/schemas/*.trigger.yaml`) is not covered elsewhere, so the test was left in place.
+
+### Wave 7 — Input Robustness Matrix (`$constraints`)
+
+`darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs`: `constraints_block_matrix_yaml` and `constraints_block_matrix_json_form`, one per accepted source format.
+- **Fixture:** both tests read the shipped `darkmatter/docs/schemas/claudine-types.yaml` with `include_str!` inside the test, check that `lifecycle-action` still has `$constraints: {min-keys: 1}`, and make one source-text edit per cell into a fresh `types-N.yaml`.
+- **Sites:** each cell is judged reused (`lifecycle-action(...)@./types-N.yaml` with a use-site postfix) and inline (the same object as a plain property).
+- **Validation path:** documents load through `Markdown::try_from(&Path)` and are judged with `DarkmatterSchemas::validate` and `validate_for_phase(Completion)`. Assertion labels are `{format} / {column} / {row} / {site}`.
+- **Load-bearing fields:**
+  - `min-keys`/`$constraints`: an empty object fails only with the bound present.
+  - `max-keys`: the block becomes `max-keys: 2`, so a 3-key object fails only with the bound present, and `max-keys: 0` is a real zero.
+  - `required`: a missing `action` fails only with the flag present.
+  - `generated`: authored validation allows a missing `action` only with the flag, and the Completion phase rejects it either way.
+
+Observed (YAML and JSON-form are the same except where noted):
+
+| Row | `$constraints` | `min-keys` / `max-keys` | `required` / `generated` |
+|---|---|---|---|
+| Positive control | positive | positive | positive |
+| Absent | B; use-site bound applies | B; use-site bound applies | B; use-site flag applies |
+| Explicit null | E "`$constraints` must be a mapping" | E "requires a non-negative integer" | E "is a flag constraint and must be `true`" |
+| Wrong whole type | E (number, string, list) | E (`"1"`, `1.5`, `-1`, `true`, object) | E (`"true"`, `1`, object) |
+| One invalid element | E (unknown key `bogus`; invalid `max-keys`) | E (`[1,"x"]`) | E (`[true,"x"]`) |
+| All invalid elements | E (never an empty block) | E (`["x","y"]`, `[1]`) | E (`["x"]`, `[true]`) |
+| Empty | `{}` = B; `[]` E | E (`""`, `[]`, `{}`); `0` valid | E (`""`, `[]`, `{}`, `false`) |
+| Duplicate key (source edit) | E | E | E |
+| Trailing / invalid content | E | E | E |
+
+- Every E names `types-N.yaml` (reused site) or property `action` (inline site). Duplicate keys and trailing content in a schema file surface as "referenced schema file `types-N.yaml` is neither a valid standalone SimplifiedSchema nor a valid JSON Schema". In frontmatter they surface as "duplicate entry with key …".
+- No cell silently accepted bad input, so there was **no production change**.
+- **Smell grep:** `simplified/mod.rs` has no `serde(default)`, `unwrap_or_default`, or `filter_map(as_str)`. Its one `.ok()` is the integer-size conversion in `constraints_usize`, and that failure becomes an error.
+- **Out-of-scope findings, not changed:**
+  - `standalone.rs::parse_standalone_schema_document` discards the YAML parse error, so a malformed schema file gets the generic "neither …" message with no line or column.
+  - In the same function, `filter_map(as_str)` drops non-string keys from the "unsupported keys" message, though the file is still rejected.
+  - `Markdown::from(String)` treats frontmatter that fails to parse as *no frontmatter*. A document whose inline `$schema` has a duplicate key therefore validates with no schema; `Markdown::try_from(&Path)` errors correctly. This is a pre-existing loader behavior outside this feature.
+
+### Wave 7 — Invocation Fixtures (`md schema validate`)
+
+The shared fixture is a types-only `types.yaml` (`code: string(required; generated)`, `title: string(required)`, `label: string(min(3))`, `title_base: label`) plus inline `$schema` reuse in all three spellings. All tests run through `--no-trigger-schemas --format json`.
+
+| Test (`darkmatter-cli` L1 `schema_validate::`) | Asserts |
+|---|---|
+| `schema_validate_inherited_required_is_reported_for_every_reference_spelling` | exit 1; exactly `/a /b /c /title` missing; no generated property reported |
+| `schema_validate_supplied_required_and_absent_generated_pass_authored_validation` | exit 0 with generated properties absent |
+| `schema_validate_rejects_a_wrong_typed_value_through_every_generated_spelling` | exit 1; `code ga gb gc` each `[1] is not of type "string"` |
+| `schema_validate_enforces_inherited_and_use_site_length_bounds_across_hops` | exit 1; `/heading` longer than 5; `/hop` and `/title_base` shorter than 3 |
+| `schema_validate_conjunctive_patterns_{accept_a_value_matching_both, reject_a_value_missing_the_use_site_pattern, reject_a_value_missing_the_inherited_pattern}` | `az` exit 0; `ab` fails `z$`; `bz` fails `^a` |
+| `schema_validate_multi_hop_bound_contradiction_names_both_origins` | exit 2, `error:"schema"`; message names `heading`, `title_base`, `min` in the types path, `max` in the inline `$schema` |
+| `schema_validate_unknown_bare_name_in_an_inline_schema_is_a_schema_error`, `…_in_a_referenced_schema_names_that_file` | exit 2; ``unknown named type `nosuchtype` in …`` |
+| `schema_validate_grouped_match_arm_accepts_a_path_every_group_admits`, `…_rejects_a_path_outside_the_use_site_group`, `…_rejects_a_path_outside_the_inherited_group`, `…_rules_out_the_arm_for_an_undecided_document`, `schema_validate_grouped_match_is_passive_in_a_single_schema` | real files `guide-intro.md` accepted; `notes.md`/`guide.txt` rejected with `match(*.md)` and `match(guide*)`; an undecided document falls to the other arm; a plain schema accepts `guide.txt` |
+| shipped `darkmatter/docs/schemas/claudine.yaml`: `…_accepts_reused_lifecycle_and_loop_types`, `…_rejects_an_empty_lifecycle_action`, `…_rejects_values_inside_a_reused_loop_event` | positive control exit 0; `{}` action fails (`min-keys: 1` applies through reuse); bad `op` enum and `max: 0` fail |
+
+- `md schema validate` runs authored validation only and has no `--phase` flag. The new `darkmatter/cli/tests/l1/schema_validate_phase.rs` therefore checks the same document in the library: `schema_validate_phase_absent_generated_passes_authored_and_fails_completion` and `schema_validate_phase_wrong_typed_generated_value_fails_both_phases`.
+- The shipped path is built with `biscuit_test_harness::manifest_dir!()` plus `.parent()` steps rather than `env!("CARGO_MANIFEST_DIR")`, per the `rust-testing` rule against compile-time paths.
+- **Production observations, not changed (for review):**
+  1. The `ConstraintConflict` message names the bound kinds (`min`, `max`) and their origins, but not the values (`min(10)`, `max(5)`); DMLS related locations show the authored text.
+  2. The pretty CLI output word-wraps the types-file path with an inserted hyphen.
+  3. Problems in nested values report the line of the top-level key.
+
+### Pre-existing performance observation
+
+The corpus agent found that `claudine/features/2026-10-20-lifecycle-grammar/spike/fixtures/variants/lifecycle-d{1..4}.md` resolve in time that doubles per nesting depth. With the debug `md`, d1/d2/d3 took 1.65/3.71/7.07 s. The Oct 3 pre-feature `md` from the main checkout took 1.36/3.00/8.96 s, so this is **not a regression from this feature**. The fixtures are excluded from the corpus (a `fixtures` directory). Per the plan's spike-scope rule, no measurement or fix was attempted; it is recorded for a separate decision.
+
+### Requirement-to-test map (Phase 5)
+
+| Requirement | Evidence |
+|---|---|
+| AC7 shipped-schema and test-suite audits recorded; no stripping assertion | Wave 6 audit table and stale-stripping search above |
+| AC9 shipped schemas parse passively | `shipped_schema_corpus::*` (5 tests) |
+| AC9 `md schema validate` proves inherited presence and conjunction through normal resolution | `schema_validate::*` tests above |
+| AC1 authored vs effective phases | `schema_validate_phase::*` (library, since the CLI has no phase flag) |
+| AC4 multi-hop contradiction names both origins (CLI) | `schema_validate_multi_hop_bound_contradiction_names_both_origins` |
+| AC5 unknown bare name (CLI) | `schema_validate_unknown_bare_name_in_an_inline_schema_is_a_schema_error`, `…_in_a_referenced_schema_names_that_file` |
+| AC10 grouped root union and single-schema passivity (CLI) | `schema_validate_grouped_match_*` |
+| Input Robustness Matrix (`$constraints`, YAML and JSON-form) | `schemas_constraints_block_matrix::constraints_block_matrix_yaml`, `…_json_form` |
+| Shipped-schema positive control with invalid document values | `schema_validate_…claudine…` three tests |
+
+### Verification and close
+
+- `darkmatter`: `just test` passed 9299 tests with 11 skipped; `just lint` exited 0.
+- `claudine`: `just test` passed 8682 tests with 9 skipped; `just lint` exited 0. This phase changed only Claudine docs and a skill.
+- Feature-flag run: `cargo nextest run -p darkmatter --test l1 --features effects-instrumentation shipped_research_contracts` passed, and the corpus agent ran its tests with and without the feature.
+- Native Windows: `just cross-check darkmatter --os windows shipped_schema_corpus schemas_constraints_block_matrix` passed 8/8, and `just cross-check darkmatter-cli --os windows schema_validate` passed 71/71. **Timing note:** on Windows, the matrix tests take about 3.6 s and the Markdown corpus scans about 3 s, under the 5 s L1 budget but closer to it than on macOS (0.35 s and 1 s). Linux and WSL2 were not run locally; CI covers them.
+- `messenger` `just test` was not run as a gate in this phase because no schema it reads changed. The audit ran its `research_corpus` and `research_validation` (15 passed). Phase 6 runs it as planned.
+- Phase 5 complete: all four Wave 6/7 tasks are checked off in the plan.
