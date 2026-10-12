@@ -86,7 +86,8 @@ use serde_json::Value;
 use crate::markdown::{Markdown, compose::ComposeSource};
 
 pub use about::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
+    ALPHANUMERIC_OPTION_DESCRIPTORS, AlphanumericOptionDescriptor, alphanumeric_option_descriptors,
+    schema_type_descriptor, CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
     SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
     TriggerGrammarDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
     inline_object_rule_descriptors, schema_constraint_descriptors, schema_shape_descriptors,

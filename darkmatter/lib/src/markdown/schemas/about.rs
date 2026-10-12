@@ -15,6 +15,8 @@
 //! See `darkmatter/features/2026-06-10-schema-improvement/spec.md` for the
 //! authoring reference that the descriptor surface mirrors.
 
+use super::simplified::AlphanumericOption;
+
 /// All schema-language type keywords, in display order.
 ///
 /// The set is **closed**: the test
@@ -23,135 +25,233 @@
 pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "string",
+        aliases: &[],
         description: "Text.",
-        accepted_constraints: "eager, min, max, not-empty, pattern, suggest, default, required",
+        accepted_constraints: &["eager", "min", "max", "not-empty", "pattern", "suggest", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "date",
+        aliases: &[],
         description: "ISO-8601 date (`YYYY-MM-DD`).",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"date\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "datetime",
+        aliases: &[],
         description: "ISO-8601 datetime; the timezone offset is optional.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "time",
+        aliases: &[],
         description: "Time of day with optional timezone.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "number",
+        aliases: &[],
         description: "A numeric value.",
-        accepted_constraints: "eager, min, max, integer, suggest, default, required",
+        accepted_constraints: &["eager", "min", "max", "integer", "suggest", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "numberlike",
+        aliases: &[],
         description: "A number, or a string that can be coerced to a number during compose.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "anyOf: [ { \"type\": \"number\" }, { \"type\": \"string\", \"pattern\": \"^-?\\d+(\\.\\d+)?$\" } ]",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "boolean",
+        aliases: &[],
         description: "A true or false value.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"boolean\" } with optional default",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "boolish",
+        aliases: &[],
         description: "A boolean, or a `true` / `false` string that can be coerced during compose.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "anyOf: [ { \"type\": \"boolean\" }, { \"enum\": [\"true\", \"false\", \"True\", \"False\", \"TRUE\", \"FALSE\"] } ]",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "object",
+        aliases: &[],
         description: "Any object shape. Use an inline object literal when you want to validate nested fields.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behavior preserved)",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "file",
+        aliases: &[],
         description: "A path-like file reference. Lazy by default (syntax-only); add `eager` to require the file to exist. Use `match(...)` to suggest accepted paths.",
-        accepted_constraints: "eager, match(glob, ...), default, required",
+        accepted_constraints: &["eager", "match", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). In a root union each simplified arm's `match(...)` emits `x-darkmatter-match`.",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "enum",
+        aliases: &[],
         description: "Value must be one of the constraint-supplied members.",
-        accepted_constraints: "<members>; eager; default; required",
+        accepted_constraints: &["<members>", "eager", "default", "required", "generated"],
         json_schema_effect: "{ \"enum\": [ ... ] } with optional default",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "url",
+        aliases: &[],
         description: "Absolute URL.",
-        accepted_constraints: "eager, scheme(http, https, ...), default, required",
+        accepted_constraints: &["eager", "scheme", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"uri\" } plus x-darkmatter-url-scheme when `scheme(...)` is set",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "email",
+        aliases: &[],
         description: "RFC 5322 addr-spec.",
-        accepted_constraints: "eager, default, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "literal",
+        aliases: &[],
         description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
-        accepted_constraints: "<value>; eager; default; required",
+        accepted_constraints: &["<value>", "eager", "default", "required", "generated"],
         json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "expression",
+        aliases: &[],
         description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
-        accepted_constraints: "eager, default, required, generated",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "type-definition",
+        aliases: &[],
         description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
-        accepted_constraints: "eager, default, required, generated",
+        accepted_constraints: &["default", "required", "generated"],
         json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "schema",
+        aliases: &[],
         description: "One complete `$schema` declaration carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for declaration completion, hover, and diagnostics.",
-        accepted_constraints: "eager, default, required, generated",
+        accepted_constraints: &["default", "required", "generated"],
         json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "unknown",
+        aliases: &["any"],
         description: "Every value, including null, or omission; `required` has no effect. `any` is an equivalent alias; `unknown` is the canonical spelling.",
-        accepted_constraints: "eager, required",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{} (empty schema)",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "null",
-        description: "Only an explicit null value, or omission; `required` has no effect. Written unquoted (`null`, `~`, or an empty value) or as the string `\"null\"` at a property, union-arm, or named-type position.",
-        accepted_constraints: "eager, default(null), required, generated",
+        aliases: &[],
+        description: "Only an explicit null value, or omission; `required` has no effect. Written unquoted (`null`, `~`, or an empty value) or as the string `\"null\"` at a property, union-arm, or named-type position. A `default` must be null.",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"null\" }",
+        type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "alphanumeric",
-        description: "A string of ASCII letters and digits. Options written before the first `;` widen or narrow the character set and are part of the type's identity; redundant options are dropped from its canonical form.",
-        accepted_constraints: "<options>; min, max, not-empty, pattern(re), suggest, eager, default, required, generated",
+        aliases: &[],
+        description: "A string of ASCII letters and digits (`[A-Za-z0-9]`); no option is on by default. Options written before the first `;` widen or narrow the character set and are part of the type's identity; redundant options are dropped from its canonical form.",
+        accepted_constraints: &["<options>", "min", "max", "not-empty", "pattern", "suggest", "eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"pattern\": <regex of the canonical options>, \"x-darkmatter-type\": \"alphanumeric\", \"x-darkmatter-options\": [ ... ] }",
+        type_options: ALPHANUMERIC_OPTION_DESCRIPTORS,
     },
     SchemaTypeDescriptor {
         keyword: "shell",
-        description: "A string holding a shell command: at least one non-whitespace character. Passive: never parsed as shell syntax, approved, or executed.",
-        accepted_constraints: "eager, default, required, generated",
+        aliases: &[],
+        description: "A string holding a shell command: at least one non-whitespace character. Passive: never parsed as shell syntax, approved, or executed. Constraints, coercion of native booleans and numbers to text, and pending-value deferral mirror `expression`.",
+        accepted_constraints: &["eager", "default", "required", "generated"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-shell\" }",
+        type_options: &[],
     },
 ];
 
 /// Returns all schema-language type descriptors in display order.
 pub fn schema_type_descriptors() -> &'static [SchemaTypeDescriptor] {
     SCHEMA_TYPE_DESCRIPTORS
+}
+
+/// Returns the type descriptor whose keyword or alias is `name`.
+///
+/// ## Examples
+///
+/// ```rust
+/// use darkmatter::markdown::schemas::schema_type_descriptor;
+///
+/// assert_eq!(schema_type_descriptor("any").map(|d| d.keyword), Some("unknown"));
+/// ```
+pub fn schema_type_descriptor(name: &str) -> Option<&'static SchemaTypeDescriptor> {
+    SCHEMA_TYPE_DESCRIPTORS
+        .iter()
+        .find(|descriptor| descriptor.is_named(name))
+}
+
+/// The `alphanumeric` type options, in canonical (table) order.
+///
+/// The test [`alphanumeric_option_descriptors_match_the_typed_options`]
+/// asserts one descriptor per [`AlphanumericOption`] in the same order, and
+/// that the redundancy fields agree with
+/// [`AlphanumericOptions::canonical`](super::simplified::AlphanumericOptions::canonical).
+pub const ALPHANUMERIC_OPTION_DESCRIPTORS: &[AlphanumericOptionDescriptor] = {
+    use AlphanumericOption::*;
+    const fn option(option: AlphanumericOption) -> AlphanumericOptionDescriptor {
+        AlphanumericOptionDescriptor { option, redundant_without: None, redundant_with: None }
+    }
+    &[
+        option(AllowDashes),
+        option(AllowUnderscores),
+        option(AllowSlashes),
+        option(AllowPeriods),
+        option(AllowWhitespace),
+        AlphanumericOptionDescriptor {
+            option: BlockDoublePeriods,
+            redundant_without: Some(AllowPeriods),
+            redundant_with: None,
+        },
+        AlphanumericOptionDescriptor {
+            option: BlockLeadingDash,
+            redundant_without: Some(AllowDashes),
+            redundant_with: Some(LeadingAlpha),
+        },
+        AlphanumericOptionDescriptor {
+            option: BlockLeadingSlash,
+            redundant_without: Some(AllowSlashes),
+            redundant_with: Some(LeadingAlpha),
+        },
+        option(LeadingAlpha),
+    ]
+};
+
+/// Returns the `alphanumeric` type option descriptors in canonical order.
+pub fn alphanumeric_option_descriptors() -> &'static [AlphanumericOptionDescriptor] {
+    ALPHANUMERIC_OPTION_DESCRIPTORS
 }
 
 /// All schema-language constraints, in display order.
@@ -606,12 +706,65 @@ pub fn match_safe_constraint_descriptors() -> &'static [MatchSafeConstraintDescr
 pub struct SchemaTypeDescriptor {
     /// Canonical lowercase keyword used in the grammar.
     pub keyword: &'static str,
+    /// Equivalent spellings that parse to the same type. The canonical
+    /// [`keyword`](Self::keyword) is what serialization and reports use.
+    pub aliases: &'static [&'static str],
     /// Human-readable description of the type's meaning.
     pub description: &'static str,
-    /// Comma-separated list of constraints accepted on this type.
-    pub accepted_constraints: &'static str,
+    /// Item-level constraints this type accepts, as
+    /// [`SchemaConstraintDescriptor::keyword`]s in display order. The
+    /// positional forms appear as their pseudo-keywords (`<members>`,
+    /// `<value>`, `<options>`). The postfix `[](…)` list is a separate surface;
+    /// see [`SchemaConstraintDescriptor::accepts_array_level`].
+    pub accepted_constraints: &'static [&'static str],
     /// Effect on the generated Draft 2020-12 JSON Schema fragment.
     pub json_schema_effect: &'static str,
+    /// The type options written before the first `;`, in canonical order.
+    /// Empty for every type without options.
+    pub type_options: &'static [AlphanumericOptionDescriptor],
+}
+
+impl SchemaTypeDescriptor {
+    /// Whether `keyword` (a [`SchemaConstraintDescriptor::keyword`]) is
+    /// accepted in this type's item-level constraint list.
+    pub fn accepts_constraint(&self, keyword: &str) -> bool {
+        self.accepted_constraints.contains(&keyword)
+    }
+
+    /// Whether `name` is this type's keyword or one of its aliases.
+    pub fn is_named(&self, name: &str) -> bool {
+        self.keyword == name || self.aliases.contains(&name)
+    }
+}
+
+/// Descriptor for one `alphanumeric` type option.
+///
+/// The keyword and effect come from the typed [`AlphanumericOption`], so a
+/// consumer holding a parsed option reads the same text as one holding a
+/// descriptor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlphanumericOptionDescriptor {
+    /// The option this descriptor describes.
+    pub option: AlphanumericOption,
+    /// The option this one needs to have any effect: without it the
+    /// character this option blocks is not allowed in the first place, so the
+    /// canonical form drops this option.
+    pub redundant_without: Option<AlphanumericOption>,
+    /// An option whose presence makes this one redundant, so the canonical
+    /// form drops this option.
+    pub redundant_with: Option<AlphanumericOption>,
+}
+
+impl AlphanumericOptionDescriptor {
+    /// The option keyword as written in the grammar.
+    pub fn keyword(&self) -> &'static str {
+        self.option.as_keyword()
+    }
+
+    /// A one-line description of the option's effect.
+    pub fn effect(&self) -> &'static str {
+        self.option.summary()
+    }
 }
 
 /// Descriptor for a single schema-language constraint.
@@ -826,6 +979,177 @@ mod tests {
                 d.keyword
             );
         }
+    }
+
+    /// A descriptor's aliases are exactly `SimplifiedType::aliases`, and each
+    /// alias parses to the descriptor's type and resolves to its descriptor.
+    #[test]
+    fn descriptor_aliases_match_simplified_type_aliases() {
+        for d in SCHEMA_TYPE_DESCRIPTORS {
+            let ty = SimplifiedType::from_keyword(d.keyword).expect("descriptor keyword parses");
+            assert_eq!(d.aliases, ty.aliases(), "aliases of `{}`", d.keyword);
+            for alias in d.aliases {
+                assert_eq!(SimplifiedType::from_keyword(alias), Some(ty), "alias `{alias}`");
+                assert_eq!(schema_type_descriptor(alias), Some(d), "alias `{alias}`");
+            }
+            assert_eq!(schema_type_descriptor(d.keyword), Some(d));
+        }
+        assert_eq!(schema_type_descriptor("any").map(|d| d.keyword), Some("unknown"));
+        assert_eq!(schema_type_descriptor("nope"), None);
+    }
+
+    /// One option descriptor per `AlphanumericOption`, in its canonical order,
+    /// and the redundancy fields agree with `AlphanumericOptions::canonical`
+    /// for every one of the 512 option sets.
+    #[test]
+    fn alphanumeric_option_descriptors_match_the_typed_options() {
+        use crate::markdown::schemas::simplified::{AlphanumericOption, AlphanumericOptions};
+
+        let described: Vec<AlphanumericOption> =
+            alphanumeric_option_descriptors().iter().map(|d| d.option).collect();
+        assert_eq!(described, AlphanumericOption::ALL);
+
+        for bits in 0u16..(1 << AlphanumericOption::ALL.len()) {
+            let set = AlphanumericOption::ALL
+                .into_iter()
+                .enumerate()
+                .filter(|(index, _)| bits & (1 << index) != 0)
+                .fold(AlphanumericOptions::base(), |set, (_, option)| set.with(option));
+            for d in alphanumeric_option_descriptors() {
+                if !set.contains(d.option) {
+                    continue;
+                }
+                let redundant = d.redundant_without.is_some_and(|needed| !set.contains(needed))
+                    || d.redundant_with.is_some_and(|other| set.contains(other));
+                assert_eq!(
+                    set.canonical().contains(d.option),
+                    !redundant,
+                    "`{}` in {:?}",
+                    d.keyword(),
+                    set.keywords().collect::<Vec<_>>(),
+                );
+            }
+        }
+
+        let alphanumeric = schema_type_descriptor("alphanumeric").expect("alphanumeric descriptor");
+        assert_eq!(alphanumeric.type_options, ALPHANUMERIC_OPTION_DESCRIPTORS);
+        assert!(alphanumeric.accepts_constraint("<options>"));
+        for d in SCHEMA_TYPE_DESCRIPTORS.iter().filter(|d| d.keyword != "alphanumeric") {
+            assert!(d.type_options.is_empty(), "`{}` has no type options", d.keyword);
+        }
+        let options_constraint = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .find(|c| c.keyword == "<options>")
+            .expect("`<options>` constraint descriptor");
+        for d in alphanumeric_option_descriptors() {
+            assert!(
+                options_constraint.description.contains(d.keyword()),
+                "the `<options>` description names `{}`",
+                d.keyword()
+            );
+        }
+    }
+
+    /// The catalog keyword a parsed constraint was written as.
+    fn catalog_keyword(constraint: &Constraint) -> &'static str {
+        match constraint {
+            Constraint::Options(_) => "<options>",
+            other => other.keyword(),
+        }
+    }
+
+    /// A value valid for `ty`, written as a constraint argument.
+    fn sample_value(ty: &str) -> &'static str {
+        match ty {
+            "date" => "2024-01-01",
+            "datetime" => "2024-01-01T00:00:00Z",
+            "time" => "12:00:00",
+            "number" | "numberlike" | "literal" => "1",
+            "boolean" | "boolish" => "true",
+            "file" => "a.md",
+            "url" => "https://example.com",
+            "email" => "a@example.com",
+            "type-definition" => "string",
+            "schema" => "./a.yaml",
+            "null" => "null",
+            "shell" => "ls",
+            _ => "a",
+        }
+    }
+
+    /// Whether `ty` accepts the catalog constraint `keyword` in its item-level
+    /// list: the definition must parse with that constraint present, and lower
+    /// to JSON Schema (where per-type applicability is enforced).
+    fn grammar_accepts(ty: &str, keyword: &str) -> bool {
+        let positional = match ty {
+            "enum" => Some("a"),
+            "literal" => Some("1"),
+            _ => None,
+        };
+        let list = match keyword {
+            "<members>" => "a, b".to_string(),
+            "<value>" => "1".to_string(),
+            "<options>" => "allow-dashes".to_string(),
+            other => {
+                let constraint = match other {
+                    "default" | "suggest" => format!("{other}({})", sample_value(ty)),
+                    "min" => "min(1)".to_string(),
+                    "max" => "max(5)".to_string(),
+                    "pattern" => "pattern(^a)".to_string(),
+                    "match" => "match(*.md)".to_string(),
+                    "scheme" => "scheme(https)".to_string(),
+                    bare => bare.to_string(),
+                };
+                match positional {
+                    Some(positional) => format!("{positional}; {constraint}"),
+                    None => constraint,
+                }
+            }
+        };
+        let definition = format!("{ty}({list})");
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&format!("p: '{definition}'")).expect("yaml");
+        let Ok(schema) = parse_yaml_schema(&yaml) else {
+            return false;
+        };
+        let SimplifiedSchema::Single(shape) = &schema else {
+            return false;
+        };
+        let Some(PropertyDef::Single(atom)) = shape.properties.get("p") else {
+            return false;
+        };
+        atom.constraints.iter().any(|c| catalog_keyword(c) == keyword)
+            && crate::markdown::schemas::simplified::to_json_schema(&schema).is_ok()
+    }
+
+    /// Each type's published constraint list is exactly the set of catalog
+    /// constraints the grammar and lowering accept on that type, so editors
+    /// can read applicability from the catalog instead of its display text.
+    #[test]
+    fn type_accepted_constraints_match_the_grammar() {
+        let mut mismatches = Vec::new();
+        for d in SCHEMA_TYPE_DESCRIPTORS {
+            for constraint in d.accepted_constraints {
+                assert!(
+                    SCHEMA_CONSTRAINT_DESCRIPTORS.iter().any(|c| c.keyword == *constraint),
+                    "`{}` lists `{constraint}`, which the constraint catalog does not describe",
+                    d.keyword
+                );
+            }
+            for c in SCHEMA_CONSTRAINT_DESCRIPTORS {
+                let accepted = grammar_accepts(d.keyword, c.keyword);
+                if accepted != d.accepts_constraint(c.keyword) {
+                    mismatches.push(format!(
+                        "`{}({})`: grammar {}, catalog {}",
+                        d.keyword,
+                        c.keyword,
+                        if accepted { "accepts" } else { "rejects" },
+                        if d.accepts_constraint(c.keyword) { "lists it" } else { "omits it" },
+                    ));
+                }
+            }
+        }
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
     }
 
     /// Every implemented `Constraint` variant has descriptor coverage, and

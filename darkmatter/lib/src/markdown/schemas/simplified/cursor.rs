@@ -43,6 +43,12 @@ pub enum SchemaCursorRole {
         /// Whether this is the postfix `[](…)` array-level list, whose accepted
         /// constraints are the array set rather than the item set.
         array_level: bool,
+        /// The list's leading group while no `;` has been typed in it: the
+        /// entries authored before the cursor's own token, in authored order.
+        /// `alphanumeric` options can only be written in this group, so
+        /// `None` (a `;` precedes the cursor) means only constraints may
+        /// follow.
+        leading_group: Option<Vec<String>>,
     },
     /// An argument inside a constraint call's `(…)` argument list.
     Argument {
@@ -266,8 +272,14 @@ fn expression_flow_arm_starts(body: &str) -> Vec<usize> {
 enum Frame {
     /// Inside `{ … }`. `key` is the property being defined once `:` is typed.
     InlineObject { key: Option<String>, in_value: bool },
-    /// Inside a `(…)` constraint list attached to `subject`.
-    ConstraintList { subject: Option<String>, array_level: bool },
+    /// Inside a `(…)` constraint list attached to `subject`. `group` holds
+    /// the entries of the list's leading group with their spans, until a `;`
+    /// ends that group (`None`).
+    ConstraintList {
+        subject: Option<String>,
+        array_level: bool,
+        group: Option<Vec<(String, Range<usize>)>>,
+    },
     /// Inside a constraint call's `(…)` argument list.
     ArgList {
         subject: Option<String>,
@@ -332,6 +344,9 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                 continue;
             }
             match stack.last_mut() {
+                Some(Frame::ConstraintList { group: Some(group), .. }) => {
+                    group.push((word.clone(), span.clone()));
+                }
                 Some(Frame::ArgList { .. } | Frame::ConstraintList { .. }) => {}
                 Some(Frame::InlineObject { in_value: false, .. }) => {}
                 _ => {
@@ -364,7 +379,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             b'(' => {
                 lex.pos += 1;
                 let frame = match stack.last() {
-                    Some(Frame::ConstraintList { subject, array_level }) => Frame::ArgList {
+                    Some(Frame::ConstraintList { subject, array_level, .. }) => Frame::ArgList {
                         subject: subject.clone(),
                         constraint: last_word.clone().unwrap_or_default(),
                         array_level: *array_level,
@@ -384,6 +399,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                     _ => Frame::ConstraintList {
                         subject: subject.clone(),
                         array_level: saw_array,
+                        group: Some(Vec::new()),
                     },
                 };
                 stack.push(frame);
@@ -411,6 +427,9 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             }
             b';' => {
                 lex.pos += 1;
+                if let Some(Frame::ConstraintList { group, .. }) = stack.last_mut() {
+                    *group = None;
+                }
                 token = None;
             }
             b':' => {
@@ -476,7 +495,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
         Some(found) => found,
         None => (String::new(), src.len()..src.len()),
     };
-    let token_span = scalar.project(decoded_span)?;
+    let token_span = scalar.project(decoded_span.clone())?;
     let mut path = path;
     for frame in &stack {
         if let Frame::InlineObject { key: Some(key), in_value: true } = frame {
@@ -489,10 +508,19 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             constraint: constraint.clone(),
             array_level: *array_level,
         },
-        Some(Frame::ConstraintList { subject, array_level }) => SchemaCursorRole::Constraint {
-            subject: subject.clone(),
-            array_level: *array_level,
-        },
+        Some(Frame::ConstraintList { subject, array_level, group }) => {
+            SchemaCursorRole::Constraint {
+                subject: subject.clone(),
+                array_level: *array_level,
+                leading_group: group.as_ref().map(|group| {
+                    group
+                        .iter()
+                        .filter(|(_, span)| *span != decoded_span)
+                        .map(|(word, _)| word.clone())
+                        .collect()
+                }),
+            }
+        }
         Some(Frame::InlineObject { in_value: false, .. }) => SchemaCursorRole::InlineObjectKey,
         Some(Frame::InlineObject { .. }) | None => match import_name {
             Some(name) => SchemaCursorRole::ImportReference { name },
@@ -560,6 +588,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: None,
             }
         );
         assert_eq!(state.token_span, 20..22);
@@ -574,6 +603,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("type-definition".into()),
                 array_level: true,
+                leading_group: Some(Vec::new()),
             }
         );
     }
@@ -586,6 +616,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: true,
+                leading_group: Some(Vec::new()),
             }
         );
         let item = at_end("string(mi");
@@ -594,8 +625,34 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: Some(Vec::new()),
             }
         );
+    }
+
+    /// The leading group is what `alphanumeric` options may be written in:
+    /// it lists the entries before the cursor's own token until a `;` ends
+    /// it, and an argument list's words never enter it.
+    #[test]
+    fn a_constraint_list_reports_its_leading_group_until_the_first_separator() {
+        let group = |value: &str| match at_end(value).role {
+            SchemaCursorRole::Constraint { leading_group, .. } => leading_group,
+            other => panic!("{value:?} -> {other:?}"),
+        };
+        let words = |list: &[&str]| Some(list.iter().map(|word| word.to_string()).collect::<Vec<_>>());
+        assert_eq!(group("alphanumeric("), words(&[]));
+        assert_eq!(group("alphanumeric(allow-da"), words(&[]));
+        assert_eq!(group("alphanumeric(allow-dashes, "), words(&["allow-dashes"]));
+        assert_eq!(
+            group("alphanumeric(allow-dashes, leading-alpha, allow-p"),
+            words(&["allow-dashes", "leading-alpha"])
+        );
+        assert_eq!(group("alphanumeric(allow-dashes; "), None);
+        assert_eq!(group("alphanumeric(allow-dashes; min(1); re"), None);
+        assert_eq!(group("alphanumeric(pattern(a, b), "), words(&["pattern"]));
+        assert_eq!(group("[string, alphanumeric(allow-dashes, "), words(&["allow-dashes"]));
+        // A nested list keeps its own group.
+        assert_eq!(group("{ id: alphanumeric(leading-alpha; max(3)), b: alphanumeric("), words(&[]));
     }
 
     #[test]
@@ -900,6 +957,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: Some(Vec::new()),
             }
         );
     }
@@ -981,7 +1039,11 @@ mod tests {
             (
                 "string(pattern(^[{]@x:y$); re",
                 root.clone(),
-                SchemaCursorRole::Constraint { subject: Some("string".into()), array_level: false },
+                SchemaCursorRole::Constraint {
+                    subject: Some("string".into()),
+                    array_level: false,
+                    leading_group: None,
+                },
                 "re",
             ),
         ];
@@ -1043,6 +1105,7 @@ mod tests {
         let constraint = |array_level| SchemaCursorRole::Constraint {
             subject: Some("person".into()),
             array_level,
+            leading_group: Some(Vec::new()),
         };
         for (bare, explicit, cursor, expected) in [
             ("person(re)", "person(re)@this", 9, constraint(false)),
@@ -1075,6 +1138,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("person".into()),
                 array_level: false,
+                leading_group: Some(Vec::new()),
             }
         );
     }

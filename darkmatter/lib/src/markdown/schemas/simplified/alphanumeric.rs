@@ -75,7 +75,9 @@ impl AlphanumericOption {
             AlphanumericOption::AllowUnderscores => "also allows `_`",
             AlphanumericOption::AllowSlashes => "also allows `/`",
             AlphanumericOption::AllowPeriods => "also allows `.`",
-            AlphanumericOption::AllowWhitespace => "also allows the ASCII space character",
+            AlphanumericOption::AllowWhitespace => {
+                "also allows the ASCII space character (U+0020)"
+            }
             AlphanumericOption::BlockDoublePeriods => "the value may not contain `..`",
             AlphanumericOption::BlockLeadingDash => "the first character may not be `-`",
             AlphanumericOption::BlockLeadingSlash => "the first character may not be `/`",
@@ -166,6 +168,49 @@ impl AsciiCharSet {
         }
         class.push(']');
         class
+    }
+}
+
+/// A compact, human-readable listing shared by `md` and DMLS: letter and
+/// digit runs as ranges, then each other character, separated by spaces,
+/// with the space character itself written `space`.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::{AlphanumericOption, AlphanumericOptions};
+///
+/// let options: AlphanumericOptions =
+///     [AlphanumericOption::AllowDashes, AlphanumericOption::AllowWhitespace].into_iter().collect();
+/// assert_eq!(options.allowed_characters().to_string(), "A-Z a-z 0-9 space -");
+/// ```
+impl fmt::Display for AsciiCharSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts: Vec<String> = Vec::new();
+        for (low, high) in [(b'A', b'Z'), (b'a', b'z'), (b'0', b'9')] {
+            let mut byte = low;
+            while byte <= high {
+                if !self.contains_byte(byte) {
+                    byte += 1;
+                    continue;
+                }
+                let start = byte;
+                while byte < high && self.contains_byte(byte + 1) {
+                    byte += 1;
+                }
+                parts.push(match byte - start {
+                    0 => (start as char).to_string(),
+                    1 => format!("{} {}", start as char, byte as char),
+                    _ => format!("{}-{}", start as char, byte as char),
+                });
+                byte += 1;
+            }
+        }
+        parts.extend(self.chars().filter(|ch| !ch.is_ascii_alphanumeric()).map(|ch| match ch {
+            ' ' => "space".to_string(),
+            other => other.to_string(),
+        }));
+        f.write_str(&parts.join(" "))
     }
 }
 
@@ -411,6 +456,24 @@ mod tests {
         let periods = options(&[AllowPeriods]);
         assert!(!periods.forbids_double_period());
         assert!(options(&[AllowPeriods, BlockDoublePeriods]).forbids_double_period());
+    }
+
+    #[test]
+    fn character_sets_display_as_compact_ranges() {
+        assert_eq!(AlphanumericOptions::base().allowed_characters().to_string(), "A-Z a-z 0-9");
+        assert_eq!(options(&[LeadingAlpha]).first_characters().to_string(), "A-Z a-z");
+        assert_eq!(
+            options(&[AllowDashes, AllowPeriods, AllowSlashes, AllowUnderscores, AllowWhitespace])
+                .allowed_characters()
+                .to_string(),
+            "A-Z a-z 0-9 space - . / _"
+        );
+        let mut partial = AsciiCharSet::default();
+        for byte in *b"abcxy5" {
+            partial.insert(byte);
+        }
+        assert_eq!(partial.to_string(), "a-c x y 5");
+        assert_eq!(AsciiCharSet::default().to_string(), "");
     }
 
     #[test]
