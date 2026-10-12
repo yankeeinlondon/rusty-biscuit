@@ -2,6 +2,19 @@
 use std::path::Path;
 use crate::{Repo, MAIN_BRANCH, commit_index, files_and_names, json_of};
 
+macro_rules! command_cases {
+    ($name:ident => $check:expr) => {
+        mod $name {
+            use super::*;
+            #[test] fn functions() { ($check)("functions"); }
+            #[test] fn types() { ($check)("types"); }
+            #[test] fn symbols() { ($check)("symbols"); }
+            #[test] fn classes() { ($check)("classes"); }
+        }
+    };
+}
+
+
 /// Symlinks `alias` to `target`. On Windows a target spelled with `/` does
 /// not resolve, so callers join relative targets name by name.
 fn link(target: &Path, alias: &Path) {
@@ -11,8 +24,8 @@ fn link(target: &Path, alias: &Path) {
     std::os::windows::fs::symlink_file(target, alias).expect("file symlink requires Developer Mode or symlink privilege");
 }
 
-fn assert_rejected(repo: &Repo, changed: &str, selector: &str) {
-    for command in ["functions", "types", "symbols", "classes"] {
+fn assert_rejected(repo: &Repo, changed: &str, selector: &str, command: &str) {
+    {
         for (mode, extra) in [
             ("terminal", vec![]), ("plain", vec!["--plain"]),
             ("table", vec!["--format", "table"]), ("json", vec!["--json"]),
@@ -50,7 +63,7 @@ fn assert_rejected(repo: &Repo, changed: &str, selector: &str) {
     assert_eq!(report["errors"], serde_json::json!([]));
 }
 
-fn foreign_aliases_are_rejected(boundary: &str, phase: &str) {
+fn foreign_aliases_are_rejected(boundary: &str, phase: &str, command: &str) {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
     let foreign = Repo::committed(&[("leaf.rs", "fn foreign() {}\nstruct Foreign;\n")]);
     let target = if boundary == "external" { foreign.dir.path().join("leaf.rs") } else {
@@ -68,60 +81,71 @@ fn foreign_aliases_are_rejected(boundary: &str, phase: &str) {
     if phase != "untracked" { repo.stage("alias.rs"); }
     if phase == "committed" { commit_index(repo.dir.path(), "alias", MAIN_BRANCH); }
     let changed = if phase == "committed" { format!("--changed={base}") } else { "--changed".into() };
-    for selector in [repo.dir.path().join("alias.rs"), target.clone()] { assert_rejected(&repo, &changed, selector.to_str().unwrap()); }
+    for selector in [repo.dir.path().join("alias.rs"), target.clone()] { assert_rejected(&repo, &changed, selector.to_str().unwrap(), command); }
 }
 
-#[test]
-fn external_untracked_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("external", "untracked");
+command_cases!(external_untracked_aliases_are_rejected_in_every_selector_and_report => check_external_untracked_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_external_untracked_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("external", "untracked", command);
 }
 
-#[test]
-fn external_staged_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("external", "staged");
+command_cases!(external_staged_aliases_are_rejected_in_every_selector_and_report => check_external_staged_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_external_staged_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("external", "staged", command);
 }
 
-#[test]
-fn external_committed_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("external", "committed");
+command_cases!(external_committed_aliases_are_rejected_in_every_selector_and_report => check_external_committed_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_external_committed_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("external", "committed", command);
 }
 
-#[test]
-fn nested_directory_untracked_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-directory", "untracked");
+command_cases!(nested_directory_untracked_aliases_are_rejected_in_every_selector_and_report => check_nested_directory_untracked_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_directory_untracked_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-directory", "untracked", command);
 }
 
-#[test]
-fn nested_directory_staged_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-directory", "staged");
+command_cases!(nested_directory_staged_aliases_are_rejected_in_every_selector_and_report => check_nested_directory_staged_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_directory_staged_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-directory", "staged", command);
 }
 
-#[test]
-fn nested_directory_committed_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-directory", "committed");
+command_cases!(nested_directory_committed_aliases_are_rejected_in_every_selector_and_report => check_nested_directory_committed_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_directory_committed_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-directory", "committed", command);
 }
 
-#[test]
-fn nested_file_untracked_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-file", "untracked");
+command_cases!(nested_file_untracked_aliases_are_rejected_in_every_selector_and_report => check_nested_file_untracked_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_file_untracked_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-file", "untracked", command);
 }
 
-#[test]
-fn nested_file_staged_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-file", "staged");
+command_cases!(nested_file_staged_aliases_are_rejected_in_every_selector_and_report => check_nested_file_staged_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_file_staged_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-file", "staged", command);
 }
 
-#[test]
-fn nested_file_committed_aliases_are_rejected_in_every_selector_and_report() {
-    foreign_aliases_are_rejected("nested-file", "committed");
+command_cases!(nested_file_committed_aliases_are_rejected_in_every_selector_and_report => check_nested_file_committed_aliases_are_rejected_in_every_selector_and_report);
+
+fn check_nested_file_committed_aliases_are_rejected_in_every_selector_and_report(command: &str) {
+    foreign_aliases_are_rejected("nested-file", "committed", command);
 }
 
-#[test]
-fn same_checkout_aliases_preserve_expected_declarations() {
+command_cases!(same_checkout_aliases_preserve_expected_declarations => check_same_checkout_aliases_preserve_expected_declarations);
+
+fn check_same_checkout_aliases_preserve_expected_declarations(command: &str) {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
     link(Path::new("clean.rs"), &repo.dir.path().join("alias.rs"));
     for selector in ["alias.rs", "clean.rs"] {
-        for (command, names) in [("functions", vec!["clean"]), ("types", vec!["Clean"]), ("symbols", vec!["clean", "Clean"]), ("classes", vec!["Clean"])] {
+        let names = match command { "functions" => vec!["clean"], "symbols" => vec!["clean", "Clean"], _ => vec!["Clean"] };
+            {
             for cached in [true, false] {
                 let extra = if cached { vec![] } else { vec!["--no-cache"] };
                 let mut args = vec![command, "--changed", "--file", selector, "--json"];
@@ -141,8 +165,9 @@ fn same_checkout_aliases_preserve_expected_declarations() {
     }
 }
 
-#[test]
-fn nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout() {
+command_cases!(nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout => check_nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout);
+
+fn check_nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout(command: &str) {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
     let inner = repo.dir.path().join("inner");
     std::fs::create_dir(&inner).unwrap();
@@ -155,7 +180,7 @@ fn nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout() {
     let changed = sniff::filesystem::git::GitRepo::discover(repo.dir.path()).unwrap().unwrap()
         .changed_paths(sniff::filesystem::git::ChangedBase::Omitted).unwrap();
     assert!(changed.contains(&Path::new("inner").join("alias.rs")), "tracked alias must supply changed evidence");
-    assert_rejected(&repo, "--changed", "clean.rs");
+    assert_rejected(&repo, "--changed", "clean.rs", command);
     std::fs::create_dir(inner.join("subdir")).unwrap();
     link(&Path::new("..").join("..").join("clean.rs"), &inner.join("subdir").join("back.rs"));
     #[cfg(unix)]
@@ -163,12 +188,13 @@ fn nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
     link(&Path::new("bridge").join("back.rs"), &repo.dir.path().join("alias.rs"));
-    assert_rejected(&repo, "--changed", "alias.rs");
-    assert_rejected(&repo, "--changed", "clean.rs");
+    assert_rejected(&repo, "--changed", "alias.rs", command);
+    assert_rejected(&repo, "--changed", "clean.rs", command);
 }
 
-#[test]
-fn external_directory_alias_cannot_return_changed_identity_to_active_checkout() {
+command_cases!(external_directory_alias_cannot_return_changed_identity_to_active_checkout => check_external_directory_alias_cannot_return_changed_identity_to_active_checkout);
+
+fn check_external_directory_alias_cannot_return_changed_identity_to_active_checkout(command: &str) {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
     let foreign = Repo::committed(&[("foreign.rs", "fn foreign() {}\n")]);
     let subdir = foreign.dir.path().join("subdir");
@@ -185,11 +211,11 @@ fn external_directory_alias_cannot_return_changed_identity_to_active_checkout() 
     let changed = sniff::filesystem::git::GitRepo::discover(repo.dir.path()).unwrap().unwrap()
         .changed_paths(sniff::filesystem::git::ChangedBase::Omitted).unwrap();
     assert!(changed.contains(&Path::new("alias.rs").to_path_buf()));
-    assert_rejected(&repo, "--changed", "alias.rs");
-    assert_rejected(&repo, "--changed", "clean.rs");
+    assert_rejected(&repo, "--changed", "alias.rs", command);
+    assert_rejected(&repo, "--changed", "clean.rs", command);
 }
 
-fn parent_traversal(shape: &str, phase: &str) {
+fn parent_traversal(shape: &str, phase: &str, command: &str) {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n"), (".gitignore", "inner/\nbridge\n")]);
     let foreign = Repo::committed(&[("foreign.rs", "fn foreign() {}\n")]);
     let inner = repo.dir.path().join("inner");
@@ -235,7 +261,8 @@ fn parent_traversal(shape: &str, phase: &str) {
     let changed = if phase == "committed" { format!("--changed={base}") } else { "--changed".into() };
     for selector in ["alias.rs", "clean.rs"] {
         if shape.starts_with("ordinary") {
-            for (command, names) in [("functions", vec!["clean"]), ("types", vec!["Clean"]), ("symbols", vec!["clean", "Clean"]), ("classes", vec!["Clean"])] {
+            let names = match command { "functions" => vec!["clean"], "symbols" => vec!["clean", "Clean"], _ => vec!["Clean"] };
+            {
                 let report = repo.json(&[command, &changed, "--file", selector, "--json", "--no-cache"]);
                 let files = files_and_names(&report);
                 assert_eq!(files.len(), 1);
@@ -249,19 +276,16 @@ fn parent_traversal(shape: &str, phase: &str) {
                 assert_eq!(files_and_names(&json_of(&crate::stdout_of(warm, &[command])))[0].1, names);
             }
         } else {
-            assert_rejected(&repo, &changed, selector);
+            assert_rejected(&repo, &changed, selector, command);
         }
     }
 }
 
 macro_rules! parent_cases {
     ($shape:literal, $untracked:ident, $staged:ident, $committed:ident) => {
-        #[test]
-        fn $untracked() { parent_traversal($shape, "untracked"); }
-        #[test]
-        fn $staged() { parent_traversal($shape, "staged"); }
-        #[test]
-        fn $committed() { parent_traversal($shape, "committed"); }
+        command_cases!($untracked => |command| parent_traversal($shape, "untracked", command));
+        command_cases!($staged => |command| parent_traversal($shape, "staged", command));
+        command_cases!($committed => |command| parent_traversal($shape, "committed", command));
     };
 }
 

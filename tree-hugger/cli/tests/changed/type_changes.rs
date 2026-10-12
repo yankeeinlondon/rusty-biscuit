@@ -9,9 +9,8 @@ fn symlink_file(target: &std::path::Path, link: &std::path::Path) {
     std::os::windows::fs::symlink_file(target, link).expect("file symlink requires Developer Mode or symlink privilege");
 }
 
-#[test]
-fn file_type_replacements_report_current_declarations_in_every_mode() {
-    for initially_symlink in [false, true] {
+fn check_file_type_replacement(initially_symlink: bool, command: &str) {
+    {
         let repo = Repo::committed(&[
             ("leaf.rs", "fn original() {}\nstruct Original;\n"),
             ("target.rs", "fn target() {}\nstruct Target;\n"),
@@ -32,7 +31,7 @@ fn file_type_replacements_report_current_declarations_in_every_mode() {
             symlink_file(std::path::Path::new("target.rs"), &repo.dir.path().join("leaf.rs"));
             ("target", "Target")
         };
-        for command in ["functions", "types", "symbols", "classes"] {
+        {
             let names: Vec<String> = match command {
                 "functions" => vec![function.into()],
                 "symbols" => vec![function.into(), typ.into()],
@@ -95,14 +94,29 @@ fn file_type_replacements_report_current_declarations_in_every_mode() {
             }
         }
         repo.stage("leaf.rs");
-        for (command, count) in [("functions", 1), ("types", 1), ("symbols", 2), ("classes", 1)] {
+        let count = if command == "symbols" { 2 } else { 1 };
+        {
             assert_eq!(repo.stdout(&[command, "--changed", "--file", "leaf.rs", "--count"]), format!("{count}\n"));
         }
         commit_index(repo.dir.path(), "type replacement", MAIN_BRANCH);
         let reference = format!("--changed={base}");
-        for (command, count) in [("functions", 1), ("types", 1), ("symbols", 2), ("classes", 1)] {
+        {
             assert_eq!(repo.stdout(&[command, &reference, "--file", "leaf.rs", "--count"]), format!("{count}\n"));
             assert_eq!(repo.stdout(&[command, "--changed", "--file", "leaf.rs", "--count"]), "0\n");
         }
     }
 }
+
+macro_rules! replacement_cases {
+    ($($direction:ident => $symlink:literal),+ $(,)?) => {
+        mod file_type_replacements_report_current_declarations_in_every_mode {
+            $(mod $direction {
+                #[test] fn functions() { super::super::check_file_type_replacement($symlink, "functions"); }
+                #[test] fn types() { super::super::check_file_type_replacement($symlink, "types"); }
+                #[test] fn symbols() { super::super::check_file_type_replacement($symlink, "symbols"); }
+                #[test] fn classes() { super::super::check_file_type_replacement($symlink, "classes"); }
+            })+
+        }
+    };
+}
+replacement_cases! { file_to_symlink => false, symlink_to_file => true }
