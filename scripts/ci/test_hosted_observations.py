@@ -49,10 +49,15 @@ ABSENT = object()
 
 
 class FakeGitHub:
-    """The two Actions API paths `hosted_observations` reads, over local data."""
+    """The three Actions API paths `hosted_observations` reads, over local data.
+
+    The workflow-run listing returns every recorded run whatever the query asks
+    for, so the code's own eligibility checks are what the tests exercise.
+    """
 
     def __init__(self) -> None:
         self.artifacts: dict[int, dict] = {}
+        self.runs: list[dict] = []
         self.calls: list[str] = []
         self.broken = False
 
@@ -67,6 +72,15 @@ class FakeGitHub:
         for artifact in self.artifacts.values():
             if artifact["run"] == run and artifact["name"] == name:
                 artifact["files"][member] = content
+
+    def add_run(self, run: str, **overrides: object) -> None:
+        entry = {
+            "id": int(run), "event": "schedule", "path": ".github/workflows/ci.yml",
+            "head_branch": "main", "status": "completed", "conclusion": "failure",
+            "repository": {"full_name": REPOSITORY},
+        }
+        entry.update(overrides)
+        self.runs.append(entry)
 
     def delete(self, run: str, name: str) -> None:
         for identifier in [
@@ -86,6 +100,8 @@ class FakeGitHub:
         prefix = f"repos/{REPOSITORY}/actions/"
         assert path.startswith(prefix), path
         rest = path[len(prefix):]
+        if rest.startswith("workflows/ci.yml/runs?"):
+            return json.dumps({"total_count": len(self.runs), "workflow_runs": self.runs}).encode()
         if rest.startswith("runs/"):
             run = rest.split("/")[1]
             page = int(re.search(r"[?&]page=(\d+)", rest).group(1))
@@ -407,6 +423,15 @@ class HostedFixture(unittest.TestCase):
         with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(io.StringIO()):
             code = hosted_observations.main(
                 ["publish", "--repository", REPOSITORY, "--run-id", run],
+                fetch=self.github.fetch,
+            )
+        return code, errors.getvalue()
+
+    def recover(self, *extra: str) -> tuple[int, str]:
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(io.StringIO()):
+            code = hosted_observations.main(
+                ["publish", "--repository", REPOSITORY, "--recent", *extra],
                 fetch=self.github.fetch,
             )
         return code, errors.getvalue()
@@ -908,6 +933,184 @@ class DiscoveryTests(HostedFixture):
         self.assertEqual(emitted, stored)
         self.assertEqual(["alpha/ubuntu-latest/L1"],
                          self.credited(self.plan_file(), self.first, self.second))
+
+
+    def test_a_rerun_attempt_is_linked_when_only_the_remote_holds_its_predecessor(self) -> None:
+        failed = self.finish_cell("alpha", "ubuntu-latest", failing=("suite::boom",))
+        self.assertEqual(0, self.publish_run()[0])
+        # The publishing job is a fresh checkout: no local notes ref.
+        self.git("update-ref", "-d", self.ref("ubuntu-latest"))
+        self.github = FakeGitHub()
+        self.finish_cell("alpha", "ubuntu-latest", attempt=2, tag="-rerun")
+        self.assertEqual(0, self.publish_run()[0])
+        collection = self.remote_collection("ubuntu-latest", self.second)
+        self.assertEqual([failed["observation"]["observation_id"]],
+                         [o["retry_of"] for o in collection["observations"] if "retry_of" in o])
+        self.assertEqual(["alpha/ubuntu-latest/L1"],
+                         self.credited(self.plan_file(), self.first, self.second))
+
+    def test_a_delayed_pass_from_an_earlier_run_does_not_hide_a_newer_failure(self) -> None:
+        # Run 100 passed first; its publication was delayed until after run 101 failed.
+        self.finish_cell("alpha", "ubuntu-latest", run="100")
+        self.finish_cell("alpha", "ubuntu-latest", run="101", failing=("suite::boom",))
+        self.assertEqual(0, self.publish_run("101")[0])
+        self.assertEqual(0, self.publish_run("100")[0])
+        collection = self.remote_collection("ubuntu-latest", self.second)
+        self.assertEqual(2, len(collection["observations"]))
+        self.assertEqual([], [o for o in collection["observations"] if "retry_of" in o])
+        accepted, rejections = self.verify(self.plan_file(), self.first, self.second)
+        self.assertEqual([], accepted)
+        self.assertTrue([r for r in rejections if r.startswith("conflicting-evidence")], rejections)
+
+    def test_a_rerun_attempt_published_before_its_predecessor_stays_unordered(self) -> None:
+        self.finish_cell("alpha", "ubuntu-latest", failing=("suite::boom",))
+        first_attempt = self.github
+        self.github = FakeGitHub()
+        self.finish_cell("alpha", "ubuntu-latest", attempt=2, tag="-rerun")
+        second_attempt = self.github
+        self.assertEqual(0, self.publish_run()[0])
+        self.github = first_attempt
+        self.assertEqual(0, self.publish_run()[0])
+        self.github = second_attempt
+        collection = self.remote_collection("ubuntu-latest", self.second)
+        self.assertEqual([], [o for o in collection["observations"] if "retry_of" in o],
+                         "a stored observation is never re-identified")
+        self.assertEqual([], self.credited(self.plan_file(), self.first, self.second))
+
+
+class RecoveryTests(HostedFixture):
+    """A run whose collector never ran still has its finished cells discovered.
+
+    Each case leaves the producers' uploads in place and never calls
+    `publish --run-id`: the collector of the run that produced them was lost.
+    """
+
+    def orphan(self, run: str = "100", **run_fields: object) -> None:
+        self.github.add_run(run, **run_fields)
+        self.finish_cell("alpha", "ubuntu-latest", run=run)
+        self.finish_cell("alpha", "wsl2-ubuntu", run=run)
+
+    def test_the_nightly_scope_recovers_both_producers_locally_without_a_push(self) -> None:
+        self.orphan()
+        plan = self.plan_file()
+        self.assertEqual([], self.credited(plan, self.first, self.second))
+        code, errors = self.recover("--no-push")
+        self.assertEqual(0, code, errors)
+        self.assertEqual(["alpha/ubuntu-latest/L1", "alpha/wsl2-ubuntu/L1"],
+                         self.credited(plan, self.first, self.second))
+        self.assertIsNone(self.remote_collection("ubuntu-latest", self.second))
+        self.assertIsNone(self.remote_collection("wsl2-ubuntu", self.second))
+
+    def test_the_trusted_publisher_pushes_the_recovery_so_it_outlives_the_run(self) -> None:
+        self.orphan()
+        code, errors = self.recover()
+        self.assertEqual(0, code, errors)
+        for environment in ("ubuntu-latest", "wsl2-ubuntu"):
+            collection = self.remote_collection(environment, self.second)
+            self.assertEqual(["100"],
+                             [o["producer"]["run_id"] for o in collection["observations"]])
+        self.assertEqual(0, self.recover()[0])
+        self.assertEqual(1, len(self.remote_collection("ubuntu-latest", self.second)["observations"]))
+
+    def test_a_recovered_failure_is_recorded_and_earns_no_credit(self) -> None:
+        self.github.add_run("100")
+        self.finish_cell("alpha", "ubuntu-latest", failing=("suite::boom",))
+        self.finish_cell("alpha", "wsl2-ubuntu")
+        code, errors = self.recover("--no-push")
+        self.assertEqual(0, code, errors)
+        outcomes = [o["cell"]["outcome"]
+                    for o in self.local_collection("ubuntu-latest", self.second)["observations"]]
+        self.assertEqual(["fail"], outcomes)
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"],
+                         self.credited(self.plan_file(), self.first, self.second))
+
+    def test_expired_or_missing_artifacts_leave_their_cell_to_execute(self) -> None:
+        self.orphan()
+        self.github.expire("100", "observation-alpha-L1-wsl2-ubuntu")
+        self.github.delete("100", "junit-alpha-L1-ubuntu-latest")
+        code, errors = self.recover("--no-push")
+        self.assertEqual(0, code, errors)
+        self.assertIn("has expired", errors)
+        self.assertIsNone(self.local_collection("wsl2-ubuntu", self.second))
+        # Recorded, but its cited report is gone, so discovery refuses it.
+        self.assertIsNotNone(self.local_collection("ubuntu-latest", self.second))
+        accepted, rejections = self.verify(self.plan_file(), self.first, self.second)
+        self.assertEqual([], accepted)
+        self.assertTrue(
+            any(r.startswith("observation-report-unavailable") for r in rejections), rejections
+        )
+
+    def test_runs_that_are_not_completed_nightlies_of_this_workflow_are_never_collected(self) -> None:
+        rows = {
+            "pull request": {"event": "pull_request"},
+            "push": {"event": "push"},
+            "manual dispatch": {"event": "workflow_dispatch"},
+            "another workflow": {"path": ".github/workflows/other.yml"},
+            "another branch": {"head_branch": "feature"},
+            "another repository": {"repository": {"full_name": "fork/repo"}},
+            "still running": {"status": "in_progress"},
+            "string id": {"id": "100"},
+        }
+        for label, fields in rows.items():
+            with self.subTest(label):
+                self.reset_notes()
+                self.github = FakeGitHub()
+                self.orphan(**fields)
+                self.github.calls.clear()
+                code, errors = self.recover("--no-push")
+                self.assertEqual(0, code, errors)
+                self.assertEqual(
+                    [], [call for call in self.github.calls if "/actions/runs/" in call], label
+                )
+                self.assertEqual([], self.credited(self.plan_file(), self.first, self.second))
+
+    def test_only_the_newest_bounded_window_of_runs_is_collected(self) -> None:
+        limit = hosted_observations.RECOVERY_RUNS
+        oldest = 100
+        self.github.add_run(str(oldest))
+        self.finish_cell("alpha", "wsl2-ubuntu", run=str(oldest))
+        for run in range(oldest + 1, oldest + 1 + limit):
+            self.github.add_run(str(run))
+        self.github.calls.clear()
+        code, errors = self.recover("--no-push")
+        self.assertEqual(0, code, errors)
+        listed = {call.split("/runs/")[1].split("/")[0]
+                  for call in self.github.calls if "/actions/runs/" in call}
+        self.assertEqual({str(run) for run in range(oldest + 1, oldest + 1 + limit)}, listed)
+        self.assertEqual([], self.credited(self.plan_file(), self.first, self.second))
+
+    def test_one_uncollectable_run_does_not_withhold_another_and_fails_visibly(self) -> None:
+        self.orphan("100")
+        self.github.add_run("101")
+        self.github.upload("101", "observation-alpha-L1-macos-latest", {"x": b"y"})
+        for artifact in self.github.artifacts.values():
+            if artifact["run"] == "101":
+                artifact["files"] = None  # an archive that cannot be built
+        original = self.github.fetch
+
+        def fetch(path: str) -> bytes:
+            if path.endswith("/zip") and self.github.artifacts[int(path.split("/")[-2])]["files"] is None:
+                return b"not a zip"
+            return original(path)
+
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(io.StringIO()):
+            code = hosted_observations.main(
+                ["publish", "--repository", REPOSITORY, "--recent", "--no-push"], fetch=fetch
+            )
+        self.assertEqual(hosted_observations.EXIT_REJECTED, code, errors.getvalue())
+        self.assertIn("cannot collect run 101", errors.getvalue())
+        self.assertEqual(["alpha/ubuntu-latest/L1", "alpha/wsl2-ubuntu/L1"],
+                         self.credited(self.plan_file(), self.first, self.second))
+
+    def test_an_unreadable_run_list_is_a_visible_failure_that_credits_nothing(self) -> None:
+        self.orphan()
+        self.github.broken = True
+        code, errors = self.recover("--no-push")
+        self.assertEqual(hosted_observations.EXIT_NO_ARTIFACTS, code)
+        self.assertIn("cannot list earlier scheduled runs", errors)
+        self.github.broken = False
+        self.assertEqual([], self.credited(self.plan_file(), self.first, self.second))
 
 
 class ObservationFieldMatrixTests(HostedFixture):

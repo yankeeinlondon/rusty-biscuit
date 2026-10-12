@@ -392,6 +392,7 @@ echo "os: ${resolved}  extra nextest args: ${extra_args[*]:-<none>}"
 plan_file="${work_dir}/cross-check-${run_id}-plan.json"
 declare -a BUILD_KEY=("" "" "" "")
 declare -a BUILD_ARTIFACT=("" "" "" "")
+declare -a RETRY_OF=("" "" "" "")
 if [[ "${mode}" == "archive" ]]; then
     if ! python3 scripts/ci/affected_scope.py --all --resolved-plan \
         --base "${base_sha}" --head "${tested_revision}" > "${plan_file}"; then
@@ -840,6 +841,7 @@ publish_rig_observation() {
     [[ "${dirty:-1}" != "0" ]] && extra+=(--remote-dirty)
     [[ -n "${build_key}" ]] && extra+=(--build-key "${build_key}")
     [[ -n "${build_digest}" ]] && extra+=(--build-digest "${build_digest}")
+    [[ -n "${RETRY_OF[${os}]}" ]] && extra+=(--retry-of "${RETRY_OF[${os}]}")
     # The work directory is deleted when this script exits, so the proof the
     # observation cites is retained in the durable evidence directory the
     # pre-push hook also uses; the publisher creates the per-run directory.
@@ -1122,6 +1124,12 @@ for os in "${ORDER[@]}"; do
         echo "== ${os} (${HOST[${os}]}, archive ${BUILD_KEY[${os}]} from ${PRODUCER[${os}]}) =="
     else
         echo "== ${os} (${HOST[${os}]}, native) =="
+    fi
+    # A leg retries only an observation that exists before it starts; naming one
+    # after the run would let a delayed publication pose as its predecessor.
+    if [[ "${mode}" == "archive" ]] && is_rig "${os}"; then
+        RETRY_OF[${os}]="$(python3 scripts/ci/observation_notes.py retry-predecessor \
+            --head HEAD --environment "${ENVIRONMENT[${os}]}" --package "${package}" 2> /dev/null || true)"
     fi
     current_os="${os}"
     phase="leg"

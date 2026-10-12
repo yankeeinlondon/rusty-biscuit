@@ -28,6 +28,10 @@ receipt's cells (`publish-receipt`, kind `hook`). A rig run of
 directory, and the observation is `rig` with that directory as its
 `report_dir`. This runs on the orchestrating host over fetched files because a
 native Windows rig has no usable `python3`.
+
+A rig leg that re-runs a cell names its predecessor (`--retry-of`), which the
+script asks `retry-predecessor` for before the leg starts. Lineage is never
+derived from the order observations reach a collection.
 """
 
 from __future__ import annotations
@@ -193,21 +197,51 @@ def _same_run(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return strip(left) == strip(right)
 
 
+def _hosted_predecessor(
+    observation: dict[str, Any], merged: dict[str, dict[str, Any]]
+) -> str | None:
+    """The id of the earlier attempt of the same hosted run this one re-ran.
+
+    GitHub starts a re-run attempt only after the previous attempt finished, so
+    a lower attempt of the same workflow run and cell is an earlier execution
+    whenever it is published. The highest such attempt is named.
+    """
+    producer = observation["producer"]
+    if producer["kind"] != "hosted":
+        return None
+    cell = _cell_identity(observation)
+    earlier = [
+        other for other in merged.values()
+        if other["producer"]["kind"] == "hosted"
+        and _cell_identity(other) == cell
+        and other["producer"].get("workflow") == producer.get("workflow")
+        and other["producer"].get("run_id") == producer.get("run_id")
+        and other["producer"].get("attempt", 0) < producer.get("attempt", 0)
+    ]
+    if not earlier:
+        return None
+    return max(earlier, key=lambda o: (o["producer"]["attempt"], o["observation_id"]))["observation_id"]
+
+
 def merge_observations(
-    existing: list[dict[str, Any]], new: list[dict[str, Any]], *, link_retries: bool = False
+    existing: list[dict[str, Any]], new: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """The union of two observation lists.
 
     The same id twice is one entry; the same id with different content is
     corruption and is refused. A `new` observation identical to an existing one
-    apart from its id/retry link is a republication and is dropped. With
-    `link_retries`, a new observation of a cell that already has exactly one
-    unretried observation becomes its retry, which is how a second run of one
-    cell at one head supersedes the first; with several unordered ones it stays
-    unlinked and the verifier treats a disagreement as a conflict.
+    apart from its id/retry link is a republication and is dropped.
+
+    Retry lineage is never inferred from the order observations arrive: a
+    delayed pass published after a newer failure must stay unordered with it,
+    so the verifier reports the conflict and the cell executes. The one link
+    added here is execution identity: a hosted re-run attempt names the
+    earlier attempt of the same run and cell ([`_hosted_predecessor`]). Any
+    other retry carries the `retry_of` its producer recorded when it started.
     """
     merged = {o["observation_id"]: o for o in existing}
-    for observation in new:
+    ordered = sorted(new, key=lambda o: o["producer"].get("attempt", 0))
+    for observation in ordered:
         known = merged.get(observation["observation_id"])
         if known is not None:
             if known != observation:
@@ -218,18 +252,46 @@ def merge_observations(
             continue
         if any(_same_run(observation, other) for other in merged.values()):
             continue
-        if link_retries and "retry_of" not in observation:
-            cell = _cell_identity(observation)
-            peers = [o for o in merged.values() if _cell_identity(o) == cell]
-            retried = {o.get("retry_of") for o in peers}
-            heads = [o for o in peers if o["observation_id"] not in retried]
-            if len(heads) == 1:
-                observation = with_identity(
-                    {**{k: v for k, v in observation.items() if k != "observation_id"},
-                     "retry_of": heads[0]["observation_id"]}
-                )
+        if "retry_of" not in observation:
+            predecessor = _hosted_predecessor(observation, merged)
+            if predecessor is not None:
+                observation = with_retry_of(observation, predecessor)
         merged[observation["observation_id"]] = observation
     return sorted(merged.values(), key=lambda o: o["observation_id"])
+
+
+def with_retry_of(observation: dict[str, Any], predecessor: str) -> dict[str, Any]:
+    """`observation` re-identified as the retry of `predecessor`."""
+    return with_identity({**observation, "retry_of": predecessor})
+
+
+def retry_predecessor(
+    environment: str, commit: str, package: str, gate: str, repo: Path | None = None
+) -> str | None:
+    """The observation a run of this cell starting now retries, or `None`.
+
+    Called when a retry *starts*, before it executes: every observation already
+    in the local collection then describes an earlier execution, so naming the
+    cell's one unsuperseded observation records real lineage. Several
+    unsuperseded observations are themselves unordered, and none is named.
+    Calling this after the run finishes would reintroduce publication-order
+    lineage.
+    """
+    try:
+        commit = _git("rev-parse", "--verify", commit, repo=repo).stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
+    text = read_note(ref_for(environment), commit, repo)
+    if not text:
+        return None
+    try:
+        collection = _collection_from_note(text, environment, commit, repo)
+    except PublicationError:
+        return None
+    peers = [o for o in collection["observations"] if _cell_identity(o) == (package, gate, "")]
+    retried = {o.get("retry_of") for o in peers}
+    heads = [o["observation_id"] for o in peers if o["observation_id"] not in retried]
+    return heads[0] if len(heads) == 1 else None
 
 
 def _collection_from_note(
@@ -344,7 +406,6 @@ def publish(
     remote: str | None = "origin",
     repo: Path | None = None,
     attempts: int = MAX_ATTEMPTS,
-    link_retries: bool = True,
     sleep: Callable[[float], None] = time.sleep,
     before_push: Callable[[int], None] | None = None,
 ) -> PublishResult:
@@ -371,7 +432,6 @@ def publish(
         merge_observations(
             current["observations"] if current else [],
             new_observations,
-            link_retries=link_retries,
         ),
     )
     # Republishing what the note already holds must not move the notes ref.
@@ -635,8 +695,11 @@ def record_rig_cell(
         return head_sha, observations
 
 
-def publish_rig_cell(*, remote: str | None, **recorded: Any) -> int:
+def publish_rig_cell(*, remote: str | None, retry_of: str | None = None, **recorded: Any) -> int:
     """Record and publish one rig leg; the exit code the script maps.
+
+    `retry_of` is the predecessor [`retry_predecessor`] named when the leg
+    started; without it the observation retries nothing.
 
     `0` published, `4` recorded locally only, `3` nothing recorded. Every
     outcome prints its own line, so a leg that publishes nothing says why.
@@ -645,6 +708,8 @@ def publish_rig_cell(*, remote: str | None, **recorded: Any) -> int:
     package = recorded["package"]
     try:
         head, observations = record_rig_cell(**recorded)
+        if retry_of:
+            observations = [with_retry_of(o, retry_of) for o in observations]
     except RigDeclined as reason:
         print(f"cross-check: publishing no {environment} observation - {reason}", file=sys.stderr)
         return 3
@@ -709,7 +774,23 @@ def main() -> None:
     rig.add_argument("--host-label", default="")
     rig.add_argument("--build-key", default="")
     rig.add_argument("--build-digest", default="")
+    rig.add_argument(
+        "--retry-of",
+        help="the observation this leg retries, as `retry-predecessor` printed it when the leg started",
+    )
+    predecessor = commands.add_parser(
+        "retry-predecessor",
+        help="before a rig leg starts, print the one observation of its cell it would retry",
+    )
+    predecessor.add_argument("--head", required=True)
+    predecessor.add_argument("--environment", required=True, choices=schema.ENVIRONMENTS)
+    predecessor.add_argument("--package", required=True)
+    predecessor.add_argument("--gate", default="L1")
     args = parser.parse_args()
+
+    if args.command == "retry-predecessor":
+        print(retry_predecessor(args.environment, args.head, args.package, args.gate) or "")
+        return
 
     if args.kind == "rig":
         required = ("plan", "package", "reports_dir", "evidence_dir", "run_id", "base", "exit_code")
@@ -719,6 +800,7 @@ def main() -> None:
         raise SystemExit(
             publish_rig_cell(
                 remote=None if args.no_push else args.remote,
+                retry_of=args.retry_of or None,
                 plan_path=args.plan,
                 package=args.package,
                 environment=args.environment,
@@ -739,6 +821,8 @@ def main() -> None:
         )
     if not args.receipt:
         parser.error("--kind hook needs --receipt")
+    if args.retry_of:
+        parser.error("--retry-of names one cell's predecessor; a hook receipt retries nothing")
 
     document = schema.loads_strict(Path(args.receipt).read_text(encoding="utf-8"))
     try:

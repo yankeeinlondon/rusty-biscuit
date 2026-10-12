@@ -18,6 +18,13 @@ verifier every other producer feeds can read:
   validates every observation of one run, drops invalid ones loudly, groups the
   rest by `(environment, head)`, and hands each group to
   `observation_notes.publish` (local write, fetch, union, non-force push).
+* `publish --recent` is recovery: it does the same for the newest
+  `RECOVERY_RUNS` completed scheduled runs of `ci.yml` on `main`, so a cell
+  whose run never reached (or never finished) its own `publish` is still
+  discovered. The nightly's `scope` job runs it with `--no-push` before
+  verification, which needs only `actions: read`; `publish-observations` runs
+  it with a push so the recovery outlives the run. Republishing an observation
+  a note already holds changes nothing.
 * `gh_probe` is the discovery-time half: it fetches the cited artifact and
   compares bytes, so a pass earns credit only while its report is retrievable
   and unaltered.
@@ -48,10 +55,12 @@ Python 3.9 stdlib plus this directory only: hosted runners, including Windows
 ## Exit status
 
 `emit`: `0` written, `1` refused (reason on stderr, nothing written).
-`publish`: `0` everything valid is on the remote (or there was nothing to
-publish), `3` an observation was rejected or could not be recorded locally,
-`4` recorded locally but the remote refused it, `5` the run's artifacts could
-not be listed. `4` outranks `3`.
+`publish`: `0` everything valid is on the remote, or recorded locally under
+`--no-push` (or there was nothing to publish), `3` an observation was rejected
+or could not be recorded locally, or (`--recent`) one run's artifacts could not
+be collected, `4` recorded locally but the remote refused it, `5` the run's
+(or, `--recent`, the run list's) artifacts could not be listed. `4` outranks
+`3`.
 """
 
 from __future__ import annotations
@@ -91,6 +100,13 @@ ENVELOPE_LIMIT = 1024 * 1024
 #: calls one run costs.
 PAGE_SIZE = 100
 MAX_PAGES = 10
+
+#: How many of the newest completed scheduled runs `publish --recent` collects.
+#: Each nightly re-reads this window, so an orphaned observation gets this many
+#: nightlies to be recovered before only a manual `--run-id` reaches it.
+RECOVERY_RUNS = 5
+WORKFLOW_FILE = "ci.yml"
+WORKFLOW_PATH = f".github/workflows/{WORKFLOW_FILE}"
 
 EXIT_REFUSED = 1
 EXIT_REJECTED = 3
@@ -437,6 +453,8 @@ class PublishSummary:
     """What a publication did, for the exit status and the step log."""
 
     published: list[str] = field(default_factory=list)
+    #: Recorded in the local notes because no remote was asked for.
+    recorded: list[str] = field(default_factory=list)
     local_only: list[str] = field(default_factory=list)
     rejected: list[str] = field(default_factory=list)
     unrecorded: list[str] = field(default_factory=list)
@@ -567,6 +585,9 @@ def publish_directory(
         if result.published:
             summary.published.extend(ids)
             print(f"hosted_observations: published {len(ids)} observation(s) for {environment}@{head[:12]}")
+        elif remote is None:
+            summary.recorded.extend(ids)
+            print(f"hosted_observations: recorded {len(ids)} observation(s) locally for {environment}@{head[:12]}")
         else:
             summary.local_only.extend(ids)
             summary.error = result.error
@@ -671,6 +692,83 @@ def collect_run(
                 (target / member).write_bytes(zipped.read(info))
         names.append(name)
     return names
+
+
+def recent_scheduled_runs(
+    repository: str, fetch: Fetch = gh_fetch, limit: int = RECOVERY_RUNS
+) -> list[str]:
+    """The ids of the newest `limit` completed scheduled `ci.yml` runs on `main`.
+
+    Only a scheduled run on `main` executes default-branch code and records
+    observations, so the query's filters are re-checked on every entry: another
+    event, workflow, branch, or repository, or a run still in progress, is never
+    collected whatever the API returned. Its conclusion is deliberately not
+    checked; a failed or cancelled nightly is exactly the run whose finished
+    cells need recovering.
+    """
+    body = fetch(
+        f"repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs"
+        f"?event=schedule&branch=main&status=completed&per_page={limit}"
+    )
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise HostedError(f"the run listing is not JSON: {error}") from error
+    runs = document.get("workflow_runs") if isinstance(document, dict) else None
+    if not isinstance(runs, list):
+        raise HostedError("the run listing has no workflow_runs list")
+    kept = [
+        run for run in runs
+        if isinstance(run, dict)
+        and run.get("event") == "schedule"
+        and run.get("path") == WORKFLOW_PATH
+        and run.get("head_branch") == "main"
+        and run.get("status") == "completed"
+        and isinstance(run.get("repository"), dict)
+        and run["repository"].get("full_name") == repository
+        and type(run.get("id")) is int
+    ]
+    kept.sort(key=lambda run: run["id"], reverse=True)
+    return [str(run["id"]) for run in kept[:limit]]
+
+
+def recover_recent(
+    repository: str,
+    *,
+    remote: Optional[str] = "origin",
+    repo: Optional[Path] = None,
+    fetch: Fetch = gh_fetch,
+    limit: int = RECOVERY_RUNS,
+) -> PublishSummary:
+    """Publish the observations of every run `recent_scheduled_runs` names.
+
+    Each run is collected and validated exactly as `publish --run-id` would,
+    and one run that cannot be collected is reported without withholding the
+    others.
+
+    ## Errors
+
+    Raises [`HostedError`] when the run list itself cannot be read.
+    """
+    summary = PublishSummary()
+    runs = recent_scheduled_runs(repository, fetch, limit)
+    print(f"hosted_observations: recovering {len(runs)} earlier scheduled run(s): {', '.join(runs) or 'none'}")
+    for run_id in runs:
+        with tempfile.TemporaryDirectory(prefix="hosted-observations-") as scratch:
+            try:
+                collect_run(repository, run_id, Path(scratch), fetch)
+            except (HostedError, zipfile.BadZipFile, OSError) as error:
+                summary.unrecorded.append(f"run {run_id}: {error}")
+                print(f"hosted_observations: cannot collect run {run_id}: {error}", file=sys.stderr)
+                continue
+            part = publish_directory(Path(scratch), repo=repo, remote=remote, run_id=run_id)
+        summary.published.extend(part.published)
+        summary.recorded.extend(part.recorded)
+        summary.local_only.extend(part.local_only)
+        summary.rejected.extend(part.rejected)
+        summary.unrecorded.extend(part.unrecorded)
+        summary.error = part.error or summary.error
+    return summary
 
 
 def gh_probe(
@@ -795,9 +893,16 @@ def _publish_command(args: argparse.Namespace, fetch: Fetch) -> int:
         )
         return summary.exit_status
     repository = args.repository or os.environ.get("GITHUB_REPOSITORY", "")
-    if not repository or not args.run_id:
-        print("hosted_observations: publish needs --directory, or --repository and --run-id",
-              file=sys.stderr)
+    if repository and args.recent and not args.run_id:
+        try:
+            return recover_recent(repository, remote=remote, fetch=fetch).exit_status
+        except HostedError as error:
+            print(f"hosted_observations: cannot list earlier scheduled runs: {error}",
+                  file=sys.stderr)
+            return EXIT_NO_ARTIFACTS
+    if not repository or not args.run_id or args.recent:
+        print("hosted_observations: publish needs --directory, or --repository and one of "
+              "--run-id or --recent", file=sys.stderr)
         return EXIT_NO_ARTIFACTS
     with tempfile.TemporaryDirectory(prefix="hosted-observations-") as scratch:
         try:
@@ -832,6 +937,10 @@ def main(argv: Optional[list[str]] = None, *, fetch: Fetch = gh_fetch) -> int:
     publish.add_argument("--directory", help="a directory of downloaded observation artifacts")
     publish.add_argument("--repository", help="owner/name; GITHUB_REPOSITORY by default")
     publish.add_argument("--run-id", help="collect this run's observation artifacts")
+    publish.add_argument(
+        "--recent", action="store_true",
+        help=f"collect the newest {RECOVERY_RUNS} completed scheduled runs' observation artifacts",
+    )
     publish.add_argument("--expect-run-id", help="with --directory, require this run id")
     publish.add_argument("--remote", default="origin")
     publish.add_argument("--no-push", action="store_true")

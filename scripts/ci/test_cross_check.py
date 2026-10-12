@@ -1127,6 +1127,28 @@ class RigPublicationRunTests(CrossCheckHarness):
         self.assertNotIn("completion_record_digest", observation["proof"])
         self.assertIn("windows  FAIL", run["stdout"])
 
+    def test_a_leg_retries_the_observation_that_existed_when_it_started(self) -> None:
+        failing = self.leg(
+            "wsl", output=self.markers(exit_code=100), exit_code=100,
+            reports={"reported": {"t_one": "fail", "t_two": "pass", "t_three": "pass"}},
+        )
+        (failed,) = self.observations(failing, "wsl")
+
+        def plant_the_failure(repo: Path, git: Callable[..., str]) -> None:
+            head = git("rev-parse", "HEAD")
+            note = repo.parent / "failure-note.json"
+            note.write_text(json.dumps({**failing["notes"]["wsl2-ubuntu"], "head": head}), encoding="utf-8")
+            git("notes", "--ref", "refs/notes/ci-local/wsl2-ubuntu", "add", "-F", str(note), head)
+
+        run = self.leg("wsl", prepare=plant_the_failure)
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        passed = [o for o in self.observations(run, "wsl") if o["cell"]["outcome"] == "pass"]
+        self.assertEqual([failed["observation_id"]], [o.get("retry_of") for o in passed])
+
+    def test_a_leg_with_nothing_to_retry_names_no_predecessor(self) -> None:
+        (observation,) = self.observations(self.leg("wsl"), "wsl")
+        self.assertNotIn("retry_of", observation)
+
     # -- publication declined, with the reason printed ----------------------------
 
     def assertDeclined(self, run: dict, os_name: str, reason: str) -> None:
@@ -1324,6 +1346,12 @@ class RigPublicationContractTests(unittest.TestCase):
         self.assertLess(loop.index("run_unix"), loop.index("publish_rig_observation"))
         self.assertLess(loop.index("publish_rig_observation"), loop.index("\ndone\n"))
         self.assertLess(loop.index("\ndone\n"), loop.index("print_summary"))
+
+    def test_a_legs_predecessor_is_fixed_before_the_leg_runs(self) -> None:
+        loop = self.text()[self.text().index('for os in "${ORDER[@]}"; do\n    [[ -n "${want[${os}]:-}" && -z'):]
+        self.assertLess(loop.index("retry-predecessor"), loop.index("run_windows"))
+        self.assertLess(loop.index("retry-predecessor"), loop.index("run_unix"))
+        self.assertIn('--retry-of "${RETRY_OF[${os}]}"', self.function_body("publish_rig_observation"))
 
     def test_both_rig_oses_are_recorded_and_no_other(self) -> None:
         body = self.function_body("is_rig")
