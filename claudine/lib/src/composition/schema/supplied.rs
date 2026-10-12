@@ -2,7 +2,7 @@
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
-use darkmatter::markdown::schemas::file_match::{file_match_admits, root_union_match_patterns};
+use darkmatter::markdown::schemas::file_match::{file_match_admits, root_union_match_groups};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
@@ -320,7 +320,9 @@ pub(super) const NO_MATCH: &str = "no existing file matched reference";
 /// (a partial the chooser will complete) never rules an arm out.
 fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
     records.iter().all(|(name, record)| {
-        let Some(patterns) = root_union_match_patterns(arm, name) else {
+        let Some(patterns) =
+            root_union_match_groups(arm, name).and_then(|groups| groups.first().copied())
+        else {
             return true;
         };
         let values: Vec<&str> = match record.raw() {
@@ -332,7 +334,7 @@ fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
         };
         values
             .into_iter()
-            .all(|value| file_match_admits(value, patterns, record.origin()))
+            .all(|value| file_match_admits(value, &[patterns], record.origin()))
     })
 }
 

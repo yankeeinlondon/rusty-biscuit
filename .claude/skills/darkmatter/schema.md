@@ -117,6 +117,14 @@ excluded keys without executing anything.
   property is judged from its origin (`DarkmatterSchemas::with_caller_input_records`,
   which every host that validates caller overrides itself must call, as
   Claudine's pre-validation and launch schema do).
+- Each authored `match(...)` is one group. `FileMatchGroups` holds every
+  group of a property and accepts a path only when each group does (positives
+  and `!` exclusions stay inside their own group; groups are never flattened).
+  `PreparedFileMatch` walks the first group's `roots()` and keeps a file when
+  every group `lists_file`s it. `root_union_match_groups`/`file_match_admits`
+  take the groups. `x-darkmatter-match` is a flat array for one group and an
+  array of arrays for several; its rejection still comes from the keyword
+  itself (never wrapped in `allOf`), which `validate.rs` relies on.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries.

@@ -816,7 +816,7 @@ fn assert_offers_resolve_and_are_admitted(effective: &EffectiveSchema, globs: &[
         );
         assert!(matcher.matches(path, &resolution), "{}", path.display());
         assert!(
-            darkmatter::markdown::schemas::file_match::file_match_admits(value, globs, &resolution),
+            darkmatter::markdown::schemas::file_match::file_match_admits(value, &[globs], &resolution),
             "`{value}` is admitted"
         );
     }
