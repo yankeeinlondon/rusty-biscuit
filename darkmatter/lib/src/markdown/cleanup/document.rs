@@ -359,24 +359,43 @@ mod tests {
 
     #[test]
     fn frontmatter_only_darkmatter_loads_is_kept_and_its_body_is_cleaned() {
-        // Tab indentation in a block scalar, as `.claude/skills/lsp/lsp.md`
-        // has it.
-        let tab_indented = "prompt: |-\n\tYour task is to research.\n\n    Answer the questions.\n";
-        for yaml in [BARE_INTERPOLATION, tab_indented] {
-            let source = document(yaml, BODY);
-            let result = clean(&source);
+        let source = document(BARE_INTERPOLATION, BODY);
+        let result = clean(&source);
 
-            assert_eq!(result.outcome, CleanOutcome::Changed, "{yaml:?}: {:?}", result.diagnostics);
-            assert_eq!(result.text, document(yaml, "\n```text\ncode\n```\n"), "the block is kept byte for byte");
-            assert!(result.applied.is_empty());
-            assert!(
-                result.diagnostics.iter().any(|d| d.code == CleanCode::Yaml(YamlDiagnosticCode::Parse)),
-                "the strict-YAML finding is still reported: {:?}",
-                result.diagnostics
-            );
-            let again = clean(&result.text);
-            assert_eq!(again.outcome, CleanOutcome::Unchanged);
-        }
+        assert_eq!(result.outcome, CleanOutcome::Changed, "{:?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            document(BARE_INTERPOLATION, "\n```text\ncode\n```\n"),
+            "the block is kept byte for byte"
+        );
+        assert!(result.applied.is_empty());
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == CleanCode::Yaml(YamlDiagnosticCode::Parse)),
+            "the strict-YAML finding is still reported: {:?}",
+            result.diagnostics
+        );
+        let again = clean(&result.text);
+        assert_eq!(again.outcome, CleanOutcome::Unchanged);
+    }
+
+    #[test]
+    fn tab_indented_frontmatter_is_repaired_as_darkmatter_reads_it() {
+        // Tab indentation in a block scalar, as `.claude/skills/lsp/lsp.md`
+        // has it. Biscuit File's tab repair matches Darkmatter's own tab
+        // normalization, so the repair keeps the loaded value.
+        let tab_indented = "prompt: |-\n\tYour task is to research.\n\n    Answer the questions.\n";
+        let repaired = "prompt: |-\n  Your task is to research.\n\n    Answer the questions.\n";
+        let result = clean(&document(tab_indented, BODY));
+
+        assert_eq!(result.outcome, CleanOutcome::Changed, "{:?}", result.diagnostics);
+        assert_eq!(result.text, document(repaired, "\n```text\ncode\n```\n"));
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == CleanCode::Yaml(YamlDiagnosticCode::TabIndentation)),
+            "{:?}",
+            result.diagnostics
+        );
+        let again = clean(&result.text);
+        assert_eq!(again.outcome, CleanOutcome::Unchanged, "{:?}", again.text);
     }
 
     #[test]

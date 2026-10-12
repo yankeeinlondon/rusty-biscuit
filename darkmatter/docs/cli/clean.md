@@ -271,8 +271,10 @@ frontmatter is present, `frontmatter` is `{ "present": false }`.
   empty, and the file is untouched.
 
 Frontmatter that strict YAML rejects but Darkmatter reads, such as a bare
-`{{ … }}` value or tab indentation, is not an error: the block is kept as
-written, `yaml.parse` is reported as a suggestion, and the body is cleaned.
+`{{ … }}` value, is not an error: the block is kept as written, `yaml.parse`
+is reported as a suggestion, and the body is cleaned. Tab indentation is
+different because it has a repair: each indentation tab becomes two spaces,
+which Darkmatter reads as the same value.
 
 ### Save Mode Constraints
 

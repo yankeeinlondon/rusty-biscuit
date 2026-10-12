@@ -448,9 +448,7 @@ fn test_compose_cleanup_preserves_ten_digit_prose_boundary() {
 
 #[test]
 fn compose_cleanup_preserves_quoted_marker_looking_indented_code() {
-    use crate::markdown::cleanup::{
-        cleanup_content, cleanup_content_with_indent, reflow_to_width,
-    };
+    use crate::markdown::cleanup::reflow_to_width;
     use crate::markdown::compose::{ComposeRequest, RequestSnapshot};
     let fixtures = [
         "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",

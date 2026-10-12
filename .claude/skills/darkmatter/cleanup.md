@@ -17,8 +17,9 @@ The user-facing record is the area's `docs/` tree.
   emit, including `frontmatter: false` over YAML only the candidate could
   read; source returned, nothing cleaned). Strict YAML is not the acceptance
   test: a block only `frontmatter::load_frontmatter_yaml` loads (bare
-  `{{ … }}` values, tab indentation, the fallbacks `Markdown` uses) is kept
-  as authored with no repair, its rules are read from that mapping, and the
+  `{{ … }}` values, the fallbacks `Markdown` uses) is kept
+  as authored with no repair (tab indentation is not in this set: Biscuit
+  File's `yaml.tab-indentation` repair applies), its rules are read from that mapping, and the
   body is cleaned; the strict `yaml.parse` finding stays report-only. Empty frontmatter blocks and BOMs without
   frontmatter are kept; a BOM before frontmatter is an applied repair.
 - String wrappers: `cleanup_content` (defaults) and
