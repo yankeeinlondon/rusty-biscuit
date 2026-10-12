@@ -138,10 +138,9 @@ fn ctags_symbols_over_multi_match_the_golden() {
     assert_export_golden(&["symbols", "--format", "ctags", "--no-cache"], "symbols.ctags", SYMBOLS_CTAGS_GOLDEN);
 }
 
-#[test]
-fn export_formats_are_stable_across_workers_cache_and_terminal_width() {
+fn assert_export_stability(format: &str) {
     let scratch = Scratch::new(MULTI_FIXTURES);
-    for format in ["tsv", "markdown", "prose", "ctags"] {
+    {
         let args = ["symbols", "--format", format];
         let cold = scratch.hug_with_env(&args, &[("RAYON_NUM_THREADS", "1"), ("COLUMNS", "20")]);
         assert!(cold.status.success(), "{format}: {}", String::from_utf8_lossy(&cold.stderr));
@@ -378,10 +377,17 @@ fn assert_identical_with_one_thread(args: &[&str]) {
 #[test]
 fn json_symbols_over_multi_are_identical_with_one_thread() {
     assert_identical_with_one_thread(&["--json", "symbols", "--no-cache"]);
-    assert_identical_with_one_thread(&["--json", "classes", "--no-cache", "--sort", "name"]);
-    assert_identical_with_one_thread(&["symbols", "--jsonl", "--no-cache", "--sort", "kind"]);
 }
 
+#[test]
+fn json_classes_over_multi_are_identical_with_one_thread() {
+    assert_identical_with_one_thread(&["--json", "classes", "--no-cache", "--sort", "name"]);
+}
+
+#[test]
+fn jsonl_symbols_over_multi_are_identical_with_one_thread() {
+    assert_identical_with_one_thread(&["symbols", "--jsonl", "--no-cache", "--sort", "kind"]);
+}
 #[test]
 fn json_full_over_multi_is_identical_with_one_thread() {
     assert_identical_with_one_thread(&["--json-full", "symbols", "--no-cache"]);
@@ -397,4 +403,16 @@ fn json_symbols_over_multi_are_identical_cold_and_warm() {
         let warm = scratch.stdout(args);
         assert!(cold == warm, "hug {args:?}: cold and warm runs differ");
     }
+}
+
+mod export_formats_are_stable_across_workers_cache_and_terminal_width {
+    use super::*;
+    #[test]
+    fn tsv() { assert_export_stability("tsv"); }
+    #[test]
+    fn markdown() { assert_export_stability("markdown"); }
+    #[test]
+    fn prose() { assert_export_stability("prose"); }
+    #[test]
+    fn ctags() { assert_export_stability("ctags"); }
 }

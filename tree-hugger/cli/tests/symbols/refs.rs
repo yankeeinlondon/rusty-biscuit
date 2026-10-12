@@ -1823,8 +1823,7 @@ fn swift_selective_imports_are_listed_by_their_bound_name() {
 /// built-in Swift attribute name (`R7-F1.S6`), cold and on a verified warm
 /// hit, in JSON and text. Caller filters preserve the real static-method
 /// `var()` Call and reject every marker Usage.
-#[test]
-fn contextual_syntax_markers_are_never_suggestions() {
+fn check_contextual_syntax_marker(key: &str) {
     let scratch = Scratch::new(&[
         ("attributes.lua", "local const=1; local close=2\nlocal x <const> = const\nlocal y <close> = close\n"),
         ("Inferred.java", "record R() {\n    void g() { var x=factory(); int var=1; use(var); }\n}\n"),
@@ -1860,7 +1859,8 @@ fn contextual_syntax_markers_are_never_suggestions() {
         ("labels.swift", "x", vec![row("Usage", "x", "3:14", "NameOnly")], vec!["3:11"]),
         ("attributes.swift", "objc", vec![row("Usage", "objc", "4:9", "NameOnly")], vec!["1:2"]),
     ];
-    for (file, name, suggestions, markers) in &expected {
+    assert_eq!(expected.iter().map(|(file, name, _, _)| format!("{file}:{name}")).collect::<Vec<_>>(), contextual_syntax_markers_are_never_suggestions::LISTED);
+    for (file, name, suggestions, markers) in expected.iter().filter(|(file, name, _, _)| format!("{file}:{name}") == key) {
         let id = declaration_id(&refs_json(&scratch, &[name, file, "--no-cache"]));
         let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
         for entry in crate::cache_entries(scratch.temp.path()) {
@@ -2324,10 +2324,14 @@ fn go_raw_string_imports_are_listed_by_imports() {
     }
 }
 
-#[test]
-fn every_swift_selective_import_selector_excludes_only_its_bound_token() {
-    for (selector, column) in [("typealias", 22), ("class", 18), ("enum", 17), ("protocol", 21),
-        ("struct", 19), ("func", 17), ("var", 16), ("let", 16)] {
+const SWIFT_IMPORT_SELECTORS: &[(&str, usize)] = &[
+    ("typealias", 22), ("class", 18), ("enum", 17), ("protocol", 21),
+    ("struct", 19), ("func", 17), ("var", 16), ("let", 16),
+];
+
+fn check_swift_import_selector(selected: &str) {
+    for &(selector, column) in SWIFT_IMPORT_SELECTORS {
+        if selector != selected { continue; }
         let source = format!("import {selector} Foo.Bar\nstruct Bar {{}}\nlet z = Bar\n");
         let scratch = Scratch::new(&[("selector.swift", &source)]);
         let id = declaration_id(&refs_json(&scratch, &["Bar", "selector.swift", "--no-cache"]));
@@ -2555,9 +2559,8 @@ const TYPE_ONLY_CLI_MATRIX: &[(&str, &str, &str, bool)] = &[
     ("R9-F2.08", "import type { F } from './types';", "F", false),
 ];
 
-#[test]
-fn type_only_imports_preserve_id_selected_callers_callees_and_text() {
-    for &(label, import, name, mixed) in TYPE_ONLY_CLI_MATRIX {
+fn check_type_only_import_reports(selected: &str) {
+    for &(label, import, name, mixed) in TYPE_ONLY_CLI_MATRIX.iter().filter(|row| row.0 == selected) {
         let extra = if mixed { " g();" } else { "" };
         let source = format!("{import}\nfunction {name}(): void {{ {name}();{extra} }}\nlet value: {name};\ntype ValueType = typeof {name};\n");
         let scratch = Scratch::new(&[("imports.ts", &source)]);
@@ -2601,9 +2604,8 @@ fn type_only_imports_preserve_id_selected_callers_callees_and_text() {
 }
 
 
-#[test]
-fn type_only_import_callers_text_has_cold_and_warm_evidence() {
-    for &(_, import, name, mixed) in TYPE_ONLY_CLI_MATRIX.iter().filter(|row| row.0 == "R9-F2.06" || row.0.starts_with("R9-F2.07")) {
+fn check_type_only_import_callers_text(selected: &str) {
+    for &(_, import, name, mixed) in TYPE_ONLY_CLI_MATRIX.iter().filter(|row| row.0 == selected) {
         let extra = if mixed { " g();" } else { "" };
         let source = format!("{import}\nfunction {name}(): void {{ {name}();{extra} }}\nlet value: {name};\n");
         let scratch = Scratch::new(&[("imports.ts", &source)]);
@@ -2625,16 +2627,18 @@ fn type_only_import_callers_text_has_cold_and_warm_evidence() {
     }
 }
 
-#[test]
-fn semantic_name_id_reports_preserve_written_calls_and_shadowing() {
-    for (file, declaration, source, target, self_call) in [
-        ("raw.rs", "r#f", "fn r#f(){f();}", "f", true),
-        ("raw_call.rs", "f", "fn f(){r#f();}", "r#f", true),
-        ("escaped.ts", r"\u0066", r"function \u0066(){f();}", "f", true),
-        ("escaped_call.js", "f", r"function f(){\u0066();}", r"\u0066", true),
-        ("shadow.rs", "f", "fn f(x:fn()){let r#f=x;f();}", "f", false),
-        ("shadow.ts", "f", r"function f(x){let \u0066=x;f();}", "f", false),
-    ] {
+const SEMANTIC_NAME_REPORT_ROWS: &[(&str, &str, &str, &str, bool)] = &[
+    ("raw.rs", "r#f", "fn r#f(){f();}", "f", true),
+    ("raw_call.rs", "f", "fn f(){r#f();}", "r#f", true),
+    ("escaped.ts", r"\u0066", r"function \u0066(){f();}", "f", true),
+    ("escaped_call.js", "f", r"function f(){\u0066();}", r"\u0066", true),
+    ("shadow.rs", "f", "fn f(x:fn()){let r#f=x;f();}", "f", false),
+    ("shadow.ts", "f", r"function f(x){let \u0066=x;f();}", "f", false),
+];
+
+fn check_semantic_name_reports(selected: &str) {
+    for &(file, declaration, source, target, self_call) in SEMANTIC_NAME_REPORT_ROWS {
+        if file != selected { continue; }
         let scratch = Scratch::new(&[(file, source)]);
         let listing = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
         let id = listing["indexes"][0]["symbols"].as_array().expect("records").iter()
@@ -2899,37 +2903,38 @@ inventory_cli_tests! {
     producer_import_inventory_java_static_role => (4, "role"),
 }
 
-#[test]
-fn java_single_segment_on_demand_imports_are_reported_without_token_suggestions() {
-    for prefix in ["import p.*;", "import static p.*;", "import p /*c*/ . /*d*/ *;", "import static p /*c*/ . /*d*/ *;"] {
-        let source = format!("{prefix}\nclass p {{ void f() {{ p x; }} }}"); let scratch = Scratch::new(&[("single.java", &source)]);
-        let discovery = refs_json(&scratch, &["p", "single.java", "--no-cache"]); let id = declaration_id(&discovery);
+const JAVA_SINGLE_SEGMENT_IMPORTS: &[&str] = &[
+    "import p.*;", "import static p.*;", "import p /*c*/ . /*d*/ *;", "import static p /*c*/ . /*d*/ *;",
+];
+
+fn check_java_single_segment_import(prefix: &str) {
+    let source = format!("{prefix}\nclass p {{ void f() {{ p x; }} }}"); let scratch = Scratch::new(&[("single.java", &source)]);
+    let discovery = refs_json(&scratch, &["p", "single.java", "--no-cache"]); let id = declaration_id(&discovery);
+    for format in ["--json", "--plain"] {
+        for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
+        let args = ["--verbose", format, "imports", "single.java"];
+        for warm in [false, true] {
+            let output = scratch.hug(&args); let stderr = stderr_of(&output); let text = stdout_of(output, &args);
+            let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+            assert!(stderr.contains(counts), "{stderr}");
+            if format == "--json" { let json = json_of(&text); let imports = json["files"][0]["imports"].as_array().expect("imports"); assert_eq!(imports.len(), 1); assert_eq!(imports[0]["name"], "p"); assert_eq!(imports[0]["alias"], "p"); assert_eq!(imports[0]["source"], "p"); assert_eq!(imports[0]["original_name"], "*"); }
+            else { assert!(text.contains("p")); }
+        }
+    }
+    for direction in [None, Some("--callers"), Some("--callees")] {
         for format in ["--json", "--plain"] {
             for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
-            let args = ["--verbose", format, "imports", "single.java"];
+            let mut args = vec!["--verbose", format, "refs", "--id", id.as_str()]; if let Some(direction) = direction { args.push(direction); } args.push("single.java");
             for warm in [false, true] {
                 let output = scratch.hug(&args); let stderr = stderr_of(&output); let text = stdout_of(output, &args);
                 let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
-                assert!(stderr.contains(counts), "{stderr}");
-                if format == "--json" { let json = json_of(&text); let imports = json["files"][0]["imports"].as_array().expect("imports"); assert_eq!(imports.len(), 1); assert_eq!(imports[0]["name"], "p"); assert_eq!(imports[0]["alias"], "p"); assert_eq!(imports[0]["source"], "p"); assert_eq!(imports[0]["original_name"], "*"); }
-                else { assert!(text.contains("p")); }
-            }
-        }
-        for direction in [None, Some("--callers"), Some("--callees")] {
-            for format in ["--json", "--plain"] {
-                for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
-                let mut args = vec!["--verbose", format, "refs", "--id", id.as_str()]; if let Some(direction) = direction { args.push(direction); } args.push("single.java");
-                for warm in [false, true] {
-                    let output = scratch.hug(&args); let stderr = stderr_of(&output); let text = stdout_of(output, &args);
-                    let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
-                assert!(stderr.contains(counts), "{stderr}");
-                    if format == "--json" {
-                        let json = json_of(&text); assert!(rows(&json, "occurrences").is_empty());
-                        let body_column = "class p { void f() { ".len() + 1;
-                        let expected = if direction.is_none() { vec![row("Usage", "p", &format!("2:{body_column}"), "NameOnly")] } else { vec![] };
-                        assert_eq!(rows(&json, "name_only_suggestions"), expected, "{prefix}: {json}");
-                    } else { assert!(!text.contains("1:"), "import token is not a suggestion: {text}"); }
-                }
+            assert!(stderr.contains(counts), "{stderr}");
+                if format == "--json" {
+                    let json = json_of(&text); assert!(rows(&json, "occurrences").is_empty());
+                    let body_column = "class p { void f() { ".len() + 1;
+                    let expected = if direction.is_none() { vec![row("Usage", "p", &format!("2:{body_column}"), "NameOnly")] } else { vec![] };
+                    assert_eq!(rows(&json, "name_only_suggestions"), expected, "{prefix}: {json}");
+                } else { assert!(!text.contains("1:"), "import token is not a suggestion: {text}"); }
             }
         }
     }
@@ -3026,4 +3031,110 @@ fn a_failed_file_beside_the_declaring_file_keeps_the_report() {
     let errors = report["errors"].as_array().expect("errors");
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0]["file"], "bad.ts");
+}
+
+macro_rules! refs_row_tests {
+    ($check:path; $($test:ident => $row:literal),* $(,)?) => {
+        pub(super) const LISTED: &[&str] = &[$($row),*];
+        $(#[test] fn $test() { $check($row); })*
+    };
+}
+
+mod contextual_syntax_markers_are_never_suggestions {
+    use super::*;
+    refs_row_tests! { check_contextual_syntax_marker;
+        attributes_lua_const => "attributes.lua:const",
+        attributes_lua_close => "attributes.lua:close",
+        inferred_java_var => "Inferred.java:var",
+        relative_php_static => "relative.php:static",
+        staticimport_java_var => "StaticImport.java:var",
+        precedence_swift_left => "precedence.swift:left",
+        staticmethod_java_var => "StaticMethod.java:var",
+        everyprecedence_swift_left => "EveryPrecedence.swift:left",
+        everyprecedence_swift_right => "EveryPrecedence.swift:right",
+        everyprecedence_swift_none => "EveryPrecedence.swift:none",
+        everyprecedence_swift_associativity => "EveryPrecedence.swift:associativity",
+        everyprecedence_swift_assignment => "EveryPrecedence.swift:assignment",
+        everyprecedence_swift_higherthan => "EveryPrecedence.swift:higherThan",
+        everyprecedence_swift_lowerthan => "EveryPrecedence.swift:lowerThan",
+        keywords_py_x => "keywords.py:x",
+        labels_swift_x => "labels.swift:x",
+        attributes_swift_objc => "attributes.swift:objc",
+    }
+}
+
+mod every_swift_selective_import_selector_excludes_only_its_bound_token {
+    use super::*;
+    refs_row_tests! { check_swift_import_selector;
+        typealias => "typealias",
+        class => "class",
+        enum_selector => "enum",
+        protocol => "protocol",
+        struct_selector => "struct",
+        func => "func",
+        var => "var",
+        let_selector => "let",
+    }
+    #[test]
+    fn every_row_is_scheduled() { assert_eq!(SWIFT_IMPORT_SELECTORS.iter().map(|row| row.0).collect::<Vec<_>>(), LISTED); }
+}
+
+mod type_only_imports_preserve_id_selected_callers_callees_and_text {
+    use super::*;
+    refs_row_tests! { check_type_only_import_reports;
+        r9_f2_01 => "R9-F2.01",
+        r9_f2_02 => "R9-F2.02",
+        r9_f2_03 => "R9-F2.03",
+        r9_f2_04 => "R9-F2.04",
+        r9_f2_05 => "R9-F2.05",
+        r9_f2_06 => "R9-F2.06",
+        r9_f2_07_statement => "R9-F2.07.statement",
+        r9_f2_07_specifier => "R9-F2.07.specifier",
+        r9_f2_07_default => "R9-F2.07.default",
+        r9_f2_08 => "R9-F2.08",
+    }
+    #[test]
+    fn every_row_is_scheduled() { assert_eq!(TYPE_ONLY_CLI_MATRIX.iter().map(|row| row.0).collect::<Vec<_>>(), LISTED); }
+}
+
+mod semantic_name_id_reports_preserve_written_calls_and_shadowing {
+    use super::*;
+    refs_row_tests! { check_semantic_name_reports;
+        raw_rs => "raw.rs",
+        raw_call_rs => "raw_call.rs",
+        escaped_ts => "escaped.ts",
+        escaped_call_js => "escaped_call.js",
+        shadow_rs => "shadow.rs",
+        shadow_ts => "shadow.ts",
+    }
+    #[test]
+    fn every_row_is_scheduled() { assert_eq!(SEMANTIC_NAME_REPORT_ROWS.iter().map(|row| row.0).collect::<Vec<_>>(), LISTED); }
+}
+
+mod java_single_segment_on_demand_imports_are_reported_without_token_suggestions {
+    use super::*;
+    refs_row_tests! { check_java_single_segment_import;
+        ordinary => "import p.*;",
+        static_import => "import static p.*;",
+        commented => "import p /*c*/ . /*d*/ *;",
+        commented_static => "import static p /*c*/ . /*d*/ *;",
+    }
+    #[test]
+    fn every_row_is_scheduled() { assert_eq!(JAVA_SINGLE_SEGMENT_IMPORTS, LISTED); }
+}
+
+mod type_only_import_callers_text_has_cold_and_warm_evidence {
+    use super::*;
+    refs_row_tests! { check_type_only_import_callers_text;
+        mixed => "R9-F2.06",
+        commented_statement => "R9-F2.07.statement",
+        commented_specifier => "R9-F2.07.specifier",
+        commented_default => "R9-F2.07.default",
+    }
+    #[test]
+    fn every_row_is_scheduled() {
+        assert_eq!(TYPE_ONLY_CLI_MATRIX.iter()
+            .filter(|row| row.0 == "R9-F2.06" || row.0.starts_with("R9-F2.07"))
+            .map(|row| row.0).collect::<Vec<_>>(), LISTED);
+    }
 }

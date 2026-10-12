@@ -355,29 +355,37 @@ fn body_lines_reach_the_full_index_across_cache_widening() {
     }
 }
 
-/// A selected declaration with more generic parameters than a `u16`
-/// position can number fails its file with kind
-/// `too_many_generic_parameters` (exit 1); a command that does not select
-/// it lists the file normally.
-#[test]
-fn an_unrepresentable_generic_list_fails_only_a_command_that_selects_it() {
-    let params: Vec<String> = (0..=usize::from(u16::MAX) + 1).map(|index| format!("T{index}")).collect();
+/// A declaration exceeding the serializable generic-position range, beside
+/// a type that commands can select without reading that declaration.
+fn oversized_generic_fixture() -> Scratch {
+    let params = vec!["T"; usize::from(u16::MAX) + 2];
     let wide = format!("fn wide<{}>() {{}}\npub struct Narrow;\n", params.join(", "));
-    let scratch = Scratch::new(&[("wide.rs", wide.as_str())]);
+    Scratch::new(&[("wide.rs", wide.as_str())])
+}
 
-    let output = scratch.hug(&["--json", "functions", "wide.rs"]);
-    assert_eq!(output.status.code(), Some(1), "functions exits 1");
-    assert!(stderr_of(&output).contains("wide"), "stderr names the declaration");
-    let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
-    let errors = json["errors"].as_array().expect("errors");
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    assert_eq!((&errors[0]["file"], &errors[0]["kind"]), (&Value::from("wide.rs"), &Value::from("too_many_generic_parameters")));
+mod an_unrepresentable_generic_list_fails_only_a_command_that_selects_it {
+    use super::*;
+    #[test]
+    fn selected_functions_fail() {
+        let scratch = oversized_generic_fixture();
+        let output = scratch.hug(&["--json", "functions", "wide.rs"]);
+        assert_eq!(output.status.code(), Some(1), "functions exits 1");
+        assert!(stderr_of(&output).contains("wide"), "stderr names the declaration");
+        let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+        let errors = json["errors"].as_array().expect("errors");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!((&errors[0]["file"], &errors[0]["kind"]), (&Value::from("wide.rs"), &Value::from("too_many_generic_parameters")));
 
-    let output = scratch.hug(&["--json", "types", "wide.rs"]);
-    assert_eq!(output.status.code(), Some(0), "types does not read `wide`: {}", stderr_of(&output));
-    let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
-    let names: Vec<&Value> = records(&json).into_iter().map(|record| &record["identity"]["name"]).collect();
-    assert_eq!(names, [&Value::from("Narrow")]);
+    }
+    #[test]
+    fn unselected_types_succeed() {
+        let scratch = oversized_generic_fixture();
+        let output = scratch.hug(&["--json", "types", "wide.rs"]);
+        assert_eq!(output.status.code(), Some(0), "types does not read `wide`: {}", stderr_of(&output));
+        let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+        let names: Vec<&Value> = records(&json).into_iter().map(|record| &record["identity"]["name"]).collect();
+        assert_eq!(names, [&Value::from("Narrow")]);
+    }
 }
 
 /// Failures are reported in file order, on stderr and in `errors`, whatever
@@ -630,23 +638,14 @@ fn a_closed_stdout_ends_the_run_quietly() {
 /// `imports` and `lint` end quietly and successfully when stdout is a pipe
 /// whose reader has gone (`hug imports | head -1`), in text and JSON alike;
 /// they used to panic on the first write.
-#[test]
-fn imports_and_lint_end_quietly_on_a_closed_pipe() {
+fn check_closed_imports_or_lint_pipe(args: &[&str]) {
     let scratch = Scratch::new(MULTI_FIXTURES);
-    for args in [
-        &["imports", "--no-cache"][..],
-        &["--plain", "imports", "--no-cache"],
-        &["--json", "imports", "--no-cache"],
-        &["lint", "--no-cache"],
-        &["--plain", "lint", "--no-cache", "--deny", "all"],
-        &["lint", "--json", "--no-cache"],
-    ] {
-        let output = hug_into_closed_pipe(&scratch, args);
-        let stderr = stderr_of(&output);
-        assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
-        assert!(!stderr.contains("cannot write output"), "hug {args:?}: {stderr}");
-        assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
-    }
+
+    let output = hug_into_closed_pipe(&scratch, args);
+    let stderr = stderr_of(&output);
+    assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
+    assert!(!stderr.contains("cannot write output"), "hug {args:?}: {stderr}");
+    assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
 }
 
 /// The module copied to build trees that span many chunks.
@@ -830,27 +829,23 @@ fn chunk_bound(grouping: &[&str]) -> usize {
 /// stdout stops the scan within the grouping's chunk bound, whether the
 /// later packages declare something or not. `classes` and both JSON
 /// reports over the same tree are controls.
-#[test]
-fn an_uneven_first_package_stops_at_a_failing_stdout() {
-    for declaring in [true, false] {
-        let scratch = uneven_packages(declaring);
-        for command in ["functions", "types", "symbols"] {
-            for grouping in GROUPINGS {
-                let mut args = vec!["--plain", command, "--no-cache", "--verbose"];
-                args.extend_from_slice(grouping);
-                assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), chunk_bound(grouping));
-            }
-        }
+fn check_uneven_package_stdout(command: &str, declaring: bool) {
+    let scratch = uneven_packages(declaring);
+    if command == "classes" {
         for format in ["--plain", "--json", "--json-full"] {
-            let args = [format, "classes", "--no-cache", "--verbose"];
+            let args = [format, command, "--no-cache", "--verbose"];
             assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
         }
-        for format in ["--json", "--json-full"] {
-            for command in ["functions", "types", "symbols"] {
-                let args = [format, command, "--no-cache", "--verbose"];
-                assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
-            }
-        }
+        return;
+    }
+    for grouping in GROUPINGS {
+        let mut args = vec!["--plain", command, "--no-cache", "--verbose"];
+        args.extend_from_slice(grouping);
+        assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), chunk_bound(grouping));
+    }
+    for format in ["--json", "--json-full"] {
+        let args = [format, command, "--no-cache", "--verbose"];
+        assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
     }
 }
 
@@ -992,8 +987,7 @@ fn assert_failures_stopped_early(args: &[&str], output: &Output) {
 /// Text `imports` and `lint`, and every streamed declaration report, flush
 /// after a failed file as after a good one, so a closed stdout stops the
 /// scan within one window of failures.
-#[test]
-fn failed_files_still_stop_imports_and_lint_at_a_failing_stdout() {
+fn check_failed_files_stop_at_stdout(args: &[&str]) {
     let scratch = slow_head_then(&[]);
     for index in 0..FAILED_SIBLINGS {
         let mut bytes = crate::RUST_FIXTURE.as_bytes().to_vec();
@@ -1003,26 +997,7 @@ fn failed_files_still_stop_imports_and_lint_at_a_failing_stdout() {
     // Control: with a reader, every failure is reported.
     let open = scratch.hug(&["--plain", "imports", "--no-cache"]);
     assert_eq!(error_lines(&open), FAILED_SIBLINGS, "{}", stderr_of(&open));
-    for args in [
-        &["imports", "--no-cache", "--verbose"][..],
-        &["--plain", "imports", "--no-cache", "--verbose"],
-        &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
-        &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
-        // Every streamed declaration report settles failures the same way.
-        &["--plain", "functions", "--no-cache", "--verbose"],
-        &["--plain", "classes", "--no-cache", "--verbose"],
-        &["--json", "functions", "--no-cache", "--verbose"],
-        &["--json-full", "functions", "--no-cache", "--verbose"],
-        &["functions", "--jsonl", "--no-cache", "--verbose"],
-        &["--plain", "functions", "--format", "table", "--no-cache", "--verbose"],
-        &["--plain", "functions", "--tree", "--no-cache", "--verbose"],
-        &["functions", "--format", "tsv", "--no-cache", "--verbose"],
-        &["functions", "--format", "ctags", "--no-cache", "--verbose"],
-        &["functions", "--format", "markdown", "--no-cache", "--verbose"],
-        &["functions", "--format", "prose", "--no-cache", "--verbose"],
-    ] {
-        assert_failures_stopped_early(args, &hug_into_closed_pipe(&scratch, args));
-    }
+    assert_failures_stopped_early(args, &hug_into_closed_pipe(&scratch, args));
 }
 
 /// An external adapter that fails on every later file does not keep being
@@ -1030,8 +1005,7 @@ fn failed_files_still_stop_imports_and_lint_at_a_failing_stdout() {
 /// Unix only: the stub is a shell script found as
 /// `node_modules/.bin/oxlint`, which Windows would not execute.
 #[cfg(unix)]
-#[test]
-fn adapter_failures_still_stop_lint_at_a_failing_stdout() {
+fn check_adapter_failures_stop_at_stdout(plain: bool) {
     use std::os::unix::fs::PermissionsExt;
 
     const TYPESCRIPT: &str = "export function h(): number { return 1; }\n";
@@ -1058,10 +1032,13 @@ fn adapter_failures_still_stop_lint_at_a_failing_stdout() {
     assert_eq!(runs(), FAILED_SIBLINGS);
     std::fs::remove_file(&log).expect("reset the run log");
 
-    for args in [
-        &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"][..],
-        &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
-    ] {
+    let args: &[&str] = if plain {
+        &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"]
+    } else {
+        &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"]
+    };
+    {
+
         assert_failures_stopped_early(args, &hug_into_closed_pipe(&scratch, args));
         let started = runs();
         assert!(started < CHUNK, "hug {args:?} ran the adapter {started} times");
@@ -1134,4 +1111,75 @@ fn an_unavailable_adapter_is_warned_once_before_its_first_file() {
     assert!(at("a.rs (Rust)") < at(warning), "{combined}");
     assert!(at(warning) < at("b.ts (TypeScript)"), "{combined}");
     assert!(at("b.ts (TypeScript)") < at("c.ts (TypeScript)"), "{combined}");
+}
+
+mod failed_files_still_stop_imports_and_lint_at_a_failing_stdout {
+    use super::*;
+    macro_rules! failed_stdout_tests {
+        ($($test:ident => $args:expr),* $(,)?) => {
+            $(#[test] fn $test() { check_failed_files_stop_at_stdout($args); })*
+        };
+    }
+    failed_stdout_tests! {
+        imports => &["imports", "--no-cache", "--verbose"],
+        plain_imports => &["--plain", "imports", "--no-cache", "--verbose"],
+        lint => &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
+        plain_lint => &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
+        functions => &["--plain", "functions", "--no-cache", "--verbose"],
+        classes => &["--plain", "classes", "--no-cache", "--verbose"],
+        json => &["--json", "functions", "--no-cache", "--verbose"],
+        json_full => &["--json-full", "functions", "--no-cache", "--verbose"],
+        jsonl => &["functions", "--jsonl", "--no-cache", "--verbose"],
+        table => &["--plain", "functions", "--format", "table", "--no-cache", "--verbose"],
+        tree => &["--plain", "functions", "--tree", "--no-cache", "--verbose"],
+        tsv => &["functions", "--format", "tsv", "--no-cache", "--verbose"],
+        ctags => &["functions", "--format", "ctags", "--no-cache", "--verbose"],
+        markdown => &["functions", "--format", "markdown", "--no-cache", "--verbose"],
+        prose => &["functions", "--format", "prose", "--no-cache", "--verbose"],
+    }
+}
+
+mod imports_and_lint_end_quietly_on_a_closed_pipe {
+    use super::*;
+    #[test]
+    fn imports() { check_closed_imports_or_lint_pipe(&["imports", "--no-cache"]); }
+    #[test]
+    fn plain_imports() { check_closed_imports_or_lint_pipe(&["--plain", "imports", "--no-cache"]); }
+    #[test]
+    fn json_imports() { check_closed_imports_or_lint_pipe(&["--json", "imports", "--no-cache"]); }
+    #[test]
+    fn lint() { check_closed_imports_or_lint_pipe(&["lint", "--no-cache"]); }
+    #[test]
+    fn plain_lint() { check_closed_imports_or_lint_pipe(&["--plain", "lint", "--no-cache", "--deny", "all"]); }
+    #[test]
+    fn json_lint() { check_closed_imports_or_lint_pipe(&["lint", "--json", "--no-cache"]); }
+}
+
+mod an_uneven_first_package_stops_at_a_failing_stdout {
+    use super::*;
+    #[test]
+    fn functions_declaring() { check_uneven_package_stdout("functions", true); }
+    #[test]
+    fn functions_empty() { check_uneven_package_stdout("functions", false); }
+    #[test]
+    fn types_declaring() { check_uneven_package_stdout("types", true); }
+    #[test]
+    fn types_empty() { check_uneven_package_stdout("types", false); }
+    #[test]
+    fn symbols_declaring() { check_uneven_package_stdout("symbols", true); }
+    #[test]
+    fn symbols_empty() { check_uneven_package_stdout("symbols", false); }
+    #[test]
+    fn classes_declaring() { check_uneven_package_stdout("classes", true); }
+    #[test]
+    fn classes_empty() { check_uneven_package_stdout("classes", false); }
+}
+
+#[cfg(unix)]
+mod adapter_failures_still_stop_lint_at_a_failing_stdout {
+    use super::*;
+    #[test]
+    fn plain() { check_adapter_failures_stop_at_stdout(true); }
+    #[test]
+    fn automatic() { check_adapter_failures_stop_at_stdout(false); }
 }

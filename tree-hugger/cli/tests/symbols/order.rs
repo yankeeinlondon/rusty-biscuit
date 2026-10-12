@@ -112,8 +112,8 @@ fn sort_name_keeps_same_named_types_together_in_path_order() {
     assert!(widgets[1].1.ends_with("rust.rs:4:1"), "{}", widgets[1].1);
 }
 
-/// With `--json` (and `--json-full`), file entries stay in portable path
-/// order whatever `--sort` says; `--sort` orders each file's records.
+/// With `--json`, file entries stay in portable path order whatever
+/// `--sort` says; `--sort` orders each file's records.
 #[test]
 fn json_keeps_file_order_and_sorts_within_each_file() {
     let scratch = scratch();
@@ -143,20 +143,47 @@ fn json_keeps_file_order_and_sorts_within_each_file() {
         }
     }
 
-    // Every scanned file has an index, so `--json-full` lists more files.
-    let full_files = files_of(&json_of(&scratch.stdout(&["--json-full", "symbols"])), "indexes");
-    let mut path_order = full_files.clone();
-    path_order.sort_by(|left, right| {
-        let (left, right) = (left.as_str().expect("file"), right.as_str().expect("file"));
-        left.split('/').cmp(right.split('/'))
-    });
-    assert_eq!(full_files, path_order, "--json-full file entries are in portable path order");
-    for command in ["functions", "types", "symbols", "classes"] {
+}
+
+/// Every scanned file has an index. Each command keeps those files in
+/// portable path order while sorting the records within each file.
+mod json_full_keeps_file_order_and_sorts_within_each_file {
+    use super::*;
+
+    fn check(command: &str) {
+        let scratch = scratch();
+        let files_of = |json: &Value| -> Vec<Value> {
+            json["indexes"].as_array().expect("indexes").iter().map(|file| file["file"].clone()).collect()
+        };
+        let full_files = files_of(&json_of(&scratch.stdout(&["--json-full", "symbols"])));
+        let mut path_order = full_files.clone();
+        path_order.sort_by(|left, right| {
+            let (left, right) = (left.as_str().expect("file"), right.as_str().expect("file"));
+            left.split('/').cmp(right.split('/'))
+        });
+        assert_eq!(full_files, path_order, "--json-full file entries are in portable path order");
         for order in ["file", "name", "kind"] {
             let full = json_of(&scratch.stdout(&["--json-full", command, "--sort", order]));
-            assert_eq!(files_of(&full, "indexes"), full_files, "{command} --sort {order}: --json-full file order");
+            assert_eq!(files_of(&full), full_files, "{command} --sort {order}: --json-full file order");
             assert_records_sorted(&full, "indexes", order, &format!("{command} --json-full"));
         }
+    }
+
+    #[test]
+    fn functions() {
+        check("functions");
+    }
+    #[test]
+    fn types() {
+        check("types");
+    }
+    #[test]
+    fn symbols() {
+        check("symbols");
+    }
+    #[test]
+    fn classes() {
+        check("classes");
     }
 }
 
