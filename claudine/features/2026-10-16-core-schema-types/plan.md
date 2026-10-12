@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-12
-phase: 3
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -72,12 +72,63 @@ docs_updated_during_phase_3:
     - darkmatter/docs/topics/schemas/definition.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/alphanumeric.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/side_effect_partial.rs
+    - darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/docs/schemas/partials/side-effect.yaml
+    - claudine/docs/schemas/partials/lifecycle.yaml
+docs_updated_during_phase_4:
+    - darkmatter/docs/inline/doc-list.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
 packages:
     - darkmatter
     - claudine
     - claudine-cli
     - darkmatter-cli
     - dmls
+source_files_during_phase_5:
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/inline/doc-list.md
+    - darkmatter/README.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Core Schema Types Implementation Plan
@@ -405,7 +456,7 @@ round trips. Literal and inserted-data passivity regressions remain green.
 
 ### Wave 6 — Parallel Consumer Work
 
-- [ ] **Artifact migration** — parallelizable; owns shipped YAML, migration
+- [x] **Artifact migration** — parallelizable; owns shipped YAML, migration
   fixture expectations, and the inventory results in the log.
   - Prerequisite: Phase 3. Replace all presence-dependent `any(required)`
     uses with the narrowest valid-domain concrete expression and required
@@ -420,7 +471,7 @@ round trips. Literal and inserted-data passivity regressions remain green.
     `any(required)` requires presence. Update the conversion test that
     previously rejected omission while retaining explicit-null acceptance.
 
-- [ ] **Catalog alignment** — parallelizable; owns `schemas/about.rs`, CLI
+- [x] **Catalog alignment** — parallelizable; owns `schemas/about.rs`, CLI
   about presentation and tests. Shared library registrations go through the
   integration owner.
   - Add authoritative descriptors and option metadata; show unknown with
@@ -430,7 +481,7 @@ round trips. Literal and inserted-data passivity regressions remain green.
     `TerminalRenderable` components for any changed terminal rendering.
     Publish stable catalog metadata early enough for the next wave.
 
-- [ ] **Runtime parity** — parallelizable; owns dedicated library/Claudine
+- [x] **Runtime parity** — parallelizable; owns dedicated library/Claudine
   consumer tests, with new test registrations integrated centrally.
   - Assert ordinary validation, trigger matching, composition, and
     launch/completion agree on presence. Keep existing initialization parser
@@ -448,7 +499,7 @@ interpretation. Integrate all three tasks before editor work.
 
 ### Wave 7 — Editor Integration
 
-- [ ] **Editor support**
+- [x] **Editor support**
   - Prerequisite: Wave 6. Update DMLS keyword completion, alphanumeric option
     completion before `;`, and hover using parsed library options/catalog
     metadata. Hover reports effective canonical character sets and
@@ -467,7 +518,7 @@ agree on valid declarations, effective types, and authored diagnostic sites.
 
 ### Wave 8 — Parallel Acceptance Work
 
-- [ ] **Acceptance matrix** — parallelizable; owns CLI/L1 matrix tests.
+- [x] **Acceptance matrix** — parallelizable; owns CLI/L1 matrix tests.
   - Prerequisite: Phase 4. Implement the Phase 1 robustness matrix driver,
     including positive controls, duplicate keys, extra documents, and public
     outcomes. Finish the changed-reader smell audit and record the results.
@@ -483,7 +534,7 @@ agree on valid declarations, effective types, and authored diagnostic sites.
     declare repository reads in CI-indexable forms. Ensure each new module
     is reachable from its existing L1 target.
 
-- [ ] **Corpus coverage** — parallelizable; owns the existing
+- [x] **Corpus coverage** — parallelizable; owns the existing
   `shipped_schema_corpus` test and artifact invocation coverage.
   - Extend its passive inventory for the changed built-ins, native null,
     trigger migration, and side-effect partial. Preserve instrumentation
@@ -493,7 +544,7 @@ agree on valid declarations, effective types, and authored diagnostic sites.
     snapshots and corpus exceptions; keep later-feature unsupported syntax
     explicit rather than widening scope.
 
-- [ ] **Current documentation** — parallelizable; owns README, topic docs,
+- [x] **Current documentation** — parallelizable; owns README, topic docs,
   and skill references, coordinating any shared definition-example edits
   with Artifact migration.
   - Reconcile `darkmatter/docs/topics/schemas/definition.md` optionality,
