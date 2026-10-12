@@ -70,55 +70,43 @@ impl ListRepositoryTreeRequest {
         self.path = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/repository/tree", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.recursive {
-            query_pairs.push(("recursive", value.to_string()));
+            query.push(("recursive".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.git_ref {
-            query_pairs.push(("git_ref", value.to_string()));
+            query.push(("git_ref".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.path {
-            query_pairs.push(("path", value.to_string()));
+            query.push(("path".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListRepositoryTreeRequest {
@@ -181,15 +169,17 @@ impl GetRepositoryFileRequest {
             git_ref: git_ref.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -201,7 +191,8 @@ impl GetRepositoryFileRequest {
             .to_string()), urlencoding::encode(& self.file_path.to_string()),
             urlencoding::encode(& self.git_ref.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetRepositoryFileRequest {
@@ -228,15 +219,17 @@ impl GetProjectRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self { id: id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -244,7 +237,8 @@ impl GetProjectRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/projects/{}", urlencoding::encode(& self.id.to_string()));
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetProjectRequest {
@@ -346,61 +340,49 @@ impl ListGroupProjectsRequest {
         self.include_subgroups = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/groups/{}/projects", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.archived {
-            query_pairs.push(("archived", value.to_string()));
+            query.push(("archived".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.visibility {
-            query_pairs.push(("visibility", value.to_string()));
+            query.push(("visibility".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order_by {
-            query_pairs.push(("order_by", value.to_string()));
+            query.push(("order_by".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.sort {
-            query_pairs.push(("sort", value.to_string()));
+            query.push(("sort".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.include_subgroups {
-            query_pairs.push(("include_subgroups", value.to_string()));
+            query.push(("include_subgroups".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListGroupProjectsRequest {
@@ -460,15 +442,17 @@ impl GetBranchRequest {
             branch: branch.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -479,7 +463,8 @@ impl GetBranchRequest {
             "/projects/{}/repository/branches/{}", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.branch.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetBranchRequest {
@@ -535,49 +520,37 @@ impl ListMergeRequestsRequest {
         self.state = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/merge_requests", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.state {
-            query_pairs.push(("state", value.to_string()));
+            query.push(("state".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListMergeRequestsRequest {
@@ -629,15 +602,17 @@ impl GetMergeRequestRequest {
             merge_request_iid: merge_request_iid.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -648,7 +623,8 @@ impl GetMergeRequestRequest {
             "/projects/{}/merge_requests/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetMergeRequestRequest {
@@ -698,47 +674,35 @@ impl ListMergeRequestCommitsRequest {
         self.per_page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/merge_requests/{}/commits", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListMergeRequestCommitsRequest {
@@ -770,15 +734,17 @@ impl ListMergeRequestChangesRequest {
             merge_request_iid: merge_request_iid.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -789,7 +755,8 @@ impl ListMergeRequestChangesRequest {
             "/projects/{}/merge_requests/{}/changes", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListMergeRequestChangesRequest {
@@ -845,49 +812,37 @@ impl ListIssuesRequest {
         self.state = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/issues", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.state {
-            query_pairs.push(("state", value.to_string()));
+            query.push(("state".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListIssuesRequest {
@@ -939,15 +894,17 @@ impl GetIssueRequest {
             issue_iid: issue_iid.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -958,7 +915,8 @@ impl GetIssueRequest {
             "/projects/{}/issues/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.issue_iid.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetIssueRequest {
@@ -1008,47 +966,35 @@ impl ListIssueNotesRequest {
         self.per_page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/issues/{}/notes", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.issue_iid.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListIssueNotesRequest {
@@ -1080,15 +1026,17 @@ impl ListIssueParticipantsRequest {
             issue_iid: issue_iid.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1099,7 +1047,8 @@ impl ListIssueParticipantsRequest {
             "/projects/{}/issues/{}/participants", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.issue_iid.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListIssueParticipantsRequest {
@@ -1146,46 +1095,34 @@ impl ListTagsRequest {
         self.per_page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/repository/tags", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListTagsRequest {
@@ -1235,15 +1172,17 @@ impl GetTagRequest {
             tag_name: tag_name.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1254,7 +1193,8 @@ impl GetTagRequest {
             "/projects/{}/repository/tags/{}", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.tag_name.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetTagRequest {
@@ -1301,46 +1241,34 @@ impl ListReleasesRequest {
         self.per_page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/releases", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListReleasesRequest {
@@ -1390,15 +1318,17 @@ impl GetReleaseRequest {
             tag_name: tag_name.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1409,7 +1339,8 @@ impl GetReleaseRequest {
             "/projects/{}/releases/{}", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.tag_name.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetReleaseRequest {
@@ -1436,15 +1367,17 @@ impl GetLatestReleaseRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self { id: id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1455,7 +1388,8 @@ impl GetLatestReleaseRequest {
             "/projects/{}/releases/permalink/latest", urlencoding::encode(& self.id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetLatestReleaseRequest {
@@ -1548,58 +1482,46 @@ impl ListProjectPipelinesRequest {
         self.sha = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/pipelines", urlencoding::encode(& self.id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.per_page {
-            query_pairs.push(("per_page", value.to_string()));
+            query.push(("per_page".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.status {
-            query_pairs.push(("status", value.to_string()));
+            query.push(("status".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.source {
-            query_pairs.push(("source", value.to_string()));
+            query.push(("source".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.git_ref {
-            query_pairs.push(("git_ref", value.to_string()));
+            query.push(("git_ref".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.sha {
-            query_pairs.push(("sha", value.to_string()));
+            query.push(("sha".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectPipelinesRequest {

@@ -16,15 +16,17 @@ use super::responses::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl ListModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -32,7 +34,8 @@ impl ListModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelsRequest {
@@ -59,15 +62,17 @@ impl GetModelRequest {
     pub fn new(repo_id: impl Into<String>) -> Self {
         Self { repo_id: repo_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -75,7 +80,8 @@ impl GetModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", self.repo_id);
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetModelRequest {
@@ -117,15 +123,17 @@ impl ListModelFilesRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -136,7 +144,8 @@ impl ListModelFilesRequest {
             "/models/{}/tree/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelFilesRequest {
@@ -175,15 +184,17 @@ impl GetModelFileRequest {
             path: path.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -194,7 +205,8 @@ impl GetModelFileRequest {
             "/models/{}/blob/{}/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string()), self.path
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetModelFileRequest {
@@ -226,15 +238,17 @@ impl ListModelCommitsRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -245,7 +259,8 @@ impl ListModelCommitsRequest {
             "/models/{}/commits/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelCommitsRequest {
@@ -277,15 +292,17 @@ impl GetModelReadmeRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -296,7 +313,8 @@ impl GetModelReadmeRequest {
             "/models/{}/resolve/{}/README.md", self.repo_id, urlencoding::encode(& self
             .revision.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetModelReadmeRequest {
@@ -323,15 +341,17 @@ impl ListModelDiscussionsRequest {
     pub fn new(repo_id: impl Into<String>) -> Self {
         Self { repo_id: repo_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -339,7 +359,8 @@ impl ListModelDiscussionsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}/discussions", self.repo_id);
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListModelDiscussionsRequest {
@@ -381,15 +402,17 @@ impl GetModelCardRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -400,7 +423,8 @@ impl GetModelCardRequest {
             "/models/{}/resolve/{}/model_card.md", self.repo_id, urlencoding::encode(&
             self.revision.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetModelCardRequest {
@@ -420,15 +444,17 @@ impl crate::shared::EndpointSpec for GetModelCardRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetsRequest {}
 impl ListDatasetsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -436,7 +462,8 @@ impl ListDatasetsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/datasets".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListDatasetsRequest {
@@ -463,15 +490,17 @@ impl GetDatasetRequest {
     pub fn new(repo_id: impl Into<String>) -> Self {
         Self { repo_id: repo_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -479,7 +508,8 @@ impl GetDatasetRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/datasets/{}", self.repo_id);
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetDatasetRequest {
@@ -521,15 +551,17 @@ impl ListDatasetFilesRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -540,7 +572,8 @@ impl ListDatasetFilesRequest {
             "/datasets/{}/tree/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListDatasetFilesRequest {
@@ -579,15 +612,17 @@ impl GetDatasetFileRequest {
             path: path.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -598,7 +633,8 @@ impl GetDatasetFileRequest {
             "/datasets/{}/blob/{}/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string()), self.path
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetDatasetFileRequest {
@@ -630,15 +666,17 @@ impl ListDatasetCommitsRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -649,7 +687,8 @@ impl ListDatasetCommitsRequest {
             "/datasets/{}/commits/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListDatasetCommitsRequest {
@@ -681,15 +720,17 @@ impl GetDatasetReadmeRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -700,7 +741,8 @@ impl GetDatasetReadmeRequest {
             "/datasets/{}/resolve/{}/README.md", self.repo_id, urlencoding::encode(& self
             .revision.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetDatasetReadmeRequest {
@@ -720,15 +762,17 @@ impl crate::shared::EndpointSpec for GetDatasetReadmeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpacesRequest {}
 impl ListSpacesRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -736,7 +780,8 @@ impl ListSpacesRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/spaces".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListSpacesRequest {
@@ -763,15 +808,17 @@ impl GetSpaceRequest {
     pub fn new(repo_id: impl Into<String>) -> Self {
         Self { repo_id: repo_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -779,7 +826,8 @@ impl GetSpaceRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/spaces/{}", self.repo_id);
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetSpaceRequest {
@@ -821,15 +869,17 @@ impl ListSpaceFilesRequest {
             revision: revision.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -840,7 +890,8 @@ impl ListSpaceFilesRequest {
             "/spaces/{}/tree/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListSpaceFilesRequest {
@@ -879,15 +930,17 @@ impl GetSpaceFileRequest {
             path: path.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -898,7 +951,8 @@ impl GetSpaceFileRequest {
             "/spaces/{}/blob/{}/{}", self.repo_id, urlencoding::encode(& self.revision
             .to_string()), self.path
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetSpaceFileRequest {
@@ -929,15 +983,17 @@ impl CreateRepoRequest {
     pub fn new(body: CreateRepoBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -945,6 +1001,7 @@ impl CreateRepoRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/create".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -953,6 +1010,7 @@ impl CreateRepoRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -989,15 +1047,17 @@ impl DeleteRepoRequest {
     pub fn new(body: DeleteRepoBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1005,6 +1065,7 @@ impl DeleteRepoRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/delete".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "DELETE",
             path,
@@ -1013,6 +1074,7 @@ impl DeleteRepoRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1061,15 +1123,17 @@ impl UpdateRepoSettingsRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1080,6 +1144,7 @@ impl UpdateRepoSettingsRequest {
             "/repos/{}/{}/settings", urlencoding::encode(& self.repo_type.to_string()),
             self.repo_id
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "PUT",
             path,
@@ -1088,6 +1153,7 @@ impl UpdateRepoSettingsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1119,15 +1185,17 @@ impl MoveRepoRequest {
     pub fn new(body: MoveRepoBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1135,6 +1203,7 @@ impl MoveRepoRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/move".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1143,6 +1212,7 @@ impl MoveRepoRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1168,15 +1238,17 @@ impl crate::shared::EndpointSpec for MoveRepoRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WhoAmIRequest {}
 impl WhoAmIRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1184,7 +1256,8 @@ impl WhoAmIRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/whoami-v2".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for WhoAmIRequest {
@@ -1211,15 +1284,17 @@ impl GetUserRequest {
     pub fn new(username: impl Into<String>) -> Self {
         Self { username: username.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1229,7 +1304,8 @@ impl GetUserRequest {
         let path = format!(
             "/users/{}", urlencoding::encode(& self.username.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetUserRequest {
@@ -1268,15 +1344,17 @@ impl ListUserReposRequest {
     pub fn new(username: impl Into<String>) -> Self {
         Self { username: username.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1286,7 +1364,8 @@ impl ListUserReposRequest {
         let path = format!(
             "/users/{}/repos", urlencoding::encode(& self.username.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListUserReposRequest {
@@ -1325,15 +1404,17 @@ impl GetUserCollectionsRequest {
     pub fn new(username: impl Into<String>) -> Self {
         Self { username: username.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1343,7 +1424,8 @@ impl GetUserCollectionsRequest {
         let path = format!(
             "/users/{}/collections", urlencoding::encode(& self.username.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetUserCollectionsRequest {

@@ -84,6 +84,8 @@ pub struct HuggingFaceHub {
     env_username: Option<String>,
     /// Headers builder with environment variable support for credentials.
     headers: schematic_define::Headers,
+    /// Explicit `ApiKeyParam` key (query or cookie); never printed by `Debug`.
+    api_key_param: Option<schematic_define::SensitiveString>,
     /// Variant-specific hooks for response customization.
     variant_hooks: crate::shared::VariantHooks,
 }
@@ -135,6 +137,7 @@ impl HuggingFaceHub {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -185,6 +188,7 @@ impl HuggingFaceHub {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -238,6 +242,7 @@ impl HuggingFaceHub {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -292,6 +297,7 @@ impl HuggingFaceHub {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -452,6 +458,16 @@ impl HuggingFaceHub {
 impl Default for HuggingFaceHub {
     fn default() -> Self {
         Self::new()
+    }
+}
+impl std::fmt::Debug for HuggingFaceHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::shared::debug_client(
+            f,
+            "HuggingFaceHub",
+            &self.base_url,
+            &self.auth_policy,
+        )
     }
 }
 /// Builder for creating customized variants of the API client.
@@ -637,6 +653,7 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
             auth_policy,
             env_username: self.base.env_username.clone(),
             headers,
+            api_key_param: self.base.api_key_param.clone(),
             variant_hooks: crate::shared::VariantHooks {
                 pre_response_json: self.pre_response_json,
                 response_mutators: self.response_mutators,

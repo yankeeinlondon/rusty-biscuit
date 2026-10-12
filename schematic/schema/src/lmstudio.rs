@@ -68,15 +68,17 @@ impl ChatRequest {
     pub fn new(body: ChatBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -84,6 +86,7 @@ impl ChatRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/chat".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -92,6 +95,7 @@ impl ChatRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -117,15 +121,17 @@ impl crate::shared::EndpointSpec for ChatRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl ListModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -133,7 +139,8 @@ impl ListModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelsRequest {
@@ -164,15 +171,17 @@ impl LoadModelRequest {
     pub fn new(body: LoadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -180,6 +189,7 @@ impl LoadModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/models/load".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -188,6 +198,7 @@ impl LoadModelRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -224,15 +235,17 @@ impl UnloadModelRequest {
     pub fn new(body: UnloadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -240,6 +253,7 @@ impl UnloadModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/models/unload".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -248,6 +262,7 @@ impl UnloadModelRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -284,15 +299,17 @@ impl DownloadModelRequest {
     pub fn new(body: DownloadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -300,6 +317,7 @@ impl DownloadModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/models/download".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -308,6 +326,7 @@ impl DownloadModelRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -344,15 +363,17 @@ impl GetDownloadStatusRequest {
     pub fn new(body: DownloadStatusBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -360,6 +381,7 @@ impl GetDownloadStatusRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v1/models/download/status".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -368,6 +390,7 @@ impl GetDownloadStatusRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -500,6 +523,8 @@ pub struct LmStudio {
     env_username: Option<String>,
     /// Headers builder with environment variable support for credentials.
     headers: schematic_define::Headers,
+    /// Explicit `ApiKeyParam` key (query or cookie); never printed by `Debug`.
+    api_key_param: Option<schematic_define::SensitiveString>,
     /// Variant-specific hooks for response customization.
     variant_hooks: crate::shared::VariantHooks,
 }
@@ -541,6 +566,7 @@ impl LmStudio {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -581,6 +607,7 @@ impl LmStudio {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -624,6 +651,7 @@ impl LmStudio {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -668,6 +696,7 @@ impl LmStudio {
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
                 }),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -828,6 +857,11 @@ impl LmStudio {
 impl Default for LmStudio {
     fn default() -> Self {
         Self::new()
+    }
+}
+impl std::fmt::Debug for LmStudio {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::shared::debug_client(f, "LmStudio", &self.base_url, &self.auth_policy)
     }
 }
 /// Builder for creating customized variants of the API client.
@@ -1013,6 +1047,7 @@ impl<'a> LmStudioVariantBuilder<'a> {
             auth_policy,
             env_username: self.base.env_username.clone(),
             headers,
+            api_key_param: self.base.api_key_param.clone(),
             variant_hooks: crate::shared::VariantHooks {
                 pre_response_json: self.pre_response_json,
                 response_mutators: self.response_mutators,
@@ -1021,194 +1056,6 @@ impl<'a> LmStudioVariantBuilder<'a> {
     }
 }
 impl LmStudio {
-    fn auth_is_required(&self) -> bool {
-        !self.auth_policy.explicit.is_empty() || self.auth_policy.env_fallback.is_some()
-    }
-    fn accepted_explicit_auth_methods(&self) -> Vec<String> {
-        self.auth_policy
-            .explicit
-            .iter()
-            .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => {
-                    match header.as_deref() {
-                        Some(header) => format!("an explicit bearer token in `{header}`"),
-                        None => "an explicit bearer token".to_string(),
-                    }
-                }
-                schematic_define::AuthMethod::ApiKey { header, .. } => {
-                    format!("an explicit API key in `{header}`")
-                }
-                schematic_define::AuthMethod::Basic => {
-                    "explicit basic auth credentials".to_string()
-                }
-                schematic_define::AuthMethod::OAuth2(_) => {
-                    "an explicit OAuth access token".to_string()
-                }
-                _ => "explicit authentication".to_string(),
-            })
-            .collect()
-    }
-    fn env_fallback_var_names(&self) -> Vec<String> {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .bearer_token
-                    .as_ref()
-                    .map(|list| list.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.names.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let mut vars = Vec::new();
-                if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
-                    vars.extend(user.names().iter().cloned());
-                }
-                if let Some(pass) = self.headers.env_mapping().basic_pass.as_ref() {
-                    vars.extend(pass.names().iter().cloned());
-                }
-                vars
-            }
-            None => Vec::new(),
-            _ => Vec::new(),
-        }
-    }
-    fn authentication_required_error(&self) -> SchematicError {
-        let explicit_methods = self.accepted_explicit_auth_methods();
-        let env_fallback_vars = self.env_fallback_var_names();
-        let mut options = Vec::new();
-        if !explicit_methods.is_empty() {
-            options.push(explicit_methods.join(", "));
-        }
-        if !env_fallback_vars.is_empty() {
-            options
-                .push(
-                    format!(
-                        "set one of the fallback env vars `{}`", env_fallback_vars
-                        .join("`, `")
-                    ),
-                );
-        }
-        let mut message = if options.is_empty() {
-            "Authentication required.".to_string()
-        } else {
-            format!("Authentication required: {}.", options.join(" or "))
-        };
-        if self.auth_policy.oauth2().is_some() {
-            message
-                .push_str(
-                    " Obtain the OAuth token with schematic-oauth, then inject it with `.oauth_token(...)`.",
-                );
-        }
-        SchematicError::AuthenticationRequired {
-            message,
-            explicit_methods,
-            env_fallback_vars,
-        }
-    }
-    fn apply_env_fallback(
-        &self,
-        headers: schematic_define::Headers,
-    ) -> schematic_define::Headers {
-        let env_mapping = self.headers.env_mapping().clone();
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping
-                    .bearer_token
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (token, header.as_deref()) {
-                    (Some(token), Some(header)) => {
-                        headers.use_bearer_token_with_header(token, header)
-                    }
-                    (Some(token), None) => headers.use_bearer_token(token),
-                    _ => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
-                let key = env_mapping
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                    });
-                match key {
-                    Some(key) => {
-                        let value = format!(
-                            "{}{}", value_prefix.clone().unwrap_or_default(), key
-                        );
-                        headers.header(header.clone(), value)
-                    }
-                    None => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping
-                    .basic_user
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                let password = env_mapping
-                    .basic_pass
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (username, password) {
-                    (Some(username), Some(password)) => {
-                        headers.use_basic_auth(username, password)
-                    }
-                    _ => headers,
-                }
-            }
-            None => headers,
-            _ => headers,
-        }
-    }
-    fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header
-                    .as_deref()
-                    .map_or_else(
-                        || headers.has_authorization(),
-                        |header| headers.has_header(header),
-                    )
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
-                headers.has_header(header)
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
-            None => false,
-            _ => false,
-        }
-    }
-    fn resolve_request_headers(&self) -> Result<Vec<(String, String)>, SchematicError> {
-        let mut headers = self.headers.clone();
-        if !headers.has_explicit_auth() {
-            headers = self.apply_env_fallback(headers);
-        }
-        if self.auth_is_required() && !headers.has_explicit_auth()
-            && !self.headers_satisfy_fallback(&headers)
-        {
-            return Err(self.authentication_required_error());
-        }
-        headers.build().map_err(SchematicError::from)
-    }
     /// Builds and sends an HTTP request, returning the raw response plus context.
     ///
     /// This is an internal helper method used by the public request methods.
@@ -1219,8 +1066,17 @@ impl LmStudio {
     ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
         let request = request.into();
         let endpoint_id = request.endpoint_id();
-        let (method, path, body, endpoint_headers) = request.into_parts()?;
-        let url = format!("{}{}", self.base_url, path);
+        let (method, path, body, endpoint_headers, mut query) = request.into_parts()?;
+        let (api_headers, api_key_param) = crate::shared::resolve_request_auth(
+            &self.auth_policy,
+            &self.headers,
+            &self.env_auth,
+            self.api_key_param.as_ref(),
+        )?;
+        let mut cookies = Vec::new();
+        crate::shared::apply_api_key_param(api_key_param, &mut query, &mut cookies);
+        let mut url = format!("{}{}", self.base_url, path);
+        crate::shared::append_query_pairs(&mut url, &path, &query);
         let mut req_builder = match method {
             "GET" => self.client.get(&url),
             "POST" => self.client.post(&url),
@@ -1231,10 +1087,11 @@ impl LmStudio {
             "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url),
             _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
         };
-        let api_headers = self.resolve_request_headers()?;
-        let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
+        let mut merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
+        crate::shared::combine_cookie_headers(&mut merged_headers, &cookies)?;
         for (key, value) in merged_headers {
-            req_builder = req_builder.header(key.as_str(), value.as_str());
+            let (key, value) = crate::shared::header_pair(&key, &value)?;
+            req_builder = req_builder.header(key, value);
         }
         req_builder = match body {
             crate::shared::RequestBody::Empty => req_builder,
@@ -1304,17 +1161,16 @@ impl LmStudio {
     }
     /// Merges API-level and endpoint-level headers.
     ///
-    /// Endpoint headers override API headers for matching keys (case-insensitive).
-    /// Returns a new Vec with the merged headers.
+    /// Endpoint headers override API headers for matching keys (case-insensitive),
+    /// except `Cookie`: both are kept, API first, for `combine_cookie_headers`.
     fn merge_headers(
         api_headers: &[(String, String)],
         endpoint_headers: &[(String, String)],
     ) -> Vec<(String, String)> {
         let mut result: Vec<(String, String)> = Vec::new();
         for (api_key, api_value) in api_headers {
-            let has_override = endpoint_headers
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
+            let has_override = !api_key.eq_ignore_ascii_case("cookie")
+                && endpoint_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(api_key));
             if !has_override {
                 result.push((api_key.clone(), api_value.clone()));
             }

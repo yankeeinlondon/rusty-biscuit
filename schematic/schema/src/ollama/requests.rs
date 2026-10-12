@@ -27,15 +27,17 @@ impl GenerateNativeRequest {
     pub fn new(body: GenerateBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -43,6 +45,7 @@ impl GenerateNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/generate".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -51,6 +54,7 @@ impl GenerateNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -87,15 +91,17 @@ impl ChatNativeRequest {
     pub fn new(body: ChatBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -103,6 +109,7 @@ impl ChatNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/chat".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -111,6 +118,7 @@ impl ChatNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -147,15 +155,17 @@ impl EmbeddingsNativeRequest {
     pub fn new(body: EmbeddingsBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -163,6 +173,7 @@ impl EmbeddingsNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/embeddings".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -171,6 +182,7 @@ impl EmbeddingsNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -196,15 +208,17 @@ impl crate::shared::EndpointSpec for EmbeddingsNativeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsNativeRequest {}
 impl ListModelsNativeRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -212,7 +226,8 @@ impl ListModelsNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/tags".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelsNativeRequest {
@@ -243,15 +258,17 @@ impl ShowModelNativeRequest {
     pub fn new(body: ShowModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -259,6 +276,7 @@ impl ShowModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/show".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -267,6 +285,7 @@ impl ShowModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -303,15 +322,17 @@ impl PullModelNativeRequest {
     pub fn new(body: PullModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -319,6 +340,7 @@ impl PullModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/pull".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -327,6 +349,7 @@ impl PullModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -363,15 +386,17 @@ impl PushModelNativeRequest {
     pub fn new(body: PushModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -379,6 +404,7 @@ impl PushModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/push".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -387,6 +413,7 @@ impl PushModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -423,15 +450,17 @@ impl CopyModelNativeRequest {
     pub fn new(body: CopyModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -439,6 +468,7 @@ impl CopyModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/copy".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -447,6 +477,7 @@ impl CopyModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -483,15 +514,17 @@ impl DeleteModelNativeRequest {
     pub fn new(body: DeleteModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -499,6 +532,7 @@ impl DeleteModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/delete".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "DELETE",
             path,
@@ -507,6 +541,7 @@ impl DeleteModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -543,15 +578,17 @@ impl CreateModelNativeRequest {
     pub fn new(body: CreateModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -559,6 +596,7 @@ impl CreateModelNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/create".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -567,6 +605,7 @@ impl CreateModelNativeRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -592,15 +631,17 @@ impl crate::shared::EndpointSpec for CreateModelNativeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRunningModelsNativeRequest {}
 impl ListRunningModelsNativeRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -608,7 +649,8 @@ impl ListRunningModelsNativeRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/ps".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListRunningModelsNativeRequest {
@@ -639,15 +681,17 @@ impl ChatCompletionsOaiRequest {
     pub fn new(body: OpenAIChatCompletionRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -655,6 +699,7 @@ impl ChatCompletionsOaiRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/chat/completions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -663,6 +708,7 @@ impl ChatCompletionsOaiRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -699,15 +745,17 @@ impl CompletionsOaiRequest {
     pub fn new(body: OpenAICompletionRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -715,6 +763,7 @@ impl CompletionsOaiRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/completions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -723,6 +772,7 @@ impl CompletionsOaiRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -759,15 +809,17 @@ impl EmbeddingsOaiRequest {
     pub fn new(body: OpenAIEmbeddingRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -775,6 +827,7 @@ impl EmbeddingsOaiRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/embeddings".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -783,6 +836,7 @@ impl EmbeddingsOaiRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -808,15 +862,17 @@ impl crate::shared::EndpointSpec for EmbeddingsOaiRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsOaiRequest {}
 impl ListModelsOaiRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -824,7 +880,8 @@ impl ListModelsOaiRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelsOaiRequest {

@@ -16,15 +16,17 @@ use super::responses::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListLlmModelsRequest {}
 impl ListLlmModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -32,7 +34,8 @@ impl ListLlmModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/data/llms/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListLlmModelsRequest {
@@ -65,41 +68,29 @@ impl ListTextToImageModelsRequest {
         self.include_categories = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/data/media/text-to-image".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/data/media/text-to-image".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query_pairs.push(("include_categories", value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListTextToImageModelsRequest {
@@ -119,15 +110,17 @@ impl crate::shared::EndpointSpec for ListTextToImageModelsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListImageEditingModelsRequest {}
 impl ListImageEditingModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -135,7 +128,8 @@ impl ListImageEditingModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/data/media/image-editing".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListImageEditingModelsRequest {
@@ -155,15 +149,17 @@ impl crate::shared::EndpointSpec for ListImageEditingModelsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTextToSpeechModelsRequest {}
 impl ListTextToSpeechModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -171,7 +167,8 @@ impl ListTextToSpeechModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/data/media/text-to-speech".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListTextToSpeechModelsRequest {
@@ -204,41 +201,29 @@ impl ListTextToVideoModelsRequest {
         self.include_categories = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/data/media/text-to-video".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/data/media/text-to-video".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query_pairs.push(("include_categories", value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListTextToVideoModelsRequest {
@@ -271,41 +256,29 @@ impl ListImageToVideoModelsRequest {
         self.include_categories = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/data/media/image-to-video".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/data/media/image-to-video".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.include_categories {
-            query_pairs.push(("include_categories", value.to_string()));
+            query.push(("include_categories".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListImageToVideoModelsRequest {
@@ -336,15 +309,17 @@ impl EvaluateCritPtRequest {
     pub fn new(body: CritPtEvaluateBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -352,6 +327,7 @@ impl EvaluateCritPtRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/critpt/evaluate".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -360,6 +336,7 @@ impl EvaluateCritPtRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }

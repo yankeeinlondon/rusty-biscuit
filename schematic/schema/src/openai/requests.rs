@@ -27,15 +27,17 @@ impl CreateSpeechRequest {
     pub fn new(body: CreateSpeechRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -43,6 +45,7 @@ impl CreateSpeechRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/audio/speech".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -51,6 +54,7 @@ impl CreateSpeechRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -173,15 +177,17 @@ impl CreateTranscriptionRequest {
     pub fn new(body: CreateTranscriptionForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -189,11 +195,13 @@ impl CreateTranscriptionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/audio/transcriptions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -268,15 +276,17 @@ impl CreateTranslationRequest {
     pub fn new(body: CreateTranslationForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -284,11 +294,13 @@ impl CreateTranslationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/audio/translations".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -337,44 +349,32 @@ impl ListVoiceConsentsRequest {
         self.limit = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/audio/voice_consents".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/audio/voice_consents".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListVoiceConsentsRequest {
@@ -437,15 +437,17 @@ impl CreateVoiceConsentRequest {
     pub fn new(body: CreateVoiceConsentForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -453,11 +455,13 @@ impl CreateVoiceConsentRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/audio/voice_consents".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -492,15 +496,17 @@ impl GetVoiceConsentRequest {
             consent_id: consent_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -511,7 +517,8 @@ impl GetVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetVoiceConsentRequest {
@@ -559,15 +566,17 @@ impl UpdateVoiceConsentRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -578,6 +587,7 @@ impl UpdateVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -586,6 +596,7 @@ impl UpdateVoiceConsentRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -615,15 +626,17 @@ impl DeleteVoiceConsentRequest {
             consent_id: consent_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -634,7 +647,8 @@ impl DeleteVoiceConsentRequest {
             "/audio/voice_consents/{}", urlencoding::encode(& self.consent_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteVoiceConsentRequest {
@@ -709,15 +723,17 @@ impl CreateVoiceRequest {
     pub fn new(body: CreateVoiceForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -725,11 +741,13 @@ impl CreateVoiceRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/audio/voices".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -778,44 +796,32 @@ impl ListBatchesRequest {
         self.limit = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/batches".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/batches".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListBatchesRequest {
@@ -846,15 +852,17 @@ impl CreateBatchRequest {
     pub fn new(body: CreateBatchRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -862,6 +870,7 @@ impl CreateBatchRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/batches".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -870,6 +879,7 @@ impl CreateBatchRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -902,15 +912,17 @@ impl RetrieveBatchRequest {
     pub fn new(batch_id: impl Into<String>) -> Self {
         Self { batch_id: batch_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -920,7 +932,8 @@ impl RetrieveBatchRequest {
         let path = format!(
             "/batches/{}", urlencoding::encode(& self.batch_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveBatchRequest {
@@ -959,15 +972,17 @@ impl CancelBatchRequest {
     pub fn new(batch_id: impl Into<String>) -> Self {
         Self { batch_id: batch_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -977,7 +992,8 @@ impl CancelBatchRequest {
         let path = format!(
             "/batches/{}/cancel", urlencoding::encode(& self.batch_id.to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for CancelBatchRequest {
@@ -1063,53 +1079,41 @@ impl ListChatCompletionsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/chat/completions".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/chat/completions".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.model {
-            query_pairs.push(("model", value.to_string()));
+            query.push(("model".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.metadata {
-            query_pairs.push(("metadata", value.to_string()));
+            query.push(("metadata".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListChatCompletionsRequest {
@@ -1140,15 +1144,17 @@ impl CreateChatCompletionRequest {
     pub fn new(body: CreateChatCompletionRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1156,6 +1162,7 @@ impl CreateChatCompletionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/chat/completions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1164,6 +1171,7 @@ impl CreateChatCompletionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1198,15 +1206,17 @@ impl GetChatCompletionRequest {
             completion_id: completion_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1216,7 +1226,8 @@ impl GetChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetChatCompletionRequest {
@@ -1264,15 +1275,17 @@ impl UpdateChatCompletionRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1282,6 +1295,7 @@ impl UpdateChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1290,6 +1304,7 @@ impl UpdateChatCompletionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1319,15 +1334,17 @@ impl DeleteChatCompletionRequest {
             completion_id: completion_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1337,7 +1354,8 @@ impl DeleteChatCompletionRequest {
         let path = format!(
             "/chat/completions/{}", urlencoding::encode(& self.completion_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteChatCompletionRequest {
@@ -1405,50 +1423,38 @@ impl GetChatCompletionMessagesRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/chat/completions/{}/messages", urlencoding::encode(& self.completion_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetChatCompletionMessagesRequest {
@@ -1499,15 +1505,17 @@ impl CreateCompletionRequest {
     pub fn new(body: CreateCompletionRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1515,6 +1523,7 @@ impl CreateCompletionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/completions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1523,6 +1532,7 @@ impl CreateCompletionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1593,50 +1603,38 @@ impl ListContainersRequest {
         self.name = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/containers".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/containers".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.name {
-            query_pairs.push(("name", value.to_string()));
+            query.push(("name".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListContainersRequest {
@@ -1667,15 +1665,17 @@ impl CreateContainerRequest {
     pub fn new(body: CreateContainerBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1683,6 +1683,7 @@ impl CreateContainerRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/containers".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1691,6 +1692,7 @@ impl CreateContainerRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -1725,15 +1727,17 @@ impl RetrieveContainerRequest {
             container_id: container_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1743,7 +1747,8 @@ impl RetrieveContainerRequest {
         let path = format!(
             "/containers/{}", urlencoding::encode(& self.container_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveContainerRequest {
@@ -1784,15 +1789,17 @@ impl DeleteContainerRequest {
             container_id: container_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1802,7 +1809,8 @@ impl DeleteContainerRequest {
         let path = format!(
             "/containers/{}", urlencoding::encode(& self.container_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteContainerRequest {
@@ -1873,49 +1881,37 @@ impl ListContainerFilesRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/containers/{}/files", urlencoding::encode(& self.container_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListContainerFilesRequest {
@@ -1971,15 +1967,17 @@ impl CreateContainerFileRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -1989,6 +1987,7 @@ impl CreateContainerFileRequest {
         let path = format!(
             "/containers/{}/files", urlencoding::encode(& self.container_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -1997,6 +1996,7 @@ impl CreateContainerFileRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -2029,15 +2029,17 @@ impl RetrieveContainerFileRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2048,7 +2050,8 @@ impl RetrieveContainerFileRequest {
             "/containers/{}/files/{}", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveContainerFileRequest {
@@ -2080,15 +2083,17 @@ impl DeleteContainerFileRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2099,7 +2104,8 @@ impl DeleteContainerFileRequest {
             "/containers/{}/files/{}", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteContainerFileRequest {
@@ -2131,15 +2137,17 @@ impl RetrieveContainerFileContentRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2150,7 +2158,8 @@ impl RetrieveContainerFileContentRequest {
             "/containers/{}/files/{}/content", urlencoding::encode(& self.container_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveContainerFileContentRequest {
@@ -2228,55 +2237,43 @@ impl ListConversationItemsRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/conversations/{}/items", urlencoding::encode(& self.conversation_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListConversationItemsRequest {
@@ -2345,43 +2342,31 @@ impl CreateConversationItemsRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/conversations/{}/items", urlencoding::encode(& self.conversation_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
-            }
-        }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
         Ok((
@@ -2392,6 +2377,7 @@ impl CreateConversationItemsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -2435,46 +2421,34 @@ impl GetConversationItemRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/conversations/{}/items/{}", urlencoding::encode(& self.conversation_id
             .to_string()), urlencoding::encode(& self.item_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetConversationItemRequest {
@@ -2506,15 +2480,17 @@ impl DeleteConversationItemRequest {
             item_id: item_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2525,7 +2501,8 @@ impl DeleteConversationItemRequest {
             "/conversations/{}/items/{}", urlencoding::encode(& self.conversation_id
             .to_string()), urlencoding::encode(& self.item_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteConversationItemRequest {
@@ -2556,15 +2533,17 @@ impl CreateEmbeddingRequest {
     pub fn new(body: CreateEmbeddingRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2572,6 +2551,7 @@ impl CreateEmbeddingRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/embeddings".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -2580,6 +2560,7 @@ impl CreateEmbeddingRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -2649,50 +2630,38 @@ impl ListEvalsRequest {
         self.order_by = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/evals".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/evals".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order_by {
-            query_pairs.push(("order_by", value.to_string()));
+            query.push(("order_by".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListEvalsRequest {
@@ -2723,15 +2692,17 @@ impl CreateEvalRequest {
     pub fn new(body: CreateEvalRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2739,6 +2710,7 @@ impl CreateEvalRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/evals".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -2747,6 +2719,7 @@ impl CreateEvalRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -2779,15 +2752,17 @@ impl GetEvalRequest {
     pub fn new(eval_id: impl Into<String>) -> Self {
         Self { eval_id: eval_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2795,7 +2770,8 @@ impl GetEvalRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetEvalRequest {
@@ -2841,15 +2817,17 @@ impl UpdateEvalRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2857,6 +2835,7 @@ impl UpdateEvalRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -2865,6 +2844,7 @@ impl UpdateEvalRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -2892,15 +2872,17 @@ impl DeleteEvalRequest {
     pub fn new(eval_id: impl Into<String>) -> Self {
         Self { eval_id: eval_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -2908,7 +2890,8 @@ impl DeleteEvalRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/evals/{}", urlencoding::encode(& self.eval_id.to_string()));
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteEvalRequest {
@@ -2983,52 +2966,40 @@ impl GetEvalRunsRequest {
         self.status = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/evals/{}/runs", urlencoding::encode(& self.eval_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.status {
-            query_pairs.push(("status", value.to_string()));
+            query.push(("status".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetEvalRunsRequest {
@@ -3086,15 +3057,17 @@ impl CreateEvalRunRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3104,6 +3077,7 @@ impl CreateEvalRunRequest {
         let path = format!(
             "/evals/{}/runs", urlencoding::encode(& self.eval_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -3112,6 +3086,7 @@ impl CreateEvalRunRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -3144,15 +3119,17 @@ impl GetEvalRunRequest {
             run_id: run_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3163,7 +3140,8 @@ impl GetEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetEvalRunRequest {
@@ -3195,15 +3173,17 @@ impl CancelEvalRunRequest {
             run_id: run_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3214,7 +3194,8 @@ impl CancelEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for CancelEvalRunRequest {
@@ -3246,15 +3227,17 @@ impl DeleteEvalRunRequest {
             run_id: run_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3265,7 +3248,8 @@ impl DeleteEvalRunRequest {
             "/evals/{}/runs/{}", urlencoding::encode(& self.eval_id.to_string()),
             urlencoding::encode(& self.run_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteEvalRunRequest {
@@ -3335,53 +3319,41 @@ impl GetEvalRunOutputItemsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/evals/{}/runs/{}/output_items", urlencoding::encode(& self.eval_id
             .to_string()), urlencoding::encode(& self.run_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.status {
-            query_pairs.push(("status", value.to_string()));
+            query.push(("status".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetEvalRunOutputItemsRequest {
@@ -3420,15 +3392,17 @@ impl GetEvalRunOutputItemRequest {
             output_item_id: output_item_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3440,7 +3414,8 @@ impl GetEvalRunOutputItemRequest {
             .to_string()), urlencoding::encode(& self.run_id.to_string()),
             urlencoding::encode(& self.output_item_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetEvalRunOutputItemRequest {
@@ -3505,50 +3480,38 @@ impl ListFilesRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/files".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/files".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.purpose {
-            query_pairs.push(("purpose", value.to_string()));
+            query.push(("purpose".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListFilesRequest {
@@ -3613,15 +3576,17 @@ impl CreateFileRequest {
     pub fn new(body: CreateFileForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3629,11 +3594,13 @@ impl CreateFileRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/files".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -3666,15 +3633,17 @@ impl RetrieveFileRequest {
     pub fn new(file_id: impl Into<String>) -> Self {
         Self { file_id: file_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3682,7 +3651,8 @@ impl RetrieveFileRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/files/{}", urlencoding::encode(& self.file_id.to_string()));
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveFileRequest {
@@ -3719,15 +3689,17 @@ impl DeleteFileRequest {
     pub fn new(file_id: impl Into<String>) -> Self {
         Self { file_id: file_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3735,7 +3707,8 @@ impl DeleteFileRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/files/{}", urlencoding::encode(& self.file_id.to_string()));
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteFileRequest {
@@ -3772,15 +3745,17 @@ impl DownloadFileRequest {
     pub fn new(file_id: impl Into<String>) -> Self {
         Self { file_id: file_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3790,7 +3765,8 @@ impl DownloadFileRequest {
         let path = format!(
             "/files/{}/content", urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DownloadFileRequest {
@@ -3831,15 +3807,17 @@ impl RunGraderRequest {
     pub fn new(body: RunGraderRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3847,6 +3825,7 @@ impl RunGraderRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/fine_tuning/alpha/graders/run".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -3855,6 +3834,7 @@ impl RunGraderRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -3891,15 +3871,17 @@ impl ValidateGraderRequest {
     pub fn new(body: ValidateGraderRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -3907,6 +3889,7 @@ impl ValidateGraderRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/fine_tuning/alpha/graders/validate".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -3915,6 +3898,7 @@ impl ValidateGraderRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -3985,53 +3969,41 @@ impl ListFineTuningCheckpointPermissionsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/fine_tuning/checkpoints/{}/permissions", urlencoding::encode(& self
             .fine_tuned_model_checkpoint.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.project_id {
-            query_pairs.push(("project_id", value.to_string()));
+            query.push(("project_id".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListFineTuningCheckpointPermissionsRequest {
@@ -4092,15 +4064,17 @@ impl CreateFineTuningCheckpointPermissionRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4111,6 +4085,7 @@ impl CreateFineTuningCheckpointPermissionRequest {
             "/fine_tuning/checkpoints/{}/permissions", urlencoding::encode(& self
             .fine_tuned_model_checkpoint.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -4119,6 +4094,7 @@ impl CreateFineTuningCheckpointPermissionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -4154,15 +4130,17 @@ impl DeleteFineTuningCheckpointPermissionRequest {
             permission_id: permission_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4174,7 +4152,8 @@ impl DeleteFineTuningCheckpointPermissionRequest {
             .fine_tuned_model_checkpoint.to_string()), urlencoding::encode(& self
             .permission_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteFineTuningCheckpointPermissionRequest {
@@ -4228,47 +4207,35 @@ impl ListPaginatedFineTuningJobsRequest {
         self.metadata = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/fine_tuning/jobs".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/fine_tuning/jobs".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.metadata {
-            query_pairs.push(("metadata", value.to_string()));
+            query.push(("metadata".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListPaginatedFineTuningJobsRequest {
@@ -4299,15 +4266,17 @@ impl CreateFineTuningJobRequest {
     pub fn new(body: CreateFineTuningJobRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4315,6 +4284,7 @@ impl CreateFineTuningJobRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/fine_tuning/jobs".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -4323,6 +4293,7 @@ impl CreateFineTuningJobRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -4357,15 +4328,17 @@ impl RetrieveFineTuningJobRequest {
             fine_tuning_job_id: fine_tuning_job_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4376,7 +4349,8 @@ impl RetrieveFineTuningJobRequest {
             "/fine_tuning/jobs/{}", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveFineTuningJobRequest {
@@ -4417,15 +4391,17 @@ impl CancelFineTuningJobRequest {
             fine_tuning_job_id: fine_tuning_job_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4436,7 +4412,8 @@ impl CancelFineTuningJobRequest {
             "/fine_tuning/jobs/{}/cancel", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for CancelFineTuningJobRequest {
@@ -4495,47 +4472,35 @@ impl ListFineTuningJobCheckpointsRequest {
         self.limit = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/fine_tuning/jobs/{}/checkpoints", urlencoding::encode(& self
             .fine_tuning_job_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListFineTuningJobCheckpointsRequest {
@@ -4600,47 +4565,35 @@ impl ListFineTuningEventsRequest {
         self.limit = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/fine_tuning/jobs/{}/events", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListFineTuningEventsRequest {
@@ -4687,15 +4640,17 @@ impl PauseFineTuningJobRequest {
             fine_tuning_job_id: fine_tuning_job_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4706,7 +4661,8 @@ impl PauseFineTuningJobRequest {
             "/fine_tuning/jobs/{}/pause", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for PauseFineTuningJobRequest {
@@ -4747,15 +4703,17 @@ impl ResumeFineTuningJobRequest {
             fine_tuning_job_id: fine_tuning_job_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4766,7 +4724,8 @@ impl ResumeFineTuningJobRequest {
             "/fine_tuning/jobs/{}/resume", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ResumeFineTuningJobRequest {
@@ -4809,15 +4768,17 @@ impl CreateImageEditRequest {
     pub fn new(body: EditImageBodyJsonParam) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4825,6 +4786,7 @@ impl CreateImageEditRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/images/edits".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -4833,6 +4795,7 @@ impl CreateImageEditRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -4869,15 +4832,17 @@ impl CreateImageRequest {
     pub fn new(body: CreateImageRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4885,6 +4850,7 @@ impl CreateImageRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/images/generations".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -4893,6 +4859,7 @@ impl CreateImageRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -4971,15 +4938,17 @@ impl CreateImageVariationRequest {
     pub fn new(body: CreateImageVariationForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -4987,11 +4956,13 @@ impl CreateImageVariationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/images/variations".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -5017,15 +4988,17 @@ impl crate::shared::EndpointSpec for CreateImageVariationRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl ListModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5033,7 +5006,8 @@ impl ListModelsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListModelsRequest {
@@ -5060,15 +5034,17 @@ impl RetrieveModelRequest {
     pub fn new(model: impl Into<String>) -> Self {
         Self { model: model.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5076,7 +5052,8 @@ impl RetrieveModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", urlencoding::encode(& self.model.to_string()));
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveModelRequest {
@@ -5113,15 +5090,17 @@ impl DeleteModelRequest {
     pub fn new(model: impl Into<String>) -> Self {
         Self { model: model.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5129,7 +5108,8 @@ impl DeleteModelRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", urlencoding::encode(& self.model.to_string()));
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteModelRequest {
@@ -5170,15 +5150,17 @@ impl CreateModerationRequest {
     pub fn new(body: CreateModerationRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5186,6 +5168,7 @@ impl CreateModerationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/moderations".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -5194,6 +5177,7 @@ impl CreateModerationRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -5252,47 +5236,35 @@ impl AdminApiKeysListRequest {
         self.limit = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/admin_api_keys".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/admin_api_keys".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for AdminApiKeysListRequest {
@@ -5323,15 +5295,17 @@ impl AdminApiKeysCreateRequest {
     pub fn new(body: serde_json::Value) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5339,6 +5313,7 @@ impl AdminApiKeysCreateRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/admin_api_keys".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -5347,6 +5322,7 @@ impl AdminApiKeysCreateRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -5379,15 +5355,17 @@ impl AdminApiKeysGetRequest {
     pub fn new(key_id: impl Into<String>) -> Self {
         Self { key_id: key_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5398,7 +5376,8 @@ impl AdminApiKeysGetRequest {
             "/organization/admin_api_keys/{}", urlencoding::encode(& self.key_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for AdminApiKeysGetRequest {
@@ -5435,15 +5414,17 @@ impl AdminApiKeysDeleteRequest {
     pub fn new(key_id: impl Into<String>) -> Self {
         Self { key_id: key_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5454,7 +5435,8 @@ impl AdminApiKeysDeleteRequest {
             "/organization/admin_api_keys/{}", urlencoding::encode(& self.key_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for AdminApiKeysDeleteRequest {
@@ -5588,78 +5570,66 @@ impl ListAuditLogsRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/audit_logs".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/audit_logs".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.effective_at {
-            query_pairs.push(("effective_at", value.to_string()));
+            query.push(("effective_at".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids__ {
             for value in values {
-                query_pairs.push(("project_ids[]", value.to_string()));
+                query.push(("project_ids[]".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.event_types__ {
             for value in values {
-                query_pairs.push(("event_types[]", value.to_string()));
+                query.push(("event_types[]".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.actor_ids__ {
             for value in values {
-                query_pairs.push(("actor_ids[]", value.to_string()));
+                query.push(("actor_ids[]".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.actor_emails__ {
             for value in values {
-                query_pairs.push(("actor_emails[]", value.to_string()));
+                query.push(("actor_emails[]".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.resource_ids__ {
             for value in values {
-                query_pairs.push(("resource_ids[]", value.to_string()));
+                query.push(("resource_ids[]".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.tenant_only {
-            query_pairs.push(("tenant_only", value.to_string()));
+            query.push(("tenant_only".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListAuditLogsRequest {
@@ -5715,47 +5685,35 @@ impl ListOrganizationCertificatesRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/certificates".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/certificates".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListOrganizationCertificatesRequest {
@@ -5786,15 +5744,17 @@ impl UploadCertificateRequest {
     pub fn new(body: UploadCertificateRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5802,6 +5762,7 @@ impl UploadCertificateRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/certificates".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -5810,6 +5771,7 @@ impl UploadCertificateRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -5846,15 +5808,17 @@ impl ActivateOrganizationCertificatesRequest {
     pub fn new(body: ToggleCertificatesRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5862,6 +5826,7 @@ impl ActivateOrganizationCertificatesRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/certificates/activate".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -5870,6 +5835,7 @@ impl ActivateOrganizationCertificatesRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -5906,15 +5872,17 @@ impl DeactivateOrganizationCertificatesRequest {
     pub fn new(body: ToggleCertificatesRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -5922,6 +5890,7 @@ impl DeactivateOrganizationCertificatesRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/certificates/deactivate".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -5930,6 +5899,7 @@ impl DeactivateOrganizationCertificatesRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -5973,46 +5943,34 @@ impl GetCertificateRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetCertificateRequest {
@@ -6067,15 +6025,17 @@ impl ModifyCertificateRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6086,6 +6046,7 @@ impl ModifyCertificateRequest {
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -6094,6 +6055,7 @@ impl ModifyCertificateRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -6123,15 +6085,17 @@ impl DeleteCertificateRequest {
             certificate_id: certificate_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6142,7 +6106,8 @@ impl DeleteCertificateRequest {
             "/organization/certificates/{}", urlencoding::encode(& self.certificate_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteCertificateRequest {
@@ -6253,68 +6218,56 @@ impl UsageCostsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/costs".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/costs".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageCostsRequest {
@@ -6334,15 +6287,17 @@ impl crate::shared::EndpointSpec for UsageCostsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveOrganizationDataRetentionRequest {}
 impl RetrieveOrganizationDataRetentionRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6350,7 +6305,8 @@ impl RetrieveOrganizationDataRetentionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/data_retention".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveOrganizationDataRetentionRequest {
@@ -6381,15 +6337,17 @@ impl UpdateOrganizationDataRetentionRequest {
     pub fn new(body: UpdateOrganizationDataRetentionBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6397,6 +6355,7 @@ impl UpdateOrganizationDataRetentionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/data_retention".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -6405,6 +6364,7 @@ impl UpdateOrganizationDataRetentionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -6466,47 +6426,35 @@ impl ListGroupsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/groups".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/groups".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListGroupsRequest {
@@ -6537,15 +6485,17 @@ impl CreateGroupRequest {
     pub fn new(body: CreateGroupBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6553,6 +6503,7 @@ impl CreateGroupRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/groups".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -6561,6 +6512,7 @@ impl CreateGroupRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -6593,15 +6545,17 @@ impl RetrieveGroupRequest {
     pub fn new(group_id: impl Into<String>) -> Self {
         Self { group_id: group_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6611,7 +6565,8 @@ impl RetrieveGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveGroupRequest {
@@ -6659,15 +6614,17 @@ impl UpdateGroupRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6677,6 +6634,7 @@ impl UpdateGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -6685,6 +6643,7 @@ impl UpdateGroupRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -6712,15 +6671,17 @@ impl DeleteGroupRequest {
     pub fn new(group_id: impl Into<String>) -> Self {
         Self { group_id: group_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6730,7 +6691,8 @@ impl DeleteGroupRequest {
         let path = format!(
             "/organization/groups/{}", urlencoding::encode(& self.group_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteGroupRequest {
@@ -6798,50 +6760,38 @@ impl ListGroupRoleAssignmentsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/groups/{}/roles", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListGroupRoleAssignmentsRequest {
@@ -6900,15 +6850,17 @@ impl AssignGroupRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6919,6 +6871,7 @@ impl AssignGroupRoleRequest {
             "/organization/groups/{}/roles", urlencoding::encode(& self.group_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -6927,6 +6880,7 @@ impl AssignGroupRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -6959,15 +6913,17 @@ impl RetrieveGroupRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -6978,7 +6934,8 @@ impl RetrieveGroupRoleRequest {
             "/organization/groups/{}/roles/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveGroupRoleRequest {
@@ -7010,15 +6967,17 @@ impl UnassignGroupRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7029,7 +6988,8 @@ impl UnassignGroupRoleRequest {
             "/organization/groups/{}/roles/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UnassignGroupRoleRequest {
@@ -7087,50 +7047,38 @@ impl ListGroupUsersRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/groups/{}/users", urlencoding::encode(& self.group_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListGroupUsersRequest {
@@ -7186,15 +7134,17 @@ impl AddGroupUserRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7205,6 +7155,7 @@ impl AddGroupUserRequest {
             "/organization/groups/{}/users", urlencoding::encode(& self.group_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -7213,6 +7164,7 @@ impl AddGroupUserRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -7245,15 +7197,17 @@ impl RetrieveGroupUserRequest {
             user_id: user_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7264,7 +7218,8 @@ impl RetrieveGroupUserRequest {
             "/organization/groups/{}/users/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveGroupUserRequest {
@@ -7296,15 +7251,17 @@ impl RemoveGroupUserRequest {
             user_id: user_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7315,7 +7272,8 @@ impl RemoveGroupUserRequest {
             "/organization/groups/{}/users/{}", urlencoding::encode(& self.group_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RemoveGroupUserRequest {
@@ -7358,44 +7316,32 @@ impl ListInvitesRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/invites".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/invites".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListInvitesRequest {
@@ -7426,15 +7372,17 @@ impl InviteUserRequest {
     pub fn new(body: InviteRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7442,6 +7390,7 @@ impl InviteUserRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/invites".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -7450,6 +7399,7 @@ impl InviteUserRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -7484,15 +7434,17 @@ impl RetrieveInviteRequest {
             invite_id: invite_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7502,7 +7454,8 @@ impl RetrieveInviteRequest {
         let path = format!(
             "/organization/invites/{}", urlencoding::encode(& self.invite_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveInviteRequest {
@@ -7543,15 +7496,17 @@ impl DeleteInviteRequest {
             invite_id: invite_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7561,7 +7516,8 @@ impl DeleteInviteRequest {
         let path = format!(
             "/organization/invites/{}", urlencoding::encode(& self.invite_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteInviteRequest {
@@ -7628,47 +7584,35 @@ impl ListProjectsRequest {
         self.include_archived = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/projects".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/projects".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.include_archived {
-            query_pairs.push(("include_archived", value.to_string()));
+            query.push(("include_archived".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListProjectsRequest {
@@ -7699,15 +7643,17 @@ impl CreateProjectRequest {
     pub fn new(body: ProjectCreateRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7715,6 +7661,7 @@ impl CreateProjectRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/projects".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -7723,6 +7670,7 @@ impl CreateProjectRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -7757,15 +7705,17 @@ impl RetrieveProjectRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7776,7 +7726,8 @@ impl RetrieveProjectRequest {
             "/organization/projects/{}", urlencoding::encode(& self.project_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveProjectRequest {
@@ -7824,15 +7775,17 @@ impl ModifyProjectRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -7843,6 +7796,7 @@ impl ModifyProjectRequest {
             "/organization/projects/{}", urlencoding::encode(& self.project_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -7851,6 +7805,7 @@ impl ModifyProjectRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -7910,50 +7865,38 @@ impl ListProjectApiKeysRequest {
         self.owner_project_access = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/api_keys", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.owner_project_access {
-            query_pairs.push(("owner_project_access", value.to_string()));
+            query.push(("owner_project_access".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectApiKeysRequest {
@@ -8005,15 +7948,17 @@ impl RetrieveProjectApiKeyRequest {
             api_key_id: api_key_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8024,7 +7969,8 @@ impl RetrieveProjectApiKeyRequest {
             "/organization/projects/{}/api_keys/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.api_key_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectApiKeyRequest {
@@ -8056,15 +8002,17 @@ impl DeleteProjectApiKeyRequest {
             api_key_id: api_key_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8075,7 +8023,8 @@ impl DeleteProjectApiKeyRequest {
             "/organization/projects/{}/api_keys/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.api_key_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteProjectApiKeyRequest {
@@ -8104,15 +8053,17 @@ impl ArchiveProjectRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8123,7 +8074,8 @@ impl ArchiveProjectRequest {
             "/organization/projects/{}/archive", urlencoding::encode(& self.project_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ArchiveProjectRequest {
@@ -8194,50 +8146,38 @@ impl ListProjectCertificatesRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/certificates", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectCertificatesRequest {
@@ -8293,15 +8233,17 @@ impl ActivateProjectCertificatesRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8312,6 +8254,7 @@ impl ActivateProjectCertificatesRequest {
             "/organization/projects/{}/certificates/activate", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -8320,6 +8263,7 @@ impl ActivateProjectCertificatesRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -8356,15 +8300,17 @@ impl DeactivateProjectCertificatesRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8375,6 +8321,7 @@ impl DeactivateProjectCertificatesRequest {
             "/organization/projects/{}/certificates/deactivate", urlencoding::encode(&
             self.project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -8383,6 +8330,7 @@ impl DeactivateProjectCertificatesRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -8412,15 +8360,17 @@ impl RetrieveProjectDataRetentionRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8431,7 +8381,8 @@ impl RetrieveProjectDataRetentionRequest {
             "/organization/projects/{}/data_retention", urlencoding::encode(& self
             .project_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveProjectDataRetentionRequest {
@@ -8482,15 +8433,17 @@ impl UpdateProjectDataRetentionRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8501,6 +8454,7 @@ impl UpdateProjectDataRetentionRequest {
             "/organization/projects/{}/data_retention", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -8509,6 +8463,7 @@ impl UpdateProjectDataRetentionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -8565,50 +8520,38 @@ impl ListProjectGroupsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/groups", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectGroupsRequest {
@@ -8664,15 +8607,17 @@ impl AddProjectGroupRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8683,6 +8628,7 @@ impl AddProjectGroupRequest {
             "/organization/projects/{}/groups", urlencoding::encode(& self.project_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -8691,6 +8637,7 @@ impl AddProjectGroupRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -8732,44 +8679,32 @@ impl RetrieveProjectGroupRequest {
         self.group_type = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/groups/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.group_type {
-            query_pairs.push(("group_type", value.to_string()));
+            query.push(("group_type".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectGroupRequest {
@@ -8801,15 +8736,17 @@ impl RemoveProjectGroupRequest {
             group_id: group_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8820,7 +8757,8 @@ impl RemoveProjectGroupRequest {
             "/organization/projects/{}/groups/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RemoveProjectGroupRequest {
@@ -8849,15 +8787,17 @@ impl RetrieveProjectHostedToolPermissionsRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8868,7 +8808,8 @@ impl RetrieveProjectHostedToolPermissionsRequest {
             "/organization/projects/{}/hosted_tool_permissions", urlencoding::encode(&
             self.project_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveProjectHostedToolPermissionsRequest {
@@ -8919,15 +8860,17 @@ impl UpdateProjectHostedToolPermissionsRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8938,6 +8881,7 @@ impl UpdateProjectHostedToolPermissionsRequest {
             "/organization/projects/{}/hosted_tool_permissions", urlencoding::encode(&
             self.project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -8946,6 +8890,7 @@ impl UpdateProjectHostedToolPermissionsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -8975,15 +8920,17 @@ impl RetrieveProjectModelPermissionsRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -8994,7 +8941,8 @@ impl RetrieveProjectModelPermissionsRequest {
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveProjectModelPermissionsRequest {
@@ -9045,15 +8993,17 @@ impl UpdateProjectModelPermissionsRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9064,6 +9014,7 @@ impl UpdateProjectModelPermissionsRequest {
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9072,6 +9023,7 @@ impl UpdateProjectModelPermissionsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -9101,15 +9053,17 @@ impl DeleteProjectModelPermissionsRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9120,7 +9074,8 @@ impl DeleteProjectModelPermissionsRequest {
             "/organization/projects/{}/model_permissions", urlencoding::encode(& self
             .project_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteProjectModelPermissionsRequest {
@@ -9191,50 +9146,38 @@ impl ListProjectRateLimitsRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/rate_limits", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectRateLimitsRequest {
@@ -9297,15 +9240,17 @@ impl UpdateProjectRateLimitsRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9317,6 +9262,7 @@ impl UpdateProjectRateLimitsRequest {
             .project_id.to_string()), urlencoding::encode(& self.rate_limit_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9325,6 +9271,7 @@ impl UpdateProjectRateLimitsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -9374,47 +9321,35 @@ impl ListProjectServiceAccountsRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/service_accounts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectServiceAccountsRequest {
@@ -9471,15 +9406,17 @@ impl CreateProjectServiceAccountRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9490,6 +9427,7 @@ impl CreateProjectServiceAccountRequest {
             "/organization/projects/{}/service_accounts", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9498,6 +9436,7 @@ impl CreateProjectServiceAccountRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -9533,15 +9472,17 @@ impl RetrieveProjectServiceAccountRequest {
             service_account_id: service_account_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9553,7 +9494,8 @@ impl RetrieveProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectServiceAccountRequest {
@@ -9596,15 +9538,17 @@ impl UpdateProjectServiceAccountRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9616,6 +9560,7 @@ impl UpdateProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9624,6 +9569,7 @@ impl UpdateProjectServiceAccountRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -9659,15 +9605,17 @@ impl DeleteProjectServiceAccountRequest {
             service_account_id: service_account_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9679,7 +9627,8 @@ impl DeleteProjectServiceAccountRequest {
             .project_id.to_string()), urlencoding::encode(& self.service_account_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteProjectServiceAccountRequest {
@@ -9744,53 +9693,41 @@ impl ListProjectSpendAlertsRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/spend_alerts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectSpendAlertsRequest {
@@ -9848,15 +9785,17 @@ impl CreateProjectSpendAlertRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9867,6 +9806,7 @@ impl CreateProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9875,6 +9815,7 @@ impl CreateProjectSpendAlertRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -9907,15 +9848,17 @@ impl RetrieveProjectSpendAlertRequest {
             alert_id: alert_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9926,7 +9869,8 @@ impl RetrieveProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectSpendAlertRequest {
@@ -9969,15 +9913,17 @@ impl UpdateProjectSpendAlertRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -9988,6 +9934,7 @@ impl UpdateProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -9996,6 +9943,7 @@ impl UpdateProjectSpendAlertRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10028,15 +9976,17 @@ impl DeleteProjectSpendAlertRequest {
             alert_id: alert_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10047,7 +9997,8 @@ impl DeleteProjectSpendAlertRequest {
             "/organization/projects/{}/spend_alerts/{}", urlencoding::encode(& self
             .project_id.to_string()), urlencoding::encode(& self.alert_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteProjectSpendAlertRequest {
@@ -10096,47 +10047,35 @@ impl ListProjectUsersRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/projects/{}/users", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectUsersRequest {
@@ -10190,15 +10129,17 @@ impl CreateProjectUserRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10209,6 +10150,7 @@ impl CreateProjectUserRequest {
             "/organization/projects/{}/users", urlencoding::encode(& self.project_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -10217,6 +10159,7 @@ impl CreateProjectUserRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10249,15 +10192,17 @@ impl RetrieveProjectUserRequest {
             user_id: user_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10268,7 +10213,8 @@ impl RetrieveProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectUserRequest {
@@ -10311,15 +10257,17 @@ impl ModifyProjectUserRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10330,6 +10278,7 @@ impl ModifyProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -10338,6 +10287,7 @@ impl ModifyProjectUserRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10370,15 +10320,17 @@ impl DeleteProjectUserRequest {
             user_id: user_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10389,7 +10341,8 @@ impl DeleteProjectUserRequest {
             "/organization/projects/{}/users/{}", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteProjectUserRequest {
@@ -10442,47 +10395,35 @@ impl ListRolesRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/roles".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/roles".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListRolesRequest {
@@ -10513,15 +10454,17 @@ impl CreateRoleRequest {
     pub fn new(body: PublicCreateOrganizationRoleBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10529,6 +10472,7 @@ impl CreateRoleRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/roles".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -10537,6 +10481,7 @@ impl CreateRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10569,15 +10514,17 @@ impl RetrieveRoleRequest {
     pub fn new(role_id: impl Into<String>) -> Self {
         Self { role_id: role_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10587,7 +10534,8 @@ impl RetrieveRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveRoleRequest {
@@ -10636,15 +10584,17 @@ impl UpdateRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10654,6 +10604,7 @@ impl UpdateRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -10662,6 +10613,7 @@ impl UpdateRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10689,15 +10641,17 @@ impl DeleteRoleRequest {
     pub fn new(role_id: impl Into<String>) -> Self {
         Self { role_id: role_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10707,7 +10661,8 @@ impl DeleteRoleRequest {
         let path = format!(
             "/organization/roles/{}", urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteRoleRequest {
@@ -10779,50 +10734,38 @@ impl ListOrganizationSpendAlertsRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/spend_alerts".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/spend_alerts".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListOrganizationSpendAlertsRequest {
@@ -10853,15 +10796,17 @@ impl CreateOrganizationSpendAlertRequest {
     pub fn new(body: CreateSpendAlertBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10869,6 +10814,7 @@ impl CreateOrganizationSpendAlertRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/spend_alerts".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -10877,6 +10823,7 @@ impl CreateOrganizationSpendAlertRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -10909,15 +10856,17 @@ impl RetrieveOrganizationSpendAlertRequest {
     pub fn new(alert_id: impl Into<String>) -> Self {
         Self { alert_id: alert_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10928,7 +10877,8 @@ impl RetrieveOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveOrganizationSpendAlertRequest {
@@ -10976,15 +10926,17 @@ impl UpdateOrganizationSpendAlertRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -10995,6 +10947,7 @@ impl UpdateOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -11003,6 +10956,7 @@ impl UpdateOrganizationSpendAlertRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -11030,15 +10984,17 @@ impl DeleteOrganizationSpendAlertRequest {
     pub fn new(alert_id: impl Into<String>) -> Self {
         Self { alert_id: alert_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -11049,7 +11005,8 @@ impl DeleteOrganizationSpendAlertRequest {
             "/organization/spend_alerts/{}", urlencoding::encode(& self.alert_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteOrganizationSpendAlertRequest {
@@ -11181,78 +11138,66 @@ impl UsageAudioSpeechesRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/audio_speeches".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/audio_speeches".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageAudioSpeechesRequest {
@@ -11372,78 +11317,66 @@ impl UsageAudioTranscriptionsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/audio_transcriptions".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/audio_transcriptions".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageAudioTranscriptionsRequest {
@@ -11536,63 +11469,51 @@ impl UsageCodeInterpreterSessionsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/code_interpreter_sessions".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/code_interpreter_sessions".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageCodeInterpreterSessionsRequest {
@@ -11722,81 +11643,69 @@ impl UsageCompletionsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/completions".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/completions".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.batch {
-            query_pairs.push(("batch", value.to_string()));
+            query.push(("batch".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageCompletionsRequest {
@@ -11916,78 +11825,66 @@ impl UsageEmbeddingsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/embeddings".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/embeddings".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageEmbeddingsRequest {
@@ -12107,78 +12004,66 @@ impl UsageFileSearchCallsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/file_search_calls".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/file_search_calls".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.vector_store_ids {
             for value in values {
-                query_pairs.push(("vector_store_ids", value.to_string()));
+                query.push(("vector_store_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageFileSearchCallsRequest {
@@ -12316,88 +12201,76 @@ impl UsageImagesRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/images".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/images".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.sources {
             for value in values {
-                query_pairs.push(("sources", value.to_string()));
+                query.push(("sources".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.sizes {
             for value in values {
-                query_pairs.push(("sizes", value.to_string()));
+                query.push(("sizes".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageImagesRequest {
@@ -12517,78 +12390,66 @@ impl UsageModerationsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/moderations".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/moderations".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageModerationsRequest {
@@ -12681,63 +12542,51 @@ impl UsageVectorStoresRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/vector_stores".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/vector_stores".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageVectorStoresRequest {
@@ -12866,83 +12715,71 @@ impl UsageWebSearchCallsRequest {
         self.page = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/usage/web_search_calls".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/usage/web_search_calls".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.start_time {
-            query_pairs.push(("start_time", value.to_string()));
+            query.push(("start_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.end_time {
-            query_pairs.push(("end_time", value.to_string()));
+            query.push(("end_time".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.bucket_width {
-            query_pairs.push(("bucket_width", value.to_string()));
+            query.push(("bucket_width".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.project_ids {
             for value in values {
-                query_pairs.push(("project_ids", value.to_string()));
+                query.push(("project_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.user_ids {
             for value in values {
-                query_pairs.push(("user_ids", value.to_string()));
+                query.push(("user_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.api_key_ids {
             for value in values {
-                query_pairs.push(("api_key_ids", value.to_string()));
+                query.push(("api_key_ids".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.models {
             for value in values {
-                query_pairs.push(("models", value.to_string()));
+                query.push(("models".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.context_levels {
             for value in values {
-                query_pairs.push(("context_levels", value.to_string()));
+                query.push(("context_levels".to_string(), value.to_string()));
             }
         }
         if let Some(ref values) = self.group_by {
             for value in values {
-                query_pairs.push(("group_by", value.to_string()));
+                query.push(("group_by".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.page {
-            query_pairs.push(("page", value.to_string()));
+            query.push(("page".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UsageWebSearchCallsRequest {
@@ -12997,49 +12834,37 @@ impl ListUsersRequest {
         self.emails = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/organization/users".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/organization/users".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.emails {
             for value in values {
-                query_pairs.push(("emails", value.to_string()));
+                query.push(("emails".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListUsersRequest {
@@ -13066,15 +12891,17 @@ impl RetrieveUserRequest {
     pub fn new(user_id: impl Into<String>) -> Self {
         Self { user_id: user_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13084,7 +12911,8 @@ impl RetrieveUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveUserRequest {
@@ -13130,15 +12958,17 @@ impl ModifyUserRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13148,6 +12978,7 @@ impl ModifyUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -13156,6 +12987,7 @@ impl ModifyUserRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -13183,15 +13015,17 @@ impl DeleteUserRequest {
     pub fn new(user_id: impl Into<String>) -> Self {
         Self { user_id: user_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13201,7 +13035,8 @@ impl DeleteUserRequest {
         let path = format!(
             "/organization/users/{}", urlencoding::encode(& self.user_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteUserRequest {
@@ -13267,50 +13102,38 @@ impl ListUserRoleAssignmentsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/organization/users/{}/roles", urlencoding::encode(& self.user_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListUserRoleAssignmentsRequest {
@@ -13369,15 +13192,17 @@ impl AssignUserRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13388,6 +13213,7 @@ impl AssignUserRoleRequest {
             "/organization/users/{}/roles", urlencoding::encode(& self.user_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -13396,6 +13222,7 @@ impl AssignUserRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -13428,15 +13255,17 @@ impl RetrieveUserRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13447,7 +13276,8 @@ impl RetrieveUserRoleRequest {
             "/organization/users/{}/roles/{}", urlencoding::encode(& self.user_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveUserRoleRequest {
@@ -13479,15 +13309,17 @@ impl UnassignUserRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13498,7 +13330,8 @@ impl UnassignUserRoleRequest {
             "/organization/users/{}/roles/{}", urlencoding::encode(& self.user_id
             .to_string()), urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UnassignUserRoleRequest {
@@ -13557,50 +13390,38 @@ impl ListProjectGroupRoleAssignmentsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/groups/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListProjectGroupRoleAssignmentsRequest {
@@ -13643,15 +13464,17 @@ impl AssignProjectGroupRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13662,6 +13485,7 @@ impl AssignProjectGroupRoleRequest {
             "/projects/{}/groups/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -13670,6 +13494,7 @@ impl AssignProjectGroupRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -13709,15 +13534,17 @@ impl RetrieveProjectGroupRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13729,7 +13556,8 @@ impl RetrieveProjectGroupRoleRequest {
             .to_string()), urlencoding::encode(& self.group_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectGroupRoleRequest {
@@ -13768,15 +13596,17 @@ impl UnassignProjectGroupRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13788,7 +13618,8 @@ impl UnassignProjectGroupRoleRequest {
             .to_string()), urlencoding::encode(& self.group_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UnassignProjectGroupRoleRequest {
@@ -13844,49 +13675,37 @@ impl ListProjectRolesRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/roles", urlencoding::encode(& self.project_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListProjectRolesRequest {
@@ -13945,15 +13764,17 @@ impl CreateProjectRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -13963,6 +13784,7 @@ impl CreateProjectRoleRequest {
         let path = format!(
             "/projects/{}/roles", urlencoding::encode(& self.project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -13971,6 +13793,7 @@ impl CreateProjectRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14003,15 +13826,17 @@ impl RetrieveProjectRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14022,7 +13847,8 @@ impl RetrieveProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectRoleRequest {
@@ -14065,15 +13891,17 @@ impl UpdateProjectRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14084,6 +13912,7 @@ impl UpdateProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14092,6 +13921,7 @@ impl UpdateProjectRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14124,15 +13954,17 @@ impl DeleteProjectRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14143,7 +13975,8 @@ impl DeleteProjectRoleRequest {
             "/projects/{}/roles/{}", urlencoding::encode(& self.project_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteProjectRoleRequest {
@@ -14202,50 +14035,38 @@ impl ListProjectUserRoleAssignmentsRequest {
         self.order = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/projects/{}/users/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
@@ -14288,15 +14109,17 @@ impl AssignProjectUserRoleRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14307,6 +14130,7 @@ impl AssignProjectUserRoleRequest {
             "/projects/{}/users/{}/roles", urlencoding::encode(& self.project_id
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14315,6 +14139,7 @@ impl AssignProjectUserRoleRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14354,15 +14179,17 @@ impl RetrieveProjectUserRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14374,7 +14201,8 @@ impl RetrieveProjectUserRoleRequest {
             .to_string()), urlencoding::encode(& self.user_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveProjectUserRoleRequest {
@@ -14413,15 +14241,17 @@ impl UnassignProjectUserRoleRequest {
             role_id: role_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14433,7 +14263,8 @@ impl UnassignProjectUserRoleRequest {
             .to_string()), urlencoding::encode(& self.user_id.to_string()),
             urlencoding::encode(& self.role_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for UnassignProjectUserRoleRequest {
@@ -14488,15 +14319,17 @@ impl CreateRealtimeCallRequest {
     pub fn new(body: CreateRealtimeCallForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14504,11 +14337,13 @@ impl CreateRealtimeCallRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/realtime/calls".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -14553,15 +14388,17 @@ impl AcceptRealtimeCallRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14571,6 +14408,7 @@ impl AcceptRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/accept", urlencoding::encode(& self.call_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14579,6 +14417,7 @@ impl AcceptRealtimeCallRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14606,15 +14445,17 @@ impl HangupRealtimeCallRequest {
     pub fn new(call_id: impl Into<String>) -> Self {
         Self { call_id: call_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14624,7 +14465,8 @@ impl HangupRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/hangup", urlencoding::encode(& self.call_id.to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for HangupRealtimeCallRequest {
@@ -14670,15 +14512,17 @@ impl ReferRealtimeCallRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14688,6 +14532,7 @@ impl ReferRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/refer", urlencoding::encode(& self.call_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14696,6 +14541,7 @@ impl ReferRealtimeCallRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14732,15 +14578,17 @@ impl RejectRealtimeCallRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14750,6 +14598,7 @@ impl RejectRealtimeCallRequest {
         let path = format!(
             "/realtime/calls/{}/reject", urlencoding::encode(& self.call_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14758,6 +14607,7 @@ impl RejectRealtimeCallRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14789,15 +14639,17 @@ impl CreateRealtimeClientSecretRequest {
     pub fn new(body: RealtimeCreateClientSecretRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14805,6 +14657,7 @@ impl CreateRealtimeClientSecretRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/realtime/client_secrets".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14813,6 +14666,7 @@ impl CreateRealtimeClientSecretRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14849,15 +14703,17 @@ impl CreateRealtimeSessionRequest {
     pub fn new(body: RealtimeSessionCreateRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14865,6 +14721,7 @@ impl CreateRealtimeSessionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/realtime/sessions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14873,6 +14730,7 @@ impl CreateRealtimeSessionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14909,15 +14767,17 @@ impl CreateRealtimeTranscriptionSessionRequest {
     pub fn new(body: RealtimeTranscriptionSessionCreateRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14925,6 +14785,7 @@ impl CreateRealtimeTranscriptionSessionRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/realtime/transcription_sessions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14933,6 +14794,7 @@ impl CreateRealtimeTranscriptionSessionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -14970,15 +14832,17 @@ impl CreateRealtimeTranslationClientSecretRequest {
     pub fn new(body: RealtimeTranslationClientSecretCreateRequest) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -14986,6 +14850,7 @@ impl CreateRealtimeTranslationClientSecretRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/realtime/translations/client_secrets".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -14994,6 +14859,7 @@ impl CreateRealtimeTranslationClientSecretRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -15031,15 +14897,17 @@ impl CreateResponseRequest {
     pub fn new(body: CreateResponse) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15047,6 +14915,7 @@ impl CreateResponseRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -15055,6 +14924,7 @@ impl CreateResponseRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -15139,54 +15009,42 @@ impl GetResponseRequest {
         self.include_obfuscation = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.stream {
-            query_pairs.push(("stream", value.to_string()));
+            query.push(("stream".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.starting_after {
-            query_pairs.push(("starting_after", value.to_string()));
+            query.push(("starting_after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.include_obfuscation {
-            query_pairs.push(("include_obfuscation", value.to_string()));
+            query.push(("include_obfuscation".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetResponseRequest {
@@ -15237,15 +15095,17 @@ impl DeleteResponseRequest {
             response_id: response_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15255,7 +15115,8 @@ impl DeleteResponseRequest {
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteResponseRequest {
@@ -15296,15 +15157,17 @@ impl CancelResponseRequest {
             response_id: response_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15314,7 +15177,8 @@ impl CancelResponseRequest {
         let path = format!(
             "/responses/{}/cancel", urlencoding::encode(& self.response_id.to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for CancelResponseRequest {
@@ -15399,55 +15263,43 @@ impl ListInputItemsRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/responses/{}/input_items", urlencoding::encode(& self.response_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListInputItemsRequest {
@@ -15500,15 +15352,17 @@ impl CreateUploadRequest {
     pub fn new(body: CreateUploadRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15516,6 +15370,7 @@ impl CreateUploadRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/uploads".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -15524,6 +15379,7 @@ impl CreateUploadRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -15558,15 +15414,17 @@ impl CancelUploadRequest {
             upload_id: upload_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15576,7 +15434,8 @@ impl CancelUploadRequest {
         let path = format!(
             "/uploads/{}/cancel", urlencoding::encode(& self.upload_id.to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for CancelUploadRequest {
@@ -15624,15 +15483,17 @@ impl CompleteUploadRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15642,6 +15503,7 @@ impl CompleteUploadRequest {
         let path = format!(
             "/uploads/{}/complete", urlencoding::encode(& self.upload_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -15650,6 +15512,7 @@ impl CompleteUploadRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -15703,15 +15566,17 @@ impl AddUploadPartRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15721,11 +15586,13 @@ impl AddUploadPartRequest {
         let path = format!(
             "/uploads/{}/parts", urlencoding::encode(& self.upload_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -15792,50 +15659,38 @@ impl ListVectorStoresRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/vector_stores".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/vector_stores".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListVectorStoresRequest {
@@ -15866,15 +15721,17 @@ impl CreateVectorStoreRequest {
     pub fn new(body: CreateVectorStoreRequest2) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15882,6 +15739,7 @@ impl CreateVectorStoreRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/vector_stores".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -15890,6 +15748,7 @@ impl CreateVectorStoreRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -15924,15 +15783,17 @@ impl GetVectorStoreRequest {
             vector_store_id: vector_store_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -15942,7 +15803,8 @@ impl GetVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetVectorStoreRequest {
@@ -15993,15 +15855,17 @@ impl ModifyVectorStoreRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16011,6 +15875,7 @@ impl ModifyVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16019,6 +15884,7 @@ impl ModifyVectorStoreRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16048,15 +15914,17 @@ impl DeleteVectorStoreRequest {
             vector_store_id: vector_store_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16066,7 +15934,8 @@ impl DeleteVectorStoreRequest {
         let path = format!(
             "/vector_stores/{}", urlencoding::encode(& self.vector_store_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteVectorStoreRequest {
@@ -16117,15 +15986,17 @@ impl CreateVectorStoreFileBatchRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16136,6 +16007,7 @@ impl CreateVectorStoreFileBatchRequest {
             "/vector_stores/{}/file_batches", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16144,6 +16016,7 @@ impl CreateVectorStoreFileBatchRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16176,15 +16049,17 @@ impl GetVectorStoreFileBatchRequest {
             batch_id: batch_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16196,7 +16071,8 @@ impl GetVectorStoreFileBatchRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetVectorStoreFileBatchRequest {
@@ -16228,15 +16104,17 @@ impl CancelVectorStoreFileBatchRequest {
             batch_id: batch_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16248,7 +16126,8 @@ impl CancelVectorStoreFileBatchRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for CancelVectorStoreFileBatchRequest {
@@ -16329,57 +16208,45 @@ impl ListFilesInVectorStoreBatchRequest {
         self.filter = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/vector_stores/{}/file_batches/{}/files", urlencoding::encode(& self
             .vector_store_id.to_string()), urlencoding::encode(& self.batch_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.filter {
-            query_pairs.push(("filter", value.to_string()));
+            query.push(("filter".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListFilesInVectorStoreBatchRequest {
@@ -16457,56 +16324,44 @@ impl ListVectorStoreFilesRequest {
         self.filter = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/vector_stores/{}/files", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.filter {
-            query_pairs.push(("filter", value.to_string()));
+            query.push(("filter".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListVectorStoreFilesRequest {
@@ -16569,15 +16424,17 @@ impl CreateVectorStoreFileRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16588,6 +16445,7 @@ impl CreateVectorStoreFileRequest {
             "/vector_stores/{}/files", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16596,6 +16454,7 @@ impl CreateVectorStoreFileRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16628,15 +16487,17 @@ impl GetVectorStoreFileRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16647,7 +16508,8 @@ impl GetVectorStoreFileRequest {
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetVectorStoreFileRequest {
@@ -16690,15 +16552,17 @@ impl UpdateVectorStoreFileAttributesRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16709,6 +16573,7 @@ impl UpdateVectorStoreFileAttributesRequest {
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16717,6 +16582,7 @@ impl UpdateVectorStoreFileAttributesRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16749,15 +16615,17 @@ impl DeleteVectorStoreFileRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16768,7 +16636,8 @@ impl DeleteVectorStoreFileRequest {
             "/vector_stores/{}/files/{}", urlencoding::encode(& self.vector_store_id
             .to_string()), urlencoding::encode(& self.file_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteVectorStoreFileRequest {
@@ -16800,15 +16669,17 @@ impl RetrieveVectorStoreFileContentRequest {
             file_id: file_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16820,7 +16691,8 @@ impl RetrieveVectorStoreFileContentRequest {
             .vector_store_id.to_string()), urlencoding::encode(& self.file_id
             .to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for RetrieveVectorStoreFileContentRequest {
@@ -16859,15 +16731,17 @@ impl SearchVectorStoreRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16878,6 +16752,7 @@ impl SearchVectorStoreRequest {
             "/vector_stores/{}/search", urlencoding::encode(& self.vector_store_id
             .to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16886,6 +16761,7 @@ impl SearchVectorStoreRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16917,15 +16793,17 @@ impl CreateConversationRequest {
     pub fn new(body: CreateConversationBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16933,6 +16811,7 @@ impl CreateConversationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/conversations".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -16941,6 +16820,7 @@ impl CreateConversationRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -16975,15 +16855,17 @@ impl GetConversationRequest {
             conversation_id: conversation_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -16993,7 +16875,8 @@ impl GetConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetConversationRequest {
@@ -17044,15 +16927,17 @@ impl UpdateConversationRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17062,6 +16947,7 @@ impl UpdateConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17070,6 +16956,7 @@ impl UpdateConversationRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17099,15 +16986,17 @@ impl DeleteConversationRequest {
             conversation_id: conversation_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17117,7 +17006,8 @@ impl DeleteConversationRequest {
         let path = format!(
             "/conversations/{}", urlencoding::encode(& self.conversation_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteConversationRequest {
@@ -17149,15 +17039,17 @@ impl crate::shared::EndpointSpec for DeleteConversationRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetorganizationspendlimitRequest {}
 impl GetorganizationspendlimitRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17165,7 +17057,8 @@ impl GetorganizationspendlimitRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/spend_limit".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetorganizationspendlimitRequest {
@@ -17196,15 +17089,17 @@ impl UpdateorganizationspendlimitRequest {
     pub fn new(body: UpdateOrganizationSpendLimitBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17212,6 +17107,7 @@ impl UpdateorganizationspendlimitRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/spend_limit".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17220,6 +17116,7 @@ impl UpdateorganizationspendlimitRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17245,15 +17142,17 @@ impl crate::shared::EndpointSpec for UpdateorganizationspendlimitRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteorganizationspendlimitRequest {}
 impl DeleteorganizationspendlimitRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17261,7 +17160,8 @@ impl DeleteorganizationspendlimitRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/organization/spend_limit".to_string();
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteorganizationspendlimitRequest {
@@ -17290,15 +17190,17 @@ impl GetprojectspendlimitRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17309,7 +17211,8 @@ impl GetprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetprojectspendlimitRequest {
@@ -17360,15 +17263,17 @@ impl UpdateprojectspendlimitRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17379,6 +17284,7 @@ impl UpdateprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17387,6 +17293,7 @@ impl UpdateprojectspendlimitRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17416,15 +17323,17 @@ impl DeleteprojectspendlimitRequest {
             project_id: project_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17435,7 +17344,8 @@ impl DeleteprojectspendlimitRequest {
             "/organization/projects/{}/spend_limit", urlencoding::encode(& self
             .project_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteprojectspendlimitRequest {
@@ -17490,15 +17400,17 @@ impl CreateanAPIkeyforaserviceaccountRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17510,6 +17422,7 @@ impl CreateanAPIkeyforaserviceaccountRequest {
             urlencoding::encode(& self.project_id.to_string()), urlencoding::encode(&
             self.service_account_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17518,6 +17431,7 @@ impl CreateanAPIkeyforaserviceaccountRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17566,15 +17480,17 @@ impl CreatecontentprovenancecheckRequest {
     pub fn new(body: CreatecontentprovenancecheckForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17582,11 +17498,13 @@ impl CreatecontentprovenancecheckRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/content_provenance_checks".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -17645,47 +17563,35 @@ impl ListVideosRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/videos".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/videos".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListVideosRequest {
@@ -17716,15 +17622,17 @@ impl CreateVideoRequest {
     pub fn new(body: CreateVideoJsonBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17732,6 +17640,7 @@ impl CreateVideoRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/videos".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17740,6 +17649,7 @@ impl CreateVideoRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17799,15 +17709,17 @@ impl CreateVideoCharacterRequest {
     pub fn new(body: CreateVideoCharacterForm) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17815,11 +17727,13 @@ impl CreateVideoCharacterRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/videos/characters".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
             crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
             vec![],
+            query,
         ))
     }
 }
@@ -17854,15 +17768,17 @@ impl GetVideoCharacterRequest {
             character_id: character_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17872,7 +17788,8 @@ impl GetVideoCharacterRequest {
         let path = format!(
             "/videos/characters/{}", urlencoding::encode(& self.character_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetVideoCharacterRequest {
@@ -17915,15 +17832,17 @@ impl CreateVideoEditRequest {
     pub fn new(body: CreateVideoEditJsonBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17931,6 +17850,7 @@ impl CreateVideoEditRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/videos/edits".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17939,6 +17859,7 @@ impl CreateVideoEditRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -17975,15 +17896,17 @@ impl CreateVideoExtendRequest {
     pub fn new(body: CreateVideoExtendJsonBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -17991,6 +17914,7 @@ impl CreateVideoExtendRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/videos/extensions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -17999,6 +17923,7 @@ impl CreateVideoExtendRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18031,15 +17956,17 @@ impl GetVideoRequest {
     pub fn new(video_id: impl Into<String>) -> Self {
         Self { video_id: video_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18049,7 +17976,8 @@ impl GetVideoRequest {
         let path = format!(
             "/videos/{}", urlencoding::encode(& self.video_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetVideoRequest {
@@ -18088,15 +18016,17 @@ impl DeleteVideoRequest {
     pub fn new(video_id: impl Into<String>) -> Self {
         Self { video_id: video_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18106,7 +18036,8 @@ impl DeleteVideoRequest {
         let path = format!(
             "/videos/{}", urlencoding::encode(& self.video_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteVideoRequest {
@@ -18156,43 +18087,31 @@ impl RetrieveVideoContentRequest {
         self.variant = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/videos/{}/content", urlencoding::encode(& self.video_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.variant {
-            query_pairs.push(("variant", value.to_string()));
+            query.push(("variant".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for RetrieveVideoContentRequest {
@@ -18244,15 +18163,17 @@ impl CreateVideoRemixRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18262,6 +18183,7 @@ impl CreateVideoRemixRequest {
         let path = format!(
             "/videos/{}/remix", urlencoding::encode(& self.video_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18270,6 +18192,7 @@ impl CreateVideoRemixRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18301,15 +18224,17 @@ impl GetinputtokencountsRequest {
     pub fn new(body: TokenCountsBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18317,6 +18242,7 @@ impl GetinputtokencountsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses/input_tokens".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18325,6 +18251,7 @@ impl GetinputtokencountsRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18361,15 +18288,17 @@ impl CompactconversationRequest {
     pub fn new(body: CompactResponseMethodPublicBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18377,6 +18306,7 @@ impl CompactconversationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses/compact".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18385,6 +18315,7 @@ impl CompactconversationRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18443,47 +18374,35 @@ impl ListSkillsRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/skills".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/skills".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListSkillsRequest {
@@ -18514,15 +18433,17 @@ impl CreateSkillRequest {
     pub fn new(body: CreateSkillBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18530,6 +18451,7 @@ impl CreateSkillRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/skills".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18538,6 +18460,7 @@ impl CreateSkillRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18570,15 +18493,17 @@ impl GetSkillRequest {
     pub fn new(skill_id: impl Into<String>) -> Self {
         Self { skill_id: skill_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18588,7 +18513,8 @@ impl GetSkillRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetSkillRequest {
@@ -18636,15 +18562,17 @@ impl UpdateSkillDefaultVersionRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18654,6 +18582,7 @@ impl UpdateSkillDefaultVersionRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18662,6 +18591,7 @@ impl UpdateSkillDefaultVersionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18689,15 +18619,17 @@ impl DeleteSkillRequest {
     pub fn new(skill_id: impl Into<String>) -> Self {
         Self { skill_id: skill_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18707,7 +18639,8 @@ impl DeleteSkillRequest {
         let path = format!(
             "/skills/{}", urlencoding::encode(& self.skill_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteSkillRequest {
@@ -18746,15 +18679,17 @@ impl GetSkillContentRequest {
     pub fn new(skill_id: impl Into<String>) -> Self {
         Self { skill_id: skill_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18764,7 +18699,8 @@ impl GetSkillContentRequest {
         let path = format!(
             "/skills/{}/content", urlencoding::encode(& self.skill_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetSkillContentRequest {
@@ -18832,49 +18768,37 @@ impl ListSkillVersionsRequest {
         self.after = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/skills/{}/versions", urlencoding::encode(& self.skill_id.to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListSkillVersionsRequest {
@@ -18930,15 +18854,17 @@ impl CreateSkillVersionRequest {
             body,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -18948,6 +18874,7 @@ impl CreateSkillVersionRequest {
         let path = format!(
             "/skills/{}/versions", urlencoding::encode(& self.skill_id.to_string())
         );
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -18956,6 +18883,7 @@ impl CreateSkillVersionRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -18988,15 +18916,17 @@ impl GetSkillVersionRequest {
             version: version.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19007,7 +18937,8 @@ impl GetSkillVersionRequest {
             "/skills/{}/versions/{}", urlencoding::encode(& self.skill_id.to_string()),
             urlencoding::encode(& self.version.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetSkillVersionRequest {
@@ -19039,15 +18970,17 @@ impl DeleteSkillVersionRequest {
             version: version.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19058,7 +18991,8 @@ impl DeleteSkillVersionRequest {
             "/skills/{}/versions/{}", urlencoding::encode(& self.skill_id.to_string()),
             urlencoding::encode(& self.version.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for DeleteSkillVersionRequest {
@@ -19090,15 +19024,17 @@ impl GetSkillVersionContentRequest {
             version: version.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19109,7 +19045,8 @@ impl GetSkillVersionContentRequest {
             "/skills/{}/versions/{}/content", urlencoding::encode(& self.skill_id
             .to_string()), urlencoding::encode(& self.version.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for GetSkillVersionContentRequest {
@@ -19138,15 +19075,17 @@ impl CancelChatSessionMethodRequest {
             session_id: session_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19157,7 +19096,8 @@ impl CancelChatSessionMethodRequest {
             "/chatkit/sessions/{}/cancel", urlencoding::encode(& self.session_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for CancelChatSessionMethodRequest {
@@ -19200,15 +19140,17 @@ impl CreateChatSessionMethodRequest {
     pub fn new(body: CreateChatSessionBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19216,6 +19158,7 @@ impl CreateChatSessionMethodRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/chatkit/sessions".to_string();
+        let query: Vec<(String, String)> = Vec::new();
         Ok((
             "POST",
             path,
@@ -19224,6 +19167,7 @@ impl CreateChatSessionMethodRequest {
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
+            query,
         ))
     }
 }
@@ -19294,53 +19238,41 @@ impl ListThreadItemsMethodRequest {
         self.before = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/chatkit/threads/{}/items", urlencoding::encode(& self.thread_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for ListThreadItemsMethodRequest {
@@ -19391,15 +19323,17 @@ impl GetThreadMethodRequest {
             thread_id: thread_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19409,7 +19343,8 @@ impl GetThreadMethodRequest {
         let path = format!(
             "/chatkit/threads/{}", urlencoding::encode(& self.thread_id.to_string())
         );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for GetThreadMethodRequest {
@@ -19450,15 +19385,17 @@ impl DeleteThreadMethodRequest {
             thread_id: thread_id.into(),
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19468,7 +19405,8 @@ impl DeleteThreadMethodRequest {
         let path = format!(
             "/chatkit/threads/{}", urlencoding::encode(& self.thread_id.to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl From<&str> for DeleteThreadMethodRequest {
@@ -19551,53 +19489,41 @@ impl ListThreadsMethodRequest {
         self.user = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = "/chatkit/threads".to_string();
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let path = "/chatkit/threads".to_string();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.before {
-            query_pairs.push(("before", value.to_string()));
+            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.user {
-            query_pairs.push(("user", value.to_string()));
+            query.push(("user".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
-        }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 impl crate::shared::EndpointSpec for ListThreadsMethodRequest {
@@ -19616,27 +19542,38 @@ impl crate::shared::EndpointSpec for ListThreadsMethodRequest {
 ///     ..Default::default()
 /// };
 /// let request = BetaCreateResponseRequest::new(body)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BetaCreateResponseRequest {
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
     pub body: BetaCreateResponse,
 }
 impl BetaCreateResponseRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: BetaCreateResponse) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19644,6 +19581,17 @@ impl BetaCreateResponseRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses?beta=true".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok((
             "POST",
             path,
@@ -19651,13 +19599,14 @@ impl BetaCreateResponseRequest {
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
-            vec![],
+            headers,
+            query,
         ))
     }
 }
 impl From<BetaCreateResponse> for BetaCreateResponseRequest {
     fn from(body: BetaCreateResponse) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
 }
 impl crate::shared::EndpointSpec for BetaCreateResponseRequest {
@@ -19676,6 +19625,7 @@ impl crate::shared::EndpointSpec for BetaCreateResponseRequest {
 ///     .with_stream(/* value */)
 ///     .with_starting_after(/* value */)
 ///     .with_include_obfuscation(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19704,6 +19654,9 @@ small amount of overhead to the data stream. You can set
 the network links between your application and the OpenAI API.
 */
     pub include_obfuscation: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl BetaGetResponseRequest {
     /// Creates a new request with the required path parameters.
@@ -19714,6 +19667,7 @@ impl BetaGetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            openai_beta: None,
         }
     }
     /// Sets the `include` query parameter.
@@ -19736,55 +19690,58 @@ impl BetaGetResponseRequest {
         self.include_obfuscation = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/responses/{}?beta=true", urlencoding::encode(& self.response_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
         if let Some(ref value) = self.stream {
-            query_pairs.push(("stream", value.to_string()));
+            query.push(("stream".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.starting_after {
-            query_pairs.push(("starting_after", value.to_string()));
+            query.push(("starting_after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.include_obfuscation {
-            query_pairs.push(("include_obfuscation", value.to_string()));
+            query.push(("include_obfuscation".to_string(), value.to_string()));
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
                 .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
+                .map(|item| item.to_string())
                 .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
         }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, headers, query))
     }
 }
 impl From<&str> for BetaGetResponseRequest {
@@ -19795,6 +19752,7 @@ impl From<&str> for BetaGetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            openai_beta: None,
         }
     }
 }
@@ -19806,6 +19764,7 @@ impl From<String> for BetaGetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            openai_beta: None,
         }
     }
 }
@@ -19821,29 +19780,41 @@ impl crate::shared::EndpointSpec for BetaGetResponseRequest {
 /// use schematic_schema::openai::BetaDeleteResponseRequest;
 ///
 /// let request = BetaDeleteResponseRequest::new("response_id_value")
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BetaDeleteResponseRequest {
     /// Path parameter: response_id
     pub response_id: String,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl BetaDeleteResponseRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
+            openai_beta: None,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19854,19 +19825,34 @@ impl BetaDeleteResponseRequest {
             "/responses/{}?beta=true", urlencoding::encode(& self.response_id
             .to_string())
         );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, headers, query))
     }
 }
 impl From<&str> for BetaDeleteResponseRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
+            openai_beta: None,
         }
     }
 }
 impl From<String> for BetaDeleteResponseRequest {
     fn from(param: String) -> Self {
-        Self { response_id: param }
+        Self {
+            response_id: param,
+            openai_beta: None,
+        }
     }
 }
 impl crate::shared::EndpointSpec for BetaDeleteResponseRequest {
@@ -19881,29 +19867,41 @@ impl crate::shared::EndpointSpec for BetaDeleteResponseRequest {
 /// use schematic_schema::openai::BetaCancelResponseRequest;
 ///
 /// let request = BetaCancelResponseRequest::new("response_id_value")
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BetaCancelResponseRequest {
     /// Path parameter: response_id
     pub response_id: String,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl BetaCancelResponseRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
+            openai_beta: None,
         }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19914,19 +19912,34 @@ impl BetaCancelResponseRequest {
             "/responses/{}/cancel?beta=true", urlencoding::encode(& self.response_id
             .to_string())
         );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
+        let query: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
+        Ok(("POST", path, crate::shared::RequestBody::Empty, headers, query))
     }
 }
 impl From<&str> for BetaCancelResponseRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
+            openai_beta: None,
         }
     }
 }
 impl From<String> for BetaCancelResponseRequest {
     fn from(param: String) -> Self {
-        Self { response_id: param }
+        Self {
+            response_id: param,
+            openai_beta: None,
+        }
     }
 }
 impl crate::shared::EndpointSpec for BetaCancelResponseRequest {
@@ -19945,27 +19958,38 @@ impl crate::shared::EndpointSpec for BetaCancelResponseRequest {
 ///     ..Default::default()
 /// };
 /// let request = BetaCompactconversationRequest::new(body)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BetaCompactconversationRequest {
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
     pub body: BetaCompactResponseMethodPublicBody,
 }
 impl BetaCompactconversationRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: BetaCompactResponseMethodPublicBody) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -19973,6 +19997,17 @@ impl BetaCompactconversationRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses/compact?beta=true".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok((
             "POST",
             path,
@@ -19980,13 +20015,14 @@ impl BetaCompactconversationRequest {
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
-            vec![],
+            headers,
+            query,
         ))
     }
 }
 impl From<BetaCompactResponseMethodPublicBody> for BetaCompactconversationRequest {
     fn from(body: BetaCompactResponseMethodPublicBody) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
 }
 impl crate::shared::EndpointSpec for BetaCompactconversationRequest {
@@ -20005,6 +20041,7 @@ impl crate::shared::EndpointSpec for BetaCompactconversationRequest {
 ///     .with_order(/* value */)
 ///     .with_after(/* value */)
 ///     .with_include(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20027,6 +20064,9 @@ pub struct BetaListInputItemsRequest {
 parameter for Response creation above for more information.
 */
     pub include: Option<Vec<serde_json::Value>>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl BetaListInputItemsRequest {
     /// Creates a new request with the required path parameters.
@@ -20037,6 +20077,7 @@ impl BetaListInputItemsRequest {
             order: None,
             after: None,
             include: None,
+            openai_beta: None,
         }
     }
     /// Sets the `limit` query parameter.
@@ -20059,55 +20100,58 @@ impl BetaListInputItemsRequest {
         self.include = Some(value);
         self
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
     /// Returns `SchematicError::SerializationError` if a JSON request body
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!(
+        let path = format!(
             "/responses/{}/input_items?beta=true", urlencoding::encode(& self.response_id
             .to_string())
         );
-        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.limit {
-            query_pairs.push(("limit", value.to_string()));
+            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
-            query_pairs.push(("order", value.to_string()));
+            query.push(("order".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.after {
-            query_pairs.push(("after", value.to_string()));
+            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
-                query_pairs.push(("include", value.to_string()));
+                query.push(("include".to_string(), value.to_string()));
             }
         }
-        if !query_pairs.is_empty() {
-            let query_string: String = query_pairs
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
                 .iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                })
+                .map(|item| item.to_string())
                 .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push_str(&format!("&{}", query_string));
-            } else {
-                path.push_str(&format!("?{}", query_string));
-            }
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
         }
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, headers, query))
     }
 }
 impl From<&str> for BetaListInputItemsRequest {
@@ -20118,6 +20162,7 @@ impl From<&str> for BetaListInputItemsRequest {
             order: None,
             after: None,
             include: None,
+            openai_beta: None,
         }
     }
 }
@@ -20129,6 +20174,7 @@ impl From<String> for BetaListInputItemsRequest {
             order: None,
             after: None,
             include: None,
+            openai_beta: None,
         }
     }
 }
@@ -20148,27 +20194,38 @@ impl crate::shared::EndpointSpec for BetaListInputItemsRequest {
 ///     ..Default::default()
 /// };
 /// let request = BetaGetinputtokencountsRequest::new(body)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BetaGetinputtokencountsRequest {
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
     pub body: BetaTokenCountsBody,
 }
 impl BetaGetinputtokencountsRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: BetaTokenCountsBody) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// ## Returns
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
+    /// - Path with path parameters substituted; declared query parameters
+    ///   are not part of it
     /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
+    /// - Declared query parameters as unencoded key-value pairs
     ///
     /// ## Errors
     ///
@@ -20176,6 +20233,17 @@ impl BetaGetinputtokencountsRequest {
     /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/responses/input_tokens?beta=true".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok((
             "POST",
             path,
@@ -20183,13 +20251,14 @@ impl BetaGetinputtokencountsRequest {
                 serde_json::to_string(&self.body)
                     .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
-            vec![],
+            headers,
+            query,
         ))
     }
 }
 impl From<BetaTokenCountsBody> for BetaGetinputtokencountsRequest {
     fn from(body: BetaTokenCountsBody) -> Self {
-        Self { body }
+        Self { openai_beta: None, body }
     }
 }
 impl crate::shared::EndpointSpec for BetaGetinputtokencountsRequest {

@@ -69,6 +69,8 @@ pub struct GitHub {
     env_username: Option<String>,
     /// Headers builder with environment variable support for credentials.
     headers: schematic_define::Headers,
+    /// Explicit `ApiKeyParam` key (query or cookie); never printed by `Debug`.
+    api_key_param: Option<schematic_define::SensitiveString>,
     /// Variant-specific hooks for response customization.
     variant_hooks: crate::shared::VariantHooks,
 }
@@ -115,6 +117,7 @@ impl GitHub {
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "schematic-github-client"),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -162,6 +165,7 @@ impl GitHub {
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "schematic-github-client"),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -212,6 +216,7 @@ impl GitHub {
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "schematic-github-client"),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -263,6 +268,7 @@ impl GitHub {
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "schematic-github-client"),
+            api_key_param: None,
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -423,6 +429,11 @@ impl GitHub {
 impl Default for GitHub {
     fn default() -> Self {
         Self::new()
+    }
+}
+impl std::fmt::Debug for GitHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::shared::debug_client(f, "GitHub", &self.base_url, &self.auth_policy)
     }
 }
 /// Builder for creating customized variants of the API client.
@@ -608,6 +619,7 @@ impl<'a> GitHubVariantBuilder<'a> {
             auth_policy,
             env_username: self.base.env_username.clone(),
             headers,
+            api_key_param: self.base.api_key_param.clone(),
             variant_hooks: crate::shared::VariantHooks {
                 pre_response_json: self.pre_response_json,
                 response_mutators: self.response_mutators,
