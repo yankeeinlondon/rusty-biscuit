@@ -2445,9 +2445,13 @@ pub enum CompositionError {
         /// The value the user provided (frontmatter or `key=value`/`--set`),
         /// used as a case-insensitive path substring against the candidates.
         provided: String,
-        /// Glob patterns from the property's `match(...)` constraint. Always
-        /// non-empty for this variant (a bare `file` has no glob to walk).
-        patterns: Vec<String>,
+        /// The property's `match(...)` groups as alternatives: a file
+        /// qualifies when it satisfies **every** group of **some**
+        /// alternative, each group being one `match(...)` list (positives plus
+        /// `!` exclusions). A single schema gives one alternative; an undecided
+        /// root union gives one per contending arm. Never empty for this
+        /// variant (a bare `file` has no glob to walk).
+        alternatives: Vec<Vec<Vec<String>>>,
         /// `true` when the property is declared `file[]`.
         is_array: bool,
         /// The original file-reference failure message (e.g. `no existing file
@@ -2873,9 +2877,11 @@ pub enum InteractiveShape {
     File {
         /// `true` when the property is declared as `file[]`.
         is_array: bool,
-        /// Glob patterns from `match(...)`, empty for a bare `file`/`file[]`
-        /// property (uses the default glob).
-        patterns: Vec<String>,
+        /// The property's `match(...)` groups as alternatives, read as for
+        /// [`CompositionError::UnresolvedFileReference`]; one alternative
+        /// holding every group, or empty for a bare `file`/`file[]` property
+        /// (uses the default glob).
+        alternatives: Vec<Vec<Vec<String>>>,
     },
 }
 

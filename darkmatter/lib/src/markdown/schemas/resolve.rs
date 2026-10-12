@@ -202,6 +202,96 @@ pub fn resolve_yaml_schema_with_roots(
     }
 }
 
+/// The canonical path of the file an explicit named-type reference
+/// (`Name@reference`) selects, from a schema authored in `base_dir`.
+///
+/// This is the resolver's own target selection, exposed so an editor can find
+/// the file that defines a referenced type without a second lookup rule.
+/// `this` names no file and returns `None`.
+///
+/// ## Errors
+///
+/// The same [`SchemaError`]s named-type expansion reports for the reference:
+/// [`SchemaError::Unresolved`], [`SchemaError::NoMatch`],
+/// [`SchemaError::BareNameSiblingExists`], or
+/// [`SchemaError::RemoteUnsupported`].
+pub fn named_type_reference_path(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<Option<PathBuf>, SchemaError> {
+    if reference.trim() == "this" {
+        return Ok(None);
+    }
+    named_type_file_path(reference, base_dir, schema_roots, request_context)
+        .map(|path| Some(canonical_path(&path)))
+}
+
+/// Expands the named-type references in `schema`, as resolving it would, and
+/// returns the expanded schema with the files its references import.
+///
+/// `defining_file` is the schema file `schema` was authored in, or `None` for
+/// an inline `$schema`; it decides what `this` names and the source of every
+/// reported location. The schema supplies its own named types (an editor
+/// passes its current buffer), so a local reference reads nothing; an
+/// explicit reference reads its target through `request_context` from
+/// `base_dir`. A root union expands each inline arm with that arm's
+/// properties as `this`, as the resolver does; file-reference arms are left
+/// as authored.
+///
+/// ## Errors
+///
+/// [`SchemaError::UnknownNamedType`], [`SchemaError::ConstraintConflict`],
+/// [`SchemaError::ImportCycle`], and any error reading or resolving an
+/// imported file.
+pub fn expand_named_types(
+    schema: &SimplifiedSchema,
+    base_dir: &Path,
+    defining_file: Option<&Path>,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
+    let key = || match defining_file {
+        Some(path) => NamespaceKey::File(canonical_path(path)),
+        None => NamespaceKey::Root,
+    };
+    match schema {
+        SimplifiedSchema::Single(_) => expand_document_imports(
+            schema.clone(),
+            base_dir,
+            key(),
+            &SchemaSourcePath::root(),
+            schema_roots,
+            request_context,
+        ),
+        SimplifiedSchema::Union(arms) => {
+            let mut imports = BTreeSet::new();
+            let mut expanded = Vec::with_capacity(arms.len());
+            for (index, arm) in arms.iter().enumerate() {
+                let SchemaArm::Inline(shape) = arm else {
+                    expanded.push(arm.clone());
+                    continue;
+                };
+                let (schema, found) = expand_document_imports(
+                    SimplifiedSchema::Single(shape.clone()),
+                    base_dir,
+                    key(),
+                    &SchemaSourcePath::root().union_arm(index),
+                    schema_roots,
+                    request_context,
+                )?;
+                imports.extend(found);
+                let SimplifiedSchema::Single(shape) = schema else {
+                    unreachable!("single root-union arm remains single")
+                };
+                expanded.push(SchemaArm::Inline(shape));
+            }
+            Ok((SimplifiedSchema::Union(expanded), imports.into_iter().collect()))
+        }
+    }
+}
+
 fn resolve_root_union(
     items: &[YamlValue],
     base_dir: &Path,
@@ -1394,54 +1484,12 @@ impl ImportEngine {
                 named_types: Arc::clone(&current.named_types),
             });
         }
-        let file_ref =
-            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-                reference: reference.to_string(),
-                source,
-            })?;
-        if file_ref.class().kind == FileReferenceKind::Url {
-            return Err(SchemaError::RemoteUnsupported {
-                reference: reference.to_string(),
-            });
-        }
-
-        // Bare-name resolution against schema roots (Phase 3).
-        let path = if !self.schema_roots.is_empty() && is_bare_name(&file_ref) {
-            if let Some(p) = try_bare_name_in_roots(
-                &file_ref,
-                &self.schema_roots,
-                &self.file_resolution_context,
-            )? {
-                p
-            } else {
-                // Check sibling for pointed error.
-                let sibling = current.base_dir.join(trimmed);
-                if sibling.is_file() {
-                    return Err(SchemaError::BareNameSiblingExists {
-                        reference: trimmed.to_string(),
-                        suggestion: format!("./{trimmed}"),
-                    });
-                }
-                return Err(SchemaError::NoMatch {
-                    reference: reference.to_string(),
-                    bare_name: true,
-                });
-            }
-        } else {
-            resolve_file_reference_in_context(
-                &file_ref,
-                &current.base_dir,
-                &self.file_resolution_context,
-            )
-                .map_err(|source| SchemaError::Unresolved {
-                    reference: trimmed.to_string(),
-                    source,
-                })?
-                .ok_or_else(|| SchemaError::NoMatch {
-                    reference: trimmed.to_string(),
-                    bare_name: false,
-                })?
-        };
+        let path = named_type_file_path(
+            reference,
+            &current.base_dir,
+            &self.schema_roots,
+            &self.file_resolution_context,
+        )?;
 
         let canonical = canonical_path(&path);
         self.dependencies.insert(canonical.clone());
@@ -1481,6 +1529,68 @@ impl ImportEngine {
         parts.push(repeat);
         parts.join(" -> ")
     }
+}
+
+/// The file an explicit named-type reference (`Name@reference`) selects,
+/// resolved exactly as the resolver selects it: schema roots nearest-first for
+/// a bare file name when roots are configured, else through `request_context`
+/// from `base_dir` (the directory of the schema that wrote the reference).
+fn named_type_file_path(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<PathBuf, SchemaError> {
+    let trimmed = reference.trim();
+    let file_ref =
+        FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+            reference: reference.to_string(),
+            source,
+        })?;
+    if file_ref.class().kind == FileReferenceKind::Url {
+        return Err(SchemaError::RemoteUnsupported {
+            reference: reference.to_string(),
+        });
+    }
+
+    // Bare-name resolution against schema roots (Phase 3).
+    let path = if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+        if let Some(p) = try_bare_name_in_roots(
+            &file_ref,
+            schema_roots,
+            request_context,
+        )? {
+            p
+        } else {
+            // Check sibling for pointed error.
+            let sibling = base_dir.join(trimmed);
+            if sibling.is_file() {
+                return Err(SchemaError::BareNameSiblingExists {
+                    reference: trimmed.to_string(),
+                    suggestion: format!("./{trimmed}"),
+                });
+            }
+            return Err(SchemaError::NoMatch {
+                reference: reference.to_string(),
+                bare_name: true,
+            });
+        }
+    } else {
+        resolve_file_reference_in_context(
+            &file_ref,
+            base_dir,
+            request_context,
+        )
+            .map_err(|source| SchemaError::Unresolved {
+                reference: trimmed.to_string(),
+                source,
+            })?
+            .ok_or_else(|| SchemaError::NoMatch {
+                reference: trimmed.to_string(),
+                bare_name: false,
+            })?
+    };
+    Ok(path)
 }
 
 /// Rewrites every `example(...)` reference in `atom`, including those of
@@ -4547,5 +4657,59 @@ mod shared_type_tables {
             assert_eq!(resolved.json_schema["required"], json!(["local"]), "tagged={tagged}");
             assert_eq!(resolved.imports, vec![canonical_path(&types)], "tagged={tagged}");
         }
+    }
+
+    #[test]
+    fn expand_named_types_reads_this_from_the_supplied_schema_not_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        std::fs::write(dir.path().join("types.yaml"), "kind: schema\ntypes:\n  shared: number\n").unwrap();
+        // The defining file on disk is stale: it defines no `base`.
+        let schema_file = dir.path().join("schema.yaml");
+        std::fs::write(&schema_file, "kind: schema\ntypes:\n  other: string\n").unwrap();
+        let buffer = parse_yaml_schema(
+            &serde_yaml_ng::from_str("title: base\ncount: 'shared@./types.yaml'\nbase: string(required)\n")
+                .unwrap(),
+        )
+        .unwrap();
+
+        let (expanded, imports) =
+            expand_named_types(&buffer, dir.path(), Some(&schema_file), &[], &context).unwrap();
+        let SimplifiedSchema::Single(shape) = expanded else { panic!("single schema") };
+        assert!(shape.properties["title"].is_required(), "`base` came from the buffer");
+        assert_eq!(imports, vec![canonical_path(&dir.path().join("types.yaml"))]);
+
+        let missing = parse_yaml_schema(&serde_yaml_ng::from_str("title: nope\n").unwrap()).unwrap();
+        let error = expand_named_types(&missing, dir.path(), Some(&schema_file), &[], &context)
+            .unwrap_err();
+        let SchemaError::UnknownNamedType { name, namespace, site } = error else {
+            panic!("unknown named type: {error:?}")
+        };
+        assert_eq!(name, "nope");
+        assert_eq!(namespace, SchemaSourceId::File(canonical_path(&schema_file)));
+        assert_eq!(site.path, SchemaSourcePath::root().property("title"));
+
+        let inline = expand_named_types(&missing, dir.path(), None, &[], &context).unwrap_err();
+        assert!(matches!(
+            inline,
+            SchemaError::UnknownNamedType { namespace: SchemaSourceId::InlineDocument, .. }
+        ));
+    }
+
+    #[test]
+    fn named_type_reference_path_selects_the_resolver_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let types = dir.path().join("types.yaml");
+        std::fs::write(&types, "kind: schema\ntypes:\n  shared: number\n").unwrap();
+        assert_eq!(named_type_reference_path("this", dir.path(), &[], &context).unwrap(), None);
+        assert_eq!(
+            named_type_reference_path("./types.yaml", dir.path(), &[], &context).unwrap(),
+            Some(canonical_path(&types))
+        );
+        assert!(matches!(
+            named_type_reference_path("./missing.yaml", dir.path(), &[], &context),
+            Err(SchemaError::NoMatch { .. })
+        ));
     }
 }

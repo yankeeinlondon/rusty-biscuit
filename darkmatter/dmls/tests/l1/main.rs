@@ -15,6 +15,7 @@ mod level1_graph_index;
 mod level1_wiki;
 mod lsp_session;
 mod mapping_only_corpus;
+mod named_type_references;
 mod no_side_effects;
 mod packaging_contract;
 mod repository_contexts;

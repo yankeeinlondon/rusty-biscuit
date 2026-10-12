@@ -28,6 +28,7 @@ use lsp_types::{
 
 use crate::context::resolution_failure_data;
 use crate::diagnostics::codes::{code, source};
+use crate::diagnostics::named_types;
 use crate::diagnostics::nested_span;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
@@ -95,6 +96,14 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     }
 
     suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
+
+    if let Some(error) = &overlay.standalone_resolution
+        && let SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } =
+            &overlay.schema_authoring
+    {
+        let scope = named_types::NamedTypeScope::standalone(ctx, model);
+        named_types::standalone_diagnostics(&scope, error, None, &mut out);
+    }
 
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
         out.push(diagnostic(
@@ -174,6 +183,11 @@ fn schema_prepare_diagnostic_with_origin(
     let fallback_span = ast
         .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
         .or_else(|| ast.map(FrontmatterAst::block_span));
+    if named_types::is_named_type_error(error) {
+        let scope = named_types::NamedTypeScope::frontmatter(ctx, ast, fallback_span);
+        out.push(scope.diagnostic(error, referenced_origin));
+        return;
+    }
     let (code_value, message, span) = match error {
         SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
             if property != "<root>" =>

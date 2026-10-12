@@ -209,7 +209,7 @@ pub fn root_union_match_groups<'a>(arm: &'a SchemaArm, property: &str) -> Option
 
 /// Every non-empty `match` group of a `file` property, in authored order;
 /// `None` when it has none.
-pub(crate) fn file_match_groups(definition: &PropertyDef) -> Option<Vec<&[String]>> {
+pub fn file_match_groups(definition: &PropertyDef) -> Option<Vec<&[String]>> {
     let PropertyDef::Single(atom) = definition else {
         return None;
     };

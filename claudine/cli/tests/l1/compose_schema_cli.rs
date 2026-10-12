@@ -1747,6 +1747,28 @@ fn completion_file_match_emits_matching_files_only() {
     );
 }
 
+/// A reused file type keeps its `match` group beside the use site's: the
+/// completer offers only files both groups admit.
+#[test]
+fn completion_file_match_intersects_a_reused_types_groups() {
+    let ws = common::TestWorkspace::named("complete-schema-file-match-groups");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("types.yaml"),
+        "kind: schema\ntypes:\n  doc: \"file(match('*.md'))\"\n",
+    );
+    write_file(
+        &ws.path().join("prompts").join("read.md"),
+        "---\n$schema:\n  doc: \"doc(match('guide*'))@./types.yaml\"\n---\nRead {{doc}}.\n",
+    );
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        write_file(&ws.path().join("docs").join(file), "x\n");
+    }
+
+    let got = run_complete(ws.path(), &["compose", "prompts/read.md", "doc="]);
+    assert_eq!(got, ["doc='docs/guide-intro.md'"]);
+}
+
 #[test]
 fn completion_file_match_emits_path_qualified_glob_matches() {
     // Regression test for review-4 medium finding. A schema like

@@ -8,9 +8,9 @@
 //!
 //! Three property categories are surfaced:
 //!
-//! - [`CompletionKind::File`] — filesystem paths filtered by zero or more
-//!   `match=` globs. The caller (shell-completion generator) walks the
-//!   filesystem; this module only returns the patterns.
+//! - [`CompletionKind::File`] — filesystem paths filtered by the property's
+//!   `match(...)` groups. The caller (shell-completion generator) walks the
+//!   filesystem; this module only returns the groups.
 //! - [`CompletionKind::Enum`] — the enumerated members of an `enum` property.
 //! - [`CompletionKind::Hint`] — `url` / `email` / date-family properties, where
 //!   completion is a one-line format hint (no values).
@@ -58,10 +58,17 @@ pub struct CompletionSuggestion {
 /// The category of completion produced for a property.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompletionKind {
-    /// Filesystem-path completion. Patterns are the raw glob strings from
-    /// `match(...)` (including any `!`-prefixed negations). Empty when the
-    /// property is a bare `file` with no `match` constraint.
-    File { patterns: Vec<String> },
+    /// Filesystem-path completion.
+    ///
+    /// `alternatives` is an OR of AND-ed groups: a path is a candidate when
+    /// it satisfies **every** group of **some** alternative, each group judged
+    /// as a [`FileMatchGlobs`](super::file_match::FileMatchGlobs) over the raw glob
+    /// strings of one `match(...)` (including `!`-prefixed exclusions). A
+    /// single property yields one alternative holding each of its groups (a
+    /// reused file type adds the use site's groups to the inherited ones); a
+    /// root union yields one alternative per contributing arm. Empty when no
+    /// contributing atom has a `match` constraint (a bare `file`).
+    File { alternatives: Vec<Vec<Vec<String>>> },
     /// Enum-member completion. The members come from the constraint payload
     /// in declaration order.
     Enum { members: Vec<String> },
@@ -78,8 +85,8 @@ pub enum CompletionKind {
 /// completion" without merging competing arms.
 ///
 /// For a **root-level union**, `property` is gathered from every inline arm
-/// that declares it. When every contributing arm is a `file`, their
-/// `match(...)` globs are combined (deduplicated) so the union offers the union
+/// that declares it. When every contributing arm is a `file`, each arm's
+/// `match(...)` groups become one alternative, so the union offers the union
 /// of its arms' candidates; otherwise the first completable arm wins. See
 /// [`suggestion_from_union`].
 pub fn for_property(effective: &EffectiveSchema, property: &str) -> Option<CompletionSuggestion> {
@@ -133,9 +140,11 @@ fn completable_in_shape(shape: &SchemaShape) -> Vec<String> {
 /// root-level union.
 ///
 /// Each arm that declares `property` contributes its first completable atom.
-/// When every contributing atom is a `file`, their `match(...)` globs are
-/// merged (deduplicated, first-seen order) so a union of file-typed arms
+/// When every contributing atom is a `file`, each atom's groups become one
+/// alternative (deduplicated, first-seen order) so a union of file-typed arms
 /// offers the union of their candidates instead of only the first arm's.
+/// Arms are never concatenated into one group: that would let one arm's
+/// exclusions and conjunctions leak into another's.
 /// Otherwise the first contributing atom wins, matching the single-shape
 /// "first completable arm" rule. Unresolved [`SchemaArm::FileRef`] arms are
 /// skipped.
@@ -154,16 +163,11 @@ fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<Completio
         .iter()
         .all(|atom| matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File)));
     if all_file {
-        let mut patterns: Vec<String> = Vec::new();
+        let mut alternatives: Vec<Vec<Vec<String>>> = Vec::new();
         for atom in &atoms {
-            for constraint in &atom.constraints {
-                if let Constraint::Match(arm_patterns) = constraint {
-                    for pattern in arm_patterns {
-                        if !patterns.contains(pattern) {
-                            patterns.push(pattern.clone());
-                        }
-                    }
-                }
+            let groups = match_groups(atom);
+            if !groups.is_empty() && !alternatives.contains(&groups) {
+                alternatives.push(groups);
             }
         }
         return Some(CompletionSuggestion {
@@ -171,7 +175,7 @@ fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<Completio
             is_array: atoms.iter().any(|atom| atom.is_array),
             description: first.description.clone(),
             generated: atoms.iter().all(|atom| atom_is_generated(atom)),
-            kind: CompletionKind::File { patterns },
+            kind: CompletionKind::File { alternatives },
         });
     }
 
@@ -230,22 +234,29 @@ fn is_completable(ty: &TypeExpr) -> bool {
     }
 }
 
+/// Every non-empty `match(...)` group on `atom`, in authored order.
+fn match_groups(atom: &PropertyAtom) -> Vec<Vec<String>> {
+    atom.constraints
+        .iter()
+        .filter_map(|constraint| match constraint {
+            Constraint::Match(patterns) if !patterns.is_empty() => Some(patterns.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
     let ty = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
         TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => return None,
     };
     match ty {
-        SimplifiedType::File => Some(CompletionKind::File {
-            patterns: atom
-                .constraints
-                .iter()
-                .find_map(|c| match c {
-                    Constraint::Match(patterns) => Some(patterns.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default(),
-        }),
+        SimplifiedType::File => {
+            let groups = match_groups(atom);
+            Some(CompletionKind::File {
+                alternatives: if groups.is_empty() { Vec::new() } else { vec![groups] },
+            })
+        }
         SimplifiedType::Enum => Some(CompletionKind::Enum {
             members: atom
                 .constraints
@@ -298,8 +309,8 @@ mod tests {
         assert!(!suggestion.is_array);
         assert!(!suggestion.generated);
         match suggestion.kind {
-            CompletionKind::File { patterns } => {
-                assert_eq!(patterns, vec!["*.png", "*.jpg"]);
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["*.png", "*.jpg"]]]);
             }
             other => panic!("expected File completion, got {other:?}"),
         }
@@ -310,7 +321,7 @@ mod tests {
         let eff = effective("$schema:\n  cover: file\n");
         let suggestion = for_property(&eff, "cover").expect("cover should be completable");
         match suggestion.kind {
-            CompletionKind::File { patterns } => assert!(patterns.is_empty()),
+            CompletionKind::File { alternatives } => assert!(alternatives.is_empty()),
             other => panic!("expected File completion, got {other:?}"),
         }
     }
@@ -324,8 +335,8 @@ mod tests {
         let eff = effective("$schema:\n  review: \"file(eager; match('**/*review*.md'))\"\n");
         let suggestion = for_property(&eff, "review").expect("review should be completable");
         match suggestion.kind {
-            CompletionKind::File { patterns } => {
-                assert_eq!(patterns, vec!["**/*review*.md"]);
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["**/*review*.md"]]]);
             }
             other => panic!("expected File completion, got {other:?}"),
         }
@@ -349,7 +360,7 @@ mod tests {
         let suggestion = for_property(&eff, "cover").expect("cover should be completable");
         assert!(suggestion.generated);
         match suggestion.kind {
-            CompletionKind::File { patterns } => assert_eq!(patterns, vec!["*.png"]),
+            CompletionKind::File { alternatives } => assert_eq!(alternatives, vec![vec![vec!["*.png"]]]),
             other => panic!("expected File completion, got {other:?}"),
         }
     }
@@ -475,27 +486,32 @@ mod tests {
             "  - design: \"file(match('**/design*.md'))\"\n",
         ));
         match for_property(&eff, "spec").expect("spec completable").kind {
-            CompletionKind::File { patterns } => assert_eq!(patterns, vec!["**/spec*.md"]),
+            CompletionKind::File { alternatives } => assert_eq!(alternatives, vec![vec![vec!["**/spec*.md"]]]),
             other => panic!("expected File completion for spec, got {other:?}"),
         }
         match for_property(&eff, "design").expect("design completable").kind {
-            CompletionKind::File { patterns } => assert_eq!(patterns, vec!["**/design*.md"]),
+            CompletionKind::File { alternatives } => assert_eq!(alternatives, vec![vec![vec!["**/design*.md"]]]),
             other => panic!("expected File completion for design, got {other:?}"),
         }
     }
 
     #[test]
-    fn root_union_combines_file_patterns_for_shared_property() {
-        // The same property in two file-typed arms must combine its match
-        // globs (deduped) instead of surfacing only the first arm's.
+    fn root_union_offers_each_file_arm_as_its_own_alternative() {
+        // The same property in two file-typed arms must offer either arm's
+        // candidates instead of surfacing only the first arm's; each arm stays
+        // its own alternative so one arm's globs never widen or narrow another.
         let eff = effective(concat!(
             "$schema:\n",
             "  - doc: \"file(match('**/spec*.md'))\"\n",
             "  - doc: \"file(match('**/design*.md', '**/spec*.md'))\"\n",
+            "  - doc: \"file(match('**/spec*.md'))\"\n",
         ));
         match for_property(&eff, "doc").expect("doc completable").kind {
-            CompletionKind::File { patterns } => {
-                assert_eq!(patterns, vec!["**/spec*.md", "**/design*.md"]);
+            CompletionKind::File { alternatives } => {
+                assert_eq!(
+                    alternatives,
+                    vec![vec![vec!["**/spec*.md"]], vec![vec!["**/design*.md", "**/spec*.md"]]]
+                );
             }
             other => panic!("expected combined File completion, got {other:?}"),
         }
@@ -511,8 +527,8 @@ mod tests {
         let suggestion = for_property(&eff, "doc").expect("doc completable");
         assert!(suggestion.generated);
         match suggestion.kind {
-            CompletionKind::File { patterns } => {
-                assert_eq!(patterns, vec!["**/spec*.md", "**/design*.md"]);
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["**/spec*.md"]], vec![vec!["**/design*.md"]]]);
             }
             other => panic!("expected combined File completion, got {other:?}"),
         }
@@ -525,8 +541,8 @@ mod tests {
         let suggestion = for_property(&eff, "doc").expect("doc completable");
         assert!(!suggestion.generated);
         match suggestion.kind {
-            CompletionKind::File { patterns } => {
-                assert_eq!(patterns, vec!["**/spec*.md", "**/design*.md"]);
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["**/spec*.md"]], vec![vec!["**/design*.md"]]]);
             }
             other => panic!("expected combined File completion, got {other:?}"),
         }
@@ -544,6 +560,32 @@ mod tests {
         match suggestion.kind {
             CompletionKind::Enum { members } => assert_eq!(members, vec!["draft", "published"]),
             other => panic!("expected Enum completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repeated_match_groups_stay_separate_groups_of_one_alternative() {
+        let eff = effective("$schema:\n  doc: \"file(match('*.md'); match('guide*', '!guide-old*'))\"\n");
+        match for_property(&eff, "doc").expect("doc completable").kind {
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["*.md"], vec!["guide*", "!guide-old*"]]]);
+            }
+            other => panic!("expected grouped File completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn root_union_arm_keeps_its_groups_together() {
+        let eff = effective(concat!(
+            "$schema:\n",
+            "  - doc: \"file(match('*.md'); match('guide*'))\"\n",
+            "  - doc: \"file(match('*.txt'))\"\n",
+        ));
+        match for_property(&eff, "doc").expect("doc completable").kind {
+            CompletionKind::File { alternatives } => {
+                assert_eq!(alternatives, vec![vec![vec!["*.md"], vec!["guide*"]], vec![vec!["*.txt"]]]);
+            }
+            other => panic!("expected grouped File completion, got {other:?}"),
         }
     }
 }

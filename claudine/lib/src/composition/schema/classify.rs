@@ -205,10 +205,10 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// candidates. The CLI catches this variant and drives a confirmation dialog
 /// (single match) or chooser (multiple), mirroring the missing-property loop.
 ///
-/// A root union qualifies too: the glob comes from the arm a literal
+/// A root union qualifies too: the `match` groups come from the arm a literal
 /// discriminant settles, the arm that declares the property as
-/// `file(match)`, or the D1 merge when several do (see
-/// [`supplied::file_reference_target`]).
+/// `file(match)`, or the D1 merge (one alternative per arm) when several do
+/// (see [`supplied::file_reference_target`]).
 ///
 /// Returns `None` when no problem qualifies, so the caller falls back to the
 /// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
@@ -240,7 +240,7 @@ pub(super) fn classify_unresolved_file_reference(
             source_path: source_path.to_path_buf(),
             property: name,
             provided,
-            patterns: target.patterns,
+            alternatives: target.alternatives,
             is_array: target.is_array,
             reason: problem.message.clone(),
         });
@@ -344,17 +344,17 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
             max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::File) => {
-            let patterns = atom
+            let groups: Vec<Vec<String>> = atom
                 .constraints
                 .iter()
-                .find_map(|c| match c {
-                    Constraint::Match(p) => Some(p.clone()),
+                .filter_map(|c| match c {
+                    Constraint::Match(p) if !p.is_empty() => Some(p.clone()),
                     _ => None,
                 })
-                .unwrap_or_default();
+                .collect();
             Some(InteractiveShape::File {
                 is_array: atom.is_array,
-                patterns,
+                alternatives: if groups.is_empty() { Vec::new() } else { vec![groups] },
             })
         }
         // A `literal(...)` is a fixed `const` with exactly one valid value, so

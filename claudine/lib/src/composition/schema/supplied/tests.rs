@@ -185,7 +185,7 @@ fn assert_single_spec_partial(pending: &[UnresolvedSuppliedFile], expected: &str
     let CompositionError::UnresolvedFileReference {
         property,
         provided,
-        patterns,
+        alternatives,
         is_array,
         ..
     } = &pending[0].error
@@ -194,7 +194,7 @@ fn assert_single_spec_partial(pending: &[UnresolvedSuppliedFile], expected: &str
     };
     assert_eq!(property, "spec");
     assert_eq!(provided, expected);
-    assert_eq!(patterns, &vec!["**/*spec*.md".to_string()]);
+    assert_eq!(alternatives, &alternatives_of(&[&[&["**/*spec*.md"]]]));
     assert!(!is_array);
     assert_eq!(pending[0].array_index, None);
 }
@@ -264,8 +264,8 @@ fn supplied_files_select_shipped_clarify_spec_arm() {
     assert_eq!(pending.len(), 1, "{pending:?}");
     assert!(matches!(
         &pending[0].error,
-        CompositionError::UnresolvedFileReference { property, provided, patterns, .. }
-            if property == "spec" && provided == "fix" && patterns == &vec!["**/*spec*.md".to_string()]
+        CompositionError::UnresolvedFileReference { property, provided, alternatives, .. }
+            if property == "spec" && provided == "fix" && alternatives == &alternatives_of(&[&[&["**/*spec*.md"]]])
     ));
 }
 
@@ -288,13 +288,13 @@ const FEATURES_SPEC: &str = "file(required;eager;match(**/features/**/spec.md))"
 const FIXES_SPEC: &str = "file(required;eager;match(**/fixes/**/spec.md))";
 
 #[test]
-fn undecided_union_merges_every_arms_eager_file_patterns() {
+fn undecided_union_offers_every_arms_eager_file_groups_as_alternatives() {
     let pending = pending_for(&two_tree_union(FEATURES_SPEC, FIXES_SPEC), json!({"spec": "cli"}));
     assert_eq!(pending.len(), 1, "{pending:?}");
     let CompositionError::UnresolvedFileReference {
         property,
         provided,
-        patterns,
+        alternatives,
         is_array,
         reason,
         ..
@@ -305,15 +305,15 @@ fn undecided_union_merges_every_arms_eager_file_patterns() {
     assert_eq!(property, "spec");
     assert_eq!(provided, "cli");
     assert_eq!(
-        patterns,
-        &vec!["**/features/**/spec.md".to_string(), "**/fixes/**/spec.md".to_string()]
+        alternatives,
+        &alternatives_of(&[&[&["**/features/**/spec.md"]], &[&["**/fixes/**/spec.md"]]])
     );
     assert!(!is_array);
     assert!(reason.starts_with("no existing file matched reference `cli`"), "{reason}");
 }
 
 #[test]
-fn undecided_union_deduplicates_patterns_in_arm_order() {
+fn undecided_union_keeps_each_arm_as_one_alternative_in_arm_order() {
     let pending = pending_for(
         &two_tree_union(
             "file(required;eager;match(**/fixes/**/spec.md, **/*.md))",
@@ -322,16 +322,16 @@ fn undecided_union_deduplicates_patterns_in_arm_order() {
         json!({"spec": "cli"}),
     );
     assert_eq!(pending.len(), 1, "{pending:?}");
-    let CompositionError::UnresolvedFileReference { patterns, .. } = &pending[0].error else {
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = &pending[0].error else {
         panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
     };
+    // Never one concatenated list: each arm's globs stay together.
     assert_eq!(
-        patterns,
-        &vec![
-            "**/fixes/**/spec.md".to_string(),
-            "**/*.md".to_string(),
-            "**/features/**/spec.md".to_string(),
-        ]
+        alternatives,
+        &alternatives_of(&[
+            &[&["**/fixes/**/spec.md", "**/*.md"]],
+            &[&["**/*.md", "**/features/**/spec.md"]],
+        ])
     );
     // The arms of a previously ambiguous pair now share one existence check.
     let pending = pending_for(
@@ -340,10 +340,32 @@ fn undecided_union_deduplicates_patterns_in_arm_order() {
         json!({"spec": "partial"}),
     );
     assert_eq!(pending.len(), 1, "{pending:?}");
-    let CompositionError::UnresolvedFileReference { patterns, .. } = &pending[0].error else {
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = &pending[0].error else {
         panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
     };
-    assert_eq!(patterns, &vec!["**/*.md".to_string(), "**/*spec*.md".to_string()]);
+    assert_eq!(alternatives, &alternatives_of(&[&[&["**/*.md"]], &[&["**/*spec*.md"]]]));
+    // Arms with identical groups are one alternative.
+    let pending = pending_for(
+        &two_tree_union(FIXES_SPEC, FIXES_SPEC),
+        json!({"spec": "partial"}),
+    );
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = &pending[0].error else {
+        panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+    };
+    assert_eq!(alternatives, &alternatives_of(&[&[&["**/fixes/**/spec.md"]]]));
+}
+
+/// `alternatives` spelled as nested string-slice literals.
+fn alternatives_of(alternatives: &[&[&[&str]]]) -> Vec<Vec<Vec<String>>> {
+    alternatives
+        .iter()
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|group| group.iter().map(|pattern| (*pattern).to_string()).collect())
+                .collect()
+        })
+        .collect()
 }
 
 #[test]
@@ -417,13 +439,75 @@ fn an_existing_file_selects_the_arm_whose_contested_glob_admits_it() {
         .caller_input_records;
         let pending = unresolved_supplied_files(&source, &records, &context.for_source(&path));
         assert_eq!(pending.len(), 1, "{pending:?}");
-        let CompositionError::UnresolvedFileReference { property, patterns, .. } =
+        let CompositionError::UnresolvedFileReference { property, alternatives, .. } =
             &pending[0].error
         else {
             panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
         };
         assert_eq!(property, "plan");
-        assert_eq!(patterns, &vec![expected.to_string()], "spec in {tree}");
+        assert_eq!(alternatives, &alternatives_of(&[&[&[expected]]]), "spec in {tree}");
+    }
+}
+
+/// A caller file selects the arm whose reused `doc` type it satisfies only
+/// when it satisfies every `match` group, judged from the caller's origin.
+#[test]
+fn an_existing_caller_file_selects_an_arm_only_when_every_match_group_admits_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let caller = dir.path().join("caller");
+    let document = dir.path().join("document");
+    std::fs::create_dir(&caller).unwrap();
+    std::fs::create_dir(&document).unwrap();
+    // The files exist only beside the caller: judged from the document they
+    // would name nothing and rule no arm out.
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        std::fs::write(caller.join(file), "x\n").unwrap();
+    }
+    std::fs::write(
+        document.join("types.yaml"),
+        "kind: schema\ntypes:\n  doc: \"file(match('*.md'))\"\n",
+    )
+    .unwrap();
+    let path = document.join("prompt.md");
+    std::fs::write(
+        &path,
+        "---\n\
+         $schema:\n\
+         \x20 - doc: \"doc(match('guide*'))@./types.yaml\"\n\
+         \x20   plan: 'file(required;eager;match(**/one/*.md))'\n\
+         \x20 - doc: file\n\
+         \x20   plan: 'file(required;eager;match(**/two/*.md))'\n\
+         ---\nbody\n",
+    )
+    .unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
+    let origin = FileResolutionContext::new(&caller);
+    for (doc, expected) in [
+        // Both groups admit it, so both arms still contend (ruling D1).
+        ("guide-intro.md", alternatives_of(&[&[&["**/one/*.md"]], &[&["**/two/*.md"]]])),
+        // Only the inherited group admits it: the first arm is ruled out.
+        ("notes.md", alternatives_of(&[&[&["**/two/*.md"]]])),
+        // Only the use-site group admits it.
+        ("guide.txt", alternatives_of(&[&[&["**/two/*.md"]]])),
+    ] {
+        let records = CallerInputLayers::from_caller_overrides(
+            Some(json!({"doc": doc, "plan": "partial"})),
+            origin.clone(),
+        )
+        .caller_input_records;
+        let pending = unresolved_supplied_files(
+            &source,
+            &records,
+            &FileResolutionContext::new(&document).for_source(&path),
+        );
+        assert_eq!(pending.len(), 1, "{doc}: {pending:?}");
+        let CompositionError::UnresolvedFileReference { property, alternatives, .. } =
+            &pending[0].error
+        else {
+            panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+        };
+        assert_eq!(property, "plan");
+        assert_eq!(alternatives, &expected, "doc = {doc}");
     }
 }
 
@@ -436,10 +520,10 @@ fn a_partial_never_rules_a_contested_arm_out() {
         two_tree_union(FEATURES_SPEC, FIXES_SPEC).trim_end_matches("---\nbody\n")
     );
     let pending = pending_for(&settled, json!({"spec": "cli"}));
-    let CompositionError::UnresolvedFileReference { patterns, .. } = &pending[0].error else {
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = &pending[0].error else {
         panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
     };
-    assert_eq!(patterns, &vec!["**/fixes/**/spec.md".to_string()]);
+    assert_eq!(alternatives, &alternatives_of(&[&[&["**/fixes/**/spec.md"]]]));
 }
 
 /// The late verdict offers only the settled arm's candidates: a file from the
@@ -456,8 +540,8 @@ fn late_verdict_on_a_settled_union_completes_against_that_arm_alone() {
     let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
     let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context())
     .unwrap_err();
-    let CompositionError::UnresolvedFileReference { patterns, .. } = error else {
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = error else {
         panic!("expected UnresolvedFileReference, got {error:?}");
     };
-    assert_eq!(patterns, vec!["**/fixes/**/spec.md".to_string()]);
+    assert_eq!(alternatives, alternatives_of(&[&[&["**/fixes/**/spec.md"]]]));
 }

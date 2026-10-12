@@ -11,10 +11,17 @@
 //!   tagged `kind: schema`): the whole buffer is the source, and spans are
 //!   already document-relative (offset zero).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::extract_frontmatter_block;
+use darkmatter::markdown::schemas::resolve::expand_named_types;
+use darkmatter::markdown::schemas::{
+    Constraint, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SuggestionLintProblem,
+    TypeExpr,
+};
+use darkmatter::markdown::span::SourceSpan;
 use darkmatter::markdown::schemas::SchemaError;
 use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
 use darkmatter::markdown::schemas::lint_suggestions;
@@ -33,42 +40,104 @@ use crate::overlay::SuggestionState;
 /// the document has no frontmatter, no `$schema` key, or the schema is not an
 /// inline mapping (e.g. a file reference), returns [`SuggestionState::Inactive`].
 pub fn inline_lints(text: &str, ast: Option<&FrontmatterAst>) -> SuggestionState {
-    let Some(ast) = ast else {
-        return SuggestionState::Inactive;
-    };
-    let Some(schema_entry) = ast.schema_entry() else {
-        return SuggestionState::Inactive;
-    };
-    if schema_entry.kind != crate::overlay::FmValueKind::Mapping {
-        return SuggestionState::Inactive;
+    match inline_schema(text, ast) {
+        Some(schema) => SuggestionState::Inline(lint_suggestions(&schema).unwrap_or_default()),
+        None => SuggestionState::Inactive,
     }
+}
 
-    let extraction = match extract_frontmatter_block(text) {
-        Ok(Some(extraction)) => extraction,
-        _ => return SuggestionState::Inactive,
-    };
-    let yaml_value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(extraction.yaml) {
-        Ok(value) => value,
-        Err(_) => return SuggestionState::Inactive,
-    };
-    let Some(schema_value) = yaml_value.get("$schema") else {
-        return SuggestionState::Inactive;
-    };
+/// The inline `$schema` mapping of a Markdown document, parsed with its
+/// `suggest(...)` candidate spans in document offsets; `None` when there is
+/// no inline mapping or it does not parse.
+pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SimplifiedSchema> {
+    let schema_entry = ast?.schema_entry()?;
+    if schema_entry.kind != crate::overlay::FmValueKind::Mapping {
+        return None;
+    }
+    let extraction = extract_frontmatter_block(text).ok()??;
+    let yaml_value: serde_yaml_ng::Value = serde_yaml_ng::from_str(extraction.yaml).ok()?;
+    let schema_value = yaml_value.get("$schema")?;
     // Scope the span-projection source to just the `$schema` value's subtree so
     // a decoy frontmatter field before `$schema` carrying identical expression
     // text cannot capture the diagnostic span.
     let value_span = crate::overlay::frontmatter::line_aligned_span(text, schema_entry.value_span.clone());
     let schema_yaml_source = &text[value_span.start..value_span.end];
-    let schema = match parse_yaml_schema_with_source(
-        schema_value,
-        schema_yaml_source,
-        value_span.start,
-    ) {
-        Ok(schema) => schema,
-        Err(_) => return SuggestionState::Inactive,
+    parse_yaml_schema_with_source(schema_value, schema_yaml_source, value_span.start).ok()
+}
+
+/// Lints the `suggest(...)` candidates written on named-type references
+/// against the definitions those references resolve to.
+///
+/// The passive lint cannot judge them: a reference's target type is unknown
+/// until it is resolved. `schema` must carry this document's candidate spans;
+/// only candidates written here are reported, since an inherited candidate
+/// belongs to (and is linted in) the file that declares it. A schema with no
+/// such candidate is not expanded at all, and a schema whose references fail
+/// to resolve reports nothing here, because resolution reports that failure.
+pub fn reference_lints(
+    schema: &SimplifiedSchema,
+    base_dir: &Path,
+    defining_file: Option<&Path>,
+    schema_roots: &[PathBuf],
+    context: &FileResolutionContext,
+) -> Vec<SuggestionLintProblem> {
+    let mut written = Vec::new();
+    collect_reference_candidates(schema, &mut written);
+    if written.is_empty() {
+        return Vec::new();
+    }
+    let Ok((expanded, _)) =
+        expand_named_types(schema, base_dir, defining_file, schema_roots, context)
+    else {
+        return Vec::new();
     };
-    let problems = lint_suggestions(&schema).unwrap_or_default();
-    SuggestionState::Inline(problems)
+    lint_suggestions(&expanded)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|problem| written.contains(&(problem.span.clone(), problem.decoded.clone())))
+        .collect()
+}
+
+/// `(span, decoded)` of every `suggest(...)` candidate written on a
+/// named-type reference.
+fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(SourceSpan, String)>) {
+    fn walk_shape(shape: &SchemaShape, out: &mut Vec<(SourceSpan, String)>) {
+        let definitions = shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def));
+        for definition in definitions {
+            let atoms = match definition {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(atoms) => atoms.as_slice(),
+            };
+            for atom in atoms {
+                match &atom.ty {
+                    TypeExpr::Imported { .. } => {
+                        for constraint in atom.constraints.iter().chain(&atom.array_constraints) {
+                            if let Constraint::Suggest(candidates) = constraint {
+                                out.extend(candidates.iter().map(|candidate| {
+                                    (candidate.span.clone(), candidate.decoded.clone())
+                                }));
+                            }
+                        }
+                    }
+                    TypeExpr::InlineObject(nested) => walk_shape(nested, out),
+                    TypeExpr::Primitive(_) => {}
+                }
+            }
+        }
+    }
+    match schema {
+        SimplifiedSchema::Single(root) => walk_shape(root, out),
+        SimplifiedSchema::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(root) = arm {
+                    walk_shape(root, out);
+                }
+            }
+        }
+    }
 }
 
 /// Classifies a standalone YAML buffer and computes suggestion lint problems.

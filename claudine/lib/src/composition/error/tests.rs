@@ -2818,7 +2818,7 @@ fn caller_input_schema_problem_in_clarify_highlights_the_arm_declaration() {
             source_path: PathBuf::from("prompts/clarify.md"),
             property: "spec".to_string(),
             provided: "fix".to_string(),
-            patterns: vec!["**/*spec*.md".to_string()],
+            alternatives: vec![vec![vec!["**/*spec*.md".to_string()]]],
             is_array: false,
             reason: "no existing file matched reference `fix`".to_string(),
         },

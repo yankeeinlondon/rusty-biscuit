@@ -949,7 +949,7 @@ fn missing_file_property_maps_to_file_shape() {
                 missing[0].interactive_shape,
                 Some(InteractiveShape::File {
                     is_array: false,
-                    patterns: Vec::new(),
+                    alternatives: Vec::new(),
                 })
             );
         }
@@ -971,7 +971,7 @@ fn missing_file_array_property_maps_to_file_array_shape() {
                 missing[0].interactive_shape,
                 Some(InteractiveShape::File {
                     is_array: true,
-                    patterns: Vec::new(),
+                    alternatives: Vec::new(),
                 })
             );
         }
@@ -991,14 +991,89 @@ fn missing_file_property_preserves_match_patterns() {
         CompositionError::MissingProperties { missing, .. } => match &missing[0]
             .interactive_shape
         {
-            Some(InteractiveShape::File { patterns, is_array }) => {
+            Some(InteractiveShape::File { alternatives, is_array }) => {
                 assert!(!is_array);
-                assert_eq!(patterns, &["*.png", "*.jpg"]);
+                assert_eq!(alternatives, &[vec![vec!["*.png", "*.jpg"]]]);
             }
             other => panic!("expected File shape, got {other:?}"),
         },
         other => panic!("expected MissingProperties, got {other:?}"),
     }
+}
+
+/// `doc` reuses `file(required; eager; match('*.md'))` from `types.yaml`
+/// with a use-site `match('guide*')`, beside one file for each group.
+fn reused_doc_source(dir: &TempDir) -> ResolvedCompositionSource {
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        fs::write(dir.path().join(file), "x\n").unwrap();
+    }
+    fs::write(
+        dir.path().join("types.yaml"),
+        "kind: schema\ntypes:\n  doc: \"file(required; eager; match('*.md'))\"\n",
+    )
+    .unwrap();
+    make_source(dir, "---\n$schema:\n  doc: \"doc(match('guide*'))@./types.yaml\"\n---\nbody\n")
+}
+
+fn reused_doc_alternatives() -> Vec<Vec<Vec<String>>> {
+    vec![vec![vec!["*.md".to_string()], vec!["guide*".to_string()]]]
+}
+
+#[test]
+fn a_reused_file_type_keeps_inherited_presence_and_every_match_group() {
+    let dir = TempDir::new().unwrap();
+    let source = reused_doc_source(&dir);
+
+    // `required` comes only from the named type; the chooser gets both groups.
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    let CompositionError::MissingProperties { missing, .. } = err else {
+        panic!("expected MissingProperties, got {err:?}");
+    };
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert_eq!(missing[0].name, "doc");
+    assert_eq!(
+        missing[0].interactive_shape,
+        Some(InteractiveShape::File { is_array: false, alternatives: reused_doc_alternatives() })
+    );
+
+    // A provided partial completes against the same groups.
+    let overrides = serde_json::json!({ "doc": "intro" });
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        .expect_err("`intro` names no file");
+    let CompositionError::UnresolvedFileReference { property, alternatives, .. } = err else {
+        panic!("expected UnresolvedFileReference, got {err:?}");
+    };
+    assert_eq!(property, "doc");
+    assert_eq!(alternatives, reused_doc_alternatives());
+}
+
+#[test]
+fn match_groups_stay_passive_for_an_existing_file_in_a_single_schema() {
+    let dir = TempDir::new().unwrap();
+    let source = reused_doc_source(&dir);
+    // Each value satisfies at most one group; outside a root union `match`
+    // only shapes completion and rejects none of them.
+    for value in ["guide-intro.md", "notes.md", "guide.txt"] {
+        let overrides = serde_json::json!({ "doc": value });
+        pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+            .unwrap_or_else(|err| panic!("`{value}` is accepted: {err}"));
+    }
+}
+
+#[test]
+fn an_empty_match_intersection_parses_and_reports_the_partial() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  doc: \"file(required; eager; match('*.md'); match('*.txt'))\"\n---\nbody\n",
+    );
+    let overrides = serde_json::json!({ "doc": "partial" });
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        .expect_err("`partial` names no file");
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = err else {
+        panic!("expected UnresolvedFileReference, not a schema error: {err:?}");
+    };
+    assert_eq!(alternatives, vec![vec![vec!["*.md".to_string()], vec!["*.txt".to_string()]]]);
 }
 
 #[test]
@@ -1429,14 +1504,14 @@ fn provided_file_match_partial_reports_unresolved_file_reference() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
         } => {
             assert_eq!(property, "spec");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(!is_array);
             assert!(
                 reason.contains("no existing file matched reference"),
@@ -1465,14 +1540,14 @@ fn provided_file_array_match_partial_reports_unresolved_file_reference() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
         } => {
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(is_array, "file[] property must report is_array: true");
             assert!(
                 reason.contains("no existing file matched reference"),
@@ -1531,13 +1606,13 @@ fn provided_file_array_multi_element_partial_reports_first_element() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             ..
         } => {
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(is_array, "file[] property must report is_array: true");
         }
         other => panic!("expected UnresolvedFileReference, got {other:?}"),
@@ -2266,12 +2341,16 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
     for (schema, expected) in [
         (
             "  - spec: 'file(required;match(**/*spec*.md);eager)'\n  - design: 'file(required)'\n",
-            vec!["**/*spec*.md"],
+            vec![vec![vec!["**/*spec*.md"]]],
         ),
         (
             "  - spec: 'file(required;match(**/features/**/spec.md);eager)'\n  \
              - spec: 'file(required;match(**/fixes/**/spec.md, **/features/**/spec.md);eager)'\n",
-            vec!["**/features/**/spec.md", "**/fixes/**/spec.md"],
+            // One alternative per arm, never one concatenated list.
+            vec![
+                vec![vec!["**/features/**/spec.md"]],
+                vec![vec!["**/fixes/**/spec.md", "**/features/**/spec.md"]],
+            ],
         ),
     ] {
         let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
@@ -2280,7 +2359,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         let CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
@@ -2290,7 +2369,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         };
         assert_eq!(property, "spec");
         assert_eq!(provided, "everywhere");
-        assert_eq!(patterns, expected, "{schema}");
+        assert_eq!(alternatives, expected, "{schema}");
         assert!(!is_array);
         assert!(reason.contains("no existing file matched reference"), "{reason}");
     }

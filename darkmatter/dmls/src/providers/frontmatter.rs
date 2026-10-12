@@ -19,7 +19,7 @@ use darkmatter::markdown::schemas::{
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor, mapping_separator,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
-    parse_schema_declaration_with_source, schema_constraint_descriptors, schema_type_descriptors,
+    schema_constraint_descriptors, schema_type_descriptors,
     select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -35,6 +35,7 @@ use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions,
 };
+use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, semantic_type_regions};
 use crate::workspace::file_path_to_uri;
 
@@ -449,17 +450,25 @@ fn type_definition_completions(
             items.push(completion);
         }
     }
-    for name in passive_namespace_names(ctx) {
-        let imported = format!("{name}@this");
-        if imported.starts_with(partial)
+    let local = passive_namespace_names(ctx).into_iter().map(|name| {
+        (
+            named_references::local_reference_spelling(&name),
+            "Named type from this schema".to_string(),
+        )
+    });
+    let external = named_references::external_names(ctx)
+        .into_iter()
+        .map(|(label, target)| (label, format!("Named type from `{target}`")));
+    for (label, detail) in local.chain(external) {
+        if label.starts_with(partial)
             && let Some(completion) = item(
                 ctx,
                 start,
                 offset,
-                &imported,
-                &imported,
+                &label,
+                &label,
                 CompletionItemKind::REFERENCE,
-                Some("Named type from the current passive schema namespace".to_string()),
+                Some(detail),
             )
         {
             items.push(completion);
@@ -1198,6 +1207,10 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let overlay = ctx.overlay?;
 
+    if let Some(hover) = named_references::hover(ctx, offset) {
+        return Some(hover);
+    }
+
     if let Some(hover) = frontmatter_definition_hover(ctx, overlay, offset) {
         return Some(hover);
     }
@@ -1218,21 +1231,8 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         );
     }
 
-    let ast = overlay.ast.as_deref()?;
-    let schema_entry = ast.schema_entry()?;
-    let source = ctx.text.get(schema_entry.value_span.clone())?;
-    let source = dedent_spanned_yaml(
-        source,
-        source_column(ctx.text, schema_entry.value_span.start),
-    );
-    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-    let parsed = parse_schema_declaration_with_source(
-        &yaml,
-        &source,
-        schema_entry.value_span.start,
-    )
-    .ok()?;
-    let SchemaDeclaration::Schema(schema) = parsed.value else {
+    let parsed = AuthoredDeclaration::frontmatter(ctx.text, overlay.ast.as_deref()?)?;
+    let SchemaDeclaration::Schema(schema) = parsed.declaration else {
         return None;
     };
     let region = semantic_type_regions(&schema, &parsed.source_map)
@@ -1310,9 +1310,11 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
         let mut name = match &atom.ty {
             TypeExpr::Primitive(ty) => ty.as_keyword().to_string(),
             TypeExpr::InlineObject(_) => "object".to_string(),
-            TypeExpr::Imported { name, reference } => format!("{name}@{reference}"),
+            TypeExpr::Imported { name, reference } => {
+                named_references::reference_spelling(name, reference, atom.is_array)
+            }
         };
-        if atom.is_array {
+        if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
         }
         if !denoted.contains(&name) {
@@ -1371,10 +1373,10 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
-        TypeExpr::Imported { name, reference } => {
-            let suffix = if atom.is_array { "[]" } else { "" };
-            format!("Type: **{name}{suffix}@{reference}**")
-        }
+        TypeExpr::Imported { name, reference } => format!(
+            "Type: **{}**",
+            named_references::reference_spelling(name, reference, atom.is_array)
+        ),
     };
     lines.push(type_line);
 
@@ -1427,8 +1429,12 @@ fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
 
 // ── Navigation (definition + document links) ────────────────────────────────
 
-/// Definition on a `$schema` file reference or a `file(...)` value.
+/// Definition on a named-type reference, a `$schema` file reference, or a
+/// `file(...)` value.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
+    if let Some(location) = named_references::definition(ctx, offset) {
+        return vec![location];
+    }
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
     };
@@ -2417,6 +2423,8 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
         range,
     })
 }
+
+mod named_references;
 
 #[cfg(test)]
 mod sequence_tests;
@@ -3969,8 +3977,12 @@ mod tests {
                 .map(|item| item.label)
                 .collect();
             assert!(
-                labels.iter().any(|label| label == "Base@this"),
-                "the current parsed schema is a passive named-type namespace: {labels:?}"
+                labels.iter().any(|label| label == "Base"),
+                "the current parsed schema offers its names bare: {labels:?}"
+            );
+            assert!(
+                labels.iter().all(|label| label != "Base@this"),
+                "a non-colliding local name is never spelled `@this`: {labels:?}"
             );
         });
 

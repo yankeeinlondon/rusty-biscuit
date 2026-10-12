@@ -485,7 +485,7 @@ fn file_candidate_paths_match_pattern_excludes_underscore_dirs() {
         "# done\n",
     );
     let ctx = ScopeContext::discover_from(tmp.path());
-    let got = file_candidate_paths(&["**/*spec*.md".to_string()], &ctx);
+    let got = file_candidate_paths(&[vec![vec!["**/*spec*.md".to_string()]]], &ctx);
     assert!(
         got.iter().any(|p| p.ends_with("features/live/spec.md")),
         "live spec must surface: {got:?}"
@@ -799,7 +799,7 @@ fn offered(effective: &EffectiveSchema, partial: &str, ctx: &ScopeContext) -> Ve
 fn assert_offers_resolve_and_are_admitted(effective: &EffectiveSchema, globs: &[String], ctx: &ScopeContext) {
     let resolution = crate::completion::scopes::file_resolution_context(ctx).unwrap();
     let values = offered(effective, "", ctx);
-    let paths = file_candidate_paths(globs, ctx);
+    let paths = file_candidate_paths(&[vec![globs.to_vec()]], ctx);
     assert_eq!(values.len(), paths.len(), "{values:?} vs {paths:?}");
     let matcher = MatchGlobs::new(globs).unwrap();
     for (value, path) in values.iter().zip(&paths) {
@@ -922,7 +922,7 @@ fn a_file_name_negation_is_neither_offered_nor_admitted() {
     let values = offered(&effective, "", &ctx);
     assert!(values.contains(&"docs/y.md".to_string()), "{values:?}");
     assert!(!values.iter().any(|value| value.contains("_x.md")), "{values:?}");
-    assert!(!file_candidate_paths(&globs, &ctx).iter().any(|path| path.ends_with("docs/_x.md")));
+    assert!(!file_candidate_paths(&[vec![globs.clone()]], &ctx).iter().any(|path| path.ends_with("docs/_x.md")));
     assert!(!MatchGlobs::new(&globs).unwrap().matches(&repo.join("docs/_x.md"), &resolution));
     assert_offers_resolve_and_are_admitted(&effective, &globs, &ctx);
 }
@@ -977,5 +977,147 @@ fn an_out_of_tree_file_symlink_is_omitted_without_a_warning() {
     let ctx = ScopeContext::discover_from(&repo);
 
     assert_eq!(offered(&effective, "", &ctx), ["docs/real.md"]);
-    assert_eq!(file_candidate_paths(&globs, &ctx), [repo.join("docs/real.md")]);
+    assert_eq!(file_candidate_paths(&[vec![globs]], &ctx), [repo.join("docs/real.md")]);
 }
+
+// ── Repeated `match(...)` groups ─────────────────────────────────────────────
+
+/// Every value TAB offers for `property` with an empty partial, unwrapped from
+/// its `property='…'` token.
+fn offered_for(effective: &EffectiveSchema, property: &str, ctx: &ScopeContext) -> Vec<String> {
+    let prefix = format!("{property}='");
+    property_value(effective, property, "", ctx)
+        .into_iter()
+        .map(|candidate| {
+            candidate
+                .strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix('\''))
+                .expect("a `property='…'` candidate")
+                .to_string()
+        })
+        .collect()
+}
+
+/// The paths the ENTER chooser lists for `property`, from the same
+/// `match(...)` alternatives TAB reads.
+fn chooser_paths(effective: &EffectiveSchema, property: &str, ctx: &ScopeContext) -> Vec<std::path::PathBuf> {
+    let suggestion = darkmatter::markdown::schemas::completion::for_property(effective, property)
+        .expect("completable property");
+    let darkmatter::markdown::schemas::CompletionKind::File { alternatives } = suggestion.kind else {
+        panic!("expected File completion, got {:?}", suggestion.kind);
+    };
+    file_candidate_paths(&alternatives, ctx)
+}
+
+/// A prompt beside `guide-intro.md`, `notes.md`, and `guide.txt` whose
+/// property reuses `file(match('*.md'))` with a use-site `match('guide*')`,
+/// loaded the way completion loads a committed prompt: from another file, as
+/// a bare local name, and as `@this` (a local name is a sibling property of
+/// the same schema).
+fn reused_doc_schemas(root: &Path) -> Vec<(&'static str, &'static str, EffectiveSchema)> {
+    seed_repo(root);
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        write(&root.join(file), "x\n");
+    }
+    write(&root.join("types.yaml"), "kind: schema\ntypes:\n  doc: \"file(match('*.md'))\"\n");
+    let local = |reference: &str| {
+        format!("---\n$schema:\n  doc: \"file(match('*.md'))\"\n  guide: \"{reference}\"\n---\nbody\n")
+    };
+    let ctx = ScopeContext::discover_from(root);
+    [
+        ("cross-file", "doc", "---\n$schema:\n  doc: \"doc(match('guide*'))@./types.yaml\"\n---\nbody\n".to_string()),
+        ("bare-local", "guide", local("doc(match('guide*'))")),
+        ("this-local", "guide", local("doc(match('guide*'))@this")),
+    ]
+    .into_iter()
+    .map(|(label, property, document)| {
+        let name = format!("{label}.md");
+        write(&root.join(&name), &document);
+        let effective = load_effective_schema(&name, &ctx)
+            .unwrap_or_else(|| panic!("{label}: the schema loads"));
+        (label, property, effective)
+    })
+    .collect()
+}
+
+#[test]
+fn reused_match_groups_offer_only_files_every_group_admits() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = ScopeContext::discover_from(&root);
+    for (label, property, effective) in reused_doc_schemas(&root) {
+        // `notes.md` satisfies only the inherited group and `guide.txt` only
+        // the use-site group; a concatenated list would offer both.
+        assert_eq!(offered_for(&effective, property, &ctx), ["guide-intro.md"], "{label}");
+        assert_eq!(chooser_paths(&effective, property, &ctx), [root.join("guide-intro.md")], "{label}");
+        assert_eq!(
+            property_value(&effective, property, "guide", &ctx),
+            [format!("{property}='guide-intro.md'")],
+            "{label}: the typed partial narrows the intersection only"
+        );
+    }
+}
+
+#[test]
+fn a_match_exclusion_stays_with_its_own_group_and_arm() {
+    let (_tmp, root) = canonical_tempdir();
+    seed_repo(&root);
+    for file in ["guide-a.md", "guide-b.md", "notes.md"] {
+        write(&root.join(file), "x\n");
+    }
+    let ctx = ScopeContext::discover_from(&root);
+
+    // Within one property each group's exclusion narrows only its own
+    // positives, and the property offers what both groups keep.
+    let groups = effective_from_doc(
+        "---\n$schema:\n  doc: \"file(match('*.md', '!notes*'); match('guide*', '!guide-b*'))\"\n---\nbody\n",
+    );
+    assert_eq!(offered_for(&groups, "doc", &ctx), ["guide-a.md"]);
+
+    // Across root-union arms the first arm's `!guide*` must not remove the
+    // second arm's `guide*` positives, as one concatenated list did.
+    let arms = effective_from_doc(concat!(
+        "---\n$schema:\n",
+        "  - doc: \"file(match('*.md', '!guide*'))\"\n",
+        "  - doc: \"file(match('guide*'))\"\n",
+        "---\nbody\n",
+    ));
+    assert_eq!(offered_for(&arms, "doc", &ctx), ["notes.md", "guide-a.md", "guide-b.md"]);
+    assert_eq!(
+        chooser_paths(&arms, "doc", &ctx),
+        [root.join("notes.md"), root.join("guide-a.md"), root.join("guide-b.md")]
+    );
+}
+
+#[test]
+fn an_empty_match_intersection_offers_nothing_without_an_error() {
+    let (_tmp, root) = canonical_tempdir();
+    seed_repo(&root);
+    for file in ["a.md", "b.txt"] {
+        write(&root.join(file), "x\n");
+    }
+    let ctx = ScopeContext::discover_from(&root);
+    let effective = effective_from_doc(
+        "---\n$schema:\n  doc: \"file(match('*.md'); match('*.txt'))\"\n---\nbody\n",
+    );
+    assert!(offered_for(&effective, "doc", &ctx).is_empty());
+    assert!(chooser_paths(&effective, "doc", &ctx).is_empty());
+}
+
+#[test]
+fn a_file_two_arms_admit_through_different_roots_is_offered_once() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    write(&repo.join("pkg/spec.md"), "# spec\n");
+    let ctx = ScopeContext::discover_from(&repo.join("pkg"));
+    // The first arm reaches the file from the launch folder, the second from
+    // the repository root.
+    let effective = effective_from_doc(concat!(
+        "---\n$schema:\n",
+        "  - spec: \"file(match('*spec*.md'))\"\n",
+        "  - spec: \"file(match('&pkg/*spec*.md'))\"\n",
+        "---\nbody\n",
+    ));
+    assert_eq!(offered_for(&effective, "spec", &ctx), ["spec.md"]);
+    assert_eq!(chooser_paths(&effective, "spec", &ctx).len(), 1);
+}
+
