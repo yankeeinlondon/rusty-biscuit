@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-11
-phase: 3
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -77,6 +77,94 @@ docs_updated_during_phase_3:
     - darkmatter/dmls/docs/autocomplete.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix_cells.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/content-policy/SKILL.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/dmls/Cargo.toml
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - darkmatter/lib/tests/union_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/schemas_union_fixture_controls.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_rewrite.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix_cells.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/dmls/Cargo.toml
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+completed_phase: 5
+implemented: true
 packages:
     - darkmatter
     - darkmatter-cli
@@ -272,12 +360,12 @@ the library's selection/error contracts and requires no anonymous-union parser.
 
 ### Wave 6 — Integration and Documentation (Parallel)
 
-- [ ] **Verify CLI Pipeline**
+- [x] **Verify CLI Pipeline**
   - Own CLI `commands/schema/assignment.rs` changes and hermetic `md schema validate`, `md schema about`, and normal compose tests. Match the existing CLI assignment rules without introducing effects into validation.
   - Exercise the acceptance fixture: valid mixed list, missing/null optional property, `[null]`, scalar input, empty list, `Duration(3mo)`, missing/null object `rule`, and invalid `action: delete`. Implement the document-data matrix through public reports.
   - Assert validation leaves source bytes and in-memory input unchanged; composition preserves current stage order, candidate coercion rules, successful eager rewriting, and repeated normalization idempotence. No default insertion is added by this feature.
   - Use `CliProcessFixture`, private fixture HOME/CWD/PATH, runtime binary paths, and explicit captured contexts; no terminal/browser/provider launch. Extend existing public tests where possible rather than creating redundant implementation-mirroring tests.
-- [ ] **Update Current Docs**
+- [x] **Update Current Docs**
   - Update `darkmatter/docs/topics/schemas/definition.md` under arrays, unions, and cross-file named imports with named `U[]`, all allowed/rejected operations, item versus container scope, presence/timing, default restrictions, and a compact Content Policy example.
   - Keep anonymous union array syntax, recursion, baseline migration, and item source positions outside the documented implemented surface. Explain reporting versus transformation safety, using a small Mermaid flow where it clarifies selection.
   - Update `darkmatter/docs/topics/schemas/dmls-schema-support.md` and `.claude/skills/darkmatter/schema.md` (and the skill index only if needed). Review relevant READMEs for public-behavior drift and update only affected claims.
@@ -291,15 +379,15 @@ describe the final implementation rather than delegating to the specification.
 
 ### Wave 7 — Final Gates (Sequential)
 
-- [ ] **Compare Compatibility Corpus**
+- [x] **Compare Compatibility Corpus**
   - Compare passive shipped-schema corpus and existing resolver-fixture lowering byte-for-byte with the Phase 1 post-prerequisite baseline, excluding only fixtures deliberately authored to use the new forms. Investigate every other difference; do not bless snapshot churn.
   - Confirm the shipped Content Policy schema is unchanged and still passes its existing tests. Run scoped downstream compile/test checks identified by the consumer inventory, including Claudine where its use of public Darkmatter types or semantics is affected.
-- [ ] **Run Scoped Gates**
+- [x] **Run Scoped Gates**
   - Run `just test` and `just lint` from `darkmatter/`, which cover the library, CLI, and DMLS through the area's recipes. Use nextest-backed recipes for targeted runs during implementation; do not use consolidated `cargo test`, workspace-wide gates, or `cargo fmt`.
   - All new tests are L1 and portable to macOS, Linux, native Windows, and WSL2. Avoid platform-specific path literals and ambient filesystem state. Load the `os` skill before changing Windows/path-comparison code, investigating a single-OS failure, or claiming another OS is unavailable.
   - Record the host/environment of evidence and distinguish observed passes from portability review. Use existing required OS evidence/scheduling; add no CI cells, fixtures solely for CI expansion, or L2/L3/browser checks for schema semantics.
   - Record any environment blocker with the exact failed check and supported alternative; do not claim a gate passed when it did not run. The area's lint includes the existing Zed WASM check, so account for its provisioned target without installing or launching editors.
-- [ ] **Audit Acceptance Coverage**
+- [x] **Audit Acceptance Coverage**
   - Attach a concise implementation-log mapping from spec criteria 1–9 to concrete test names/results and docs. Include every walker, all boundary families, matrix row/column coverage, baseline identity, and authored-reference round trips.
   - Review the final diff for duplicate representations, accidental constraint redistribution, reporting-driven mutations, missing provenance, dropped invalid elements, new parser effects, unsupported syntax, and comment/document drift.
   - Confirm phase/wave checkpoints are complete, shared test registrations compile, the implementation log records any departures, and no unrelated files, dependency changes, or CI scheduling changes slipped in. If dependencies changed intentionally, update dependency docs in the same change.

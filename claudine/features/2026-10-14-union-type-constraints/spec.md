@@ -30,28 +30,18 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+implemented: true
 message_to_agent: |-
-    Phase 3 is complete. Read the implementation log's "## Phase 3" section first; it has the per-walker changes, the per-site audit, and the findings.
+    All five phases are implemented. Read the implementation log's "## Phase 5" section first.
 
-    - Public API added this phase, which you can use in CLI tests and docs:
-        - `schemas::flattened_alternatives(def)` and `Alternative { atom, arm, is_array }` list every leaf alternative.
-        - In `schemas::completion`: `alternative_accepts(atom, value)` judges a value structurally against one alternative as a present value, so `null` matches only an arm that accepts null. Also `for_list_item`, `for_property_value`, `alternatives_for_def`, and `AlternativeCompletion`.
-        - `validate::resolve_problem_description` now takes the instance.
-    - Behavior changes the CLI pipeline tests must expect:
-        - Union items now coerce: exactly one validating candidate, specialized boolish/numberlike first. Validation coerces a working copy first, so `body: 1` against a string arm validates.
-        - Eager rewriting now covers object arms with nested `file(eager)` fields. It also covers optional union properties (`one: asset`), which were silently skipped before. This is a deliberate bug fix.
-        - Discriminated narrowing applies at items and nested fields, and only where a problem already exists.
-        - A missing field in an untagged object item (`{action: archive}`) is reported at the item with the generic anyOf message. `action: delete` is narrowed to the enum problem.
-    - Clean (AC 4) departure is recorded: the single-problem auto-apply gate was kept. The sibling repair is proven in a document whose union list is valid. Carry this into the Phase 5 acceptance audit as a departure, not a failure.
-    - `md schema about` takes no schema. It is a fixed catalog, which now has "Array of a named union" and "Marked union reference" descriptors. Test about through that catalog output.
-    - Docs:
-        - Already partly updated: `definition.md` (discriminated narrowing at items, union-item coercion, "Completing inside a union value"), `docs/inline/schema-validation.md`, and DMLS `hover.md`/`autocomplete.md`.
-        - Still stale: `definition.md` around line 888 says union postfixes are rejected. Also stale: `dmls-schema-support.md`, the darkmatter skill, and the shipped content-policy schema comment. Leave the schema itself unchanged.
-        - `default([...])` is still a string in the grammar, so do not document array defaults as working.
-    - Findings not fixed, which you can mention in the docs or leave:
-        - Content Policy's `suggest` list is linted against its `^Evergreen$` arm only, so only `Evergreen` is offered.
-        - Claudine's `classify.rs` treats item `eager` as property timing; darkmatter phase does not. This predates the feature.
-        - The trigger gate may not see `x[](required)`. Not verified.
+    - Phase 5 fixed two review defects, each test first:
+        - `resolve.rs` now wraps `SchemaError::UnionReference` in `ReferencedSchema`, as it does the other named-type errors.
+        - DMLS adds the use site as related information when the site is in another file.
+        - DMLS now declares `darkmatter/lib/tests/union_fixtures/mod.rs` in `source-inputs`.
+    - Phase 5 also added a round-trip and anonymous-syntax test for authored `U[]` references.
+    - Byte identity is unchanged: 347/347 entries. The shipped Content Policy schema is unchanged.
+    - Environment trap on the author's Mac: a plain `just lint` (or `cargo test --no-run`) sometimes compiled `darkmatter` from `/Volumes/coding/personal/rusty-biscuit`. That checkout holds broken uncommitted work, so the run failed with E0432/E0599 errors that are not in this worktree. Rerun with `KACHE_DISABLED=1`. The kache root cause is unproven.
+    - Review nits deliberately left in place are listed in the log: duplicate flattening helpers, an unused `PropertyDef::alternatives()`, an unreachable `ItemMatch::Unique` arm, and "flattened" wording on `SchemaUnionRejection` arm indexes.
 pipeline_step: 4
 depends-on:
     - 2026-10-13-named-type-presence-and-local-names

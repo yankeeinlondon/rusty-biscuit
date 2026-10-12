@@ -76,6 +76,94 @@ docs_updated_during_phase_3:
     - darkmatter/dmls/docs/autocomplete.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix_cells.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/content-policy/SKILL.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/dmls/Cargo.toml
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - darkmatter/lib/tests/union_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/schemas_union_fixture_controls.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_rewrite.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix.rs
+    - darkmatter/cli/tests/l1/schema_union_matrix_cells.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/dmls/Cargo.toml
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+completed_phase: 5
+implemented: true
 packages:
     - darkmatter
     - darkmatter-cli
@@ -1053,3 +1141,421 @@ still owns the full rewrite.
 - **Skills:** the `claudine` skill needs no update, because Claudine code was
   not changed this phase. The `darkmatter` skill update is Phase 4's.
 - **State:** Phase 3 is complete. Phase 4 may proceed.
+
+## Phase 4
+
+### How the phase was run
+
+- The two Wave 6 tasks ran in parallel with disjoint ownership: CLI
+  pipeline tests (`darkmatter/cli/tests/`) and current docs plus the
+  darkmatter skill.
+- Both ran in parallel. Their files did not overlap, and each was reviewed
+  before its task was checked off.
+
+### Wave 6 — Verify CLI Pipeline
+
+**New L1 tests (50).** They run the real `md` binary through
+`CliProcessFixture`, with a private HOME, CWD, and PATH and no terminal,
+browser, or provider:
+
+- `cli/tests/l1/schema_union_pipeline.rs` (18 tests) covers AC 1, unchanged
+  input, `about`, compose, and assignment.
+- `cli/tests/l1/schema_union_matrix.rs` holds the cell table, the runner, and
+  two guard tests.
+- `cli/tests/l1/schema_union_matrix_cells.rs` has one `#[test]` per matrix
+  cell (30).
+- `cli/tests/l1/main.rs` registers the three modules and `#[path]`-includes
+  `lib/tests/union_fixtures/mod.rs`.
+
+**Report contract relied on.** `md schema validate --format json` emits one
+NDJSON line per file:
+
+- the line is `{file, problems:[{path, kind, message, description, …}], schema, valid}`;
+- exit 0 means valid, 1 means problems, and 3 means a load failure, which also
+  carries `"error":"frontmatter_parse"`.
+
+**`assignment.rs` was not changed.** Its existing `TypeExpr::Union` branch
+already keeps raw text for `U(required)`, as it does for a property union.
+
+- `schema_validate_assignment_keeps_raw_text_for_every_union_reference_form`
+  proves this for an inline union, a bare reference, and `ver(required)` with
+  `version=1.10`.
+- With that branch disabled, the test fails because the value becomes the
+  float `1.1`.
+- `U[]` assignments are not string-coerced, the same existing rule as
+  `string[]`.
+
+**CI metadata.** `darkmatter/lib/tests/union_fixtures/mod.rs` was added to the
+CLI's `[package.metadata.ci.tests] source-inputs`, the same way the
+entry-point parity matrix is declared.
+
+- Each test that uses the fixture spells it with
+  `include_str!`/`let _ = include_str!(…)` inside the `#[test]`.
+- An edit to the fixture therefore schedules exactly those narrowed tests.
+- No standing CI cell was added.
+
+**Departures.**
+
+- **Matrix cells are written out, not generated by `macro_rules!`.**
+  - An `include_str!` inside a macro body is not inside a `#[test] fn`, so the
+    CI test-input scanner would widen the cell to the whole binary.
+  - A table plus two guard tests keeps the table and the tests in step
+    instead: `matrix_covers_every_row_and_column` and
+    `every_matrix_cell_has_its_own_test`.
+- **The `about` test is in the new file**, not `schema_about.rs`, which is
+  already 702 lines (over the `lint-files` 500-line cap).
+- **`just lint-files` already fails on `main`.** Six existing CLI test files
+  exceed the cap without an exemption. The recipe is not part of `just lint`,
+  and none of the new files are flagged; each is under 500 lines.
+- **The compose idempotence test re-composes the output.**
+  - `md compose` never writes the source file, so "repeated normalization"
+    is proven by composing the composed output again.
+  - This follows the existing persist-and-recompose pattern. It expects
+    identical bytes and an unchanged key set, so no default is inserted.
+
+**Load-bearing evidence.** Each break was temporary and has been restored:
+
+- disabling the `assignment.rs` union branch failed the assignment test;
+- disabling item-union coercion in `coerce.rs` failed the compose test and
+  both unchanged-input tests;
+- skipping eager-file arms in `rewrite.rs` failed the rewrite test;
+- using the unmodified shipped schema (`rule` optional) failed
+  `rule_absent_is_reported_at_the_item`;
+- a wrong expected path failed its cell;
+- a renamed cell test or a duplicated acceptance call tripped the guards.
+
+### Wave 6 — Update Current Docs
+
+**`darkmatter/docs/topics/schemas/definition.md`**
+
+- New "Named Union References" section. It covers:
+  - the three reference forms;
+  - an allowed-operations table, and a rejected-operations table that names
+    the `SchemaUnionRejection` variant for each row;
+  - item versus container scope;
+  - presence and timing, including that `eager` never makes a lazy `file`
+    arm eager;
+  - defaults, scalar arm defaults rejected, and nothing inserted;
+  - lowering, with the null wrapper only on the optional property;
+  - the typed-model representation;
+  - the Content Policy example, with the AC 1 pass/fail table.
+- New "Choosing an Arm: Reporting versus Changing Data" section, with a
+  Mermaid flow and a table per consumer.
+- The stale "union postfixes are rejected / planned" sentence under
+  cross-file imports was replaced.
+- The Error Model now has a `UnionReference` row.
+- The `md schema about` shape list now uses the real descriptor names.
+- The limitations now say:
+  - "no arrays of anonymous unions";
+  - a problem inside a list item is located at its top-level key.
+
+**`darkmatter/docs/topics/schemas/dmls-schema-support.md`**
+
+- `UnionReference` diagnostics are ranged on the reference, with related
+  information at the union's definition.
+- New coverage of completion and hover inside union items, cross-linked to
+  DMLS `hover.md` and `autocomplete.md`.
+- Matrix row and footnotes updated.
+
+**Skills**
+
+- `.claude/skills/darkmatter/schema.md` has a new "Named union references"
+  section. It covers:
+  - the forms and rejections;
+  - scope and defaults;
+  - the representation and lowering;
+  - the consumer rule (`flattened_alternatives`, `alternative_accepts`, the
+    completion functions);
+  - the safety rule per consumer, and known gaps.
+- `.claude/skills/content-policy/SKILL.md` said Darkmatter rejects
+  `policy[]`, which is no longer true. That claim was corrected. The skill
+  keeps the still-true facts that the shipped schema does not type
+  `content_policy` and leaves `rule` optional.
+
+**Comment-only source change.** `darkmatter/lib/tests/l1/content_policy_editor_schema.rs`
+no longer says the language cannot make `rule` required. It now says the
+shipped schema leaves `rule` optional.
+
+**Drift found and resolved**
+
+- **`default([...])`.** `definition.md` said this produces a default array.
+  The grammar reads `[a]` as the string `"[a]"`. The code wins, so the doc row
+  was corrected.
+- **`md schema about` shape names.** The doc showed outdated names. They now
+  match `about.rs`.
+- **READMEs.** None claimed that union references reject postfixes, so none
+  changed.
+
+**Drift left in place deliberately.** The comment in
+`content-policy/schemas/content-policy.yaml` ("a union-typed reference cannot
+take constraints today") is now stale.
+
+- It was not edited, because the plan forbids changing the shipped schema
+  and Phase 5 checks that it is unchanged.
+- Whoever adopts `short_form(required)` in that file should update the
+  comment in the same change.
+
+**Not documented as implemented:**
+
+- anonymous `(A | B)[]` syntax;
+- recursion;
+- the Content Policy baseline change;
+- per-item line and column, which is listed only as a limitation.
+
+The docs name no feature or fix spec. The tests that read these docs pass:
+`schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes`,
+`schema_roots::no_doc_or_skill_names_the_singular_schema_variable`, and the
+`content_policy_editor_schema` tests.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| AC 1 through the CLI: one test per acceptance case | `schema_union_pipeline::{acceptance_mixed_scalar_and_object_list_validates, acceptance_missing_property_validates, acceptance_null_property_validates, acceptance_null_item_is_rejected_at_its_index, acceptance_scalar_in_place_of_the_list_is_rejected, acceptance_empty_list_fails_min_items, acceptance_item_matching_no_arm_is_rejected, acceptance_object_item_without_rule_is_rejected, acceptance_object_item_with_null_rule_is_rejected, acceptance_object_item_with_unknown_action_is_rejected}`; guard `acceptance_cases_each_have_an_expected_report_and_a_test` |
+| Document-data matrix: every cell of the 3 columns × 9 rows, plus the control, with file bytes unchanged in each cell | `schema_union_matrix_cells::*` (30 cell tests); guards `schema_union_matrix::{matrix_covers_every_row_and_column, every_matrix_cell_has_its_own_test}` |
+| Validation leaves the input unchanged (coercible items, eager-file items, invalid items) | `schema_union_pipeline::{validate_leaves_coercible_and_eager_file_union_items_unchanged, validate_leaves_a_document_with_invalid_union_items_unchanged}` |
+| AC 5/8 `md schema about` renders the array-of-union shapes | `schema_union_pipeline::schema_about_renders_the_named_union_reference_shapes` |
+| AC 8 composition: coercion rule (exactly one candidate), stage order (normalization runs before the body expression), eager rewrite and lazy preserved, idempotence, no default insertion | `schema_union_pipeline::{compose_coerces_an_unambiguous_union_item_and_keeps_ambiguous_items, compose_rewrites_an_eager_file_union_item_and_keeps_lazy_items, recomposing_normalized_union_items_is_idempotent_and_inserts_nothing}` |
+| CLI assignment rules for union references | `schema_union_pipeline::schema_validate_assignment_keeps_raw_text_for_every_union_reference_form` |
+| Docs describe the final behavior | `definition.md`, `dmls-schema-support.md`, darkmatter skill; doc-reading tests listed above |
+
+Matrix outcomes worth noting:
+
+- A missing `rule` or `action` in an object item is reported at the item
+  (`/content_policy/1`) with the generic `anyOf` message.
+- An explicit null or a wrong-typed field is reported at the field.
+- This matches Phase 3's recorded behavior.
+- Duplicate-key and invalid-YAML cells fail loading through the real loader
+  (exit 3).
+
+### Gates and evidence
+
+| Check | Result |
+|---|---|
+| `darkmatter/` `just test` (macOS) | 9437 passed, 11 skipped (27.7 s) |
+| `darkmatter/` `just lint` (macOS, run by the CLI task after its last change) | exit 0; clippy clean for all four packages; zed-dmls wasm32-wasip2 check passed |
+| `claudine/` `just test` (macOS) | 8684 passed, 9 skipped (48.0 s) |
+| `claudine/` `just lint` (macOS) | exit 0. The only warning is the known macOS `__eh_frame` linker note. |
+| `just cross-check darkmatter-cli --os windows schema_union` | 50 passed |
+| `just cross-check darkmatter-cli --os linux schema_union` | 50 passed |
+
+- WSL2 was not run. The tests are tempdir-based, and native Windows exercised
+  the path-sensitive rewrite assertions.
+- All new tests are L1, and each takes well under 1 s.
+- No `cargo fmt` was run, and nothing was staged or committed.
+- No pre-existing test failure was seen. Nothing was skipped, apart from
+  the `macro_rules!` departure explained above.
+- **Skills:** the `claudine` skill needs no update, because no Claudine code
+  or workflow changed this phase.
+- **State:** Phase 4 is complete. Phase 5 may proceed.
+
+## Phase 5
+
+### How the phase was run
+
+- Run sequentially on macOS (`Darwin 27.2.0`, arm64), from the working tree
+  on `feat/osc-9-4-protocol` (HEAD `14cc1277f` plus the uncommitted Phase 4
+  and Phase 5 changes).
+- One read-only review subagent audited the feature's diff while the first
+  `darkmatter/` `just test` ran. Its two confirmed defects were fixed here,
+  test first. Its nits are listed below with what was done about each.
+
+### Wave 7 — Compare Compatibility Corpus
+
+- **Byte identity (AC 6).** `baseline/capture_lowering.rs` was rerun on the
+  implemented tree as its module doc describes. The scratch module and its
+  `mod` line were then removed, and `git status darkmatter/lib/tests/l1/`
+  shows only Phase 4's comment edit.
+  - The manifest has **347 entries, all identical** to
+    `baseline/lowered-corpus.blake3` (`diff` clean).
+  - No entry was added or dropped. The new-form fixtures exist only in
+    tempdirs (`lib/tests/union_fixtures/mod.rs`), so nothing on disk had to
+    be excluded, and there was no difference to investigate.
+  - Inline resolver fixtures stay guarded by the `schemas_convert_snapshots`
+    insta snapshots and
+    `schemas_conjunctive_lowering::schemas_without_repeats_keep_their_lowered_output`.
+    Both are in the passing `just test` run.
+- **Shipped Content Policy schema is unchanged.**
+  `git diff --stat b2cc72a00 -- content-policy/` is empty, and
+  `content_policy_editor_schema::*` and `shipped_schema_corpus::*` pass.
+- **Downstream checks from the consumer inventory.** `claudine` and
+  `claudine-gen` are compile-level consumers.
+  - `claudine/` `just test`: 8684 passed, 9 skipped.
+  - `claudine/` `just lint`: exit 0. The only warning is the known macOS
+    `__eh_frame` linker note.
+  - `content-policy` and `messenger` do not depend on the schema AST (Phase 1
+    inventory) and were not rerun.
+- **No dependency or CI-scheduling change came from this feature.**
+  - Since the baseline, the feature changed `Cargo.toml` only in
+    `[package.metadata.ci.tests] source-inputs`: the CLI in Phase 4 and DMLS
+    in this phase.
+  - The other manifest, `.github`, and `docs/dependencies.md` diffs on the
+    branch since `b2cc72a00` arrived through the `main` merge (`069f8d2e8`),
+    not from this feature.
+
+### Wave 7 — Final review and fixes
+
+The review read commits `44ee1aa08`, `ed5a53a98`, `3fc863692`, `43429bccc`,
+`153829689` and the uncommitted Phase 4 diff.
+
+**Defect 1, fixed: a union rejection inside a referenced schema lost its
+`ReferencedSchema` wrapper.**
+
+- `resolve.rs::load_guarded_in_context` wrapped `Grammar | Convert |
+  UnknownNamedType | ConstraintConflict | Aggregate`, but not the new
+  `UnionReference`.
+- Before this feature, the same misuse raised `Convert`, which was wrapped,
+  so this was a regression. Users saw:
+  - the CLI message without the "referenced schema … is invalid" prefix;
+  - DMLS without the "schema definition is authored in this file" location.
+- Regression test, written first and seen to fail with "expected
+  ReferencedSchema, got UnionReference { … }":
+  `schemas_union_postfix::a_rejection_inside_a_referenced_schema_keeps_the_referenced_wrapper`.
+- Fix: added `UnionReference` to the wrapped set. The `## Errors` docs on
+  `expand_named_types` also omitted `UnionReference`, and now list it.
+- DMLS follow-on:
+  - The DMLS test
+    `named_type_references::an_unsupported_union_postfix_inside_a_referenced_schema_points_into_that_file`
+    then showed that the use site inside the referenced file was missing
+    from the related information.
+  - `diagnostics/named_types.rs` now adds "`U` is referenced here" when the
+    site is in another file, as it already does for `UnknownNamedType`.
+  - The test asserts all three related locations: the file, the use site,
+    and the definition.
+  - The `dmls-schema-support.md` table row was updated to match.
+
+**Defect 2, fixed: DMLS read the shared union fixture without declaring it to
+CI.**
+
+- `dmls/tests/l1/union_item_editor.rs` includes
+  `darkmatter/lib/tests/union_fixtures/mod.rs` by `#[path]`. A fixture edit
+  would therefore not have run those four tests.
+- `dmls/Cargo.toml` `source-inputs` now lists the file, and each of the four
+  tests spells it with `let _ = include_str!(…)`. This is the same pattern
+  the CLI uses.
+- `python3 scripts/ci/affected_scope.py darkmatter/lib/tests/union_fixtures/mod.rs`
+  exits 0 (the declaration validates) and selects `dmls`.
+
+**Acceptance gap closed: authored-reference round trips.**
+
+- The grammar proptest never generates named references. So no test
+  serialized and reparsed an authored `U[]` reference, although the plan's
+  audit names round trips.
+- Added `schemas_union_postfix::authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected`.
+  - Each authored form goes through parse, serialize, reparse, and serialize
+    again, with equal atoms and stable text. The forms are
+    `policy[](min(1))@./content-policy.yaml`, `short_form(required)`,
+    `choice[]`, `choice[](min(1); max(3))`, `choice(eager)@this`, and
+    `choice[](min(1))@./types.yaml`.
+  - The resolved `TypeExpr::Union` display form must not reparse.
+  - The anonymous `(string | number)[]` and `[string, number][]` must be
+    rejected by both the grammar and resolution. This also covers the
+    review's nit that nothing pinned the anonymous form as rejected.
+
+**Review nits left as they are.** None changes behavior, and each is
+recorded for the review cycle:
+
+- `dmls/src/overlay/schema.rs::alternatives()` and the private
+  `frontmatter_shape::alternatives_of` repeat the public
+  `flattened_alternatives`. They are structural walks, not a second
+  representation or acceptance logic.
+- `PropertyDef::alternatives()` has only a test caller.
+- `dmls/src/providers/frontmatter.rs::union_item_alternatives` has an
+  `ItemMatch::Unique` arm that its callers never reach.
+- The `SchemaUnionRejection::{ArrayArm, ScalarDefault}.arm` docs say "among
+  the flattened arms", but the value is the top-level position. They differ
+  only for a nested postfixed union arm, which today's grammar cannot
+  produce under these rejections.
+
+**Review categories reported clean** (subagent, with the code checked):
+
+- one array-of-union encoding (`TypeExpr::Union` + `is_array` → `items.anyOf`);
+- no constraint redistribution: value constraints are rejected rather than
+  moved, and arm bounds stay on arms;
+- report, hover, and completion paths are read-only;
+- no item is dropped by coerce or rewrite;
+- no new parser effects, and the grammar is untouched;
+- docs match the code and name no spec;
+- every new test is declared, and none carries a tier marker.
+
+### Acceptance criteria → evidence
+
+| AC | Evidence (all L1, passing on macOS in the final `just test`) |
+|---|---|
+| 1 Content Policy shapes | lib `schemas_union_postfix::{content_policy_list_validates_the_acceptance_cases, content_policy_list_lowers_to_an_array_of_the_flattened_arms}`; fixture controls `schemas_union_fixture_controls::*`; CLI `schema_union_pipeline::acceptance_*` (10 cases plus the guard `acceptance_cases_each_have_an_expected_report_and_a_test`) |
+| 2 required / rejected operations | `schemas_union_postfix::{required_union_reference_requires_the_property_without_a_null_arm, value_constraints_on_a_union_reference_are_rejected_by_name, an_array_arm_rejects_the_array_suffix_even_behind_an_import, a_cross_file_rejection_names_both_sources, a_rejection_inside_a_referenced_schema_keeps_the_referenced_wrapper}`; `schemas_named_type_merge::already_array_suffix_remains_rejected` (the former union rows became acceptance tests in Phase 2) |
+| 3 lowering | `schemas_union_postfix::content_policy_list_lowers_to_an_array_of_the_flattened_arms` (`type: array`, `minItems: 1`, one `items.anyOf` entry per flattened arm) |
+| 4 walkers | validate/discriminant: `schemas_union_report::{content_policy_rule_lookup_reads_the_union_inside_the_object_arm, a_literal_tag_narrows_each_item_to_its_own_arm}`; clean: `schemas_union_clean::{union_items_with_extra_keys_are_reported_and_left_unchanged, repairable_sibling_beside_valid_union_items_is_quoted}`; rewrite: `schemas_union_rewrite::eager_file_arm_in_union_item_is_rewritten_like_the_property`; coerce: `schemas_union_coerce::boolish_and_numberlike_arms_coerce_inside_a_union_item`. Phase 3 recorded each as failing when its walker reads the wrapper blindly. |
+| 5 typed tree | completion: `schemas_union_completion::content_policy_item_offers_object_keys_and_scalar_values`; DMLS hover: `union_item_editor::hover_on_an_item_names_the_alternative_only_for_a_unique_match`; `about`: `schemas_union_typed_consumers::about_model_exposes_every_content_policy_alternative_and_the_container` and CLI `schema_union_pipeline::schema_about_renders_the_named_union_reference_shapes` |
+| 6 byte identity | 347/347 manifest entries identical (above); snapshot and lowering guards pass |
+| 7 boundaries | `schemas_union_postfix` (three reference forms, forward and multi-hop, inherited markers, descriptions, container versus value constraints, bounds, contradictions, defaults, hidden array arm, nested array in an object arm, cycles and depth, round trips); `schemas_union_report` (overlap, invalid and conflicting tags, item/property parity); `schemas_union_coerce` / `schemas_union_rewrite` (ambiguous left unchanged, independent items, parity); `schemas_union_typed_consumers` (presence and timing); YAML schema-surface matrix `schemas_union_schema_matrix::*` (5 columns × 9 rows) |
+| 8 CLI and DMLS | CLI `schema_union_pipeline::*` (validate leaves input unchanged, compose coercion and rewrite, idempotence, assignment) and the document-data matrix `schema_union_matrix_cells::*` (30 cells plus 2 guards); DMLS `union_item_editor::*` (parser/overlay, hover, completion, published problems), `named_type_references::{an_unsupported_union_postfix_is_reported_at_the_reference_with_its_definition, an_unsupported_union_postfix_inside_a_referenced_schema_points_into_that_file, an_array_of_a_union_reference_prepares_without_schema_diagnostics}` |
+| 9 gates | below |
+
+- **Matrix coverage.** The YAML schema-surface matrix (Phase 2) walks all
+  5 columns × 9 rows from the shipped-schema fixture, one edit per cell, with
+  a control.
+- The document-data matrix (Phase 4) walks all 3 columns × 9 rows through
+  the real `md` binary, with row and column guards.
+- Duplicate-key and trailing-content cells fail through the real loader.
+- The smell grep over this phase's production diff (`serde(default)`,
+  `unwrap_or_default`, `.ok()`, `filter_map(.. as_str())`) found nothing new.
+
+### Gates and evidence
+
+| Check | Host | Result |
+|---|---|---|
+| `darkmatter/` `just test` (final, after every Phase 5 edit) | macOS | 9440 passed, 11 skipped |
+| `darkmatter/` `just lint` (final) | macOS | exit 0: clippy clean for `darkmatter`, `darkmatter-cli`, `dmls`, and `zed-dmls-cli`; zed-dmls wasm32-wasip2 check passed. Run with `KACHE_DISABLED=1`; see the environment finding. |
+| `claudine/` `just test` | macOS | 8684 passed, 9 skipped |
+| `claudine/` `just lint` | macOS | exit 0. The only warning is the known `__eh_frame` linker note. |
+| `just cross-check dmls --os windows named_type_references` | native Windows | pass |
+| `just cross-check darkmatter --os linux schemas_union_postfix` | Linux | pass |
+
+- Observed passes are listed above. WSL2 was not run, and that is a
+  portability review rather than evidence.
+  - The Phase 5 tests use tempdir roots compared through
+    `canonicalize_simplified` or `canonical_uri`, the same as the Windows-run
+    Phase 2 to 4 tests.
+  - Native Windows exercised the new DMLS URI assertions.
+- No CI cells, features, L2/L3/browser tests, or dependencies were added.
+  `cargo fmt` was not run, and nothing was staged or committed.
+
+**Environment finding (host, not this feature).** A plain `just lint`
+intermittently failed on this Mac.
+
+- The failing run compiled `darkmatter` from another checkout,
+  `/Volumes/coding/personal/rusty-biscuit/darkmatter/lib`: "Checking
+  darkmatter v0.1.0 (/Volumes/coding/personal/…)".
+- That checkout is on `main` with an uncommitted, non-compiling
+  `darkmatter/lib/src/markdown/schemas/errors.rs` from other work. It failed
+  with E0432/E0599 on `SchemaSourceId` and `UnknownNamedType`.
+- The same happened once with a plain
+  `cargo test --no-run -p claudine-cli` in this worktree.
+- `cargo metadata` resolves no package outside this worktree, the target
+  directory is local, and nothing in the worktree links to that path.
+- Runs with `KACHE_DISABLED=1` compiled this worktree's sources and passed.
+  This points at the `kache` rustc wrapper's shared store serving another
+  checkout's build, but the root cause was not proven: one
+  `KACHE_DISABLED=1 just lint` run still failed before an uncached rebuild
+  refreshed the artifacts.
+- Clearing an inherited `CDPATH` was tried and ruled out.
+- Recommended follow-up: investigate kache's cross-worktree behavior and,
+  once it is understood, record it in the `kache` skill.
+
+**Skills.** The `claudine` skill needs no update, because no Claudine code or
+workflow changed in this phase. The `darkmatter` skill's union section still
+matches. The new related location is a DMLS diagnostic detail, which
+`dmls-schema-support.md` documents.
+
+**Known follow-ups carried forward (not defects of this feature):**
+
+- the stale comment in `content-policy/schemas/content-policy.yaml`, left so
+  the shipped schema stays unchanged;
+- the Phase 2 and 3 findings (suggestion lint per arm, list-`eager`
+  disagreement with Claudine, possible trigger gap, untagged-item reporting,
+  path wording);
+- `just lint-files` already failing on `main`.
+
+**State: implementation complete, ready for review.** Lifecycle placement and
+commits are left to the author.
