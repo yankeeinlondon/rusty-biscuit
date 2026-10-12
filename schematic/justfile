@@ -66,9 +66,18 @@ build *args="":
 sanity:
     @just _sanity_all "schematic-define --all-features; schematic-definitions; schematic-gen; schematic-oauth"
 
-# run tests for schematic packages
+# run tests for schematic packages (L1, then the fresh-output guard)
 test *args="":
     @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth" {{ args }}
+    @just test-fresh-output {{ args }}
+
+# These are schematic-gen's `slow_` L1 tests, which the shared L1 filter leaves
+# out (archive consumers have no Cargo), so `test` runs them here and the CI
+# build job runs this recipe before producing the test archive.
+#
+# compile freshly generated client crates offline, outside the checkout
+test-fresh-output *args="":
+    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
 
 # test the generated schematic-schema crate (excluded from the workspace; uses its generated manifest)
 test-schema *args="":
@@ -146,7 +155,7 @@ check-drift:
     @echo "Checking Artifact Drift"
     @echo "-----------------------"
     @echo ""
-    @cargo test -p schematic-gen artifact_drift -- --ignored
+    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/^artifact_drift::/) | test(=fresh_output_compile::slow_real_apis_compile_offline)'
 
 # run clippy on schematic packages
 lint:

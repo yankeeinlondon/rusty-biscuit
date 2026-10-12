@@ -6,8 +6,12 @@
 //! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
+#[path = "../common/mod.rs"]
+mod common;
+
 mod artifact_drift;
 mod e2e_generation;
+mod fresh_output_compile;
 mod http_client;
 mod openapi_import_test;
 mod openapi_strict_completeness;

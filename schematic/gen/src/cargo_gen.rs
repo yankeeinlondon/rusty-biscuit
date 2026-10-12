@@ -67,14 +67,30 @@ wiremock = "0.6"
 /// assert!(content.contains("path = \"/workspace/schematic/define\""));
 /// ```
 pub fn generate_cargo_toml(workspace_root: Option<&str>) -> String {
-    let (define_path, definitions_path) = match workspace_root {
-        Some(root) => (format!("{}/define", root), format!("{}/definitions", root)),
-        None => ("../define".to_string(), "../definitions".to_string()),
-    };
+    match workspace_root {
+        Some(root) => generate_cargo_toml_with_paths(
+            &format!("{}/define", root),
+            &format!("{}/definitions", root),
+        ),
+        None => generate_cargo_toml_with_paths("../define", "../definitions"),
+    }
+}
 
+/// Generates the Cargo.toml content with explicit paths to the
+/// `schematic-define` and `schematic-definitions` packages.
+///
+/// Each path is serialized as a TOML string, so a Windows path such as
+/// `C:\work\schematic\define` survives intact instead of being read as escape
+/// sequences. An isolated build of freshly generated code uses this to point
+/// the manifest at a checkout or at a stand-in definitions crate.
+pub fn generate_cargo_toml_with_paths(define_path: &str, definitions_path: &str) -> String {
     CARGO_TOML_TEMPLATE
-        .replace("{{DEFINE_PATH}}", &define_path)
-        .replace("{{DEFINITIONS_PATH}}", &definitions_path)
+        .replace("\"{{DEFINE_PATH}}\"", &toml_string(define_path))
+        .replace("\"{{DEFINITIONS_PATH}}\"", &toml_string(definitions_path))
+}
+
+fn toml_string(value: &str) -> String {
+    biscuit_file::toml_crate::Value::String(value.to_string()).to_string()
 }
 
 /// Writes the Cargo.toml to the output directory.
@@ -430,5 +446,48 @@ mod tests {
 
         assert!(content.contains("path = \"../define\""));
         assert!(content.contains("path = \"../definitions\""));
+    }
+
+    fn dependency_path(content: &str, dependency: &str) -> String {
+        let parsed: toml_crate::Table = toml_crate::from_str(content).expect("valid TOML");
+        parsed["dependencies"][dependency]["path"]
+            .as_str()
+            .expect("path is a string")
+            .to_string()
+    }
+
+    #[test]
+    fn explicit_windows_paths_round_trip_through_toml() {
+        let define = r"C:\Users\dev\rusty-biscuit\schematic\define";
+        let definitions = r"D:\tmp\fixture definitions\stub";
+        let content = generate_cargo_toml_with_paths(define, definitions);
+
+        assert_eq!(dependency_path(&content, "schematic-define"), define);
+        assert_eq!(dependency_path(&content, "schematic-definitions"), definitions);
+    }
+
+    #[test]
+    fn explicit_paths_with_quotes_round_trip_through_toml() {
+        let define = r#"/tmp/a "quoted" dir/define"#;
+        let content = generate_cargo_toml_with_paths(define, "/tmp/definitions");
+
+        assert_eq!(dependency_path(&content, "schematic-define"), define);
+        assert_eq!(dependency_path(&content, "schematic-definitions"), "/tmp/definitions");
+    }
+
+    #[test]
+    fn windows_workspace_root_keeps_backslashes() {
+        let content = generate_cargo_toml(Some(r"C:\work\schematic"));
+
+        assert_eq!(
+            dependency_path(&content, "schematic-define"),
+            r"C:\work\schematic/define"
+        );
+    }
+
+    #[test]
+    fn default_manifest_matches_the_committed_schema_manifest() {
+        let committed = include_str!("../../schema/Cargo.toml");
+        assert_eq!(generate_cargo_toml(None), committed);
     }
 }

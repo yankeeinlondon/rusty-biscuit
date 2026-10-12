@@ -1,0 +1,317 @@
+//! Isolated, offline builds of freshly generated client code.
+//!
+//! [`FreshCrate::generate`] runs the public generation entry point into a
+//! temporary directory outside the checkout and writes the manifest with
+//! [`generate_cargo_toml_with_paths`], pointing it at local dependency paths.
+//! Cargo then resolves strictly offline against a copy of a committed
+//! lockfile: `cargo update --workspace --offline` adds only the temporary
+//! package entries, and every build runs with `--offline --locked`. There is
+//! no online fallback; a host whose Cargo cache cannot satisfy the lockfile
+//! fails with Cargo's own explanation.
+//!
+//! Every child build shares one reusable target directory, a sibling of the
+//! outer build's profile directories inside the configured target storage.
+//! It is never the outer build's own directory, so the two never wait on each
+//! other's Cargo locks. Tests that drive these builds carry the `slow_` prefix,
+//! which `.config/nextest.toml` places in a one-at-a-time test group with a
+//! longer timeout. When that timeout expires nextest kills the test's whole
+//! process group, which bounds the child build too.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use schematic_define::RestApi;
+use schematic_gen::cargo_gen::generate_cargo_toml_with_paths;
+use schematic_gen::output::generate_and_write_all;
+use tempfile::TempDir;
+
+/// Where the generated crate's `schematic-definitions` dependency comes from.
+pub enum Definitions<'a> {
+    /// The checkout's real `schematic-definitions` crate.
+    Checkout,
+    /// A stand-in crate that re-exports the real one and adds one module per
+    /// `(module name, Rust source)` pair. Fixture APIs need their request and
+    /// response types under `schematic_definitions::<module>`, and production
+    /// definitions must not carry them.
+    Fixture(&'a [(&'a str, &'a str)]),
+}
+
+/// A generated client crate in a temporary directory.
+pub struct FreshCrate {
+    _root: TempDir,
+    pub crate_dir: PathBuf,
+    pub src_dir: PathBuf,
+}
+
+/// The captured result of one child Cargo invocation.
+pub struct CargoRun {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+    pub command: String,
+}
+
+impl CargoRun {
+    /// Panics with the command, its exit, and both streams unless it succeeded.
+    pub fn assert_success(&self) {
+        assert!(
+            self.success,
+            "`{}` failed\n\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            self.command, self.stdout, self.stderr
+        );
+    }
+}
+
+/// The `schematic/` package area of the checkout, resolved at run time.
+pub fn schematic_root() -> PathBuf {
+    biscuit_test_harness::manifest_dir!()
+        .parent()
+        .expect("schematic/gen has a parent")
+        .to_path_buf()
+}
+
+impl FreshCrate {
+    /// Generates `apis` into a new temporary crate and copies `lockfile` beside
+    /// its manifest.
+    pub fn generate(apis: &[&RestApi], definitions: Definitions<'_>, lockfile: &Path) -> Self {
+        let root = TempDir::new().expect("create temp dir");
+        let crate_dir = root.path().join("schema");
+        let src_dir = crate_dir.join("src");
+
+        generate_and_write_all(apis, &src_dir, false).expect("generate client code");
+
+        let area = schematic_root();
+        let define = area.join("define");
+        let real_definitions = area.join("definitions");
+        let definitions_path = match definitions {
+            Definitions::Checkout => real_definitions,
+            Definitions::Fixture(modules) => {
+                let stub = root.path().join("fixture-definitions");
+                write_fixture_definitions(&stub, &real_definitions, modules);
+                stub
+            }
+        };
+        let manifest =
+            generate_cargo_toml_with_paths(path_str(&define), path_str(&definitions_path));
+        fs::write(crate_dir.join("Cargo.toml"), manifest).expect("write Cargo.toml");
+        fs::copy(lockfile, crate_dir.join("Cargo.lock"))
+            .unwrap_or_else(|e| panic!("copy lockfile {}: {e}", lockfile.display()));
+
+        Self { _root: root, crate_dir, src_dir }
+    }
+
+    /// Adds `tests/<name>.rs` to the generated crate.
+    pub fn add_test_file(&self, name: &str, source: &str) {
+        let tests = self.crate_dir.join("tests");
+        fs::create_dir_all(&tests).expect("create tests dir");
+        fs::write(tests.join(format!("{name}.rs")), source).expect("write test file");
+    }
+
+    /// `cargo check --offline --locked` of the library.
+    pub fn cargo_check(&self) -> CargoRun {
+        self.resolve_offline();
+        self.cargo(&["check", "--lib"])
+    }
+
+    /// Builds and runs the crate's integration tests through nextest,
+    /// offline and locked, with `envs` added to the child environment.
+    pub fn nextest_run(&self, envs: &[(&str, &str)]) -> CargoRun {
+        self.resolve_offline();
+        let mut command = self.command(&["nextest", "run", "--tests", "--no-fail-fast"]);
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        run(command)
+    }
+
+    /// Adds the temporary package entries to the copied lockfile without
+    /// touching any registry version it already pins.
+    fn resolve_offline(&self) {
+        let mut command = cargo_command();
+        command
+            .args(["update", "--workspace", "--offline", "--manifest-path"])
+            .arg(self.crate_dir.join("Cargo.toml"));
+        run(command).assert_success();
+    }
+
+    fn cargo(&self, args: &[&str]) -> CargoRun {
+        run(self.command(args))
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = cargo_command();
+        command
+            .args(args)
+            .args(["--offline", "--locked", "--manifest-path"])
+            .arg(self.crate_dir.join("Cargo.toml"))
+            .arg("--target-dir")
+            .arg(child_target_dir());
+        command
+    }
+}
+
+fn path_str(path: &Path) -> &str {
+    path.to_str()
+        .unwrap_or_else(|| panic!("non-UTF-8 path {}", path.display()))
+}
+
+fn write_fixture_definitions(stub: &Path, real: &Path, modules: &[(&str, &str)]) {
+    fs::create_dir_all(stub.join("src")).expect("create fixture definitions");
+    // Version 0.1.1 still satisfies the generated `version = "0.1.0"`
+    // requirement while keeping the stand-in distinct from the real 0.1.0 in
+    // the lockfile; two path packages with one name and version collide there.
+    let manifest = format!(
+        "[package]\n\
+         name = \"schematic-definitions\"\n\
+         version = \"0.1.1\"\n\
+         edition = \"2024\"\n\
+         publish = false\n\n\
+         [dependencies]\n\
+         real = {{ package = \"schematic-definitions\", version = \"0.1.0\", path = {} }}\n\
+         serde = {{ version = \"1.0\", features = [\"derive\"] }}\n",
+        toml_path(real)
+    );
+    fs::write(stub.join("Cargo.toml"), manifest).expect("write fixture manifest");
+
+    let mut lib = String::from("pub use real::*;\n");
+    for (name, source) in modules {
+        lib.push_str(&format!("\npub mod {name} {{\n{source}\n}}\n"));
+    }
+    fs::write(stub.join("src/lib.rs"), lib).expect("write fixture lib.rs");
+}
+
+fn toml_path(path: &Path) -> String {
+    biscuit_file::toml_crate::Value::String(path_str(path).to_string()).to_string()
+}
+
+/// A Cargo command stripped of the settings the outer test run leaks into
+/// its tests. Nextest's own variables would select the outer profile (`ci`
+/// does not exist in the temporary crate), and an inherited target directory
+/// or build target would aim the child build at the outer build's output.
+fn cargo_command() -> Command {
+    let program = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(program);
+    for (key, _) in std::env::vars_os() {
+        let Some(key) = key.to_str() else { continue };
+        let leaked = key.starts_with("NEXTEST")
+            || key.starts_with("CARGO_PKG_")
+            || key.starts_with("CARGO_BIN_")
+            || (key.starts_with("CARGO_TARGET_") && key.ends_with("_RUNNER"))
+            || matches!(
+                key,
+                "CARGO_TARGET_DIR"
+                    | "CARGO_BUILD_TARGET_DIR"
+                    | "CARGO_BUILD_BUILD_DIR"
+                    | "CARGO_BUILD_TARGET"
+                    | "CARGO_MANIFEST_DIR"
+                    | "CARGO_MANIFEST_PATH"
+                    | "CARGO_CRATE_NAME"
+                    | "CARGO_PRIMARY_PACKAGE"
+                    | "CARGO_TARGET_TMPDIR"
+            );
+        if leaked {
+            command.env_remove(key);
+        }
+    }
+    command.env("CARGO_NET_OFFLINE", "true");
+    command.env("CARGO_TERM_COLOR", "never");
+    command
+}
+
+fn run(mut command: Command) -> CargoRun {
+    let rendered = format!("{command:?}");
+    let output = command
+        .output()
+        .unwrap_or_else(|e| panic!("could not start Cargo ({rendered}): {e}"));
+    CargoRun {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        command: rendered,
+    }
+}
+
+/// The reusable child target directory.
+///
+/// The running test binary lives at `<target>/<profile>/deps/<binary>` (a
+/// cross build inserts a target triple after `<target>`), so this resolves
+/// inside whatever target storage the outer build was configured with.
+fn child_target_dir() -> PathBuf {
+    let exe = std::env::current_exe().expect("current test executable");
+    let profile_dir = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("test binary sits in <profile>/deps");
+    profile_dir
+        .parent()
+        .expect("profile dir has a parent")
+        .join("schematic-fresh-output")
+}
+
+/// Relative path to file bytes (or `None` for a directory) under one root.
+pub type TreeSnapshot = BTreeMap<String, Option<Vec<u8>>>;
+
+/// Every file and directory below `root`, keyed by `/`-separated relative
+/// path. Symlinks are recorded as entries but not followed.
+pub fn snapshot_tree(root: &Path) -> TreeSnapshot {
+    let mut entries = TreeSnapshot::new();
+    collect(root, root, &mut entries);
+    entries
+}
+
+fn collect(root: &Path, dir: &Path, entries: &mut TreeSnapshot) {
+    let mut children: Vec<_> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|entry| entry.expect("directory entry"))
+        .collect();
+    children.sort_by_key(|entry| entry.file_name());
+    for entry in children {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .expect("entry below root")
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let file_type = entry.file_type().expect("file type");
+        if file_type.is_dir() {
+            entries.insert(relative, None);
+            collect(root, &path, entries);
+        } else if file_type.is_file() {
+            entries.insert(relative, Some(fs::read(&path).expect("read file")));
+        } else {
+            entries.insert(relative, None);
+        }
+    }
+}
+
+/// The names of `dir`'s direct children, sorted.
+pub fn list_dir(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// A one-line-per-path summary of how two snapshots differ.
+pub fn diff_summary(expected: &TreeSnapshot, actual: &TreeSnapshot) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (path, bytes) in expected {
+        match actual.get(path) {
+            None => lines.push(format!("missing: {path}")),
+            Some(other) if other != bytes => lines.push(format!("differs: {path}")),
+            Some(_) => {}
+        }
+    }
+    for path in actual.keys() {
+        if !expected.contains_key(path) {
+            lines.push(format!("unexpected: {path}"));
+        }
+    }
+    lines
+}
