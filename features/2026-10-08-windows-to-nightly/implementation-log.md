@@ -941,3 +941,74 @@ just ci-seed                           # the rest; rerun to resume
 ```
 
 No nightly baseline exists, and nothing here is a certified workspace.
+
+## Phase 6 — Documentation and final validation (2026-10-11)
+
+### What changed
+
+- **Guidance:** `docs/topics/ci-cd.md` gains a per-cell flow diagram (proof
+  sources → one plan → gap/reuse/execute → audits → certify or keep the
+  anchor) and states that a pass counts only for its own environment.
+  `docs/cicd/test-inputs.md` no longer says the nightly runs every package's
+  full L1 on Linux; `.github/ci/README.md` no longer calls the nightly
+  WSL2-only; `CLAUDE.md` marks the nightly duration as measured under the old
+  cadence. Release enforcement and the risk-directed workflow stay planned.
+- **Drift check:** `ci_workflow_contracts::
+  active_cadence_guidance_agrees_with_the_environment_table` reads the
+  environment table and refuses a bounded set of contradicting phrases in
+  `CLAUDE.md`, `docs/topics/ci-cd.md`, `.github/ci/README.md`, and the
+  rust-devops and os skills (normalized for case, backticks, and wrapping).
+  Verified to fail on a planted claim. An edit to any listed document selects
+  the contracts binary on Linux.
+- **Matrix close-out:** duplicate keys and trailing content are now refused at
+  load by the readers this feature changed: `affected_scope.py`
+  `--apply-to`, `--accepted-cells`, `--evidence-rejections`;
+  `reuse_validation.py certify --plan`; `completion.py`'s `manifest.jsonl`
+  lines; `seed.py`'s plan and state. The seed state has a per-field matrix
+  (absent, null, wrong type, wrong version, boolean version, empty id,
+  another seed's id), each with an unedited control.
+- **Departure:** a malformed seed state is *ignored and replaced*, not a
+  stop-and-repair error as the matrix row says. The state decides nothing, so
+  refusing it would block a pass for no protection; only its attempt history
+  is lost.
+
+### Acceptance criteria
+
+| Criterion | Evidence |
+|---|---|
+| Merge eligibility vs release eligibility | `docs/topics/ci-cd.md` ("Planned release evidence policy"); release enforcement deferred, not claimed |
+| PR/push plans have no Windows/WSL2 cells; PR-proven push runs nothing | `EventSchedulingTests.test_each_event_schedules_its_environments_and_defers_the_rest`, `test_a_reused_pull_request_leaves_its_push_nothing_to_run` (plus its projection) |
+| Nightly: Windows + WSL2 for affected scope, Linux only as WSL2 producer; opt-ins kept | `test_a_scheduled_guest_brings_its_producer_without_cells`, `test_a_full_scope_run_preflights_only_the_scheduled_runners`, `test_the_label_plans_every_environment_for_a_pull_request` |
+| Unchanged nightly schedules nothing; failures keep pending coverage; bootstrap/API failure diagnosed; WSL2 history is not Windows proof | `CoverageAnchorTests.test_an_unchanged_certified_head_plans_no_cell_and_inherits_everything`, `test_wsl2_only_history_anchors_wsl2_and_runs_windows_in_full`; `NightlyAnchorTests.test_no_successful_nightly_is_a_bootstrap_for_every_scheduled_environment`, `test_an_api_failure_is_a_visible_full_scope_fallback_not_a_bootstrap`, `test_failed_incomplete_foreign_and_non_ancestor_runs_never_anchor` |
+| Existing nightly failures documented with a recovery path | Phase 1 recovery inventory; five zero-test packages fixed (`unimplemented`); `claudine-cli` hosted-WSL2 timeout **unresolved** (passes on the rig) |
+| Resumable full-workspace seed; interrupted passes keep completed cells; no receipt overwrite | `test_seed.SeedRunTests` (interruption/resume, retry, accumulation), Phase 4 `RigProducerToReuseTests` (sequential packages unioned) |
+| Fully seeded bootstrap schedules nothing; partial seed runs exactly the rest | `test_a_fully_seeded_bootstrap_nightly_builds_and_runs_nothing`, `test_a_partly_seeded_nightly_runs_exactly_the_rest` |
+| The three nightly examples | 1: `test_an_unchanged_certified_head_plans_no_cell_and_inherits_everything`; 2: Phase 4 `PartialRecoveryTests` (later commit reuses unchanged, reruns changed); 3: `test_a_partly_seeded_nightly_runs_exactly_the_rest` |
+| Strict blocks, warn publishes honest mixed results | hook suite (`test_warn_passing_tests_exits_zero` and strict cases, 68 passed); `test_a_warn_mode_failure_in_one_environment_does_not_hide_a_pass_in_another`; `test_a_newer_failure_beats_an_older_pass_of_equivalent_inputs` |
+| Python tests for cadence, empty plans, scoped diffs, producer demand, migration, failures; contracts + actionlint | suites below |
+| Active guidance agrees with the shipped policy | `active_cadence_guidance_agrees_with_the_environment_table` |
+| End-to-end fixtures: Windows receipt publication, completion checks, discovery, selective reuse, sequential receipts, fallback | Phase 4 `test_cross_check.RigPublicationRunTests`, `test_evidence_reuse.RigProducerToReuseTests`, `RigFailureAndIncompleteTests`, `test_hosted_observations` |
+
+### Simulated vs collected
+
+Everything above is fixture or contract evidence on macOS, plus Phase 4's
+real `biscuit-file` legs on both rigs against a scratch bare remote. **Not
+collected:** an operational seed (blocked until this branch is on `main`),
+any hosted run of the new nightly, and whether `GITHUB_TOKEN` may push
+`refs/notes/*`. No nightly baseline exists.
+
+### Gates run (macOS, local, final tree)
+
+Every `SUITE_REGISTRY` Python companion with its count: `test_affected_scope`
+462, `test_build_key` 15, `test_ci_local` 103, `test_completion` 75,
+`test_constraints` 39, `test_cross_check` 52, `test_evidence_reuse` 172,
+`test_hosted_observations` 33, `test_local_evidence` 23, `test_publish_gaps`
+19, `test_resolved_plan` 103, `test_reuse_validation` 43, `test_runner_loss`
+50, `test_schema` 202, `test_seed` 20, all OK. `just test repo-deps`: 489
+passed. `just test test-toolkit`: 472 passed. `actionlint`, `shellcheck -S
+warning` (`cross-check.sh`, the hook): clean. Hook fixtures: 68 passed, 0
+failed. Host load averaged 150+ (other sessions' language servers) during the
+run; nothing timed out.
+
+Implementation complete, ready for review. The operational seed, a hosted
+nightly, and the `refs/notes/*` push permission remain open (above).

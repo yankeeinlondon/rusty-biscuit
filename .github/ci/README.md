@@ -1427,8 +1427,9 @@ request scan must never be presented as a completed full-tree push scan.
 
 The scan scope itself travels on the plan as `archive_guard`; see
 [the schema README](schemas/README.md#resolved-plan). The guard is Linux-hosted
-and never forces Linux into an event that excludes it, so the WSL2-only nightly
-records `selected: false` rather than gaining a runner.
+and never forces Linux into an event that excludes it, so the nightly, where
+Linux only builds WSL2's archives, records `selected: false` rather than
+gaining a Linux cell.
 
 #### How the cell executes
 

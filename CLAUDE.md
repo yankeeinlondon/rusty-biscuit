@@ -115,7 +115,8 @@ estimate and allow up to about 1.5 h before treating a run as stuck.
 By event across all outcomes (same period): pull request median 34 min (p90
 83), push to `main` median 40 min (p90 78, measured while a push still added
 Windows; it no longer does), nightly schedule
-about 2 h (114–140 min, adds WSL2). Pull requests before 2026-09-18, which ran
+about 2 h (114–140 min, measured when it ran WSL2 alone over the full
+workspace on every run; it now runs native Windows too, over what changed). Pull requests before 2026-09-18, which ran
 every environment, had a median of 2.5 h (p90 4.6 h); those figures no longer
 apply. Refresh the figures with `gh run list --workflow ci.yml --status
 completed` when the schedule or runners change.

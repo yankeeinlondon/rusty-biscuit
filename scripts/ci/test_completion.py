@@ -518,6 +518,23 @@ class CompletionValidatorOracleTests(ValidatorHarness):
         self.assertIn("malformed", stderr.lower())
         self.assertFalse(out.exists())
 
+    def test_a_manifest_line_with_a_duplicate_key_fails_validation(self):
+        # Last-wins would let a second `exit_code` decide the report's result.
+        document = junit_document([junit_case("green_one"), junit_case("green_two")])
+        tree = self.staging_tree(
+            {"L1/claudine.xml": document}, [self.manifest_entry("L1/claudine.xml")]
+        )
+        code, stderr, _ = self.validate(artifacts=tree)
+        self.assertEqual(0, code, f"the unedited control validates: {stderr}")
+        manifest = tree / "junit-claudine-L1-ubuntu-latest" / "manifest.jsonl"
+        line = manifest.read_text(encoding="utf-8")
+        manifest.write_text(line.replace('"exit_code": 0', '"exit_code": 1, "exit_code": 0', 1),
+                            encoding="utf-8")
+        code, stderr, out = self.validate(artifacts=tree)
+        self.assertNotEqual(0, code)
+        self.assertIn("duplicate key", stderr)
+        self.assertFalse(out.exists())
+
     # -- expected versus observed identities ---------------------------------
 
     def test_a_missing_expected_test_fails_and_a_skip_approval_cannot_excuse_it(self):

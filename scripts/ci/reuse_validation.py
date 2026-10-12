@@ -543,7 +543,10 @@ def certify(args: argparse.Namespace) -> None:
     name is printed as a JSON list with its environment so the workflow can
     upload each under that exact name.
     """
-    plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    try:
+        plan = schema.loads_strict(Path(args.plan).read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise SystemExit(f"certify: the resolved plan is unreadable: {error}") from None
     problems = schema.validate_resolved_plan(plan)
     if problems:
         raise SystemExit("certify: the resolved plan is invalid: " + "; ".join(problems))

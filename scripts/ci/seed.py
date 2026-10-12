@@ -49,6 +49,7 @@ from typing import Any, Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import local_evidence  # noqa: E402
+import schema  # noqa: E402
 
 #: `cross-check.sh --os` name → the plan environment its leg proves.
 SEED_ENVIRONMENTS = {"windows": "windows-latest", "wsl": "wsl2-ubuntu"}
@@ -138,7 +139,7 @@ def resolve_plan(path: Path, cwd: Path = ROOT) -> dict[str, Any]:
          "schedule", "--resolved-plan", "--plan-out", str(path)],
         cwd=cwd, check=True, stdout=subprocess.DEVNULL, timeout=600,
     )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return schema.loads_strict(path.read_text(encoding="utf-8"))
 
 
 @dataclass
@@ -251,13 +252,38 @@ def write_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def read_state(path: Path) -> dict[str, Any] | None:
-    """The previous attempts, or None when absent or unreadable (it decides nothing)."""
+#: The state fields a resumed pass appends to, and their types.
+STATE_FIELDS: dict[str, type] = {
+    "schema_version": int,
+    "seed_id": str,
+    "repository": dict,
+    "pinned": dict,
+    "plan": dict,
+}
+
+
+def read_state(path: Path, identity: str | None = None) -> dict[str, Any] | None:
+    """The previous attempts, or None when absent, malformed, or another seed's.
+
+    The state decides nothing, so a bad one is replaced rather than repaired:
+    the pass re-derives every cell from published proof either way, and only
+    the attempt history of the unreadable file is lost.
+    """
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = schema.loads_strict(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(state, dict) or state.get("schema_version") != STATE_SCHEMA_VERSION:
+    if not isinstance(state, dict):
+        return None
+    for name, kind in STATE_FIELDS.items():
+        value = state.get(name)
+        if type(value) is not kind or (kind is str and not value):
+            return None
+    if state["schema_version"] != STATE_SCHEMA_VERSION:
+        return None
+    if identity is not None and state["seed_id"] != identity:
+        return None
+    if not isinstance(state.get("attempts", {}), dict):
         return None
     return state
 
@@ -353,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             with pass_lock(directory):
                 state_path = directory / "state.json"
-                state = read_state(state_path) or {
+                state = read_state(state_path, identity) or {
                     "schema_version": STATE_SCHEMA_VERSION,
                     "seed_id": identity,
                     "repository": {"remote": git("remote", "get-url", "origin")},

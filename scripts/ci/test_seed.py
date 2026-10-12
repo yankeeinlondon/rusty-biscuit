@@ -190,19 +190,58 @@ class StateTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    STATE = {
+        "schema_version": 1,
+        "seed_id": "cccccccccccc-0123456789ab",
+        "repository": {"remote": "git@example.com:o/r.git"},
+        "pinned": {"revision": "c" * 40, "tree": "d" * 40},
+        "plan": {"sha256": "e" * 64, "cell_count": 5},
+        "attempts": {},
+        "cells": {"a": "proved"},
+    }
+
     def test_state_round_trips_and_leaves_no_temporary_file(self) -> None:
         path = self.directory / "seed" / "state.json"
-        seed.write_state(path, {"schema_version": 1, "cells": {"a": "proved"}})
-        self.assertEqual({"a": "proved"}, seed.read_state(path)["cells"])
+        seed.write_state(path, self.STATE)
+        self.assertEqual({"a": "proved"}, seed.read_state(path, self.STATE["seed_id"])["cells"])
         self.assertEqual(["state.json"], [entry.name for entry in path.parent.iterdir()])
 
-    def test_unreadable_or_foreign_state_is_ignored_not_trusted(self) -> None:
+    def test_unreadable_state_is_ignored_not_trusted(self) -> None:
         path = self.directory / "state.json"
-        for text in ("{broken", "[]", json.dumps({"schema_version": 2})):
-            with self.subTest(text=text):
+        good = json.dumps(self.STATE)
+        for text in ("{broken", "[]", good + " trailing",
+                     good.replace('"schema_version": 1', '"schema_version": 1, "schema_version": 1')):
+            with self.subTest(text=text[:40]):
                 path.write_text(text, encoding="utf-8")
                 self.assertIsNone(seed.read_state(path))
         self.assertIsNone(seed.read_state(self.directory / "absent.json"))
+
+    def test_state_matrix_every_field_edit_makes_it_ignored(self) -> None:
+        # The control: the unedited state is read.
+        path = self.directory / "state.json"
+        seed.write_state(path, self.STATE)
+        self.assertIsNotNone(seed.read_state(path, self.STATE["seed_id"]))
+        edits = {"absent": ..., "null": None, "wrong type": ["x"]}
+        for field in seed.STATE_FIELDS:
+            for label, value in edits.items():
+                with self.subTest(field=field, edit=label):
+                    state = dict(self.STATE)
+                    if value is ...:
+                        del state[field]
+                    else:
+                        state[field] = value
+                    seed.write_state(path, state)
+                    self.assertIsNone(seed.read_state(path, self.STATE["seed_id"]))
+        for field, value in (("schema_version", 2), ("schema_version", True), ("seed_id", ""),
+                             ("attempts", [])):
+            with self.subTest(field=field, value=value):
+                seed.write_state(path, {**self.STATE, field: value})
+                self.assertIsNone(seed.read_state(path, self.STATE["seed_id"]))
+
+    def test_another_seeds_state_is_not_resumed(self) -> None:
+        path = self.directory / "state.json"
+        seed.write_state(path, self.STATE)
+        self.assertIsNone(seed.read_state(path, "000000000000-ffffffffffff"))
 
     def test_a_second_pass_on_the_same_seed_is_refused(self) -> None:
         with seed.pass_lock(self.directory):

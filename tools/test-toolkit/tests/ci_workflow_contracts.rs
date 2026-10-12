@@ -8144,3 +8144,80 @@ fn the_observation_artifact_prefix_is_the_one_the_publisher_collects() {
         );
     }
 }
+
+// --- cadence guidance agrees with the environment table ------------------------
+
+/// The active documents that state when each environment runs. A bounded list:
+/// historical specs and dated timing measurements are snapshots and stay out.
+const CADENCE_GUIDANCE: &[&str] = &[
+    "CLAUDE.md",
+    "docs/topics/ci-cd.md",
+    ".github/ci/README.md",
+    ".claude/skills/rust-devops/ci-cd.md",
+    ".claude/skills/os/SKILL.md",
+];
+
+fn environment_events(name: &str) -> Vec<String> {
+    let table: serde_json::Value =
+        serde_json::from_str(&read(".github/ci/environments.json")).expect("environments.json is JSON");
+    table["environments"]
+        .as_array()
+        .expect("environments.json lists environments")
+        .iter()
+        .find(|environment| environment["name"] == name)
+        .unwrap_or_else(|| panic!("environments.json declares {name}"))["events"]
+        .as_array()
+        .expect("each environment names its events")
+        .iter()
+        .map(|event| event.as_str().expect("events are strings").to_owned())
+        .collect()
+}
+
+/// Lowercased, with backticks dropped and whitespace collapsed, so a claim
+/// matches however a document wraps or formats it.
+fn normalized(text: &str) -> String {
+    text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Claims about the schedule that contradict the environment table, checked as
+/// short phrases rather than whole sentences so wording can move freely.
+#[test]
+fn active_cadence_guidance_agrees_with_the_environment_table() {
+    let windows = environment_events("windows-latest");
+    let wsl = environment_events("wsl2-ubuntu");
+    let windows_on_push = windows.iter().any(|event| event == "push");
+    let windows_nightly = windows.iter().any(|event| event == "schedule");
+    let wsl_nightly = wsl.iter().any(|event| event == "schedule");
+
+    let mut contradicted: Vec<&str> = Vec::new();
+    if !windows_on_push {
+        contradicted.extend([
+            "push to main adds windows",
+            "a push to main adds windows-latest",
+            "windows is proven by every push",
+            "only windows runs",
+        ]);
+    }
+    if windows_nightly {
+        contradicted.extend(["runs wsl2 alone", "plans wsl2 alone", "plans wsl2-ubuntu alone", "the nightly is wsl2's alone"]);
+    }
+
+    let mut problems = Vec::new();
+    for document in CADENCE_GUIDANCE {
+        let text = normalized(&read(document));
+        for claim in &contradicted {
+            if text.contains(claim) {
+                problems.push(format!("{document} says \"{claim}\""));
+            }
+        }
+        if windows_nightly && wsl_nightly && !text.contains("nightly") {
+            problems.push(format!("{document} no longer says when Windows and WSL2 run"));
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "active CI guidance contradicts .github/ci/environments.json (windows-latest: {windows:?}, \
+         wsl2-ubuntu: {wsl:?}):\n  {}",
+        problems.join("\n  ")
+    );
+}

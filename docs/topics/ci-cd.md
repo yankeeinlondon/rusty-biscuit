@@ -378,6 +378,29 @@ successful baseline unchanged. Hosted cells that finished keep their proof
 qualifying evidence, executing only unproven cells. A newer qualifying failure will
 prevent an older pass from hiding that cell's failure.
 
+Every nightly cell resolves the same way, whoever produced its proof:
+
+```mermaid
+flowchart LR
+    Hook[pre-push hook] --> Notes[(observations in<br/>refs/notes/ci-local/*)]
+    Rig[just cross-check / just ci-seed] --> Notes
+    Hosted[finished hosted cells] --> Notes
+    Scope[nightly scope:<br/>one resolved plan] --> Cell{each cell}
+    Notes --> Cell
+    Cell -->|governed gap| Gap[ACCEPTED GAP]
+    Cell -->|qualifying pass,<br/>no newer failure| Reuse[reuse]
+    Cell -->|anything else| Execute[execute on a hosted runner]
+    Execute --> Notes
+    Gap --> Audit[area audits + ci-gate]
+    Reuse --> Audit
+    Execute --> Audit
+    Audit -->|all passed| Certify[certify: next nightly's anchor]
+    Audit -->|any failure| Keep[anchor unchanged;<br/>finished cells keep their proof]
+```
+
+A pass from the pre-push hook, a rig, or a hosted cell counts only for its own environment, on the
+same tree or one with the same gate inputs; WSL2 proof never stands in for native Windows.
+
 **Planned release evidence policy:** native Windows and WSL2 passes are not
 required for ordinary merges to `main`. A release will require qualifying
 passing evidence for its release scope on macOS, Linux, native Windows, and

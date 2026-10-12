@@ -5783,7 +5783,7 @@ def read_accepted_cells(source: str | None) -> list[dict[str, Any]]:
     if not source:
         return []
     text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
-    document = json.loads(text)
+    document = schema.loads_strict(text)
     if not isinstance(document, list):
         raise RuntimeError(f"accepted cells must be a JSON list, got {type(document).__name__}")
     for entry in document:
@@ -5820,7 +5820,7 @@ def read_prohibitions(directory: str | None) -> dict[str, dict[str, Any]]:
 def read_evidence_rejections(source: str | None) -> list[str]:
     if not source:
         return []
-    document = json.loads(Path(source).read_text(encoding="utf-8"))
+    document = schema.loads_strict(Path(source).read_text(encoding="utf-8"))
     if not isinstance(document, list) or not all(isinstance(x, str) for x in document):
         raise RuntimeError("evidence rejections must be a JSON list of strings")
     return document
@@ -5834,7 +5834,7 @@ def main() -> None:
         # The carried plan is the selection. Nothing from the checkout is
         # consulted here, so a receipt CI accepted cannot be second-guessed.
         plan = apply_accepted_cells(
-            json.loads(Path(args.apply_to).read_text(encoding="utf-8")),
+            schema.loads_strict(Path(args.apply_to).read_text(encoding="utf-8")),
             accepted_cells,
             evidence_rejections,
             accepted_environments=args.accepted_environment,

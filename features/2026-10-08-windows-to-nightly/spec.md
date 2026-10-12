@@ -2,7 +2,7 @@
 kind: feature
 name: windows-to-nightly
 date: 2026-10-08
-status: draft-spec
+status: implemented
 $schema:
   status: |-
     enum(
@@ -27,6 +27,8 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
+implemented: true
+implemented_by: claude-code/claude-opus-5-5 (cadence, zero-test packages, Phases 5-6); a separate implementation run (Phases 1-4)
 human_review: false
 message_to_agent: |-
   Phase 4 is implemented (see the log). Things the next phase must know:

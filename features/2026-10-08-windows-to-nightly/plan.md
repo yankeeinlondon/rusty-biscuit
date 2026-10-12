@@ -220,11 +220,11 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 10 — Seed operation
 
-- [ ] **Implement seed command**
+- [x] **Implement seed command**
   - Add the dedicated Just interface chosen in Phase 1, backed by a small orchestrator using the existing planner, verifier, and cross-check transport. Preview resolves one full-workspace schedule plan at a pinned committed `main` revision; it creates no proof.
   - List every gated package's separate Windows/WSL2 cells, declared gates/features, current gaps, chosen host, reuse/execution, and remaining coverage. Packages without gates stay visibly unscheduled.
   - Refuse dirty/mismatched execution trees and unsafe concurrent checkout/build mutations. Honor rig locks and native Windows storage contracts; missing/unreachable rigs are explicit and leave requested coverage unproved.
-- [ ] **Persist seed progress**
+- [x] **Persist seed progress**
   - Bind resume state to repository, pinned revision, policy/date, and cell contracts. Treat it as a progress cache only; reverify published/local observations and actual inputs on every resume.
   - Publish each completed cell immediately using Phase 4. Preserve local proof if publication fails and distinguish local success from remote availability. Failure/interruption must not discard earlier cells or wait for workspace-wide success to publish.
   - Keep a pass pinned when `main` advances. A new pass may reuse older equivalent-input observations and execute changed cells; never relabel an old run as testing the new head.
@@ -244,24 +244,24 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 12 — Parallel closure preparation
 
-- [ ] **Align active guidance**
+- [x] **Align active guidance**
   - Update `.github/ci/README.md`, schema documentation, `docs/topics/ci-cd.md`, `AGENTS.md`, rust-devops/os skill topic pages, and other active cadence/evidence guidance found by search. Add a developer-facing seed/recovery example and a Mermaid diagram of scope → verify → execute/reuse/gap → audit → baseline.
   - Remove planned markers only for delivered behavior. Keep risk-directed selection and release enforcement planned/deferred. Distinguish merge eligibility from intended four-environment release eligibility, and incremental scope from historical full-scope fallback costs.
   - Historical specs remain snapshots; current docs do not name/link feature or fix directories. Record new OS-specific discoveries in the matching skill page alongside the fix.
   - Ownership: docs/skills/instructions only; integrate implementation log updates serially.
-- [ ] **Check policy drift**
+- [x] **Check policy drift**
   - Add a focused contract check for conflicting active cadence guidance using a bounded set of policy claims/locations, excluding historical specs and timing measurements. Avoid exact sentence snapshots and a new independent CI gate.
   - Extend existing planner, evidence, schema, cross-check, hook, audit, and workflow suites rather than adding unrelated CI cells. Use the test toolkit and canonical test-input read spellings so edits select their actual suite owners.
   - Ownership: focused tests and fixtures; agree with the documentation task on the policy assertions before editing.
 
 ### Wave 13 — Final verification
 
-- [ ] **Run scoped checks**
+- [x] **Run scoped checks**
   - Run relevant Python suites through their registered companion recipes; confirm the expected test count so invoking a module that collects zero tests cannot be reported as validation.
   - Run `just test repo-deps` and `just test test-toolkit` from the repository root; use area `just lint` where supplied and actionlint for changed workflows. Run affected hook fixtures through their canonical noninteractive runner. Use nextest, never `cargo test`; do not run `cargo fmt`.
   - Inspect `SUITE_REGISTRY` and recipe ownership before choosing exact companion commands. Run relevant L2 via area `just test-l2` only if changed behavior requires it; terminal/browser windows must never gain focus.
   - Record OS evidence explicitly: local contract checks plus configured native Windows and WSL2 targeted transport checks, Linux archive production, and macOS behavior where changed. Reuse qualifying evidence; do not add a hosted matrix cell or dispatch a workspace run to answer a fixture-level question.
-- [ ] **Record review readiness**
+- [x] **Record review readiness**
   - Map every spec acceptance criterion to a test or operational result, including strict/warn outcomes and hosted partial-result recovery; mark unavailable operational evidence/blockers explicitly. Record assumptions/departures and actual run identities in `implementation-log.md`.
   - Inspect final diffs for unintended cadence changes, policy-free gate drift, scope recalculation, loss of provenance, defaulted malformed inputs, and stale comments. Confirm only necessary files changed and active documentation matches shipped behavior.
   - Stop at implementation complete, ready for review. Do not manufacture a baseline, claim release enforcement, commit, publish a branch, or move the feature to `_completed`.
@@ -316,7 +316,7 @@ JSON resume inputs (proposed names, finalized in Wave 2):
 | Duplicate key | R | R | R | R | R | R | R |
 | Trailing/invalid document | R | R | R | R | R | R | R |
 
-- [ ] **Assert complete matrix**
+- [x] **Assert complete matrix**
   - Finalize columns for receipt `environment/base/head/tree/scope_identity/completion/host/cells`; each host, cell, report, source/run, build, expected-manifest, completion, anchor, policy, API, and progress field actually read. Include cells' package/gate/outcome/exit/completion/counts/duration/input identity/backends/report/build/filter and nested values that affect credit. Treat optional legacy absence by that generation's contract; explicit null is a separate row.
   - One parameterized matrix test per supported format walks recorder/producer-generated fixtures, makes one edit per field/shape cell, and asserts the public decision. Use multiple real-tool control fixtures inside that test where different document sides need them; each control must prove that the edited field changes the result.
   - Reject duplicate keys at document loading, not after a last-wins parse; reject valid JSON followed by garbage. A malformed candidate cannot hide a conflicting failure or silently remove a required cell. Test valid empty scopes alongside invalid missing scopes.

@@ -3838,6 +3838,45 @@ class ApplyCliTests(ApplyFixture):
             self.assertEqual(schema.canonical(expected), (cwd / "plan.json").read_text(encoding="utf-8"))
             self.assertEqual(legacy_scope_document(expected), json.loads(result.stdout))
 
+    def test_apply_to_refuses_duplicate_keys_and_trailing_content_in_every_input(self) -> None:
+        # A last-wins parse would let a second `"state"` or `"outcome"` key
+        # silently decide a cell; each input is refused at load instead.
+        plan = schema.canonical(self.plan())
+        accepted = json.dumps(self.accepted)
+        rejected = json.dumps(self.rejections)
+        duplicated_plan = plan.replace("{", '{"base":"' + "f" * 40 + '",', 1)
+        self.assertNotEqual(plan, duplicated_plan)
+        cases = {
+            "plan duplicate key": (duplicated_plan, accepted, rejected),
+            "plan trailing content": (plan + "[]", accepted, rejected),
+            "accepted duplicate key": (
+                plan, accepted.replace('"origin": "local"', '"origin": "local", "origin": "local"', 1), rejected),
+            "accepted trailing content": (plan, accepted + "{}", rejected),
+            "rejections trailing content": (plan, accepted, rejected + "1"),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            for label, (plan_text, accepted_text, rejected_text) in cases.items():
+                with self.subTest(label):
+                    (cwd / "plan.json").write_text(plan_text, encoding="utf-8")
+                    (cwd / "accepted.json").write_text(accepted_text, encoding="utf-8")
+                    (cwd / "rejected.json").write_text(rejected_text, encoding="utf-8")
+                    result = self.run_planner(
+                        "--apply-to", "plan.json", "--accepted-cells", "accepted.json",
+                        "--evidence-rejections", "rejected.json", cwd=cwd,
+                    )
+                    self.assertNotEqual(0, result.returncode, label)
+                    self.assertRegex(result.stderr, "duplicate key|Extra data", label)
+            # The control: the same three files, unedited, apply cleanly.
+            (cwd / "plan.json").write_text(plan, encoding="utf-8")
+            (cwd / "accepted.json").write_text(accepted, encoding="utf-8")
+            (cwd / "rejected.json").write_text(rejected, encoding="utf-8")
+            result = self.run_planner(
+                "--apply-to", "plan.json", "--accepted-cells", "accepted.json",
+                "--evidence-rejections", "rejected.json", cwd=cwd,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+
     def test_apply_to_excludes_selection_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cwd = Path(temporary)

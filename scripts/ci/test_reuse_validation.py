@@ -575,6 +575,21 @@ class CertificationTests(unittest.TestCase):
         ]
         self.assertEqual((2, 1), count_audits(jobs, 2))
 
+    def test_the_command_refuses_a_plan_with_a_duplicate_key_or_trailing_content(self) -> None:
+        text = json.dumps(self.plan())
+        self.assertIn('"head"', text)
+        for label, edited in (("duplicate key", text.replace("{", '{"head": "x", ', 1)),
+                              ("trailing content", text + "{}")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temp:
+                plan_path = Path(temp) / "plan.json"
+                plan_path.write_text(edited, encoding="utf-8")
+                with patch.dict(os.environ, {"GITHUB_REPOSITORY": REPO}), patch(
+                    "sys.argv", ["reuse_validation.py", "certify", "--plan", str(plan_path),
+                                 "--out", temp, "--gate-result", "success"],
+                ), self.assertRaises(SystemExit) as raised:
+                    main()
+                self.assertIn("unreadable", str(raised.exception))
+
     def test_the_command_writes_one_artifact_per_anchored_environment(self) -> None:
         plan = self.plan()
         plan["packages"] = [{"area": "a", "gates": ["L1"]}, {"area": "b", "gates": ["L1"]}]

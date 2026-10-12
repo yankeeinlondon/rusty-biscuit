@@ -704,8 +704,8 @@ def staged_entries(stage: Path, cell: dict[str, Any]) -> list[dict[str, Any]]:
         if not line:
             continue
         try:
-            record = json.loads(line)
-        except json.JSONDecodeError as error:
+            record = schema.loads_strict(line)
+        except ValueError as error:
             raise refuse(
                 "completion-report-malformed",
                 f"{manifest} line {number} is malformed: {error}",
