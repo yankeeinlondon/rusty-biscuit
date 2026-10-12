@@ -33,6 +33,8 @@ mod position_fixtures;
 mod union_fixtures;
 
 mod absent_property_contract;
+mod schemas_effective_presence;
+mod schemas_core_type_values;
 mod alias_lookup_once;
 mod ambient_ctx_capture;
 mod array_rendering_json;
@@ -105,6 +107,7 @@ mod schema_yaml_spellings;
 mod schemas_conjunctive_lowering;
 mod schemas_constraints_block_matrix;
 mod schemas_convert_snapshots;
+mod schemas_core_type_grammar;
 mod schemas_detect_table;
 mod schemas_grammar_proptest;
 mod schemas_literal_expression;

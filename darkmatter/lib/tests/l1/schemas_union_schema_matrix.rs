@@ -171,7 +171,9 @@ fn imported_policy_definition_cells() {
     let cells: Vec<(&str, String, Expect)> = vec![
         ("control", schema.clone(), Expect::Valid),
         ("absent", with(""), Expect::UnknownName),
-        ("null", with("  policy: null\n"), Expect::PrepareFails),
+        // A native null definition is the `null` type: the control list's
+        // non-null items fail validation.
+        ("null", with("  policy: null\n"), Expect::Invalid),
         ("wrong type", with("  policy: 1\n"), Expect::PrepareFails),
         ("one wrong element", with("  policy:\n    - short_form\n    - 1\n"), Expect::PrepareFails),
         ("every element wrong", with("  policy: [1, 2]\n"), Expect::PrepareFails),
@@ -235,8 +237,10 @@ fn document_content_policy_declaration_cells() {
         // No list declaration: no union validation of the data, and never an
         // empty union that rejects it.
         ("absent", document("$schema:\n  note: string\n"), Expect::Valid),
-        ("null", declared("null"), Expect::PrepareFails),
-        ("empty-value null", document("$schema:\n  content_policy:\n"), Expect::PrepareFails),
+        // A native null declaration is the `null` type, which the control
+        // list fails.
+        ("null", declared("null"), Expect::Invalid),
+        ("empty-value null", document("$schema:\n  content_policy:\n"), Expect::Invalid),
         ("wrong type", declared("1"), Expect::PrepareFails),
         ("one wrong element", declared(&format!("[{list}, 1]")), Expect::PrepareFails),
         ("every element wrong", declared("[1, 2]"), Expect::PrepareFails),

@@ -133,8 +133,23 @@ const TAGGED_CELLS: &[Cell] = &[
         Remove("title"),
         Accepts(&[("title: ab", true), ("status: word", false)]),
     ),
-    cell("title null", Set("title", " null"), Rejects),
-    cell("title empty value", Set("title", ""), Rejects),
+    // A native YAML null definition is the `null` type: a non-null value
+    // fails, null passes, and the other definitions are untouched.
+    cell(
+        "title null",
+        Set("title", " null"),
+        Accepts(&[("title: ab", false), ("title: null", true), ("status: word", false)]),
+    ),
+    cell(
+        "title tilde",
+        Set("title", " ~"),
+        Accepts(&[("title: abcd", false), ("title: null", true)]),
+    ),
+    cell(
+        "title empty value",
+        Set("title", ""),
+        Accepts(&[("title: ab", false), ("title: null", true), ("status: word", false)]),
+    ),
     cell("title number", Set("title", " 5"), Rejects),
     cell("title bool", Set("title", " true"), Rejects),
     cell("title one wrong element", Set("title", " [string, 5]"), Rejects),
@@ -161,8 +176,17 @@ const TAGGED_CELLS: &[Cell] = &[
         RemoveLine("- code: number(min(1))"),
         Accepts(&[("status: true", true), ("status:\n  code: 2", false)]),
     ),
-    cell("status null arm", Replace("- boolean", "- null"), Rejects),
-    cell("status empty arm", Replace("- boolean", "-"), Rejects),
+    // A native null arm is the `null` type's arm, never a discarded one.
+    cell(
+        "status null arm",
+        Replace("- boolean", "- null"),
+        Accepts(&[("status: true", false), ("status: 5", true), ("status: null", true)]),
+    ),
+    cell(
+        "status empty arm",
+        Replace("- boolean", "-"),
+        Accepts(&[("status: true", false), ("status: 5", true), ("status: null", true)]),
+    ),
     cell("status number", Set("status", " 5"), Rejects),
     cell("status one wrong arm", Replace("- boolean", "- 5"), Rejects),
     cell("status every arm wrong", Set("status", " [5, true]"), Rejects),
@@ -223,8 +247,16 @@ const NESTED_CELLS: &[Cell] = &[
         // unknown key rather than an implicit empty definition.
         Accepts(&[("meta:\n  level: 3", false), ("meta:\n  mode: word", false)]),
     ),
-    cell("level null", Set("level", " null"), Rejects),
-    cell("level empty value", Set("level", ""), Rejects),
+    cell(
+        "level null",
+        Set("level", " null"),
+        Accepts(&[("meta:\n  level: 3", false), ("meta:\n  level: null", true), ("meta:\n  mode: word", false)]),
+    ),
+    cell(
+        "level empty value",
+        Set("level", ""),
+        Accepts(&[("meta:\n  level: 3", false), ("meta:\n  level: null", true), ("meta:\n  mode: word", false)]),
+    ),
     cell("level number", Set("level", " 5"), Rejects),
     cell("level bool", Set("level", " true"), Rejects),
     cell("level one wrong element", Set("level", " [number, 5]"), Rejects),

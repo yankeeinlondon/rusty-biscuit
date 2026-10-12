@@ -35,6 +35,10 @@ fn property_definition_parser_matches_schema_property_matrix() {
         "\"string(required)\"",
         "title: string(required)\nmetadata:\n  count: number\n",
         "- literal(auto)\n- number(min(1))\n- width: number(required)\n",
+        // The YAML null scalar is the `null` type at a property position.
+        "null",
+        "~",
+        "- string\n- null\n",
     ] {
         let value = yaml(source);
         assert_eq!(
@@ -47,7 +51,6 @@ fn property_definition_parser_matches_schema_property_matrix() {
     for source in [
         "true",
         "2",
-        "null",
         "[]",
         "[string, true]",
         "string(min(nope))",
