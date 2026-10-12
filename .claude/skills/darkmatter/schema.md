@@ -102,6 +102,32 @@ instance path, optional schema path, offending property, source position, and
 file-reference diagnostics. `ValidationOptions` controls pending values and
 excluded keys without executing anything.
 
+Problem positions (`schemas/positions.rs`, one `PositionMap` per validation
+source snapshot, shared by every problem and root-union arm):
+
+- `line` counts the complete file (opening `---` is line 1); `column` is a
+  1-based UTF-8 byte column; LF and CRLF agree.
+- Targets: a value failure → the value's start (a block list item excludes
+  `- `); an unknown key (`path` = parent mapping) → the key token; a missing
+  property → the lacking mapping's start (its first key; root = first key
+  after comments). Block and quoted scalars are one node: anything at or
+  below them reports the scalar's start.
+- Unauthored paths (assignments) use the nearest authored non-root ancestor;
+  a new top-level path has no position. A replaced path keeps its authored
+  node.
+- The alignment witness: `PositionMap::project` accepts the locator's tree
+  only when its mappings match the parsed `MappingOrders` and it holds no
+  alias. Otherwise (aliases/anchors, `<<`, unquoted `{{ }}`, multi-line or
+  commented flow collections) it falls back to top-level key line, column 1.
+  Positions never change validity.
+- `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
+  a constructed `Markdown` is located in its serialized YAML view.
+  `PositionMap::new()` (and `EffectiveSchema::validate`) is source-free: no
+  positions. `validate::build_position_map(yaml)` is slice-relative (line 1
+  = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
+- `md schema validate` prints `(at line L, column C)`; the compose block
+  prints ` at L:C`; DMLS ranges start at the same nodes.
+
 ## Imports and dictionaries
 
 - `Name@file` and `Name@this` import named types eagerly with dependency and
@@ -224,7 +250,6 @@ References; Choosing an Arm: Reporting versus Changing Data).
   when exactly one candidate validates; eager-file rewriting needs exactly one
   validating arm containing an eager `file`; cleanup never repairs inside a
   union.
-- Known gaps: item problems carry the top-level key's line/column.
 
 ## Special types
 

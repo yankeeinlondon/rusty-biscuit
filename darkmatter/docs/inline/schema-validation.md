@@ -204,14 +204,18 @@ md schema validate <file>... [--schema <path>] [--format pretty|json] [--quiet]
 Pretty output (the default) renders one styled block per file:
 
 ```
-post.md  ✓ valid (schema: ./schemas/post.yaml)
-
-draft.md  ✗ 2 problems
-  • title is required
-      at line 2, column 1 of frontmatter
-  • tags[2] does not match pattern ^[a-z0-9-]+$
-      at line 6, column 5 of frontmatter
+- ✔ the document post.md has a schema definition and is valid.
+- ✗ the document draft.md failed schema validation:
+    - title is a required property (at line 2, column 1)
+    - tags/1 42 is not of type "string" (at line 6, column 5)
 ```
+
+Each location points at the offending YAML node — the value, unknown key, or
+mapping that is wrong — counted in lines of the complete file (the opening
+`---` is line 1) and 1-based UTF-8 byte columns. Above, `tags/1` is the second
+item of a block list on line 6, so its value starts at column 5, after the
+`- `. See [Problem Locations](../topics/schemas/definition.md#problem-locations)
+for the full rules and fallbacks.
 
 `--format json` emits newline-delimited JSON (one object per file) for piping into other tools, and `--quiet` suppresses the success lines.
 

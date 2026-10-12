@@ -1669,7 +1669,7 @@ md schema validate <FILE_OR_PROP=VALUE>... [--schema <path>] [--format pretty|js
 |----------------------------|--------------------------------------------------------------------------------------------------------|
 | `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
 | `--schema <path>`          | Baseline schema for this invocation. Falls back to `$BASELINE_SCHEMA`, then to no baseline.            |
-| `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file with source line/column info.         |
+| `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
 | `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
 
@@ -1726,7 +1726,21 @@ Coercion is intentionally conservative:
 - `user.email=ken@ken.net` on `{ user: { name: "Ken" } }` produces `{ user: { name: "Ken", email: "ken@ken.net" } }`.
 - `user.email=...` on `{ user: "scalar" }` replaces the scalar with `{ email: "..." }` — the descent cannot continue into a non-object parent.
 
-**Caveat.** Source line/column reporting is taken from the original frontmatter text. Problems on assigned properties carry no `line`/`column`; problems on properties that were *overridden* by an assignment still report the original source position of the (now-replaced) value.
+**Locations of assigned values.** Problem locations always come from the file as written, so an assigned value has no source of its own. A problem at a path the file already had reports the authored node there, even though the assignment replaced its value. A problem at a newly added nested path reports its nearest authored ancestor; a newly added top-level property has no location (`line` and `column` are `null`). For example, given a schema where `count`, `rating`, and `user.age` are numbers, and this frontmatter:
+
+```yaml
+---
+count: 3
+user:
+  name: Ken
+---
+```
+
+| Assignment | Problem path | Location |
+|---|---|---|
+| `count=many` | `/count` | line 2, column 8: the authored `3` |
+| `user.age=x` | `/user/age` | line 4, column 3: the authored `user` mapping |
+| `rating=x` | `/rating` | none |
 
 ### Exit Codes
 
@@ -1742,16 +1756,30 @@ When multiple kinds of failure occur in the same invocation, the more specific f
 
 ### Pretty Output
 
-```
-post.md  ✓ valid (schema: ./schemas/post.yaml)
+Given `draft.md`:
 
-draft.md  ✗ 2 problems
-  • title "title" is a required property
-      at line 2, column 1 of frontmatter
-      The author's full name
-  • tags[2] does not match pattern ^[a-z0-9-]+$
-      at line 6, column 5 of frontmatter
+```markdown
+---
+$schema: ./schemas/post.yaml
+status: orange
+tags:
+  - rust
+  - 42
+---
 ```
+
+`md schema validate post.md draft.md` prints one block per file:
+
+```
+- ✔ the document post.md has a schema definition and is valid.
+- ✗ the document draft.md failed schema validation:
+    - title is a required property (at line 2, column 1)
+        The post's title
+    - status "orange" is not one of "draft", "published" or "archived" (at line 3, column 9)
+    - tags/1 42 is not of type "string" (at line 6, column 5)
+```
+
+Each bullet starts with the failing path (`tags/1`), or with the missing property's name when the root lacks it, and ends with the problem's [location](#problem-locations) in the complete file: `(at line L, column C)`, `(at line L)` when no column is known, or nothing when the problem has no location.
 
 When the failing property declares a `description` (via `-> ...`, an inline-object
 per-property description, or a `description` keyword in a referenced JSON Schema),
@@ -1762,24 +1790,25 @@ description-less schema produces no extra lines.
 For root-union failures, problems are prefixed with `arm[N]`:
 
 ```
-post.md  ✗ 1 problem
-  • arm[1]: title "title" is a required property
+- ✗ the document post.md failed schema validation:
+    - arm[0]: title is a required property (at line 2, column 1)
 ```
-
-Line/column positions are drawn from the **original frontmatter text** (with the leading `---` delimiter accounted for), so the coordinates match the source the author is editing.
 
 ### JSON Output
 
 ```json
 {"file":"post.md","valid":true,"schema":"./schemas/post.yaml","problems":[]}
-{"file":"draft.md","valid":false,"schema":null,"problems":[
-  {"path":"/title","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The author's full name"},
-  {"path":"/tags/2","property":"tags","message":"does not match pattern ^[a-z0-9-]+$","kind":"invalid","line":6,"column":5,"arm_index":null,"description":null}
+{"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","problems":[
+  {"path":"","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The post's title"},
+  {"path":"/tags/1","property":null,"message":"42 is not of type \"string\"","kind":"type","line":6,"column":5,"arm_index":null,"description":null}
 ]}
 ```
 
-Each problem carries a `property` field (the top-level property name, when
-resolvable) and a `kind` field — one of `missing`, `type`, or `invalid`.
+Each problem carries a `path` (a JSON pointer; a missing property's `path` is the
+mapping that lacks it, `""` for the root), a `property` field (the missing
+property's name, when resolvable) and a `kind` field — one of `missing`,
+`type`, or `invalid`. `line` and `column` give the problem's
+[location](#problem-locations), or are `null` when it has none.
 
 Each problem also carries a `description` field: the failing property's declared
 description string when one is resolved, or `null` when the property declares no
@@ -1788,10 +1817,61 @@ byte-for-byte equal to the problem message).
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
 
+### Problem Locations
+
+A problem's location points at the authored YAML node that is wrong, not just at the top-level property that contains it. Given a schema in which `then` items allow only `say`:
+
+```yaml
+---
+start:
+  - then:
+      - say: hello
+      - sya: goodbye
+---
+```
+
+the unknown-key problem keeps the path `/start/0/then/1` and is reported at line 5, column 9, the `s` of `sya`:
+
+```
+    - start/0/then/1 Additional properties are not allowed ('sya' was unexpected) (at line 5, column 9)
+```
+
+**Coordinates.** Lines count the complete Markdown file, so the opening `---` is line 1. Columns are 1-based UTF-8 byte columns: a `😀` before the node counts as 4 columns. LF and CRLF line endings give the same line and column.
+
+**Which node.** The problem's kind decides what it points at:
+
+| Problem | Location | Example |
+|---|---|---|
+| A wrong value (type, constraint, enum, file reference) | the start of the value; for a block list item, after the `- ` | `  - oops`: column 5, the `o` |
+| An unknown key (`path` is the parent mapping; the message names the key) | the start of the key itself | `sya` above: 5:9 |
+| A missing required property | the start of the mapping that lacks it; for a list item, its first key rather than its dash | `  - name: b`: column 5, the `n` |
+| A missing property of the root | the root mapping's first key, after any leading comments or blank lines | `---`, `# draft`, then `title: x`: line 3, column 1 |
+
+Flow collections (`{…}`, `[…]`) written on one line are located node by node too. With `m: {a: 1, b: x}` on line 2, an unknown key `b` is at 2:11 and a wrong value `x` at 2:14.
+
+**Scalars are one node.** A block scalar (`|`, `>`) or a quoted scalar is located at its start (the indicator or the opening quote). A problem inside its decoded content, such as a `yaml` or `json` value whose embedded document is wrong, reports that start; no position inside the scalar is invented.
+
+**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation means aliases (`*a`) and anchors used as values, merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
+
+```mermaid
+flowchart TD
+    A[Problem at a path] --> B{Can the document's YAML<br/>be mapped node by node?}
+    B -- "no (unsupported presentation)" --> C[Line of the top-level key<br/>column 1]
+    B -- yes --> D{Is the node itself authored?}
+    D -- yes --> E[The node's start]
+    D -- "no (e.g. added by an assignment)" --> F{Is there an authored<br/>ancestor below the root?}
+    F -- yes --> G[The nearest authored ancestor's start]
+    F -- no --> H[No location]
+```
+
+**Documents without loaded text.** Locations need the text the document was parsed from. A `Markdown` document built in code has no such text, so its locations refer to the serialized YAML of its frontmatter. Source-free validation reports no locations: `EffectiveSchema::validate`, or `validate_with_positions` given the empty `PositionMap::new()`. A library caller holding bare YAML can build a map with `schemas::validate::build_position_map(yaml)`; its lines are relative to that slice, so line 1 is the first YAML line rather than the `---`.
+
+The same locations appear in `md compose`'s [schema-failure block](#error-rendering), and the DMLS language server highlights the same nodes in an editor.
+
 ### Behavior Without `$schema`
 
 - With a baseline configured, the document is validated against the baseline alone.
-- Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `valid (no schema; vacuously valid)`.
+- Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
 
 ## CLI: `md schema detect`
 
@@ -1974,7 +2054,8 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's provenance: document, baseline, or referenced file). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
-| `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column`, optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`. |
 | `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it still holds a `$(...)` shell expression or an unresolved `{{ }}` template. |
 | `SimplifiedSchema`    | Either `Single(SchemaShape)` or `Union(Vec<SchemaArm>)`.                                                            |
@@ -2175,7 +2256,7 @@ for `md compose`; `--baseline-schema <path>` replaces it, and
   - Missing required: `missing <inverse>property</inverse>: required but not provided`.
   - Wrong type: `type <inverse>property</inverse>: <message>`.
   - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
-- Each bullet carries the YAML source `line:col` when available.
+- Each bullet ends with the problem's [location](#problem-locations) as `line:column` in the complete file, for example `invalid start: Additional properties are not allowed ('sya' was unexpected) at 5:9`.
 - **Per-problem description sub-line**: when the failing property declares a description (via `-> ...`, an inline-object per-property description, or a `description` keyword in a referenced JSON Schema), it renders as a sub-line beneath the bullet, reusing the same dimmed-italic treatment as the document-level `description:` line. The document-level and per-problem description lines coexist. Schema-preparation failures (empty problems list) render no per-problem description.
 - **Failure-class sub-line**: a `file` value that failed to resolve adds `failure: <class>` beneath its bullet, for example `failure: no-match` (no such file) or `failure: invalid-reference` (malformed, or a relative path that climbs out of the file tree). The class is the stable part to match on; the message is not. `md schema validate` prints the same sub-line.
 - Root-union failures include the arm index (e.g. `schema arm 2`).
@@ -2207,7 +2288,6 @@ unless the same baseline is supplied explicitly.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
 - **No arrays of anonymous unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form; there is no `(A | B)[]` spelling. Name the union and reference it as `U[]` instead (see [Named Union References](#named-union-references)). This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays).
-- **No line and column for a problem inside a list item.** A problem such as `/content_policy/1/rule` carries the full path, but its `line` / `column` are those of the top-level property's key.
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
 - **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.

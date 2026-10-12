@@ -11,6 +11,13 @@ last_updated: 2026-09-17
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
 - YAML frontmatter rejects duplicate keys at every mapping depth; explicit
   document merges continue to use their selected conflict strategy
+- Validate frontmatter against a [schema](./docs/topics/schemas/definition.md); each problem points at the [offending YAML node](./docs/topics/schemas/definition.md#problem-locations), however deeply nested, as a line and column in the complete file:
+
+  ```text
+  - ✗ the document plan.md failed schema validation:
+      - start/0/then/1 Additional properties are not allowed ('sya' was unexpected) (at line 5, column 9)
+  ```
+
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 
