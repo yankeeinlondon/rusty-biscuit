@@ -61,7 +61,7 @@ $schema:
     verbosity: "enum(silent, quiet, verbose) -> Prompt-reporting verbosity for system-prompt documents."
     mode: "enum(append, replace) -> Delivery mode for automatically discovered system-prompt documents."
 
-    state: "any(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
+    state: "object(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
     previous_state: "any(generated) -> Previous sequence step state, or null for the first step."
     next_state: "any(generated) -> Next sequence step state, or null for the last step."
     is_first: "boolean(generated; required) -> true when the current sequence step is first."
