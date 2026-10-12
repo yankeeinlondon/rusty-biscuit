@@ -50,9 +50,9 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push(')');
             }
         }
-        // Imported type reference: `name ('[]')? ('(' constraints ')')? '@' ref`
-        // — the terminal-`@` grammar (O-B1). Postfix `[]`/constraints ride on
-        // the enclosing atom.
+        // Named-type reference: `name ('[]')? ('(' constraints ')')? ('@' ref)?`.
+        // A local reference is written bare unless its name is a built-in
+        // keyword, where only `@this` selects the local type.
         TypeExpr::Imported { name, reference } => {
             out.push_str(name);
             if atom.is_array {
@@ -63,8 +63,10 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
                 out.push(')');
             }
-            out.push('@');
-            out.push_str(reference);
+            if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
+                out.push('@');
+                out.push_str(reference);
+            }
         }
     }
 
@@ -746,5 +748,60 @@ mod tests {
         assert!(parsed.is_array);
         let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
         assert!(has_suggest, "parsed atom must retain suggest constraint");
+    }
+
+    /// Serializes `source`, asserts the canonical spelling, and asserts that
+    /// it re-parses to the same AST.
+    fn assert_canonical(source: &str, expected: &str) {
+        let parsed = parse_type_expr("value", source)
+            .unwrap_or_else(|error| panic!("parse {source}: {error}"));
+        let serialized = serialize_property_atom(&parsed);
+        assert_eq!(serialized, expected, "{source}");
+        let reparsed = parse_type_expr("value", &serialized)
+            .unwrap_or_else(|error| panic!("reparse {serialized}: {error}"));
+        assert_eq!(reparsed, parsed, "{source} -> {serialized}");
+    }
+
+    #[test]
+    fn local_reference_serializes_bare_and_round_trips() {
+        for (source, expected) in [
+            ("person", "person"),
+            ("person@this", "person"),
+            ("person[]", "person[]"),
+            ("person(required)@this", "person(required)"),
+            ("person[](min(1))", "person[](min(1))"),
+            ("person(min(2); max(5))", "person(min(2);max(5))"),
+            ("person -> The author", "person -> The author"),
+            ("person[]@this -> Reviewers", "person[] -> Reviewers"),
+        ] {
+            assert_canonical(source, expected);
+        }
+    }
+
+    #[test]
+    fn local_reference_with_a_keyword_name_keeps_the_explicit_spelling() {
+        assert_canonical("string@this", "string@this");
+        assert_canonical("file[](required)@this -> Files", "file[](required)@this -> Files");
+        assert_eq!(
+            serialize_property_atom(&parse_type_expr("value", "string").unwrap()),
+            "string"
+        );
+    }
+
+    #[test]
+    fn cross_file_reference_serialization_is_unchanged() {
+        assert_canonical("person@./people.yaml", "person@./people.yaml");
+        assert_canonical(
+            "person[](required)@./people.yaml -> People",
+            "person[](required)@./people.yaml -> People",
+        );
+    }
+
+    #[test]
+    fn local_reference_inside_an_inline_object_round_trips() {
+        assert_canonical(
+            "{ author: person(required) -> The author, editor: string@this }",
+            "{author: person(required) -> The author,editor: string@this}",
+        );
     }
 }

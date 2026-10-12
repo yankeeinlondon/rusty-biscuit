@@ -8,15 +8,15 @@
 //! type_expr_string := type_expr ( "->" description )?
 //! type_expr        := simple_type
 //!                   | inline_object
-//!                   | import
+//!                   | reference
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
 //! inline_object    := "{" ws* property_list? ws* "}"
 //!                     ( "(" item_constraints ")"
 //!                     | "[]" ( "(" arr_constraints ")" )?
 //!                     )?
-//! import           := identifier ( "[]" )? ( "(" item_constraints ")" )?
-//!                     "@" fileref                             (Feature B, O-B1)
+//! reference        := identifier ( "[]" )? ( "(" item_constraints ")" )?
+//!                     ( "@" fileref )?
 //! property_list    := property_def ( "," ws* property_def )* ","?
 //! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
 //! pattern_key      := "<" pattern_body ">"                   (Feature C)
@@ -37,11 +37,17 @@
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
 //!
-//! An `import` (`Name@fileref`) inlines a named type from another schema file
-//! and is represented as [`TypeExpr::Imported`] until the resolver expands it.
+//! A `reference` names a type defined in a schema and is represented as
+//! [`TypeExpr::Imported`] until the resolver expands it. With `@fileref` it
+//! names a type in that file (`this` is the current schema). Without `@`, an
+//! identifier that is a `type_name` is the built-in `simple_type`; any other
+//! identifier is a bare local reference, the same value as `Name@this`. So
+//! `string` is the built-in and `string@this` is a local type named `string`.
+//! A misspelled built-in therefore parses, and fails during resolution unless
+//! a local type has that name.
+//!
 //! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
-//! keys a dictionary/pattern-keyed object; see [`PatternKey`]. Both are
-//! additive — a schema using neither parses exactly as before.
+//! keys a dictionary/pattern-keyed object; see [`PatternKey`].
 //!
 //! Inside an `inline_object`, `description` consumes text only until the
 //! next top-level comma or closing brace (Decision #9). Inline object
@@ -840,20 +846,17 @@ impl<'a> Parser<'a> {
                 );
             }
         };
-        // A cross-file named-type import (`Name@fileref`, Feature B) is
-        // detected here: after the base name the grammar is
-        // `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). The base name
-        // is an arbitrary named type, not a built-in keyword, so import
-        // detection runs *before* the `SimplifiedType::from_keyword` check.
+        // An explicit `@` reference is detected before the keyword check so
+        // that `string@this` names a local type called `string`.
         if self.looks_like_import_suffix() {
-            return self.parse_import(name);
+            return self.parse_named_reference(name, true);
         }
 
-        let ty = SimplifiedType::from_keyword(&name).ok_or_else(|| SchemaError::Grammar {
-            property: self.property.to_string(),
-            message: format!("unknown type `{name}`"),
-            span: name_span.clone(),
-        })?;
+        // Built-in keywords win; any other identifier is a bare local
+        // reference, identical to `Name@this`.
+        let Some(ty) = SimplifiedType::from_keyword(&name) else {
+            return self.parse_named_reference(name, false);
+        };
 
         // Optional first paren list (item constraints, or value constraints
         // for non-array atoms).
@@ -1043,12 +1046,21 @@ impl<'a> Parser<'a> {
         bytes.get(pos) == Some(&b'@')
     }
 
-    /// Parses the import postfix after the base `name` has been read:
-    /// `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). Postfix `[]` and
-    /// constraints ride on the enclosing [`PropertyAtom`]; the constraints are
-    /// re-interpreted against the resolved type in Phase 4, so they are parsed
-    /// here with a neutral type.
-    fn parse_import(&mut self, name: String) -> Result<PropertyAtom, SchemaError> {
+    /// Parses the named-reference postfix after the base `name` has been read:
+    /// `('[]')? ('(' constraints ')')?`, followed by `'@' fileref` when
+    /// `explicit` is set. Without `explicit` the result is the local reference
+    /// [`TypeExpr::local`], the same value `name@this` produces.
+    ///
+    /// Postfix `[]` and constraints ride on the enclosing [`PropertyAtom`] and
+    /// `array_constraints` stays empty. The constraints are parsed with a
+    /// neutral type because their meaning depends on the target, which is
+    /// known only after resolution. `[]` after the constraint list is
+    /// rejected in both spellings.
+    fn parse_named_reference(
+        &mut self,
+        name: String,
+        explicit: bool,
+    ) -> Result<PropertyAtom, SchemaError> {
         let mut is_array = false;
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'[') {
@@ -1065,14 +1077,26 @@ impl<'a> Parser<'a> {
             constraints = self.parse_constraint_list(SimplifiedType::Any, is_array)?;
             self.defer_suggestion_target = false;
             self.expect(Tok::RParen)?;
+            self.lex.skip_ws();
+            if !is_array && self.lex.peek_byte() == Some(b'[') {
+                return self.err(
+                    "`[]` must come before the constraint list in a named type reference",
+                    self.lex.pos..self.lex.pos + 1,
+                );
+            }
         }
 
-        self.lex.skip_ws();
-        self.expect_byte(b'@', "expected `@` in an imported type reference")?;
-        let reference = self.read_fileref()?;
+        let ty = if explicit {
+            self.lex.skip_ws();
+            self.expect_byte(b'@', "expected `@` in an imported type reference")?;
+            let reference = self.read_fileref()?;
+            TypeExpr::Imported { name, reference }
+        } else {
+            TypeExpr::local(name)
+        };
 
         Ok(PropertyAtom {
-            ty: TypeExpr::Imported { name, reference },
+            ty,
             is_array,
             constraints,
             array_constraints: Vec::new(),
@@ -2024,12 +2048,97 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_type() {
-        let err = parse_err("widget");
-        let SchemaError::Grammar { message, .. } = err else {
-            panic!("expected Grammar error, got {err:?}")
-        };
-        assert!(message.contains("unknown type"));
+    fn unknown_identifier_parses_as_local_reference() {
+        let atom = parse("widget");
+        assert_eq!(atom.ty, TypeExpr::local("widget"));
+        assert_eq!(atom, parse("widget@this"));
+    }
+
+    #[test]
+    fn misspelled_keyword_parses_as_local_reference() {
+        assert_eq!(parse("strng").ty, TypeExpr::local("strng"));
+    }
+
+    #[test]
+    fn bare_keyword_stays_primitive_and_explicit_keyword_is_a_reference() {
+        assert_eq!(parse("string").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert_eq!(parse("string@this").ty, TypeExpr::local("string"));
+    }
+
+    #[test]
+    fn bare_reference_postfixes_match_explicit_reference() {
+        for (bare, explicit) in [
+            ("person", "person@this"),
+            ("person[]", "person[]@this"),
+            ("person(required)", "person(required)@this"),
+            ("person[](min(1))", "person[](min(1))@this"),
+            ("person(min(2); max(5))", "person(min(2); max(5))@this"),
+            ("person -> An author", "person@this -> An author"),
+            ("person[](max(3)) -> People", "person[](max(3))@this -> People"),
+        ] {
+            let bare_atom = parse(bare);
+            assert_eq!(bare_atom, parse(explicit), "{bare} vs {explicit}");
+            assert_eq!(bare_atom.ty, TypeExpr::local("person"), "{bare}");
+            assert!(bare_atom.array_constraints.is_empty(), "{bare}");
+        }
+    }
+
+    #[test]
+    fn bare_reference_records_constraints_and_array_marker() {
+        // As for explicit references, constraints after `[]` are parsed at
+        // the array level but ride in `constraints`.
+        let atom = parse("person[](min(1))");
+        assert!(atom.is_array);
+        assert_eq!(atom.constraints, vec![Constraint::MinItems(1)]);
+        assert!(atom.array_constraints.is_empty());
+
+        let atom = parse("person(required) -> The author");
+        assert!(!atom.is_array);
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+        assert_eq!(atom.description.as_deref(), Some("The author"));
+    }
+
+    #[test]
+    fn bare_reference_defers_suggestion_target() {
+        // `suggest` is invalid on most primitives, but a reference's target
+        // is unknown until resolution, so both spellings accept it.
+        let atom = parse("code(suggest(1, b))");
+        assert_eq!(atom, parse("code(suggest(1, b))@this"));
+        assert!(matches!(atom.constraints.as_slice(), [Constraint::Suggest(c)] if c.len() == 2));
+    }
+
+    #[test]
+    fn named_reference_rejects_array_marker_after_constraints_in_both_spellings() {
+        for input in ["person(required)[]", "person(required)[]@this"] {
+            let SchemaError::Grammar { message, .. } = parse_err(input) else {
+                panic!("expected Grammar error for {input}");
+            };
+            assert!(
+                message.contains("`[]` must come before the constraint list"),
+                "{input}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_reference_works_in_inline_objects() {
+        let atom = parse("{ author: person(required) -> The author, tags: tag[] }");
+        let shape = inline_shape(&atom);
+        let author = prop(shape, "author");
+        assert_eq!(author.ty, TypeExpr::local("person"));
+        assert_eq!(author.constraints, vec![Constraint::Required]);
+        assert_eq!(author.description.as_deref(), Some("The author"));
+        let tags = prop(shape, "tags");
+        assert_eq!(tags.ty, TypeExpr::local("tag"));
+        assert!(tags.is_array);
+    }
+
+    #[test]
+    fn bare_reference_identifier_characters_match_explicit_reference() {
+        for name in ["Person", "postal_code", "x-custom", "v2"] {
+            assert_eq!(parse(name).ty, TypeExpr::local(name), "{name}");
+            assert_eq!(parse(name), parse(&format!("{name}@this")), "{name}");
+        }
     }
 
     #[test]
@@ -2349,11 +2458,11 @@ mod tests {
     #[test]
     fn parameterized_expression_is_rejected() {
         // The reserved future `expression(condition)` form is rejected in v1
-        // as an unknown constraint (never the generic unknown-type error).
+        // as an unknown constraint.
         let SchemaError::Grammar { message, .. } = parse_err("expression(condition)") else {
             panic!("expected Grammar error");
         };
-        assert!(!message.contains("unknown type"), "got: {message}");
+        assert!(message.contains("unknown constraint"), "got: {message}");
     }
 
     #[test]
@@ -2663,23 +2772,14 @@ mod tests {
 
     #[test]
     fn inline_object_description_with_unescaped_comma_is_not_supported() {
-        // `second` is treated as the next property start; since `second`
-        // is not a known type and the `:` separator is missing, the
-        // parser reports a grammar error. Decision #9 leaves escaping
-        // out of scope for this feature.
+        // The comma ends the description, so `second` is read as the next
+        // property name and its missing `:` is a grammar error. Decision #9
+        // leaves escaping out of scope.
         let err = parse_err("{ foo: string -> first, second }");
         let SchemaError::Grammar { message, .. } = err else {
             panic!("expected Grammar error, got {err:?}")
         };
-        // The exact message depends on whether the trailing `}` looks
-        // like the end of a property definition or a type-name error.
-        assert!(
-            message.contains("unknown type")
-                || message.contains("expected a type name")
-                || message.contains("`:`")
-                || message.contains("expected `:`"),
-            "unexpected message: {message}"
-        );
+        assert!(message.contains("expected `:`"), "unexpected message: {message}");
     }
 
     #[test]

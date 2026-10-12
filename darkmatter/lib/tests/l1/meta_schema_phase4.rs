@@ -310,3 +310,24 @@ fn shipped_schema_artifacts_validate_through_semantic_keywords() {
         report.problems
     );
 }
+
+/// A `type-definition` value is checked passively: a bare local reference,
+/// whose name is defined nowhere, and an explicit reference to a file that
+/// does not exist both validate, because the meta-type parses reference
+/// syntax without looking a definition up.
+#[test]
+fn type_definition_values_accept_reference_syntax_without_lookup() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let source = concat!(
+        "---\n$schema:\n",
+        "  bare: type-definition(required)\n",
+        "  explicit: type-definition(required)\n",
+        "bare: person[]\n",
+        "explicit: person(required)@./missing.yaml\n",
+        "---\nBody\n",
+    );
+    let report = DarkmatterSchemas::new(crate::request_support::context_at(workspace.path()))
+        .validate(&Markdown::from(source))
+        .expect("validation must run");
+    assert!(report.valid, "reference syntax must validate: {:?}", report.problems);
+}

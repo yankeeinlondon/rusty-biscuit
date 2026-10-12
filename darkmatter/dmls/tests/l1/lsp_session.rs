@@ -5044,7 +5044,7 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
     let workspace = LspWorkspace::new();
     let valid = "$schema:\n  title: string\n";
-    let malformed = "$schema:\n  title: str\n";
+    let malformed = "$schema:\n  title: str(\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5098,7 +5098,9 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
 fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
     let workspace = LspWorkspace::new();
     let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
-    let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
+    // An unterminated constraint list. A bare `nope` is a local reference and
+    // parses.
+    let malformed = "? kind\n: schema\n? types\n:\n  title: nope(\n";
     let path = workspace.path().join("explicit-mapping.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5277,7 +5279,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let workspace = LspWorkspace::new();
-    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
+    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
         "#{}\nkind: schema\ntypes:\n  title: string\n",
@@ -5400,13 +5402,13 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
         (
             "flow-pure.yaml",
             "{\"$schema\": {\"title\": \"string\"}}\n",
-            "{\"$schema\": {\"title\": \"str\"}}\n",
+            "{\"$schema\": {\"title\": \"str(\"}}\n",
             16u32,
         ),
         (
             "flow-tagged.yaml",
             "{kind: schema, types: {title: string}}\n",
-            "{kind: schema, types: {title: str}}\n",
+            "{kind: schema, types: {title: str(}}\n",
             25,
         ),
     ];
@@ -5478,35 +5480,35 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
         (
             "pure.yaml",
             r#"{"$schema": {"title": "string"}}"#,
-            r#"{"$schema": {"title": "str"}}"#,
+            r#"{"$schema": {"title": "str("}}"#,
             26u32,
             "string",
         ),
         (
             "tagged.yaml",
             "{kind: schema, types: {title: string}}",
-            "{kind: schema, types: {title: str}}",
+            "{kind: schema, types: {title: str(}}",
             33,
             "string",
         ),
         (
             "nested.yaml",
             "{$schema: {config: {title: string}}}",
-            "{$schema: {config: {title: str}}}",
+            "{$schema: {config: {title: str(}}}",
             30,
             "string",
         ),
         (
             "outer-array.yaml",
             "{$schema: [{title: string}, {name: number}]}",
-            "{$schema: [{title: string}, {name: num}]}",
+            "{$schema: [{title: string}, {name: num(}]}",
             38,
             "number",
         ),
         (
             "union-item.yaml",
             "{$schema: {title: [string, number]}}",
-            "{$schema: {title: [string, num]}}",
+            "{$schema: {title: [string, num(]}}",
             30,
             "number",
         ),
@@ -5975,15 +5977,15 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
         ),
         (
             "pure-invalid-inner.yaml",
-            "$schema:\n  title: str\n",
+            "$schema:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
-            Some("str"),
+            Some("str("),
         ),
         (
             "tagged-invalid-inner.yaml",
-            "kind: schema\ntypes:\n  title: str\n",
+            "kind: schema\ntypes:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
-            Some("str"),
+            Some("str("),
         ),
     ];
     let schema_codes = [
@@ -6720,18 +6722,18 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
     let cases: [(&str, &str, &str); 3] = [
         (
             "pure-dotted.yaml",
-            "$schema:\n  build:\n    target: number\n  \"build.target\": str\n",
-            "str",
+            "$schema:\n  build:\n    target: number\n  \"build.target\": str(\n",
+            "str(",
         ),
         (
             "pure-slash.yaml",
-            "$schema:\n  a:\n    b: number\n  \"a/b\": str\n",
-            "str",
+            "$schema:\n  a:\n    b: number\n  \"a/b\": str(\n",
+            "str(",
         ),
         (
             "tagged-colon.yaml",
-            "kind: schema\ntypes:\n  \"host: port\": str\n",
-            "str",
+            "kind: schema\ntypes:\n  \"host: port\": str(\n",
+            "str(",
         ),
     ];
 

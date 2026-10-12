@@ -674,4 +674,22 @@ mod tests {
         assert_eq!(q.items[0].label, "blue gray");
         assert_eq!(q.items[0].insert_text, "\"blue gray\"");
     }
+
+    /// An unresolved bare reference is the same AST as `Name@this`, so a
+    /// suggestion query answers identically for both spellings.
+    #[test]
+    fn bare_reference_suggestions_match_explicit_local_reference() {
+        let s = schema(concat!(
+            "$schema:\n",
+            "  bare: code(suggest(a, 2))\n",
+            "  explicit: code(suggest(a, 2))@this\n",
+            "  code: string\n",
+        ));
+        let bare = suggestions_for_def("v", def(&s, "bare")).expect("bare suggestions");
+        let explicit =
+            suggestions_for_def("v", def(&s, "explicit")).expect("explicit suggestions");
+        assert_eq!(bare, explicit);
+        let labels: Vec<&str> = bare.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, ["a", "2"]);
+    }
 }

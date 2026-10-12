@@ -31,11 +31,14 @@ use super::yaml_scalar::decode_partial_scalar_at;
 /// The structural role a cursor occupies inside a partially authored value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaCursorRole {
-    /// A type keyword, import name, or whole-definition scaffold position.
+    /// A type keyword, named-type reference (bare or before `@`), or
+    /// whole-definition scaffold position.
     Type,
     /// A constraint keyword inside a `(…)` constraint list.
     Constraint {
-        /// The type keyword the constraint list attaches to, when one was typed.
+        /// The type keyword or named-type reference the constraint list
+        /// attaches to, when one was typed. A reference's target is unknown
+        /// here, so its name is reported as authored.
         subject: Option<String>,
         /// Whether this is the postfix `[](…)` array-level list, whose accepted
         /// constraints are the array set rather than the item set.
@@ -843,7 +846,7 @@ mod tests {
     #[test]
     fn a_hard_parse_failure_still_yields_a_usable_state() {
         // Every one of these is rejected outright by `parse_type_expr`.
-        for value in ["strin", "))(", "string(((", "{ a: [b"] {
+        for value in ["strin(", "))(", "string(((", "{ a: [b"] {
             assert!(super::super::grammar::parse_type_expr("p", value).is_err(), "{value:?}");
             assert!(locate_type_definition_cursor(value, 0, value.len()).is_some(), "{value:?}");
         }
@@ -1013,5 +1016,64 @@ mod tests {
     #[test]
     fn a_description_is_prose_rather_than_grammar() {
         assert!(locate_type_definition_cursor("string -> a note", 0, 16).is_none());
+    }
+
+    /// The role at `cursor` inside `value`.
+    fn role_at(value: &str, cursor: usize) -> SchemaCursorRole {
+        locate_type_definition_cursor(value, 0, cursor).expect("cursor state").role
+    }
+
+    #[test]
+    fn a_bare_reference_name_is_a_type_position() {
+        let state = at_end("pers");
+        assert_eq!(state.role, SchemaCursorRole::Type);
+        assert_eq!(state.token, "pers");
+
+        let inline = at_end("{ author: pers");
+        assert_eq!(inline.role, SchemaCursorRole::Type);
+        assert_eq!(inline.path, SchemaSourcePath::root().property("author"));
+
+        let arm = at_end("[string, pers");
+        assert_eq!(arm.role, SchemaCursorRole::Type);
+        assert!(is_union_arm_path(&arm.path));
+    }
+
+    #[test]
+    fn bare_reference_constraint_positions_match_explicit_reference_positions() {
+        let constraint = |array_level| SchemaCursorRole::Constraint {
+            subject: Some("person".into()),
+            array_level,
+        };
+        for (bare, explicit, cursor, expected) in [
+            ("person(re)", "person(re)@this", 9, constraint(false)),
+            ("person[](mi)", "person[](mi)@this", 11, constraint(true)),
+            ("person[]", "person[]@./people.yaml", 8, SchemaCursorRole::Type),
+            (
+                "person(min(1))",
+                "person(min(1))@this",
+                12,
+                SchemaCursorRole::Argument {
+                    subject: Some("person".into()),
+                    constraint: "min".into(),
+                    array_level: false,
+                },
+            ),
+        ] {
+            assert_eq!(role_at(bare, cursor), expected, "{bare}");
+            assert_eq!(role_at(explicit, cursor), expected, "{explicit}");
+        }
+    }
+
+    #[test]
+    fn a_bare_reference_in_an_inline_object_keeps_its_constraint_role() {
+        let state = at_end("{ author: person(requ");
+        assert_eq!(state.path, SchemaSourcePath::root().property("author"));
+        assert_eq!(
+            state.role,
+            SchemaCursorRole::Constraint {
+                subject: Some("person".into()),
+                array_level: false,
+            }
+        );
     }
 }

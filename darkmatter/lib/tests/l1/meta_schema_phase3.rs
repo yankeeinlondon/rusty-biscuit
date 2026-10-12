@@ -98,7 +98,7 @@ fn semantic_defaults_use_the_passive_parser_authority() {
     }
 
     for invalid in [
-        "type-definition(default(not-a-type))",
+        "type-definition(default('string(min(nope))'))",
         "type-definition(default(true))",
         "schema(default(true))",
         "schema(default('https://example.com/schema.yaml'))",

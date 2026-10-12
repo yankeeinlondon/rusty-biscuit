@@ -114,7 +114,8 @@ pub use rewrite::NormalizationOutcome;
 pub use simplified::{
     Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
     SchemaArm,
-    SchemaCursor, SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaCursor, SchemaCursorRole,
+    SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
     SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,

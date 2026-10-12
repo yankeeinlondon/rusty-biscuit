@@ -172,8 +172,8 @@ impl PropertyDef {
 }
 
 /// A type expression is a primitive type keyword, an inline object literal
-/// declared with `{ ... }` syntax, or a cross-file named-type import
-/// (`Name@fileref`).
+/// declared with `{ ... }` syntax, or a named-type reference (`Name@fileref`
+/// or a bare local `Name`).
 ///
 /// `TypeExpr` is `Clone` but not `Copy` because the inline-object and import
 /// arms carry owned data. Call sites that previously matched on
@@ -185,9 +185,10 @@ pub enum TypeExpr {
     Primitive(SimplifiedType),
     /// Inline object literal: `{ foo: string, bar: number }`.
     InlineObject(SchemaShape),
-    /// Cross-file named-type import: `Name@fileref` (Feature B). Left of `@`
-    /// is the named type to inline; right is the file reference (`this` = the
-    /// current file). Postfix `[]` and `(constraints)` ride on the enclosing
+    /// Named-type reference: `Name@fileref` (Feature B), or a bare
+    /// non-keyword `Name`, which is `Name@this` ([`TypeExpr::local`]). Left
+    /// of `@` is the named type to inline; right is the file reference
+    /// (`this` = the current file). Postfix `[]` and `(constraints)` ride on the enclosing
     /// [`PropertyAtom`] (`is_array` / `constraints`), so this variant only
     /// carries the two parts that survive until resolution. The resolver
     /// (Phase 4) inline-expands imports before conversion; `to_json_schema`
@@ -198,6 +199,30 @@ pub enum TypeExpr {
         /// The raw file reference (right of `@`); `"this"` is the current file.
         reference: String,
     },
+}
+
+/// The [`TypeExpr::Imported`] reference that names the current schema's
+/// own named types, written `Name@this` or as a bare `Name`.
+pub const LOCAL_REFERENCE: &str = "this";
+
+impl TypeExpr {
+    /// A reference to the named type `name` in the schema that writes it.
+    ///
+    /// A bare `Name` and `Name@this` parse to this same value: they resolve
+    /// through one namespace, and serialization chooses the spelling (see
+    /// [`TypeExpr::is_local_reference`]).
+    pub fn local(name: impl Into<String>) -> Self {
+        Self::Imported {
+            name: name.into(),
+            reference: LOCAL_REFERENCE.to_string(),
+        }
+    }
+
+    /// Whether this is a reference to a named type of the writing schema,
+    /// in either spelling. A local reference never adds a file dependency.
+    pub fn is_local_reference(&self) -> bool {
+        matches!(self, Self::Imported { reference, .. } if reference == LOCAL_REFERENCE)
+    }
 }
 
 /// One arm of a property-level union (or the body of a non-union property).
@@ -362,6 +387,13 @@ impl SimplifiedType {
             SimplifiedType::Schema => "schema",
             SimplifiedType::Any => "any",
         }
+    }
+
+    /// Whether `name` is a built-in type keyword. Built-ins win over a local
+    /// named type of the same name, so such a type is reachable only as
+    /// `name@this`.
+    pub fn is_keyword(name: &str) -> bool {
+        Self::from_keyword(name).is_some()
     }
 
     /// Parses a type keyword. Returns `None` if `keyword` is not a known type.

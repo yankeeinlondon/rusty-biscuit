@@ -24,7 +24,7 @@ use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape,
-    SimplifiedSchema, TypeExpr, parse_property_definition, parse_schema_declaration,
+    SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition, parse_schema_declaration,
     parse_yaml_schema,
 };
 
@@ -67,6 +67,108 @@ impl SchemaSourcePath {
     }
 }
 
+/// Renders properties joined by `.` and union arms as `[N]`; the root is
+/// `<root>`.
+impl std::fmt::Display for SchemaSourcePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            return f.write_str("<root>");
+        }
+        for (index, segment) in self.0.iter().enumerate() {
+            match segment {
+                SchemaSourcePathSegment::Property(name) if index == 0 => f.write_str(name)?,
+                SchemaSourcePathSegment::Property(name) => write!(f, ".{name}")?,
+                SchemaSourcePathSegment::UnionArm(arm) => write!(f, "[{arm}]")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The authored source a schema declaration was read from.
+///
+/// Spans recorded against a [`SchemaSourceId`] are byte ranges in that
+/// source's text, so a consumer that holds the text (DMLS for an open
+/// document, the resolver for a named-type file) can turn them into ranges.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SchemaSourceId {
+    /// The `$schema` declaration being prepared: inline frontmatter or a
+    /// caller-supplied schema value. The resolver receives a YAML value, not
+    /// its text, so origins in this source carry no span until the consumer
+    /// projects one from its own source map.
+    InlineDocument,
+    /// A schema file, by the canonical path the resolver loaded it from.
+    File(std::path::PathBuf),
+}
+
+impl std::fmt::Display for SchemaSourceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InlineDocument => f.write_str("the inline `$schema`"),
+            Self::File(path) => write!(f, "`{}`", path.display()),
+        }
+    }
+}
+
+/// Where one authored constraint came from, as an address into its source's
+/// [`SchemaSourceMap`].
+///
+/// `path` is the structural path of the atom that authored the constraint
+/// in `source` (`[type-name, …]` in a named-type file, `[property, …]` under
+/// an inline `$schema`); a `$constraints` entry is addressed as
+/// `path.property("$constraints").property(key)`. `occurrence` selects among
+/// the [`SchemaSpanKind::Constraint`] spans at `path` whose text starts with
+/// `keyword` (see [`SchemaSourceMap::constraint_span`]); value-level groups
+/// precede array-level groups, as in `T(c)[](c)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaConstraintOrigin {
+    /// The source that authored the constraint.
+    pub source: SchemaSourceId,
+    /// Structural path of the authoring atom within `source`.
+    pub path: SchemaSourcePath,
+    /// The constraint keyword as authored (`min`, `max-keys`, `scheme`, …).
+    pub keyword: String,
+    /// Index among the `keyword` constraints at `path`, in source order.
+    pub occurrence: usize,
+    /// Byte range of the complete constraint in `source`, when the producer
+    /// held that source's text.
+    pub span: Option<Range<usize>>,
+}
+
+/// The consuming named-type reference a resolution diagnostic belongs to.
+///
+/// Its authored span is the [`SchemaSpanKind::ImportName`] span at `path`
+/// in `source`'s map, for bare and explicit references alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaReferenceSite {
+    /// The source that wrote the reference.
+    pub source: SchemaSourceId,
+    /// Structural path of the property (or named type) holding the reference.
+    pub path: SchemaSourcePath,
+}
+
+/// Which merge rule two or more reused constraints contradict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaConstraintConflictKind {
+    /// A lower bound exceeds an upper bound of the same kind (string length,
+    /// number, item count, or key count).
+    Bounds,
+    /// Repeated `scheme(...)` lists share no scheme.
+    Scheme,
+    /// Repeated `default(...)` values differ after JSON normalization.
+    Default,
+}
+
+impl std::fmt::Display for SchemaConstraintConflictKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Bounds => "bounds",
+            Self::Scheme => "schemes",
+            Self::Default => "defaults",
+        })
+    }
+}
+
 /// The authored role described by one source-map span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SchemaSpanKind {
@@ -84,7 +186,8 @@ pub enum SchemaSpanKind {
     Constraint,
     /// One constraint argument.
     Argument,
-    /// The named-type portion to the left of `@`.
+    /// The name of a named-type reference: the portion to the left of `@`,
+    /// or the whole identifier of a bare local reference.
     ImportName,
     /// The file-reference portion to the right of `@`.
     ImportReference,
@@ -117,6 +220,35 @@ impl SchemaSourceMap {
         self.spans
             .iter()
             .map(|((path, kind), spans)| (path, *kind, spans.as_slice()))
+    }
+
+    /// The span of the `occurrence`-th complete constraint at `path` whose
+    /// authored text in `source` starts with the whole word `keyword`
+    /// (`min` does not select `min-keys(…)`).
+    ///
+    /// `source` must be the text this map was projected from. This is how a
+    /// [`SchemaConstraintOrigin`] becomes a location.
+    pub fn constraint_span(
+        &self,
+        source: &str,
+        path: &SchemaSourcePath,
+        keyword: &str,
+        occurrence: usize,
+    ) -> Option<Range<usize>> {
+        self.spans(path, SchemaSpanKind::Constraint)
+            .iter()
+            .filter(|span| {
+                source
+                    .get((*span).clone())
+                    .and_then(|text| text.strip_prefix(keyword))
+                    .is_some_and(|rest| {
+                        rest.chars()
+                            .next()
+                            .is_none_or(|next| next == '(' || next == ':' || next.is_whitespace())
+                    })
+            })
+            .nth(occurrence)
+            .cloned()
     }
 
     fn insert(&mut self, path: &SchemaSourcePath, kind: SchemaSpanKind, span: Range<usize>) {
@@ -1563,14 +1695,14 @@ fn scan_expression_range(
             source_map,
         )?;
     } else {
-        insert_projected(
-            scalar,
-            path,
-            SchemaSpanKind::TypeKeyword,
-            name,
-            source_offset,
-            source_map,
-        )?;
+        // A bare non-keyword name is a local reference and shares the span
+        // kind of an explicit reference's name.
+        let kind = if SimplifiedType::is_keyword(&source[name.clone()]) {
+            SchemaSpanKind::TypeKeyword
+        } else {
+            SchemaSpanKind::ImportName
+        };
+        insert_projected(scalar, path, kind, name, source_offset, source_map)?;
     }
     scan_constraint_groups(scalar, path, expression, source_offset, source_map)
 }
@@ -2310,6 +2442,46 @@ mod tests {
             unreachable!()
         };
         candidates[1].span.clone()
+    }
+
+    /// A [`SchemaConstraintOrigin`] address resolves to the authored text of
+    /// that constraint in plain, quoted, and `$constraints` presentations;
+    /// `min` never selects `min-keys`, and `occurrence` counts per keyword.
+    #[test]
+    fn constraint_span_resolves_an_origin_address_in_each_presentation() {
+        let yaml = "plain: string(min(3); max(9))[](min(1))\n\
+                    quoted: \"number(max(5))\"\n\
+                    box:\n  $constraints:\n    min-keys: 3\n  a: string\n\
+                    keyed: \"{ a: string }(min-keys(2))\"\n";
+        let value: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let declared = parse_schema_declaration_with_source(&value, yaml, 0).unwrap();
+        let map = &declared.source_map;
+        let text = |path: &SchemaSourcePath, keyword: &str, occurrence: usize| {
+            map.constraint_span(yaml, path, keyword, occurrence)
+                .map(|span| &yaml[span])
+        };
+        let root = SchemaSourcePath::root();
+        let plain = root.property("plain");
+        assert_eq!(text(&plain, "min", 0), Some("min(3)"));
+        assert_eq!(text(&plain, "min", 1), Some("min(1)"), "array-level group follows");
+        assert_eq!(text(&plain, "max", 0), Some("max(9)"));
+        assert_eq!(text(&plain, "min", 2), None);
+        assert_eq!(text(&root.property("quoted"), "max", 0), Some("max(5)"));
+        let block = root.property("box").property("$constraints").property("min-keys");
+        assert_eq!(text(&block, "min-keys", 0), Some("min-keys: 3"));
+        let keyed = root.property("keyed");
+        assert_eq!(text(&keyed, "min-keys", 0), Some("min-keys(2)"));
+        assert_eq!(text(&keyed, "min", 0), None, "`min` is a whole word");
+    }
+
+    #[test]
+    fn schema_source_path_and_id_render_for_messages() {
+        let root = SchemaSourcePath::root();
+        assert_eq!(root.to_string(), "<root>");
+        assert_eq!(root.property("a").union_arm(1).property("b").to_string(), "a[1].b");
+        assert_eq!(SchemaSourceId::InlineDocument.to_string(), "the inline `$schema`");
+        let file = std::path::PathBuf::from("types.yaml");
+        assert_eq!(SchemaSourceId::File(file).to_string(), "`types.yaml`");
     }
 
     #[test]

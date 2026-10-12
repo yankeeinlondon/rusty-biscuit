@@ -29,6 +29,7 @@ pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
 pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestions_for_path};
 pub use serialize::serialize_property_atom;
 pub use source::{
+    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaValueEntry,
     SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
     mapping_separator,
@@ -40,7 +41,7 @@ pub use standalone::{
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
 };
 pub use types::{
-    Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    Constraint, LOCAL_REFERENCE, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
 #[cfg(feature = "work-counters")]
@@ -404,8 +405,18 @@ fn parse_mapping_atom(
             span: 0..0,
         });
     }
-    let shape = parse_schema_shape(context, value, nested_object_depth + 1)?;
-    Ok(PropertyAtom::bare_inline_object(shape))
+    let mut shape = parse_schema_shape(context, value, nested_object_depth + 1)?;
+    // A block `required` / `generated` on a property's object means the same
+    // as the postfix on that property, so it moves onto the atom where every
+    // presence consumer (`is_required`, phase projection, lowering) reads it.
+    let (presence, block): (Vec<_>, Vec<_>) = shape
+        .constraints
+        .into_iter()
+        .partition(|c| matches!(c, Constraint::Required | Constraint::Generated));
+    shape.constraints = block;
+    let mut atom = PropertyAtom::bare_inline_object(shape);
+    atom.constraints = presence;
+    Ok(atom)
 }
 
 fn describe_yaml(value: &YamlValue) -> &'static str {
@@ -592,7 +603,7 @@ mod tests {
 
     #[test]
     fn property_grammar_errors_propagate_with_property_name() {
-        let v = yaml("title: widget");
+        let v = yaml("title: string(min(nope))");
         let err = parse_yaml_schema(&v).unwrap_err();
         let SchemaError::Grammar { property, .. } = err else {
             panic!("expected Grammar error, got {err:?}")
