@@ -455,7 +455,7 @@ fn test_clean_applies_body_cleanup_alongside_frontmatter_repair() {
     let fixture = CliProcessFixture::named(
         "clean-frontmatter-test-clean-applies-body-cleanup-alongside-frontmatter-repair",
     );
-    let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body   \n\n-  Alpha\n-  Beta\n");
+    let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n\nIntro:\n- Alpha\n- Beta\n");
 
     fixture
         .command()
@@ -463,10 +463,7 @@ fn test_clean_applies_body_cleanup_alongside_frontmatter_repair() {
         .arg(&path)
         .assert()
         .success()
-        .stdout(predicate::str::contains("title: \"@daily-report\""))
-        .stdout(predicate::str::contains("- Alpha"))
-        .stdout(predicate::str::contains("-  Alpha").not())
-        .stdout(predicate::str::contains("# Body   ").not());
+        .stdout("---\ntitle: \"@daily-report\"\n---\n\n# Body\n\nIntro:\n\n- Alpha\n- Beta\n");
 }
 
 /// D-2: stdin with no `-` marker at all takes the same repair path.

@@ -2,7 +2,45 @@
 kind: feature
 name: windows-to-nightly
 date: 2026-10-08
-status: draft-spec
+status: implemented
+$schema:
+  status: |-
+    enum(
+        draft-spec,
+        finalized-spec,
+        planned,
+        implemented,
+        review-findings,
+        human-in-the-loop,
+        completed,
+        on-hold,
+        abandoned
+    ) -> an indicator of progress for this specification
+  reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+  reviewed_by: string -> the agent and model used in the spec review
+  reviewed_on: date -> the date the spec was reviewed
+  review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+  clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+  implemented: boolean -> indicates whether this spec's plan has been implemented
+  implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 3
+completed: true
+implemented: true
+implemented_by: claude-code/claude-opus-5-5 (cadence, zero-test packages, Phases 5-6); a separate implementation run (Phases 1-4)
+human_review: false
+message_to_agent: |-
+  Phase 4 is implemented (see the log). Things the next phase must know:
+  1. Rig and hosted producers now publish observations: `scripts/cross-check.sh` records one `rig` observation per finished leg (`wsl2-ubuntu`, `windows-latest`) with a per-run proof directory; `hosted_observations.py` emits and publishes `hosted` ones on scheduled runs; `local_evidence.py verify --artifact-repo` vouches for hosted artifacts. A passing rig/seed observation's proof documents are rechecked byte for byte by a reader on the same host.
+  2. A seed command (Phase 5) should call the same `publish_rig_observation` path in `cross-check.sh` per cell, or the `observation_notes.py publish-receipt --kind rig` CLI it wraps. Each rig run needs its own evidence directory (`<head>/<environment>/<package>-<gate>-<run_id>`): two runs sharing one would break the first run's digests.
+  3. The zero-test packages are settled (author chose option B, 2026-10-11): `reaper`, `reaper-cli`, `ui`, `agent-sandbox-cli` and `research-cli` declare `[package.metadata.ci.tests] unimplemented`, so while their source has no test the planner gives them no test cell and records `unimplemented: {reason, tests_found: false}`. A full-workspace seed must therefore schedule nothing for them, not report them unproved. The first test they gain schedules them normally.
+  4. Unverified on a real hosted run: that `GITHUB_TOKEN` may push `refs/notes/*`, `always()` behavior of the publisher on cancel, and re-run attempts that repeat an artifact name.
+  5. Do not run cross-check from a scratch clone against the real rigs: its prune step deletes clones of worktrees it does not know about (it removed three warm clones on `build-win-native` in Phase 4).
+
+  Earlier, from Phase 3:
+  Phase 3 landed per-environment nightly anchors. DEPARTURE from the Phase 1 ruling: the resolved plan stays at version 7 (no v8): `coverage_anchors` is an OPTIONAL field present only on a nightly (like `event`), so the archive-guard fix's claim on v8 is untouched and no Rust constant or hook fixture moved. `reuse_validation.py nightly-base` is gone; `nightly-anchors` prints the anchor document, `affected_scope.py --anchors FILE` derives each environment's diff itself (calculate_scope(coverage_groups=...), select_group/merge_selections/apply_policy_delta), and `certify` writes the per-environment `ci-coverage-v1-<env>-<head>-<policy16>` artifact from the new `certify-nightly` job in ci.yml (schedule-only, gated on ci-gate success, contents+actions read only, not in ci-gate's needs). The scheduled run now runs the evidence verifier/overlay (only workflow_dispatch skips it) with the all-zero base. Legacy (pre-certification) anchors carry covered_cells=null: the planner assumes they cover whatever the diff does not reselect and adds NO policy delta, which is a stated limit until the first certified nightly. Nothing publishes Windows or hosted-cell observations yet, so Phase 4 producers decide how much the first nightlies can reuse; the first nightly after merge is a bootstrap (no nightly has ever succeeded) and runs the full gated workspace on hosted runners. Phase 4 should also smoke `observation_notes.py publish-receipt` and the Python suites on the native Windows and WSL2 rigs (still macOS-only evidence), and check whether GITHUB_TOKEN may push refs/notes/* before relying on hosted note publication. `ci-rollup` now refuses malformed reused-cell proof (no evidence, CI-origin evidence, unknown outcome); it cannot verify the host OS of a reused observation, only its shape. Run the hook test suite with `CDPATH= bash .githooks/tests/test-pre-push.sh` (a set CDPATH breaks its repo-root discovery).
 related:
   - 2026-09-18-ci-cadence
   - 2026-09-19-nightly-scope
@@ -19,23 +57,38 @@ packages. Reuse valid test-rig evidence instead of repeating those cells on
 hosted runners. Scheduling, Python enforcement, documentation, and agent
 instructions must describe the same policy.
 
-This is a specification, not an implemented change. Cadence correction,
-test-rig seeding, receipt publication/consumption, and regression checks are
-required. Only the risk-directed pre-push workflow is optional.
+A **cell** is one package's required gate (a test tier or compile/lint check)
+on one environment. A **receipt** records what a host tested and its results.
+The **resolved plan** is the single document that says which cells run, reuse
+verified proof, or have an approved temporary capability gap. A nightly's
+**coverage anchor** is the earlier commit through which its required coverage
+has been satisfied; it determines which later changes still need proof.
 
-## Verified current behavior
+This specification is partially implemented. The cadence correction and the
+bounded wait for an unfinished PR run landed in this worktree on 2026-10-10,
+as recorded in the adjacent implementation log. Test-rig seeding, receipt
+publication/consumption, migration safeguards, and regression checks remain
+required. The optional risk-directed pre-push interface is deferred from the
+first delivery; its evidence contracts still apply to required workspace seeds.
+The document remains a draft because the evidence design needs the decisions
+listed in Open Questions before implementation.
 
-Inspected on 2026-10-08 in this worktree and through the repository's GitHub API:
+## Verified behavior and implementation status
+
+The original inspection was on 2026-10-08, including the repository's GitHub
+API. Local code and the implementation log were rechecked on 2026-10-11.
+The table below describes this worktree; it does not claim the changes have
+been merged or deployed.
 
 | Surface | Current behavior |
 | --- | --- |
-| `.github/ci/environments.json` | Linux/macOS on PR and push; Windows on push; WSL2 on schedule; all four on manual dispatch. |
+| `.github/ci/environments.json` | Linux/macOS on PR and push; Windows and WSL2 on schedule; all four on manual dispatch. |
 | `scripts/ci/affected_scope.py` | Derives event coverage from that table and produces one canonical resolved plan. |
-| `scripts/ci/test_affected_scope.py` | Explicitly asserts Windows-on-push and WSL2-only nightlies, including a reused PR leaving Windows work on the subsequent push. |
-| `scripts/ci/reuse_validation.py::nightly_base` | Searches up to 20 successful scheduled `ci.yml` runs on `main`, newest first, and selects the first whose head is an ancestor of the current head. No qualifying run, or an API failure, returns no base. |
+| `scripts/ci/test_affected_scope.py` | Updated event-policy assertions cover Windows/WSL2 nightlies and an empty plan after reuse of matching PR validation on push. |
+| [`nightly_base`](../../scripts/ci/reuse_validation.py), in the `repo-deps` package | Searches up to 20 successful scheduled `ci.yml` runs on `main`, newest first, and selects the first whose head is an ancestor of the current head. No qualifying run, or an API failure, returns no base. |
 | `.github/workflows/ci.yml` | Diffs the selected base against the current head; no base means `--all`. Scheduled runs bypass local evidence verification and overlay. |
 | `scripts/cross-check.sh` | Runs native Windows via `BUILD_WIN`, but publishes validation receipts only for WSL2. The Python cross-check recorder already accepts an environment argument; the shell publication path is WSL2-specific. |
-| Skills and instructions | `AGENTS.md`, CI docs, and the rust-devops skill describe Windows-on-push. The rust-devops skill additionally has stale prose claiming nightly Linux/Windows full-workspace execution. |
+| Skills and instructions | Primary CI docs, `AGENTS.md`, and the rust-devops/os skills now describe Windows/WSL2 nightlies and mark seeding and scheduled receipt reuse as planned. The focused cadence-drift check remains outstanding. |
 
 ### The nightly is not a fixed 24-hour window
 
@@ -55,14 +108,19 @@ archives consumed by WSL2, without Linux test, lint, or check cells.
 
 ### Observed fallback cost
 
-GitHub's successful scheduled-run query returned `total_count: 0`. The
+In the 2026-10-08 inspection, GitHub's successful scheduled-run query returned
+`total_count: 0`. The
 [latest inspected nightly](https://github.com/yankeeinlondon/rusty-biscuit/actions/runs/37800062455)
 used an all-zero base and recorded an explicit full-scope inventory: 66
 executing WSL2 cells, 17 omitted accepted-gap cells, and 68 distinct packages.
 The eight latest scheduled runs were failures, with several sharing the same
 head. Thus the desired incremental mechanism exists, but has not obtained a
-successful baseline in the available hosted history and currently repeats
-full-workspace attempts. Do not present that as efficient incremental coverage.
+successful baseline in the available hosted history and repeated
+full-workspace attempts in that inspected history. These are historical
+observations, not a fresh diagnosis of hosted runs on the review date. Recheck
+the affected cells during implementation; do not present this fallback as
+efficient incremental coverage. These figures already justify resumable
+seeding; no additional performance spike is required.
 
 ## Required cadence
 
@@ -84,9 +142,25 @@ full-workspace attempts. Do not present that as efficient incremental coverage.
 3. Update Python event-policy assertions, fixtures, proven-event handling,
    producer-demand checks, and schema contracts. A matching PR-proven push
    must produce an empty execution grid, not a Windows grid. Keep unchanged
-   check/lint environment policy and the policy-free `ci-gate`.
+   check/lint environment policy and the policy-free `ci-gate`. For a push
+   merged before its matching PR run finishes, preserve the implemented
+   90-minute wait and reuse only a qualifying success for the same tree.
+   Failure, cancellation, timeout, or unverifiable identity falls back to the
+   ordinary Linux/macOS plan, never a Windows/WSL2 plan.
 4. Preserve capability gaps as explicit accepted gaps with their existing
-   governance. Windows and WSL2 evidence remain distinct.
+   governance. Windows and WSL2 evidence remain distinct. Evaluate gap and
+   exact-skip
+   governance at the current run's policy date. An expired gap, a newly
+   declared gate, or a newly required backend cannot be treated as proved by
+   an older successful baseline. The planner adds newly required coverage
+   even when the source diff is empty; evidence verification still decides
+   whether those cells need execution.
+5. Preserve test-input selection: non-source reads select narrowed Ubuntu L1
+   only when Ubuntu is a scheduled test environment. Adding Ubuntu solely as
+   a WSL2 archive producer must not enable Ubuntu test cells or turn a
+   document-only change into Windows/WSL2 suites. Shared CI inputs continue
+   to select their existing suite owners; internal prompt folders remain
+   excluded under the existing policy.
 
 ## Merge eligibility and release eligibility
 
@@ -97,7 +171,8 @@ Default strict pre-push validation still blocks a selected local/rig failure;
 that hook behavior is distinct from a repository-wide Windows/WSL2 merge
 requirement and retains its explicit warn-mode exception.
 
-**No release may proceed without qualifying passing evidence from all
+**Planned release policy: no release may proceed without qualifying passing
+evidence from all
 supported environments for the release scope:** macOS, Linux, native Windows,
 and WSL2. Evidence must apply to the release's tested inputs and cover the
 packages and gates required by that release scope. A merge to `main`, green
@@ -105,7 +180,8 @@ Linux/macOS PR checks, a successful nightly baseline, or passing evidence for
 unrelated packages does not independently establish release eligibility.
 Native Windows and WSL2 remain separate evidence requirements.
 
-This section states the release policy only. Defining release scope, evidence
+This section states the intended release policy only; it does not change or
+certify the existing release automation. Defining release scope, evidence
 aggregation, enforcement points, and treatment of governed capability gaps
 belongs to subsequent release-process work. Do not infer that an existing CI
 gap automatically waives a release requirement or claim release enforcement
@@ -121,19 +197,35 @@ part of the policy.
    already-published completed cell evidence across failures and cancellations;
    a newer qualifying failure prevents reuse of an older pass for that cell,
    without erasing unrelated proof or changing the successful baseline.
-   No new change since a successful nightly means no
-   package test cells, builds, or package preflight runners.
+   No new source or required-coverage change since a qualifying successful
+   nightly means no package test cells, builds, or package preflight runners.
 2. Do not silently discard pending coverage to make a nightly smaller. When
    no baseline exists, or baseline discovery fails, report the precise reason
    for full scope. Distinguish a genuine bootstrap from an API failure or an
    exhausted bounded search. Recover the existing failing nightly and obtain
    truthful coverage; never manufacture a successful baseline.
 3. An old WSL2-only successful nightly cannot prove newly nightly Windows
-   coverage. Define and test the migration baseline for Windows explicitly,
-   using qualifying Windows evidence where available and bootstrapping missing
-   cells where necessary. Do not force already-proven WSL2 cells to rerun merely
-   to initialize Windows coverage. Preserve one canonical plan even if this
-   requires distinct environment coverage anchors inside it.
+   coverage. For migration, use its qualifying ancestor as the WSL2 comparison
+   anchor, but select the full gated Windows workspace until a successful
+   nightly has certified both environments under the new policy. Apply
+   qualifying cell evidence before deciding what executes in either
+   environment. If no WSL2 anchor qualifies, select full scope there too.
+   A rig receipt never becomes a comparison anchor by itself.
+
+   **Reader's note:** a single old comparison base would omit unchanged
+   Windows packages that have never been proved. Resetting both environments
+   would needlessly select old WSL2 work. The planner therefore records the
+   migration anchors and their reasons in one resolved plan, unions their
+   selections by package/cell identity, and derives dispatch and producer
+   demand only from that plan. Consumers never calculate a second diff.
+   After one successfully audited dual-environment nightly, both environments
+   use its common ancestor anchor. A required plan-field change follows the
+   repository's schema-version rules.
+
+   Verify a candidate baseline's recorded coverage policy, not just its green
+   GitHub conclusion. Pre-migration runs qualify only for WSL2. Missing policy
+   provenance earns no Windows baseline credit. A run that skipped required
+   audits cannot establish either environment's coverage anchor.
 4. A successful empty or fully reused nightly may advance a baseline only
    when every cell it was required to prove is satisfied or has a governed
    accepted gap. A green orchestration job alone is insufficient.
@@ -183,6 +275,13 @@ the existing Just and cross-check interfaces.
    merge-base lookup cannot be assumed to work for that base. Keep evidence
    discovery independent of baseline availability, verify the attached commit
    and tested inputs, and handle seed receipts at the baseline boundary.
+   Enumerate annotated
+   reachable ancestors from fetched evidence refs, including the anchor and
+   pinned seed revision; do not require a merge base with an all-zero SHA or
+   traverse every commit merely to discover a small set of notes. Squashed or
+   rebased commits that are not reachable are not candidates in this delivery:
+   rerun or republish proof attached to the actual tested reachable revision,
+   never attach an old result to a new commit without verification.
 8. A fully seeded first nightly may resolve all required cells to verified
    reuse or governed gaps, run no package tests/builds, pass the normal audits,
    and establish a genuine successful nightly baseline. Do not synthesize a
@@ -255,6 +354,10 @@ mode blocks the branch push on failure but also publishes completed failure
 receipts independently of that blocked branch transfer. Thus receipts are
 records of observations, not exclusively assertions that all tests passed.
 No claim is made here about whether warn mode has historically been used.
+The current hook can publish complete outcomes from a failed pass; preserving
+individual completed cells from an interrupted pass is an extension required
+by this feature, not existing hook behavior. An interrupted cell itself never
+earns passing credit.
 
 | Mode | Branch push after a required local/selected rig failure | Evidence treatment |
 | --- | --- | --- |
@@ -308,8 +411,8 @@ additional evidence, not a requirement to run Windows for every changeset.
    `refs/notes/ci-local/windows-latest`. Bind evidence to the actual tested
    committed tree and native Windows target/runtime. Require real reports,
    expected/observed test identity agreement, completion, gate inputs, and
-   backend proof where required. A compile check, zero-test pass, WSL2 run,
-   dirty mismatched tree, interruption, or unsupported flags do not certify
+   backend proof where required. A compile check, a zero-test pass that omits expected tests, a WSL2 run,
+   a dirty mismatched tree, interruption, or unsupported flags do not certify
    Windows behavioral coverage. Preserve honest failure receipts.
 5. Enable scheduled local-evidence verification and apply the existing
    per-cell overlay before deriving builds and dispatch rows. A malformed or
@@ -330,6 +433,47 @@ additional evidence, not a requirement to run Windows for every changeset.
 9. Opting out means an explicit `reuse` state backed by verified evidence in
    the nightly plan and report, not an environment ban, accepted gap, hidden
    skip, or successful empty test command.
+
+## Evidence integrity and publication
+
+A validation receipt describes an observation. A producer completion record
+certifies that a particular planned execution met its coverage contract. They
+are distinct documents: a hosted completion record is bound to its original
+head, build, run, and reports and must never be rewritten as completion of a
+later run. Verified prior evidence satisfies a later cell as `reuse`; the
+later audit checks its provenance instead of demanding an executing-cell
+completion record for that reused cell.
+
+Retain each observation's environment, tested commit/tree, package and gate,
+filter/features, gate-input identity, host or workflow/run/attempt identity,
+report references, and completion/backend proof. Recompute input equivalence
+using the existing declared closure. No changed input outside a known closure
+may be assumed irrelevant. Accepted gaps are current planning decisions,
+never passing receipts; expired gap and skip approvals must be reevaluated.
+A zero-test report cannot replace a nonempty expected listing, but this
+feature must not invent a blanket prohibition on a legitimate empty listing
+that the existing gate contract accepts.
+
+Publishing multiple packages or retrying one cell must preserve unrelated
+observations and their original provenance. The existing same-head receipt
+merge requires identical host, scope, and report context, so it is not a
+cross-host aggregation solution. Publication must handle concurrent writers:
+fetch the latest ref, merge nonconflicting observations, and retry a bounded
+number of times on a ref conflict. Never force-push over unseen evidence. A
+publication failure preserves local proof, reports that remote reuse is
+unavailable, and leaves uncovered hosted cells scheduled. Decide the storage
+and conflicting-result rules in Open Questions before implementing this path.
+
+Hosted producers publish proof as each cell completes, before area-wide or
+workflow-wide success is known. Use existing trusted workflow identities and
+permissions; PR code must not gain a new write credential. Preserve the
+exclusive `checks: write` ownership used for accepted-gap reporting. A canceled
+job may leave proof only if its full observation was durably published before
+interruption. Missing or expired reports, unavailable refs, and verification
+errors cause execution of the affected cells with a visible reason. They do
+not invalidate another cell's still-verifiable proof or manufacture a green
+baseline. Reuse promises apply while the required evidence remains available;
+this feature does not require unlimited artifact retention.
 
 ## Implementation surfaces and drift prevention
 
@@ -362,10 +506,12 @@ duration estimates. Follow the document-version rules if a contract changes.
   implemented by this feature.
 - Ordinary PR and push plans have no native Windows or WSL2 execution cells.
   A PR-proven push has no unnecessary test/build/preflight work.
-- Scheduled plans contain Windows and WSL2 cells only for affected scope;
+- After migration, scheduled plans contain Windows and WSL2 cells only for
+  affected scope, plus any newly required coverage under current policy;
   Linux appears only as a demanded WSL2 archive producer. Explicit opt-ins
   retain their documented behavior.
-- Successful unchanged nightlies schedule no package work. Failed nightlies
+- Successful unchanged nightlies with unchanged required coverage schedule
+  no package work. Failed nightlies
   preserve pending coverage. Missing baseline and API failure are diagnosed;
   the cadence migration cannot treat WSL2 history as Windows proof.
 - Existing nightly failures and bootstrap status are documented during
@@ -388,24 +534,97 @@ duration estimates. Follow the document-version rules if a contract changes.
   pending failed cells, newer-failure precedence, later-pass recovery, and no
   accidental hosted Windows PR/push grid or baseline rollback.
 - Python tests cover the shipped cadence, empty plans, scoped diffs,
-  producer demand, baseline migration, and failure paths. Relevant workflow
+  producer demand, baseline migration, and failure paths, including a WSL2-only
+  success followed by an unchanged head, expired gaps, newly required gates,
+  and the bounded wait for matching unfinished PR validation. Relevant workflow
   contract suites and actionlint pass. Validate locally; do not dispatch a
   speculative full-workspace hosted run to learn scheduling behavior.
 - All active instructions, skills, and CI docs agree with implemented policy;
   planned behavior is clearly labeled until implementation.
+- Evidence-publication fixtures cover concurrent ref updates, publication
+  failures, artifact expiry, mixed host/run provenance, same-commit retries,
+  and unordered conflicting outcomes under the author's selected design.
+  No later audit credits a prior completion record as its own execution.
 - End-to-end fixtures prove native
   Windows receipt publication, report/completion checks, merge-to-nightly
   discovery, selective reuse, sequential package receipt preservation, and
   fallback on missing/invalid evidence. Only unproven cells execute, and a
   newer failure cannot be hidden by older passing evidence.
 
-## Open implementation decisions
+## Open Questions
 
-- Whether to include the optional risk-directed rig workflow in the first
-  delivery. Workspace seeding and its receipt publication/consumption are
-  required either way.
-- Which existing command surface should expose resumable workspace seeding,
-  and how to recover the currently failing cells on the rigs.
-- Which explicit risk-selection interface fits the existing hook and
-  cross-check workflow. Avoid an automatic heuristic or new configuration
-  system unless an actual need justifies it.
+### How should rig and hosted observations be stored for reuse?
+
+The current notes contain one receipt per environment/commit, and a receipt's
+host and report context apply to all its cells. Required seeding and recovery
+must combine independently completed cells without changing who proved them.
+The author should choose this before the evidence-publication phase.
+
+- **Versioned observation collection in the existing environment notes
+  (recommended).** Keep independent receipts and immutable report references
+  together under the existing ref; verify each observation separately.
+  Pros: one discovery path, preserves per-run provenance, and fits rig
+  publication. Cons: requires a document contract, concurrent-update handling,
+  and a defined way to retain and fetch hosted reports. Recommended because
+  it extends the current discovery mechanism without pretending multiple
+  hosts share one execution context. Follow schema-version rules; do not
+  silently change the meaning of a version-2 receipt.
+- **Separate rig notes and hosted artifact discovery.** Feed both sets of
+  verified observations to the same planner overlay. Pros: hosted reports
+  stay in their existing artifact store; fewer note-format changes.
+  Cons: two discovery paths, API/pagination work, and artifact expiry must be
+  surfaced consistently. The artifact lookup is evidence discovery only,
+  never another scope calculator.
+- **One receipt per cell under separate refs.** Pros: independent publication
+  and retry ownership. Cons: many refs to fetch and manage, and a new naming
+  and retention contract. Prefer this only if aggregate-note conflicts prove
+  materially problematic; no performance spike is needed to choose the
+  simpler existing-ref approach initially.
+
+### What makes one qualifying observation newer than another?
+
+Commit ancestry does not order retries at the same commit or runs on sibling
+branches. Host clocks and fetch order are not trustworthy ordering rules.
+A concurrent pass must not silently erase a failure for equivalent inputs.
+The existing newest-commit-first walk does not settle these cases.
+
+- **Explicit retry lineage with unresolved conflicts requiring execution
+  (recommended).** Preserve all qualifying observations. A later complete
+  observation may supersede one it explicitly names as its retry; observations
+  on later descendant commits follow the existing input-equivalence rule.
+  Unordered conflicting pass/failure observations leave the cell unproven.
+  Pros: conservative, supports later-pass recovery, and needs no global clock.
+  Cons: records need observation identities and retry links; a conflict may
+  cause one extra execution. Recommended because an extra cell run is cheaper
+  than falsely certifying coverage. Cyclic or invalid links are rejected.
+- **Repository-wide publication sequence.** Assign ordering during serialized
+  ref updates. Pros: a simple total order for all observations. Cons: receipt
+  publication can arrive after testing; an old delayed pass could hide a newer
+  test failure unless execution lineage is also recorded.
+- **Trusted completion timestamps.** Pros: familiar and easy to display.
+  Cons: rig clock drift and concurrent finishes make precedence ambiguous;
+  requires a clock trust policy and tie handling. Do not use local timestamps
+  alone to satisfy the newer-failure rule.
+
+### Which command should expose workspace seeding?
+
+The first delivery excludes the optional risk-selection interface. Seeding
+still needs a preview, a pinned revision, persistent progress, and an honest
+nonzero exit when requested coverage remains unproved. Governed gaps are
+reported separately and evaluated under the existing planner policy.
+
+- **Dedicated Just recipe backed by the existing cross-check transport
+  (recommended).** Pros: explicit full-workspace operation with resumable
+  state, while preserving existing per-package commands. Cons: a small
+  orchestration entry point is required. Recommended because a potentially
+  long workspace seed is a different user operation from checking one package.
+- **Extend `just cross-check` with a workspace mode.** Pros: one command family
+  and existing host selection. Cons: broadens the current per-package
+  interface and complicates resume and preview behavior.
+
+Local resume state must be bound to repository identity, pinned revision,
+policy, and cell contracts. It is a progress cache, never proof by itself;
+published observations must still pass verification. Use existing rig locks,
+noninteractive failure reporting, and terminal/browser tests that never take
+focus. Recover actual red cells with targeted local runs; do not add unrelated
+hosted cells, benchmark workloads, or repeated statistical measurements.

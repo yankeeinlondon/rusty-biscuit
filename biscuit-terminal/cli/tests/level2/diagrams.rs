@@ -36,13 +36,13 @@
 
 use crate::common;
 
-use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{extract_kitty_apc_columns, parse_debug_image_width};
-use common::{capture_until, send_bt_command};
+use common::{bt_command, capture_until, run_bt_rows, run_to_end_marker, send_bt_command};
 use serial_test::serial;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -167,6 +167,16 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
     );
 }
 
+/// Runs `bt <args>` on a pane cleared by the same shell line, so earlier
+/// output cannot leak into the capture, and returns the frame once `bt` has
+/// exited.
+///
+/// Not `run_bt_rows`: a full-size diagram scrolls its begin marker off the
+/// viewport.
+fn run_on_cleared_pane(harness: &mut impl TerminalHarness, args: &str) -> CapturedFrame {
+    run_to_end_marker(harness, &format!("clear; {}", bt_command(args)))
+}
+
 /// Asserts the diagram in `case` renders via the WezTerm path. Because
 /// `wezterm cli get-text --escapes` strips image protocol bytes from
 /// captured panes, this asserts on the `--meta` JSON keys (`filename`,
@@ -178,16 +188,7 @@ fn assert_renders_in_wezterm(case: &DiagramCase) {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    // Reset the pane so prior tests' rendered output cannot leak into
-    // this run's capture window.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-
-    send_bt_command(harness, &format!("{} --meta {}", case.cmd, case.arg));
-    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
-        let joined: String = f.plain.lines().collect();
-        joined.contains("\"filename\"") && joined.contains("\"render_time_ms\"")
-    });
+    let frame = run_on_cleared_pane(harness, &format!("{} --meta {}", case.cmd, case.arg));
     let joined: String = frame.plain.lines().collect();
 
     // The presence of meta JSON in stderr proves the renderer ran the
@@ -369,17 +370,12 @@ fn level2_diagram_width_respects_pane_columns() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     let pane_size = harness.pane_size().expect("pane_size failed");
     let pane_cols = pane_size.cols;
     assert!(pane_cols > 0, "pane_size.cols was zero");
 
-    send_bt_command(harness, "pie-chart --debug --width 50% \"A: 1\"");
-    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
-        parse_debug_image_width(&f.plain).is_some()
-    });
+    let frame = run_on_cleared_pane(harness, "pie-chart --debug --width 50% \"A: 1\"");
     let actual = parse_debug_image_width(&frame.plain).unwrap_or_else(|| {
         panic!(
             "could not parse `image width:` line from `bt pie-chart --debug` output.\n\
@@ -559,14 +555,7 @@ fn level2_diagram_fallback_when_no_image_protocol() {
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-
-    send_bt_command(harness, "flowchart \"A --> B\"");
-
-    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
-        f.plain.contains("```mermaid")
-    });
+    let (frame, _) = run_bt_rows(harness, "flowchart \"A --> B\"", &[]);
     assert!(
         frame.plain.contains("```mermaid"),
         "expected fallback fenced code block in tmux (no image protocol). plain:\n{}",
@@ -671,3 +660,4 @@ mod helper_tests {
         assert_eq!(CASES.len(), 10);
     }
 }
+

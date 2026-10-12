@@ -73,7 +73,7 @@ the first context's base; a target that advanced past the branch point is review
 receipt, and CI calculates scope itself.
 
 The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes a
-**validation receipt** under `refs/notes/ci-local/<environment>` — schema version 2, carrying the
+**validation receipt** — schema version 2, carrying the
 reviewed base (the scope receipt's: a pull request's target tip, never a merge base with
 `origin/main`), head, tree, and the scope receipt's plan identity plus one record per
 `{package, gate}` cell that this run executed with its
@@ -83,7 +83,32 @@ already stages, so a receipt reports what the run *measured* rather than what it
 reports themselves are retained on the producing host under
 `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/` (root default `~/.rusty-biscuit/ci-evidence`)
 before the receipt is written; `host.report_dir` names that directory, and a copy that fails
-publishes no receipt.
+publishes no receipt. The directories are named by commit SHA because the receipt, a git note on
+that commit, points at its own; `just ci-evidence` lists them readably, newest first, with each
+commit's branch, environments, cell count, result, total cell time and subject.
+
+The receipt is not stored as-is. `scripts/ci/observation_notes.py` turns each of its cells into an
+immutable **observation** (cited by report digest) and unions them into the **observation
+collection** (schema version 3) on `refs/notes/ci-local/<environment>`, so the next package, a
+retry, or another host at the same head adds to the note instead of replacing it. The union is
+written locally first, then the remote ref is fetched, merged, and pushed without force, retrying a
+lost race up to five times; a failure leaves the proof on the local ref and the covered cells
+scheduled for CI. A retry of a cell links to the observation it replaces (`retry_of`), and the
+verifier orders results only by that link and by commit ancestry, never by time: a later failure
+beats an earlier pass, a later pass beats an earlier failure, and results nothing orders that
+disagree make the cell execute.
+
+The link is set by whoever ran the retry, from what it knew when the retry started, never from the
+order observations reach the note:
+
+- a `cross-check.sh` rig leg asks `observation_notes.py retry-predecessor` before it runs and names
+  the cell's one unsuperseded observation, if there is exactly one;
+- a hosted re-run attempt names the earlier attempt of the same workflow run and cell;
+- a hook receipt names nothing.
+
+So a pass that ran first but was published after a newer failure is stored unlinked, the two
+disagree, and the cell executes. The field contract is in
+[`.github/ci/schemas/README.md`](../../.github/ci/schemas/README.md#observation-collection).
 
 A **complete** run is evidence whether it passed or failed; `strict` and `warn` both publish one.
 A gate that staged no report is recorded `partial` and refused for reuse, so a compile failure
@@ -91,10 +116,11 @@ cannot pass for a tested cell. An L2 cell is `partial` unless a backend it requi
 a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
 `lint` and `check` stage no report and are therefore always CI-origin.
 
-CI reads **every** note on every environment's notes ref between the merge base and the outgoing
-head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in one
-answer, and two receipts on one environment covering different packages combine across commits;
-each cell is resolved by the newest note that qualifies for it. A receipt from an
+CI reads **every** note on every environment's notes ref from the merge base (included) to the
+outgoing head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in
+one answer, and results on one environment covering different packages combine across commits and
+across observations of one commit; each cell is resolved among the observations that qualify for it,
+newest by retry link and commit ancestry. A receipt from an
 **older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
 `git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
 included) plus that gate's global inputs, plus the Just recipes the gate's CI entry recipes
@@ -120,10 +146,15 @@ When the plan schedules no cell it names the changed documents and states that n
 required. That is an **affirmative scheduling decision**, not a warning, a failure, an accepted
 gap, or a fabricated passing result.
 
-`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg ran the outgoing
-head's exact tree on a clean remote worktree with no test filter; every other run prints why it
-published nothing. It ships the developer's local tree, uncommitted work included, so most of its
-runs test a tree no head names.
+`scripts/cross-check.sh` records a `rig` observation for a leg's cell, the moment that leg finishes,
+under the leg's own environment: `wsl2-ubuntu` for the WSL2 guest and `windows-latest` for native
+Windows. It does so only when the leg ran the outgoing head's exact tree on a clean remote worktree
+with no test filter, in archive mode; every other run prints why it published nothing. It ships the
+developer's local tree, uncommitted work included, so most of its runs test a tree no head names.
+Each recorded cell cites its JUnit report, the expected-test listing, and the completion record,
+all kept in one per-run directory; a completed failure is recorded too (without a completion
+record, which `completion.py` refuses for a failing test), and an interrupted or incomplete leg
+records nothing, so an earlier leg's proof survives it.
 
 ### Execution constraints
 
@@ -152,9 +183,11 @@ Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores when there are four or fewer, and `logical_cores - 2` on
 larger runners. This preserves capacity on developer and larger shared hosts
 without crippling small CI runners. It is a concurrency setting, not CPU
-affinity or a guarantee that cores stay reserved. Shared-resource L2 suites
-remain at one worker; `l2-parallel-self-spawn` opts isolated suites into the
-parallel policy, and an explicit `BISCUIT_L2_THREADS` takes precedence.
+affinity or a guarantee that cores stay reserved. L2 runs in parallel by
+default at `max(1, floor(logical_cores / 2))` workers on every host
+(`_test_l2_threads`) because each worker drives a real terminal; only a package declaring the `l2-serial` runner tool,
+with its required `l2-serial-reason`, runs at one worker. An explicit
+`BISCUIT_L2_THREADS` takes precedence.
 
 `_test_threads` in `just/devops.just` calculates the shared worker default.
 It recognizes CI through `CI=true`, `GITHUB_ACTIONS=true`, or a nonempty
@@ -195,31 +228,258 @@ SHAs, verifies every published local receipt per cell, and resolves the plan.
 GitHub events that schedule it, and the planner plans nothing for an environment the event does
 not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
 (`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
-latter normally from the pre-push hook's local evidence; a push to `main` adds `windows-latest`;
-the nightly run (08:00 UTC) plans `wsl2-ubuntu` alone over the packages that changed since the
-last successful nightly, with `ubuntu-latest` joining cell-less as the producer of their archives
-(`fixes/2026-09-19-nightly-scope`); `workflow_dispatch` plans every environment over the full
-workspace. A push to `main` whose pull request
-validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
-environment for a pull request from its next push.
+latter normally from the pre-push hook's local evidence; a push to `main` schedules the same two;
+the nightly run (08:00 UTC) plans `windows-latest` and `wsl2-ubuntu`, each over the packages that
+changed since the last successful nightly that proved that environment, with `ubuntu-latest` joining cell-less as the producer
+of WSL2's archives; `workflow_dispatch` plans every environment over the full workspace. A push to
+`main` whose pull request validation is reused therefore plans nothing, and every downstream job
+skips. The `ci:all-os` label plans every environment for a pull request from its next push.
 
-**Planned cadence correction:** ordinary PRs and pushes to `main` will cover
-Linux and macOS; native Windows will move to the scoped nightly alongside
-WSL2. Nightly scope will remain the changes since the last successful qualifying
-ancestor run, rather than a fixed 24-hour window. With no qualifying baseline,
-the current implementation falls back to full scope; failed runs do not advance
-that baseline. A required resumable workspace seeding command will gather
-Windows and WSL2 evidence on configured rigs and let the bootstrap nightly
-execute only unproven cells. Scheduled evidence consumption and Windows
-cross-check receipt publication are not yet implemented. An optional
-Windows-risk workflow will reuse this infrastructure before pushing. Explicit
-manual and all-OS opt-ins will remain available.
+```mermaid
+flowchart LR
+    PR[pull request] -->|Linux + macOS| Merge[merge to main]
+    Merge -->|same tree already green| Skip[push plans nothing]
+    Merge -->|PR run still going| Wait[wait up to 90 min, then reuse]
+    Merge -->|tree never tested| Grid[Linux + macOS grid]
+    Main[main since last green nightly] --> Nightly[nightly: Windows + WSL2]
+```
 
-**Planned partial-run recovery:** failed or canceled nightlies will leave the
-last successful baseline unchanged and retain independently published proof
-from completed cells. Retries will verify and reuse qualifying rig or hosted
-cell evidence, executing only unproven cells. A newer qualifying failure will
+Nightly scope is per environment, not per run. Each scheduled environment is anchored to the
+newest successful nightly on `main` that this head descends from **and** that proved that
+environment, and the planner unions the per-anchor selections once per `{package, environment,
+gate}`. A run proves an environment when it published a **coverage certification** for it — written
+by the `certify-nightly` job only after the final gate passed and every normal audit ran — or, for a
+run from before certifications existed, when its own workflow scheduled the environment and every
+`coverage-audit` job succeeded. So the old WSL2-only history anchors WSL2 and leaves Windows on the
+full gated workspace; once a dual-environment nightly is certified, both share the newer anchor.
+
+```mermaid
+flowchart LR
+    Runs[successful nightlies on main] --> Anchor{proved this environment<br/>and an ancestor?}
+    Anchor -->|certified| Inc[diff since that run]
+    Anchor -->|legacy WSL2-only run| Inc
+    Anchor -->|none| Full[full gated workspace + coded reason]
+    Inc --> Delta[+ cells current policy requires<br/>that the anchor never covered<br/>under the same contract]
+    Delta --> Reopen[+ covered cells that a later<br/>published failure contradicts]
+    Reopen --> Plan[one resolved plan]
+    Full --> Plan
+    Plan --> Verify[verified evidence reused]
+    Verify --> Run[execute the rest, audit, certify]
+```
+
+The plan records each environment's anchor and reason in `coverage_anchors` (reasons:
+`bootstrap-no-run`, `api-failure`, `search-exhausted`, `policy-uncertified`,
+`no-qualifying-ancestor`, `certified-ancestor`, `legacy-wsl2-ancestor`), so a first nightly, an API
+outage, or an exhausted search is visible rather than inferred from silence.
+
+A certification records, for every cell it covers, a **coverage contract**: a digest of what that
+cell must prove beyond its name, such as its Level-2 backends, its test features, its target kinds,
+and its companion suites. The next nightly computes the same digest for every cell current policy
+requires (the plan's `required_cells`) and compares the two:
+
+| The anchor's certification... | The cell is... |
+|---|---|
+| covered it with the same contract | inherited (`inherited_cells`) unless the diff reselects it, or later evidence reopens it (below) |
+| covered it with a different contract (a new backend or test feature) | selected (`policy_delta`) |
+| did not cover it (an expired accepted gap, a newly declared gate) | selected (`policy_delta`) |
+| is a legacy run, which recorded no contracts | selected (`policy_delta`) |
+
+For example, a package that adds `wezterm` beside `tmux` to its Level-2 backends changes only its
+manifest, which selects no package by itself; the changed contract is what puts its `L2` cell back
+in the nightly. A selected cell still goes through evidence verification, so a cell already proved
+on a rig (`just ci-seed`) does not execute. `inherited_cells` keep coverage transitive across
+nightlies that execute nothing.
+
+**A later failure reopens an inherited cell.** A certification proves the anchor, not every commit
+since, so before the planner lends a covered cell to the new nightly it asks the evidence verifier
+about it, with the same rules a selected cell gets: a result counts when it describes this head's
+tree or one with the same gate inputs, and a passing retry that names the failure in `retry_of`, or a
+pass on a descendant commit, supersedes it. When the newest qualifying result is a failure, or a pass
+and a failure that nothing orders, the cell is selected and listed in `reopened_cells`, its
+selection reason names the evidence, and it builds, dispatches, and executes like any selected
+cell. The anchor and every other inherited cell stand.
+
+```sh
+just cross-check alpha --os windows   # after a green nightly; the rig run fails and is published
+# next nightly, with nothing changed in alpha (or only docs changed):
+#   windows-latest  reopened_cells: [alpha/L1]   inherited_cells: [beta/L1, ...]
+#   wsl2-ubuntu     reopened_cells: []           inherited_cells: [alpha/L1, beta/L1, ...]
+```
+
+If the reopened cell fails, the gate is red and no certification is written, so the failure stays
+visible to the following nightly too; if it passes, the certification covers it as this run's own
+result. A later passing rig retry (`cross-check.sh` names its predecessor before it runs) restores
+inheritance without a hosted run. The nightly records earlier runs' unpublished hosted observations
+before it plans, so a failure only an artifact holds is seen as well. A legacy anchor therefore selects the whole WSL2 workspace once, and
+seeded evidence decides what actually runs; the first certified nightly ends that. A failed,
+canceled, incomplete, foreign, or non-ancestor run never becomes or moves an anchor. The nightly now
+runs the same evidence verifier as pushes, so notes published from a rig satisfy Windows and WSL2
+cells there. Windows and WSL2 failures are found after merge and fixed forward; they never block a
+merge.
+
+A pull request merged before its own CI finished would otherwise get the whole grid again. The push
+instead waits, up to 90 minutes, for the pull request's run of the same head. A green finish on the
+same tree is reused; a failure, cancellation, or timeout falls back to the normal grid.
+
+**A package that is not built yet runs no tests.** Zero tests fail the completeness check, because
+an empty test list looks exactly like a broken filter, so such a package declares why it has none:
+
+```toml
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"
+```
+
+While the package's own source holds no test, the planner gives it no test cell and records
+`unimplemented: {reason, tests_found: false}` on it; lint still compiles every target on Linux.
+The first `#[test]` (or `#[tokio::test]`, `rstest`, `proptest!`, a file under `tests/`) schedules
+its tests normally, and the plan reports `tests_found: true` so the marker can be deleted. Only
+declaring packages are scanned. The field reference is in `.github/ci/README.md`.
+
+**Seeding the nightly from the rigs.** The nightly reuses any verified observation for a cell, so
+the test rigs can prove the Windows and WSL2 cells ahead of it instead of the nightly running them on
+hosted runners. `just ci-seed` does that for the whole workspace at one pinned `main` revision:
+
+```sh
+git switch --detach origin/main      # the checkout must be the pinned revision, clean
+just ci-seed --plan                  # preview: every cell, reused or still owed, and its rig
+just ci-seed                         # prove what is owed on BUILD_WIN and BUILD_WSL
+just ci-seed --os wsl --package ui   # narrow a pass to one environment or package
+```
+
+It resolves the full-workspace nightly plan, asks the nightly's own verifier which cells are already
+proved (by an earlier seed, the pre-push hook, or another host), and runs `just cross-check <package>
+--os windows|wsl` for each package still owing a cell. Every finished leg publishes its observation
+at once, so stopping a pass loses only the leg in flight; running the command again continues where
+it stopped, because what is owed is always re-derived from published proof, never from the progress
+file (`<evidence dir>/seed/<seed id>/state.json`), which only records attempts and their logs.
+
+A busy rig (another run holds its clone), an unreachable one, an unset `BUILD_WIN`/`BUILD_WSL`, a
+failed run, and a run that published nothing are reported apart, and each leaves its cells owed; the
+command exits nonzero until every requested cell is proved or a governed gap. A pass pinned to an
+older revision keeps its value: the nightly reuses its proof wherever the cell's inputs are unchanged.
+
+The seed proves **Level 1 cells only**, because `just cross-check` runs a package's Level 1 suite and
+nothing else. A pending cell of any other gate (Level 2, browser, and so on) is listed as
+`unsupported`, no leg runs for it (a Level 1 run would not prove it), and the command exits nonzero
+while it remains; the nightly runs that cell on its hosted runner. Today every higher tier on these
+two environments is a governed gap, so a full-workspace pass has no such cell until a higher tier is
+enabled there:
+
+```text
+  reused      alpha/windows-latest/L1   build-win  already proved; not run again
+  unsupported alpha/windows-latest/L2   build-win  the seed runs Level 1 only; this L2 cell stays for the nightly
+```
+
+An optional Windows-risk workflow, running selected Windows cells before a push, is **planned**.
+
+### Hosted cell observations
+
+A nightly that fails in one place no longer discards the cells it proved elsewhere. Every scheduled
+hosted producer (a native test job in `_package-ci.yml`, or the WSL2 guest job in `_wsl-ci.yml`)
+records its finished cell as an observation and uploads it before its area or the workflow knows how
+it ended. A trusted job then publishes the run's observations to the notes refs, where the normal
+verifier reads them like any other producer's.
+
+```mermaid
+flowchart LR
+    gate[gate command] --> junit[upload junit-pkg-gate-env]
+    junit --> cert[completion.py]
+    cert --> comp[upload completion-pkg-gate-env]
+    comp --> emit["hosted_observations.py emit"]
+    gate -. "failed: no completion record" .-> emit
+    emit --> obs[upload observation-pkg-gate-env]
+    obs --> pub["publish-observations (schedule only, contents: write)"]
+    pub --> notes["refs/notes/ci-local/ENV"]
+    obs -. "publisher never ran" .-> recover["next nightly: publish --recent"]
+    recover --> notes
+    notes --> verify["verify_cells + gh_probe"]
+    verify -->|"artifact bytes match"| reuse[cell reused]
+    verify -->|"expired, altered, or API down"| run[cell executes]
+```
+
+What each stage records, and what it refuses:
+
+- **A passing cell** needs the gate to have succeeded and a completion record bound to this cell,
+  head, run, and attempt. The observation cites the report by SHA-256 and byte count, and its proof
+  carries the digests of `expected-<gate>.json` and `completion.json`.
+- **An honest failure** (a real report that names a failing test) is recorded too, with whatever
+  proof the expected listing allows. A failure needs no completion record, and it still blocks an
+  older pass of the same inputs.
+- **Interrupted or unproven work records nothing.** A cancelled or skipped gate, a missing or
+  unreadable report, a report the failure cannot be attributed to, or a passing gate with no valid
+  completion record makes `emit` exit nonzero with the reason and write no file. The step is
+  `continue-on-error` so it can never change the cell's verdict.
+- **Cancellation.** A job cancelled before its `emit` step publishes nothing. One cancelled after
+  its observation upload keeps the artifact, and `publish-observations` still runs (`always()`), so a
+  cell that finished is not lost to an unrelated failure or a cancelled sibling.
+- **A run whose publisher never ran** (force-cancelled, a lost runner, the publisher's own time
+  limit) is recovered by the next nightly. Before it verifies evidence, the nightly's `scope` job
+  runs `hosted_observations.py publish --recent --no-push`: it lists the newest five completed
+  scheduled `ci.yml` runs on `main` (whatever their conclusion), collects their `observation-*`
+  artifacts, validates them exactly as the publisher does, and records them in its own checkout's
+  notes, so the verifier discovers them in the same pass. That needs only the `actions: read` the
+  job already holds. `publish-observations` then runs the same command with a push, so the recovery
+  outlives the run. A run of another event, workflow, branch, or repository, or one still in
+  progress, is never collected; republishing an observation a note already holds changes nothing.
+  A run older than the window, or an observation whose artifact expired, is not recovered and its
+  cell executes; `publish --run-id N` still republishes one run by hand.
+- **Names are conventions, not stored.** The report lives in `junit-<package>-<gate>-<environment>`
+  of the producer run; the observation's `producer.host.label` is the environment, which is how the
+  probe recomputes that name. The observation itself records `workflow`, `run_id`, and `attempt` and
+  is never rewritten: a retry at a new head is verified, not copied, and a re-run attempt is a new
+  observation linked with `retry_of` to the earlier attempt of the same run and cell. An attempt
+  published before its predecessor stays unlinked, because a stored observation is never
+  re-identified, and the cell executes.
+
+Discovery fetches the artifact. `local_evidence.py verify --artifact-repo OWNER/REPO` (what `ci.yml` passes) builds
+`hosted_observations.gh_probe` and hands it to `verify_cells` as its `report_probe`; the probe
+lists the producer run's artifacts through `gh api`, requires the conventional artifact to exist and
+be unexpired, downloads it, and compares the cited member's bytes and the proof's digests. Anything
+else (expired, altered, deleted, API failure) answers "unavailable" and the cell executes, with the
+`observation-report-unavailable` reason in the plan. A failure is kept regardless.
+
+The report artifacts keep the repository's default artifact retention, so hosted proof is reusable
+for that long and no longer; an expired artifact makes the cell run again rather than fail.
+
+`publish-observations` runs only on `schedule`, holds `contents: write` and `actions: read`, and
+runs default-branch code from the tested checkout (full history, so an earlier run's head can carry
+its note). It writes notes refs only. A push the remote
+refuses leaves the proof local and prints "hosted observations are local to this runner; remote reuse
+unavailable"; the step then fails red, but the job is not part of `ci-gate`.
+
+**Unverified:** whether the repository ruleset permits `GITHUB_TOKEN` to push `refs/notes/*`; whether
+a cancelled run still schedules the publisher on a real cancellation; and how the Actions artifact
+service behaves for a re-run attempt that repeats an artifact name. None has been exercised on a
+hosted run.
+
+**Partial-run recovery:** failed or canceled nightlies leave the last
+successful baseline unchanged. Hosted cells that finished keep their proof
+(previous section), and so do rig legs (`just cross-check`, `just ci-seed`). Retries verify and reuse
+qualifying evidence, executing only unproven cells. A newer qualifying failure will
 prevent an older pass from hiding that cell's failure.
+
+Every nightly cell resolves the same way, whoever produced its proof:
+
+```mermaid
+flowchart LR
+    Hook[pre-push hook] --> Notes[(observations in<br/>refs/notes/ci-local/*)]
+    Rig[just cross-check / just ci-seed] --> Notes
+    Hosted[finished hosted cells] --> Notes
+    Scope[nightly scope:<br/>one resolved plan] --> Cell{each cell}
+    Notes --> Cell
+    Cell -->|governed gap| Gap[ACCEPTED GAP]
+    Cell -->|qualifying pass,<br/>no newer failure| Reuse[reuse]
+    Cell -->|anything else| Execute[execute on a hosted runner]
+    Execute --> Notes
+    Gap --> Audit[area audits + ci-gate]
+    Reuse --> Audit
+    Execute --> Audit
+    Audit -->|all passed| Certify[certify: next nightly's anchor]
+    Audit -->|any failure| Keep[anchor unchanged;<br/>finished cells keep their proof]
+```
+
+A pass from the pre-push hook, a rig, or a hosted cell counts only for its own environment, on the
+same tree or one with the same gate inputs; WSL2 proof never stands in for native Windows.
 
 **Planned release evidence policy:** native Windows and WSL2 passes are not
 required for ordinary merges to `main`. A release will require qualifying
@@ -760,9 +1020,8 @@ What a reviewer can rely on when approving a PR:
 
 1. **Every affected gating package passed the environments its event schedules** against the
    exact pinned Rust version in `rust-toolchain.toml`. A pull request proves Linux and macOS;
-   the push to `main` after it adds Windows; the nightly run adds `wsl2-ubuntu`, a distinct
-   archive-based L1 cell. Windows and WSL2 failures are therefore found after merge and fixed
-   forward, by decision (`fixes/2026-09-18-ci-cadence`).
+   the nightly run adds native Windows and `wsl2-ubuntu`, a distinct archive-based L1 cell.
+   Windows and WSL2 failures are therefore found after merge and fixed forward, by decision.
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 

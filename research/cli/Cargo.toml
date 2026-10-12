@@ -24,3 +24,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 [package.metadata.benchmarks]
 required = false
 reason = "Thin CLI wrapper around research; no measurable hot paths."
+
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"

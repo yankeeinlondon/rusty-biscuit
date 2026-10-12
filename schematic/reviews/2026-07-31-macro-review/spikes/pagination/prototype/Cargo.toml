@@ -1,0 +1,13 @@
+[package]
+name = "pagination-prototype"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway spike: pagination strategy model for schematic-define"
+
+# Empty table: keeps this crate out of the rusty-biscuit workspace.
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

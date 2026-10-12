@@ -1,0 +1,18 @@
+error[E0277]: `ListModels` is not paginated
+ --> tests/ui/fail_unpaginated_has_no_pager.rs:4:13
+  |
+4 |     let _ = Pager::<ListModels>::new(&client);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no pagination strategy is authored for `ListModels`
+  |
+  = help: the trait `Paginated` is not implemented for `ListModels`
+  = note: the definition does not author a pagination strategy for this endpoint, so the generated client has no pager for it
+  = help: the following other types implement trait `Paginated`:
+            ListBatches
+            ListCommits
+            ListEvents
+            ListIssues
+            ListRepos
+            ListRoles
+            SearchScroll
+note: required by a bound in `Pager::<E>::new`
+ --> /kache/workspace/src/pager.rs:51:4

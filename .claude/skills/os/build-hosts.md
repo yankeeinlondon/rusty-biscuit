@@ -128,11 +128,20 @@ filter. A Cargo build flag (`--features`, `--all-features`,
 switches *every* host to plain `cargo nextest run` with no tier filter and no
 receipt; every other argument goes to the run.
 
-Per-test results appear only as PASS lines in the live output. The run keeps
-no JUnit report locally, and `--no-tests=pass` means a green leg does not prove
-a `cfg`-gated test ran. To show that a Windows-only test compiled and ran, tee
-the output (`./scripts/cross-check.sh <pkg> --os windows 2>&1 | tee <file>`)
-and cite its PASS line.
+Every archive-mode `wsl` or `windows` leg prints `cross-check-*:` markers
+(`tree`, `dirty`, `key`, `digest`, `manifest-exit`, `exit`, `duration`) and
+leaves its whole staging directory (`manifest.jsonl`, `L1/<package>.xml`, and
+`expected-L1.json`, which `just _expected_manifest` writes before the tests) at
+`<clone dir>/cross-check-<run id>-reports` until the orchestrating host has
+fetched it with `scp -r`; the host then deletes it. When the leg qualifies it
+becomes a `rig` observation for its own environment (`wsl2-ubuntu` or
+`windows-latest`, never the other) and the retained JUnit report, expected
+manifest, and completion record sit in
+`${BISCUIT_CI_EVIDENCE_DIR:-~/.rusty-biscuit/ci-evidence}/<head>/<environment>/<package>-L1-<run id>/`.
+A native-mode run (a Cargo build flag) stages nothing and publishes nothing.
+For one-off evidence of a `cfg`-gated test, `--no-tests=pass` still means a
+green leg does not prove it ran; read the PASS line in the live output, or tee
+the output (`./scripts/cross-check.sh <pkg> --os windows 2>&1 | tee <file>`).
 
 `--os` takes one value (`linux`, `windows`, `wsl`, `macos`, or `all`); a
 comma list is rejected. A `wsl` leg that fails with `ssh: connect to host ...
@@ -207,14 +216,32 @@ directly; use your own worktree for ad hoc sessions.
   stays on `PATH`; that is what `cross-check` now sends. Suspect this shape in
   any remote command that runs a script through a login shell, and check the
   host's `~/.bash_logout` before believing the exit status.
-- The `wsl` leg still publishes no receipt for a run whose tree is not the
-  outgoing head's, which is most runs; the printed reason says which.
-  Separately, the archive run writes its JUnit report to
-  `<clone>/target/nextest/ci/test-results.xml`, which is not where
-  `publish_wsl_receipt` looks, and the same fresh `target` makes the restoring
-  `mv target.hold target` nest the warm cache at `target/target.hold`, so the
-  next WSL run rebuilds from cold. Both are `scripts/cross-check.sh`
-  bookkeeping, not the package under test.
+- **Only a pristine committed tree publishes** (checked 2026-10-11). A leg
+  publishes when the remote's tested tree IS the outgoing `HEAD`'s tree, on a
+  clean remote worktree, unfiltered, in archive mode, with a successful
+  `cross-check-manifest-exit: 0`; any other run prints
+  `cross-check: publishing no <environment> observation - <reason>` and records
+  nothing. `completion.py` and the publisher run on the ORCHESTRATING host over
+  the fetched staging directory, because the native Windows rig has no usable
+  `python3`. A completed failure (the report shows a failing test) is published
+  as a failing observation; a missing, unexpected, or malformed report, an empty
+  expectation, or a run that never reached its tests publishes nothing. Exit
+  75 is printed as `BUSY` and 255 as `UNREACHABLE`; neither ran anything. Ctrl-C
+  or `kill` ends the script nonzero, prints `cross-check: <os> interrupted; no
+  observation recorded`, and leaves every earlier leg's observation in place.
+- `build-win-native` has `jq` (Cygwin's, LF line endings) and `just`, so
+  `_expected_manifest` works there (1054 tests for `biscuit-file`, target
+  `x86_64-pc-windows-msvc`; the WSL2 guest lists 1062 on
+  `x86_64-unknown-linux-gnu`). The listing runs before the tests and its failure
+  does not stop them.
+- **Never run `cross-check` from a scratch clone that is not a worktree of the
+  real repository** (found 2026-10-11 rehearsing publication). The stale-clone
+  prune keeps only clones whose worktree `git worktree list` names HERE, so a
+  scratch clone deleted the Windows rig's warm clones for three live worktrees
+  (`feat-filesystem-watchers`, `feat-symbols`, `fix-bt-inline-prose`) and each
+  re-cloned cold on its next run. For a rehearsal, make the scratch checkout a
+  linked worktree of a clone, or rehearse publication against fetched files with
+  `observation_notes.py publish-receipt --kind rig` instead.
 - **Native Windows, first working run 2026-09-22.** Two faults had been hidden
   behind the storage preflight, which always refused the leg before it got far
   enough: `cross-check` looked for `ci-build.exe` under

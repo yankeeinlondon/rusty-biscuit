@@ -203,6 +203,54 @@ fn style_strict_style_fails_on_deprecated_key() {
     );
 }
 
+/// Valid `style.markdown` cleanup rules are neither unknown nor inactive
+/// render styles, so strict rendering accepts the shipped control document.
+#[test]
+fn style_strict_style_accepts_markdown_cleanup_rules() {
+    let fixture = CliProcessFixture::named("style_strict_style_accepts_markdown_cleanup_rules");
+    let document = biscuit_test_harness::manifest_dir!()
+        .join("../lib/tests/fixtures/clean/style-markdown-control.md");
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
+        .arg(&document)
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "--strict-style must accept valid style.markdown rules: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// An invalid rule is a typed style error naming the rule, as for any other
+/// invalid style value.
+#[test]
+fn style_invalid_markdown_rule_fails_with_its_path() {
+    let fixture = CliProcessFixture::named("style_invalid_markdown_rule_fails_with_its_path");
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   markdown:\n\
+        \x20       indentation: 3\n\
+        ---\n\n# Doc\n",
+    );
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "an invalid rule must fail the render");
+    let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("style.markdown.indentation"), "{stderr}");
+}
+
 #[test]
 fn style_non_strict_renders_with_unknown_key() {
     let fixture = CliProcessFixture::named("style_non_strict_renders_with_unknown_key");

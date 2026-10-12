@@ -2277,7 +2277,7 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
     ];
     // `check` and `lint` are measured too, from Phase 5: each is its own
     // compile configuration, and the same advisory pair carries it.
-    for header in ["  check:", "  lint:", "  test:"] {
+    for header in ["  check:", "  lint:"] {
         assert_eq!(
             normalized("_package-ci.yml", header),
             measurement,
@@ -2285,6 +2285,15 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
             header.trim()
         );
     }
+    // The test job also hides the scheduled observation recorder: it must
+    // never change a cell's verdict, and it refuses (with an annotation) rather
+    // than invent proof. Its upload is NOT hidden: a lost observation is a
+    // failed producer.
+    assert_eq!(
+        normalized("_package-ci.yml", "  test:"),
+        [measurement.clone(), vec!["Record this cell's observation".to_owned()]].concat(),
+        "_package-ci.yml: `test` may hide the measurement steps and the observation recorder only"
+    );
     // `ci.yml`'s build owner hides nothing: a failed produce, a failed upload,
     // and a lost runner must all reach the fold and the dependent cells.
     assert_eq!(
@@ -2301,9 +2310,10 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
             "Census the Windows host before extraction",
             "Guest post-mortem",
             "Host post-mortem",
+            "Record this cell's observation",
         ],
-        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt and \
-         diagnostics — never tests, staging, or upload"
+        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt, \
+         diagnostics, and the observation recorder — never tests, staging, or upload"
     );
     // The audit tool's own exit 2 is normalized so its enforcement step can
     // explain a coverage block; `package-ci` is a `uses:` job with no steps.
@@ -2887,7 +2897,14 @@ fn every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_report() {
     let mut headers = jobs(&ci)
         .iter()
         .map(|block| block.lines().next().unwrap_or("").trim().trim_end_matches(':').to_owned())
-        .filter(|name| name != "ci-gate" && name != "ci-reporting")
+        // The certification publishes after the gate and is checked by its own
+        // contract; folding it would make the gate wait on its own output. The
+        // observation publisher runs beside the gate and is checked by its own
+        // contract too.
+        .filter(|name| {
+            !["ci-gate", "ci-reporting", "certify-nightly", "publish-observations"]
+                .contains(&name.as_str())
+        })
         .collect::<Vec<_>>();
     headers.sort_unstable();
     let mut gated = GATED_JOBS.map(str::to_owned).to_vec();
@@ -4262,9 +4279,10 @@ fn archive_guard_registry_entry() -> String {
 #[test]
 fn a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold() {
     assert_eq!(
-        8,
+        10,
         TARGET_CI_JOBS.len(),
-        "the guard must add NO top-level job; ci.yml now declares {TARGET_CI_JOBS:?}"
+        "the guard must add NO top-level job beyond the nightly's \
+         `certify-nightly` and `publish-observations`; ci.yml now declares {TARGET_CI_JOBS:?}"
     );
     assert_eq!(
         6,
@@ -5076,8 +5094,14 @@ fn empty_execution_matrices_skip_before_expansion() {
 #[test]
 fn the_worker_policy_survives_the_area_restructure() {
     let package_ci = workflow("_package-ci.yml");
+    let devops = read("just/devops.just");
+    let l2_policy = devops
+        .split("\n_test_l2_threads:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("devops.just defines `_test_l2_threads`");
     assert!(
-        package_ci.contains("just _test_threads"),
+        package_ci.contains("just _test_l2_threads") && l2_policy.contains("just _test_threads"),
         "the CI worker policy must still come from the shared `_test_threads` recipe"
     );
     let test_job = job_block("_package-ci.yml", "  test:");
@@ -5092,8 +5116,10 @@ fn the_worker_policy_survives_the_area_restructure() {
         .next()
         .unwrap_or_default();
     assert!(
-        l2_branch.contains("l2-parallel-self-spawn") && l2_branch.contains("BISCUIT_L2_THREADS"),
-        "only a declared self-isolating L2 suite may use the shared worker budget"
+        l2_branch.contains("l2-serial")
+            && l2_branch.contains("just _test_l2_threads")
+            && l2_branch.contains("BISCUIT_L2_THREADS"),
+        "L2 must use the parallel L2 worker budget unless the package declares `l2-serial`"
     );
     assert!(
         l2_branch.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
@@ -7017,14 +7043,19 @@ fn top_level_job_ids(file: &str) -> Vec<String> {
 /// `ci.yml`'s whole top-level job set. `ci-tooling` and
 /// `biscuit-tui-captured-stdout` retired into their owners' package cells and
 /// the advisory `summary` became `ci-reporting`; `build` and `area-drift`
-/// arrived with the single-OS-compile fix.
-const TARGET_CI_JOBS: [&str; 8] = [
+/// arrived with the single-OS-compile fix; `certify-nightly` publishes a
+/// finished nightly's coverage and sits outside the gate's fold, as does
+/// `publish-observations`, which turns the nightly's hosted cell observations
+/// into notes.
+const TARGET_CI_JOBS: [&str; 10] = [
     "validation",
     "scope",
     "preflight",
     "build",
     "area-ci",
     "area-drift",
+    "certify-nightly",
+    "publish-observations",
     "ci-gate",
     "ci-reporting",
 ];
@@ -7766,5 +7797,502 @@ fn every_matrix_in_the_reader_facing_workflows_keeps_fail_fast_false() {
     assert!(
         checked > 0,
         "the reader-facing workflows carry matrices; this contract went vacuous"
+    );
+}
+
+// --- the nightly plans per environment anchor and certifies what it proved -----
+
+/// The `permissions:` entries a job block declares at job level, as
+/// `(scope, access)` pairs; empty when the job inherits the workflow's.
+fn job_permissions(block: &str) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    let mut inside = false;
+    for line in executable_lines(block).lines() {
+        if line == "    permissions:" {
+            inside = true;
+            continue;
+        }
+        if inside {
+            if !line.starts_with("      ") {
+                break;
+            }
+            let (scope, access) = line.trim().split_once(':').expect("a permission entry");
+            entries.push((scope.to_owned(), access.trim().to_owned()));
+        }
+    }
+    entries
+}
+
+fn named_job(file: &str, id: &str) -> String {
+    job_block(file, &format!("  {id}:"))
+}
+
+#[test]
+fn the_nightly_plans_from_per_environment_anchors_and_never_a_single_base() {
+    let ci = workflow("ci.yml");
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    assert!(
+        scope.contains("reuse_validation.py nightly-anchors > nightly-anchors.json")
+            && scope.contains("--anchors nightly-anchors.json"),
+        "the schedule path must resolve anchors and hand them to the planner"
+    );
+    for stale in ["nightly-base", "nightly_base"] {
+        assert!(
+            !executable_lines(&ci).contains(stale),
+            "ci.yml must not call the single-base lookup `{stale}`"
+        );
+    }
+}
+
+#[test]
+fn the_evidence_verifier_runs_on_schedule_and_not_on_manual_dispatch() {
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    assert!(
+        scope.contains(r#"if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then"#),
+        "the verifier and overlay must be skipped for workflow_dispatch alone"
+    );
+    assert!(
+        !scope.contains(r#""$EVENT_NAME" != "schedule""#),
+        "the schedule event must not be excluded from evidence verification"
+    );
+}
+
+#[test]
+fn the_evidence_verifier_vouches_for_hosted_artifacts_through_the_token() {
+    let scope = named_job("ci.yml", "scope");
+    let lines = executable_lines(&scope);
+    assert!(
+        lines.contains(r#"--artifact-repo "$GITHUB_REPOSITORY""#),
+        "discovery must fetch hosted artifacts, or a hosted observation earns no credit"
+    );
+    assert!(
+        scope.contains("GH_TOKEN: ${{ github.token }}"),
+        "the artifact lookup needs the read-only job token"
+    );
+}
+
+#[test]
+fn the_scope_job_reads_contents_and_actions_and_writes_nothing() {
+    let scope = named_job("ci.yml", "scope");
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "read".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&scope),
+        "the scope job needs `actions: read` for anchors and hosted artifacts, and nothing more"
+    );
+}
+
+#[test]
+fn the_nightly_certification_is_schedule_only_gated_on_the_final_gate_and_read_only() {
+    let certify = named_job("ci.yml", "certify-nightly");
+    let body = executable_lines(&certify);
+    for required in [
+        "github.event_name == 'schedule'",
+        "needs.ci-gate.result == 'success'",
+        "needs.scope.result == 'success'",
+    ] {
+        assert!(body.contains(required), "certify-nightly must require `{required}`");
+    }
+    assert!(
+        body.contains("needs: [scope, ci-gate]"),
+        "certify-nightly must wait for the final gate"
+    );
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "read".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&certify),
+        "certify-nightly holds read permissions only"
+    );
+    assert!(
+        body.contains("retention-days: 90") && body.contains("if-no-files-found: error"),
+        "a certification is kept 90 days and a missing file fails the upload"
+    );
+    assert!(
+        body.contains("fromJSON(needs.scope.outputs.coverage_environments)")
+            && body.contains("scripts/ci/reuse_validation.py certify"),
+        "certifications derive from the plan's anchored environments"
+    );
+
+    let gate = executable_lines(&named_job("ci.yml", "ci-gate"));
+    let gate_needs: Vec<&str> = gate
+        .lines()
+        .skip_while(|line| line.trim() != "needs:")
+        .skip(1)
+        .take_while(|line| line.trim_start().starts_with("- "))
+        .map(|line| line.trim_start_matches([' ', '-']))
+        .collect();
+    assert!(
+        !gate_needs.contains(&"certify-nightly"),
+        "ci-gate stays a policy-free fold and must not wait on the certification"
+    );
+    assert_eq!(
+        vec!["area-ci".to_owned()],
+        jobs_containing("ci.yml", "checks: write"),
+        "no certification or scope job may hold `checks: write`"
+    );
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "only the scheduled observation publisher may hold `contents: write`"
+    );
+}
+
+#[test]
+fn pull_requests_and_pushes_still_prove_linux_and_macos_only() {
+    let table: serde_json::Value =
+        serde_json::from_str(&read(".github/ci/environments.json")).expect("environments.json");
+    let environments = table["environments"].as_array().expect("environments list");
+    let scheduled_on = |event: &str| -> Vec<&str> {
+        environments
+            .iter()
+            .filter(|record| {
+                record["events"]
+                    .as_array()
+                    .is_some_and(|events| events.iter().any(|name| name == event))
+            })
+            .filter_map(|record| record["name"].as_str())
+            .collect()
+    };
+    for event in ["pull_request", "push"] {
+        assert_eq!(
+            vec!["ubuntu-latest", "macos-latest"],
+            scheduled_on(event),
+            "{event} proves Linux and macOS only"
+        );
+    }
+    assert_eq!(
+        vec!["windows-latest", "wsl2-ubuntu"],
+        scheduled_on("schedule"),
+        "the nightly proves native Windows and WSL2"
+    );
+    let validation = executable_lines(&named_job("ci.yml", "validation"));
+    assert!(
+        validation.contains("--wait-minutes 90"),
+        "the same-tree PR wait stays 90 minutes"
+    );
+}
+
+// --- hosted cells are recorded as durable observations ------------------------
+
+/// The producer jobs that finish a hosted cell, as `(file, job header, the
+/// step id of the gate command, the artifact name the upload uses)`.
+fn observation_producers() -> [(&'static str, &'static str, &'static str, &'static str); 2] {
+    [
+        (
+            "_package-ci.yml",
+            "  test:",
+            "gate",
+            "observation-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}",
+        ),
+        (
+            "_wsl-ci.yml",
+            "  wsl:",
+            "l1",
+            "observation-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.gate }}-wsl2-ubuntu",
+        ),
+    ]
+}
+
+#[test]
+fn every_hosted_producer_records_and_uploads_its_cell_on_the_nightly_only() {
+    let guard = "if: ${{ !cancelled() && github.event_name == 'schedule' }}";
+    for (file, header, gate_id, artifact) in observation_producers() {
+        let job = job_block(file, header);
+        let all = steps(&job);
+        let names: Vec<String> = all.iter().map(|step| step_name(step)).collect();
+        let position = |name: &str| {
+            names
+                .iter()
+                .position(|candidate| candidate == name)
+                .unwrap_or_else(|| panic!("{file}: `{}` must carry the `{name}` step", header.trim()))
+        };
+        let completion = position("Upload this cell's completion record");
+        let record = position("Record this cell's observation");
+        let upload = position("Upload this cell's observation");
+        assert!(
+            completion < record && record + 1 == upload && upload + 1 == all.len(),
+            "{file}: the observation is recorded after the completion record is uploaded, uploaded \
+             straight after, and is the job's last step"
+        );
+
+        let recorder = executable_lines(&all[record]);
+        assert!(
+            recorder.contains(guard) && recorder.contains("continue-on-error: true"),
+            "{file}: the recorder runs on `!cancelled()` (a failed gate records its honest failure, \
+             a cancelled job records nothing), only on the nightly, and never changes the verdict"
+        );
+        assert!(
+            recorder.contains("scripts/ci/hosted_observations.py emit")
+                && recorder.contains(&format!("steps.{gate_id}.outcome"))
+                && recorder.contains("--completion"),
+            "{file}: the recorder must emit from the gate's own outcome and the completion record"
+        );
+        assert!(
+            !recorder.contains("success()") && !recorder.contains("always()"),
+            "{file}: neither a green-only nor a cancel-proof guard"
+        );
+
+        let uploader = executable_lines(&all[upload]);
+        assert!(
+            uploader.contains(guard)
+                && uploader.contains("uses: actions/upload-artifact@v6")
+                && uploader.contains(&format!("name: {artifact}"))
+                && uploader.contains("retention-days: 90")
+                && uploader.contains("if-no-files-found: ignore"),
+            "{file}: the observation uploads under the exact name the publisher collects, kept \
+             90 days, and a cell that recorded nothing uploads nothing"
+        );
+        assert!(
+            !uploader.contains("continue-on-error"),
+            "{file}: a lost observation upload is a failed producer"
+        );
+    }
+}
+
+#[test]
+fn the_observation_recorder_changes_nothing_a_pull_request_can_reach() {
+    // Every step that touches an observation is guarded by the nightly event;
+    // a pull request or a push never runs one.
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        for job in jobs(&workflow(file)) {
+            for step in steps(&job) {
+                let text = executable_lines(&step);
+                if text.contains("hosted_observations.py") || text.contains("name: observation-") {
+                    assert!(
+                        text.contains("github.event_name == 'schedule'"),
+                        "{file}: `{}` handles observations and must be schedule-only",
+                        step_name(&step)
+                    );
+                }
+            }
+        }
+        let source = executable_lines(&workflow(file));
+        assert!(
+            !source.contains("contents: write") && !source.contains("checks: write"),
+            "{file}: producers keep the read-only token they inherit"
+        );
+    }
+    let area = executable_lines(&job_block("_area-ci.yml", "  package-ci:"));
+    assert!(
+        area.contains("contents: read") && !area.contains("write"),
+        "`package-ci` keeps `contents: read` and nothing writable"
+    );
+    assert_eq!(
+        vec!["accepted-gaps".to_owned()],
+        jobs_containing("_area-ci.yml", "checks: write"),
+        "accepted-gaps stays the sole `checks: write` owner"
+    );
+}
+
+#[test]
+fn the_observation_publisher_is_a_trusted_schedule_only_job_outside_the_gate() {
+    let publisher = named_job("ci.yml", "publish-observations");
+    let body = executable_lines(&publisher);
+    for required in [
+        "always()",
+        "github.event_name == 'schedule'",
+        "needs.scope.result == 'success'",
+        "needs: [scope, area-ci]",
+        "ref: ${{ needs.scope.outputs.head }}",
+        "scripts/ci/hosted_observations.py publish",
+        r#"--run-id "$GITHUB_RUN_ID""#,
+    ] {
+        assert!(body.contains(required), "publish-observations must carry `{required}`");
+    }
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "write".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&publisher),
+        "the publisher writes refs (notes) and reads artifacts, nothing else"
+    );
+    assert!(
+        !body.contains("continue-on-error") && !body.contains("|| true"),
+        "a publication that fails must fail the run visibly"
+    );
+    assert!(
+        !body.contains("pull_request") && !body.contains("github.head_ref"),
+        "no pull-request value reaches the job that holds the write token"
+    );
+
+    let gate = executable_lines(&named_job("ci.yml", "ci-gate"));
+    assert!(
+        !gate.contains("publish-observations"),
+        "ci-gate stays a policy-free fold and must not wait on, or fold, the publisher"
+    );
+    let report = executable_lines(&named_job("ci.yml", "ci-reporting"));
+    assert!(
+        !report.contains("publish-observations"),
+        "the advisory report does not wait on the publisher"
+    );
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "no other ci.yml job holds a write token"
+    );
+}
+
+#[test]
+fn earlier_nightlies_unpublished_observations_are_recovered_without_a_new_credential() {
+    // A run whose publisher never ran leaves its finished cells as artifacts
+    // only. The next nightly's scope job records them locally before it
+    // plans (a recovered failure reopens an anchored cell) and verifies, with
+    // the read-only token it already holds, and the trusted publisher pushes
+    // them.
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    let recovery = scope
+        .find("hosted_observations.py publish")
+        .expect("the scope job recovers earlier nightlies' observations");
+    let plan = scope
+        .find(r#"python3 scripts/ci/affected_scope.py "${scope_args[@]}""#)
+        .expect("the scope job plans");
+    let verify = scope
+        .find("local_evidence.py verify --cells")
+        .expect("the scope job verifies evidence");
+    assert!(
+        recovery < plan && plan < verify,
+        "recovery runs before the planner and the verifier that read it"
+    );
+    assert!(
+        scope.contains(r#"--anchors nightly-anchors.json --artifact-repo "$GITHUB_REPOSITORY""#),
+        "the nightly planner probes hosted artifacts when it checks inherited coverage"
+    );
+    let guard = scope[..recovery]
+        .rfind(r#"if [[ "$EVENT_NAME" == "schedule" ]]; then"#)
+        .expect("recovery is guarded by the nightly event");
+    assert!(
+        !scope[guard..recovery].lines().any(|line| line.trim() == "fi"),
+        "the schedule guard encloses the recovery"
+    );
+    let invocation = &scope[recovery..plan];
+    assert!(
+        invocation.contains("--recent --no-push") && !invocation.contains("--run-id"),
+        "the scope job recovers the bounded window and pushes nothing"
+    );
+    assert!(
+        invocation.contains("|| recovery_status=$?") && invocation.contains("::warning"),
+        "a failed recovery is visible and costs only reuse"
+    );
+
+    let publisher = named_job("ci.yml", "publish-observations");
+    let publisher_body = executable_lines(&publisher);
+    assert!(
+        publisher_body.contains("fetch-depth: 0"),
+        "an earlier run's head must be present to carry its note"
+    );
+    let publisher_steps = steps(&publisher);
+    let pushed = step_named(&publisher_steps, "Publish earlier nightlies' unpublished observations")
+        .expect("the trusted publisher pushes the recovery");
+    let pushed = executable_lines(pushed);
+    assert!(
+        pushed.contains("if: always()")
+            && pushed.contains("scripts/ci/hosted_observations.py publish")
+            && pushed.contains("--recent")
+            && !pushed.contains("--no-push")
+            && !pushed.contains("continue-on-error"),
+        "the publisher pushes earlier runs' observations and fails visibly"
+    );
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "recovery adds no write credential anywhere else"
+    );
+}
+
+#[test]
+fn the_observation_artifact_prefix_is_the_one_the_publisher_collects() {
+    let python = read("scripts/ci/hosted_observations.py");
+    assert!(
+        python.contains(r#"name.startswith("observation-")"#)
+            && python.contains(r#"f"observation-{package}-{gate}-{environment}""#),
+        "the publisher collects `observation-*` and the module derives names the workflows upload"
+    );
+    for (file, _, _, artifact) in observation_producers() {
+        assert!(
+            workflow(file).contains(&format!("name: {artifact}")),
+            "{file}: the uploaded name must follow `observation-<package>-<gate>-<environment>`"
+        );
+    }
+}
+
+// --- cadence guidance agrees with the environment table ------------------------
+
+/// The active documents that state when each environment runs. A bounded list:
+/// historical specs and dated timing measurements are snapshots and stay out.
+const CADENCE_GUIDANCE: &[&str] = &[
+    "CLAUDE.md",
+    "docs/topics/ci-cd.md",
+    ".github/ci/README.md",
+    ".claude/skills/rust-devops/ci-cd.md",
+    ".claude/skills/os/SKILL.md",
+];
+
+fn environment_events(name: &str) -> Vec<String> {
+    let table: serde_json::Value =
+        serde_json::from_str(&read(".github/ci/environments.json")).expect("environments.json is JSON");
+    table["environments"]
+        .as_array()
+        .expect("environments.json lists environments")
+        .iter()
+        .find(|environment| environment["name"] == name)
+        .unwrap_or_else(|| panic!("environments.json declares {name}"))["events"]
+        .as_array()
+        .expect("each environment names its events")
+        .iter()
+        .map(|event| event.as_str().expect("events are strings").to_owned())
+        .collect()
+}
+
+/// Lowercased, with backticks dropped and whitespace collapsed, so a claim
+/// matches however a document wraps or formats it.
+fn normalized(text: &str) -> String {
+    text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Claims about the schedule that contradict the environment table, checked as
+/// short phrases rather than whole sentences so wording can move freely.
+#[test]
+fn active_cadence_guidance_agrees_with_the_environment_table() {
+    let windows = environment_events("windows-latest");
+    let wsl = environment_events("wsl2-ubuntu");
+    let windows_on_push = windows.iter().any(|event| event == "push");
+    let windows_nightly = windows.iter().any(|event| event == "schedule");
+    let wsl_nightly = wsl.iter().any(|event| event == "schedule");
+
+    let mut contradicted: Vec<&str> = Vec::new();
+    if !windows_on_push {
+        contradicted.extend([
+            "push to main adds windows",
+            "a push to main adds windows-latest",
+            "windows is proven by every push",
+            "only windows runs",
+        ]);
+    }
+    if windows_nightly {
+        contradicted.extend(["runs wsl2 alone", "plans wsl2 alone", "plans wsl2-ubuntu alone", "the nightly is wsl2's alone"]);
+    }
+
+    let mut problems = Vec::new();
+    for document in CADENCE_GUIDANCE {
+        let text = normalized(&read(document));
+        for claim in &contradicted {
+            if text.contains(claim) {
+                problems.push(format!("{document} says \"{claim}\""));
+            }
+        }
+        if windows_nightly && wsl_nightly && !text.contains("nightly") {
+            problems.push(format!("{document} no longer says when Windows and WSL2 run"));
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "active CI guidance contradicts .github/ci/environments.json (windows-latest: {windows:?}, \
+         wsl2-ubuntu: {wsl:?}):\n  {}",
+        problems.join("\n  ")
     );
 }

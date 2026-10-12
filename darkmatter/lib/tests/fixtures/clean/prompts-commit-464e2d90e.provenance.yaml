@@ -1,0 +1,9 @@
+# Provenance of prompts-commit-464e2d90e.md, whose bytes are the blob below
+# exactly. The fixture carries no metadata of its own so that it stays
+# byte-identical to the blob; `clean_real_world_prompt` checks the two agree.
+source: prompts/commit.md
+blob: 464e2d90ee389470a3cf198c4ff5a6cf3f50d9cd
+# `git rev-parse c5ad95142~1:prompts/commit.md` gives this blob; c5ad95142
+# replaced it with the next revision of the prompt.
+replaced_by: c5ad95142
+retrieved_with: git cat-file blob 464e2d90e

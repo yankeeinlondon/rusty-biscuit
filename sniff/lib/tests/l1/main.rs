@@ -30,6 +30,8 @@ mod network_primitives;
 #[cfg(feature = "remote")]
 mod open_pull_requests;
 #[cfg(feature = "remote")]
+mod pr_check_status;
+#[cfg(feature = "remote")]
 mod pr_for_branch;
 mod package_identity;
 mod program_installable;

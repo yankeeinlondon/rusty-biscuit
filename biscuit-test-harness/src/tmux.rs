@@ -25,8 +25,27 @@ use super::{
 };
 
 const SESSION_PREFIX: &str = "biscuit_test_";
+/// The `-L` socket name of the tmux server every harness session lives on.
+const SERVER_SOCKET: &str = "biscuit-test-harness";
 const SERVER_EXITED_UNEXPECTEDLY: &str = "server exited unexpectedly";
 static CLEANUP_ONCE: Once = Once::new();
+
+/// A `tmux` command addressed to the harness's own server.
+///
+/// The server is private (`-L biscuit-test-harness`) and starts with no
+/// configuration (`-f /dev/null`). The host's default server reads the
+/// developer's `tmux.conf`; one loading plugin managers measured 2.1 s per
+/// server start against 18 ms with none, and every owned session's `Drop`
+/// lets the server exit, so each test paid it again. That configuration also
+/// set options CI never has (`default-terminal`, `escape-time`, status line),
+/// and a `$TMUX` inherited from a developer's own tmux would have pointed the
+/// commands at that server. Run every command that touches a harness session
+/// through this, including a test's own `display-message` queries.
+pub fn tmux_command() -> Command {
+    let mut cmd = Command::new("tmux");
+    cmd.args(["-L", SERVER_SOCKET, "-f", "/dev/null"]);
+    cmd
+}
 
 /// Spawns a detached login shell in a named tmux session.
 ///
@@ -45,7 +64,7 @@ pub fn spawn_shell_session_with_env(
     rows: u32,
     environment: &[(&str, &str)],
 ) -> io::Result<()> {
-    let mut cmd = Command::new("tmux");
+    let mut cmd = tmux_command();
     cmd.args(new_session_args(session, cols, rows, environment, None));
     cmd.envs(environment.iter().copied());
     run_new_session(&mut cmd)
@@ -203,7 +222,7 @@ impl TmuxHarness {
     /// output is not a column count.
     pub fn pane_cols(&self) -> io::Result<u32> {
         let session = self.session().to_string();
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(["display-message", "-p", "-t", &session, "#{pane_width}"]);
         let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
@@ -233,7 +252,7 @@ impl TmuxHarness {
         }
         let session = self.session().to_string();
         let start_dir = std::env::temp_dir();
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(["respawn-pane", "-k", "-t", &session, "-c"])
             .arg(&start_dir);
         let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
@@ -250,7 +269,7 @@ impl TmuxHarness {
     /// than the pane's shell, i.e. a command is still running in it.
     #[cfg(unix)]
     fn pane_is_busy(&self) -> bool {
-        let mut query = Command::new("tmux");
+        let mut query = tmux_command();
         query.args(["display-message", "-p", "-t", self.session(), "#{pane_pid}"]);
         let Ok(out) = run_with_timeout(&mut query, QUERY_TIMEOUT) else {
             return false;
@@ -281,7 +300,7 @@ impl TmuxHarness {
 
     fn kill_session(&mut self) {
         if let Some(name) = self.session.take() {
-            let mut cmd = Command::new("tmux");
+            let mut cmd = tmux_command();
             cmd.args(["kill-session", "-t", &name])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
@@ -299,7 +318,7 @@ impl TmuxHarness {
     /// `Command::arg` API rejects when passed as raw text.
     pub fn send_key(&mut self, key_name: &str) -> io::Result<()> {
         let session = self.session().to_string();
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(["send-keys", "-t", &session, key_name]);
         let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
         if !out.status.success() {
@@ -323,10 +342,10 @@ impl TmuxHarness {
     /// `resize-window` reports a non-zero status.
     pub fn resize(&mut self, cols: u32, rows: u32) -> io::Result<()> {
         let session = self.session().to_string();
-        let mut set = Command::new("tmux");
+        let mut set = tmux_command();
         set.args(["set-option", "-t", &session, "window-size", "manual"]);
         run_with_timeout(&mut set, SEND_TIMEOUT)?;
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args([
             "resize-window",
             "-t",
@@ -357,7 +376,7 @@ pub fn cleanup_stale_tmux_sessions() {
     if !TmuxHarness::available() {
         return;
     }
-    let mut cmd = Command::new("tmux");
+    let mut cmd = tmux_command();
     cmd.arg("ls");
     let Ok(out) = run_with_timeout(&mut cmd, Duration::from_secs(2)) else {
         return;
@@ -383,7 +402,7 @@ pub fn cleanup_stale_tmux_sessions() {
         if pid == current_process_id() || process_is_alive(pid) {
             continue;
         }
-        let mut kill = Command::new("tmux");
+        let mut kill = tmux_command();
         kill.args(["kill-session", "-t", name])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -410,7 +429,7 @@ impl Drop for TmuxHarness {
 /// down shared sessions whose `TmuxHarness` was leaked in a different
 /// process. Best-effort: any error is swallowed.
 pub fn kill_session_by_name(session: &str) {
-    let mut cmd = Command::new("tmux");
+    let mut cmd = tmux_command();
     cmd.args(["kill-session", "-t", session])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -435,7 +454,7 @@ impl TerminalHarness for TmuxHarness {
         let session = unique_session_name();
         let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
 
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(new_session_args(&session, 120, 40, &[], bin_dir.as_deref()));
 
         // Force color on the spawned shell so `bt`'s color detection is
@@ -463,7 +482,7 @@ impl TerminalHarness for TmuxHarness {
             shell_cmd.push(' ');
             shell_cmd.push_str(&shell_quote(a));
         }
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args([
             "new-session",
             "-d",
@@ -486,7 +505,7 @@ impl TerminalHarness for TmuxHarness {
         let session = self.session().to_string();
         let s = std::str::from_utf8(bytes)
             .map_err(|e| io::Error::other(format!("send_text non-utf8: {e}")))?;
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(["send-keys", "-t", &session, "-l", s]);
         let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
         if !out.status.success() {
@@ -497,7 +516,7 @@ impl TerminalHarness for TmuxHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let session = self.session().to_string();
-        let mut cmd = Command::new("tmux");
+        let mut cmd = tmux_command();
         cmd.args(["capture-pane", "-t", &session, "-p", "-e"]);
         let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
@@ -535,7 +554,7 @@ fn unique_session_name() -> String {
 /// the sessions the server holds now, which is what tells a session that was
 /// killed under the harness apart from a server that is gone.
 fn send_failure(what: &str, session: &str, out: &std::process::Output) -> io::Error {
-    let mut listing = Command::new("tmux");
+    let mut listing = tmux_command();
     listing.arg("ls");
     let sessions = match run_with_timeout(&mut listing, QUERY_TIMEOUT) {
         Ok(listed) if listed.status.success() => String::from_utf8_lossy(&listed.stdout)

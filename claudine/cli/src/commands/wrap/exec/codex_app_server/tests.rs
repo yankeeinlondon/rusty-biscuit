@@ -420,9 +420,8 @@ fn work_after_the_turn_keeps_the_run_open() {
     opened.session.observe(&turn_started(TURN));
     opened.session.observe(&turn_completed(TURN, "completed"));
     wait_until("the settlement check", || opened.wire.methods().contains(&"thread/read".to_string()));
-    thread::sleep(Duration::from_millis(50));
+    wait_until("steering to be accepted again", || !opened.session.inner.state.lock().unwrap().closing);
     assert!(!closed(&opened));
-    assert!(!opened.session.inner.state.lock().unwrap().closing, "steering is accepted again");
 
     // A turn started while the check was being answered.
     let opened = open();

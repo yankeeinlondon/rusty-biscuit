@@ -76,23 +76,24 @@ environment's cell and how to record an execution ban.
 | Need "which processes hold this path" on Windows without the per-handle hang | ask from the file side with `FileProcessIdsUsingFileInformation` | [windows.md](windows.md#asking-which-processes-have-a-path-open) |
 | `/proc` fd scan finds nothing for a process you know holds files | `procfs` skips per-fd `EACCES`, or `sdev` was compared without decoding | [linux.md](linux.md#reading-proc-for-another-processs-descriptors) |
 | Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
+| WezTerm L2 tests time out at spawn or capture, or report `WezTerm not available`, a different set each run | too many concurrent `wezterm cli` clients for the GUI's main thread; the harness lets two run at a time | [macos.md](macos.md) |
 | macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |
 | Slow on one leg only, or a timing delta under 15% | runner size and per-leg profile; noise is 5–15% per leg | [ci-runners.md](ci-runners.md) |
 
 ## Standing rules
 
-- **Planned CI cadence correction:** ordinary PRs and main pushes will cover
-  Linux/macOS; scoped nightlies will cover native Windows and WSL2. Until
-  implementation, the live environment table still schedules Windows on
-  push and WSL2 on schedule. Required resumable workspace seeding on rigs
-  will suppress proved Windows/WSL2 nightly cells after receipt publication
-  and scheduled evidence verification are implemented. Risk-directed pre-push
-  use remains optional. Read `docs/topics/ci-cd.md` for the
-  current and planned policy; WSL2 is never native Windows evidence.
+- **CI cadence:** ordinary PRs and main pushes cover Linux/macOS; the
+  scoped nightly covers native Windows and WSL2. A Windows failure surfaces
+  in the nightly, after merge, and is fixed forward. `just ci-seed` proves
+  the nightly's cells on the rigs at a pinned `main` checkout, resumably; the
+  nightly reuses that proof per cell. Read `docs/topics/ci-cd.md`; WSL2 is
+  never native Windows evidence.
 - The Windows and WSL2 Level 2 CI cells are a **temporary policy gap**
   (`.github/ci/environments.json`, owner and expiry recorded there). Do not
   amend an acceptance criterion to exclude them; record the criterion as unmet
-  with provisioning as the required change.
+  with provisioning as the required change. When a gap is lifted, `just
+  ci-seed` still proves Level 1 only: it reports those cells `unsupported`
+  and the nightly runs them on hosted runners.
 - A cross-compile is compile evidence, never behavioral evidence. Say which
   one you have.
 - CI legs are compared within one environment only, on matched test

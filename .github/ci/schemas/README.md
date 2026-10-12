@@ -1,6 +1,6 @@
 # CI contract schemas
 
-Five documents carry every decision this repository's CI makes. All are
+Six documents carry every decision this repository's CI makes. All are
 defined once in [`scripts/ci/schema.py`](../../../scripts/ci/schema.py), which
 is also their validator.
 
@@ -8,11 +8,13 @@ is also their validator.
 |---|---|---|---|
 | Resolved plan | 7 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
+| Observation collection | 3 | the pre-push hook and `scripts/cross-check.sh`, through `scripts/ci/observation_notes.py` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
+| Coverage certification | 1 | the nightly's `certify-nightly` job, through `scripts/ci/reuse_validation.py certify` | `reuse_validation.py nightly-anchors`, the planner (`--anchors`) |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 | Expected manifest | 2 | `just _expected_manifest`, on the execution target | `scripts/ci/completion.py` |
 | Completion record | 1 | `scripts/ci/completion.py`, on success only | the area's `ci-rollup verdict` |
 
-The first three describe what CI will do; the last two are how a producer job
+The first four describe what CI will do; the last two are how a producer job
 proves it did it.
 
 `contract.json` in this directory is the field contract dumped from that module
@@ -309,6 +311,45 @@ whole-environment evidence, never through gate-input equivalence, and is never
 upgraded in place. Its measurements render as the exact string
 `not recorded (v1 receipt)`.
 
+## Observation collection
+
+A note on a commit holds a version-3 collection:
+`{schema_version, environment, head, tree, observations[]}`, with the
+observations sorted by id. An observation is one run of one cell and is
+immutable:
+
+| Field | Meaning |
+|---|---|
+| `observation_id` | The hex identity of every other field. Republishing the same observation is a no-op; the same id with other content is corruption. |
+| `retry_of` | Optional. The id of an observation of the **same cell in the same collection** that this one replaces. Absent declares no retry; `null` is malformed. Time is never used to order runs, nor is the order observations are published: a rig leg names the observation that existed when it started, and a hosted re-run attempt names the earlier attempt of the same run. |
+| `producer` | `{kind, host{os, kernel, label?, report_dir?}, workflow?, run_id?, attempt?, seed_id?}`. Kinds: `hook`, `rig`, `hosted`, `seed`. A `hosted` producer names `workflow`, `run_id`, `attempt`; a `seed` producer names `seed_id`. |
+| `base`, `scope_identity`, `completion` | As in the version-2 receipt. |
+| `cell` | A version-2 receipt cell, unchanged. |
+| `proof` | `{nextest_version, target, expected_listing_digest, completion_record_digest}`. Required for `rig`, `hosted`, and `seed`; forbidden for `hook`, which proves through the report counts in its cell. A **failing** observation may omit `proof`, and a failing one that carries it may omit `completion_record_digest`: `completion.py` refuses a run with a failing test, so a completed failure has no record to cite, and it still blocks reuse. A passing observation cites all four. For a `rig` or `seed` observation the two digests name `<package>-<gate>.expected.json` and `<package>-<gate>.completion.json` inside `producer.host.report_dir`, which a reader on that host rechecks byte for byte (another host's directory is accepted with its provenance). |
+| `reports[]` | `{path, sha256, bytes, store}` with `store` `host-dir` (under `producer.host.report_dir`) or `artifact`. A complete cell's own `report` must be cited. |
+| `features` | Optional. The isolated feature arguments the run used, verbatim; absent means none. |
+
+**Reading.** The verifier gathers every observation reachable from the head
+first, then resolves each `{package, environment, gate}`. A candidate qualifies
+on the head's exact tree or on an unchanged gate-input identity; among the
+qualifying ones, a retry supersedes the observation it names and a descendant
+commit supersedes an ancestor. Unordered results that disagree are
+`conflicting-evidence` and the cell executes, so a newer failure is never hidden
+by an older pass and a later passing retry restores reuse. A passing
+observation also needs its reports: a `host-dir` directory on this host must
+hold the exact bytes; one on another host is accepted with its provenance shown;
+an `artifact` reference is unavailable unless a probe can retrieve it. A failing
+observation blocks whether or not its reports remain.
+
+**Publishing.** `scripts/ci/observation_notes.py` writes the merged collection
+to the local notes ref first, then fetches the remote ref into a scratch ref,
+unions, re-attaches local notes onto the fetched tip, and pushes without force,
+retrying a rejected push up to 5 times. Remote failure leaves the proof local and
+the covered cells scheduled for everyone else. A collection over 256 KiB is
+refused. Today the hook and `cross-check.sh` publish `hook`-kind observations
+built from their version-2 receipts; the `rig`, `hosted`, and `seed` kinds
+require proof those producers do not yet write.
+
 ## Scope receipt
 
 What the planner selected for one committed `base..head`, published on
@@ -462,3 +503,57 @@ so an unreadable input is never reported as an invented test failure.
 | `completion-companion-incomplete` / `completion-companion-failed` | a declared suite did not complete, or failed |
 | `completion-backend-unproven` | a declared L2 backend that nothing proves drove a test |
 | `completion-test-stranded` | an L1 listing excluded a test by a tier marker (`level2_`, `level3_`, `browser_`, `real_`, on any path segment) whose area's `test-<tier>` recipe is a stub, so it runs in no tier |
+
+## Coverage certification and anchors
+
+A scheduled nightly publishes one artifact per scheduled environment,
+`ci-coverage-v1-<environment>-<head>-<policy16>`, from the `certify-nightly` job
+and only after the final gate passed. `<policy16>` is the leading digits of
+`schema.policy_digest`, the identity of the environment's name and scheduling
+events, so a run certified under a different schedule policy is a different
+name and is simply absent. The document (`certification.json`) is
+`{schema_version, run_id, attempt, workflow_path, event, head, tree,
+environment, coverage_policy_version, environments_digest, plan_identity,
+anchors_used[], certified, cells{executing, reused, accepted_gap, inherited},
+covered_cells[], audits{required, passed}}`. `certified` requires every
+required audit to have passed; `covered_cells` is what the environment is
+proven for after the run (executed and reused cells plus the cells its anchor
+covered that the plan did not reselect), and accepted gaps cover nothing. Each
+covered cell is `{package, gate, contract}`, distinct by `{package, gate}`;
+`contract` is the 64-hex coverage contract the plan recorded for that cell. A
+cell the plan records no contract for, or one narrowed by a `test_filter`, is
+never certified: the writer refuses to build the document, as it does for an
+anchor that both inherits and reopens one cell. A reopened cell is covered only
+as this run executed it. `anchors_used[]` entries are the plan's anchors
+without `required_cells`.
+
+The coverage contract (`affected_scope.coverage_contract`) is the identity of
+what one cell must prove beyond its name: target kinds, test filter, companion
+suites, compiled dependents, and, by gate, the test feature arguments, slow-test
+inclusion (`L1`), the declared and hosted backends (`L2`), and the check
+arguments (`check`). Two cells with the same name but a different contract prove
+different things. For example, adding `wezterm` beside `tmux` to a package's
+Level-2 backends changes its `L2` contract on every environment, so a nightly
+whose anchor certified the `tmux`-only cell selects it again.
+
+The resolved plan's optional `coverage_anchors[]` (a nightly only; the plan
+version does not move) holds, per environment, `{environment, mode, anchor,
+reason, source{kind, run_id, head}, policy_delta[], inherited_cells[],
+reopened_cells[], required_cells[]}`. `mode` is `incremental` (an `anchor` commit) or `full`
+(`anchor` null); `reason` is one of the coded values in `schema.ANCHOR_REASONS`
+and must agree with `mode` and `source.kind`. `required_cells` is
+`{package, gate, contract}` for every pending cell current policy requires of
+the environment; every `policy_delta`, `inherited_cells`, and `reopened_cells`
+entry names one of them. A cell is inherited only when the anchor's
+certification covered it with the same contract and published evidence does
+not contradict it; a cell it did not cover, or covered under another contract,
+is in `policy_delta`. A covered cell whose qualifying evidence
+(`local_evidence.blocking_evidence`: an unsuperseded failure, or a pass and a
+failure nothing orders) requires execution is in `reopened_cells`: it is a plan
+cell on that environment, never also inherited, and a full-scope fallback
+reopens nothing. A legacy anchor (`covered_cells` null) records no
+contract, so it inherits nothing and every required cell the diff does not
+reselect is in `policy_delta`. The planner reads the anchors from the document
+`reuse_validation.py nightly-anchors` prints (`schema.ANCHOR_INPUT_*`); a
+malformed anchor document stops planning with a nonzero exit instead of
+producing a reduced plan.

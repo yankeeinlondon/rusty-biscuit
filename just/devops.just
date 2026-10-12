@@ -299,10 +299,11 @@ _ci_build_verify dir artifact environment plan="":
         } >>"${GITHUB_OUTPUT}"
     fi
 
-# Worker budget: keep two slots for other host work, except on small CI
-# runners where reserving them would discard half or more of the capacity.
-# This limits test processes, not CPU affinity or Cargo build jobs.
-_test_threads:
+# Worker budget. L2 takes half the cores, rounded down, on every host, CI
+# runners included. Other tiers keep two slots for other host work, except on
+# small CI runners where reserving them would discard half or more of the
+# capacity. This limits test processes, not CPU affinity or Cargo build jobs.
+_test_threads tier="L1":
     #!/usr/bin/env bash
     set -euo pipefail
     cores=""
@@ -314,11 +315,21 @@ _test_threads:
         cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-1}")"
     fi
     [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
-    if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
+    if [[ "{{ tier }}" == "L2" ]]; then
+        echo "$(( cores > 1 ? cores / 2 : 1 ))"
+    elif [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
         echo "$cores"
     else
         echo "$(( cores > 2 ? cores - 2 : 1 ))"
     fi
+
+# Worker budget for parallel self-spawn L2: half the host's cores, rounded
+# down. Every worker starts a login shell and a terminal pane, the panes of
+# every concurrent run share one tmux server or WezTerm mux, and spawn and
+# capture deadlines are wall-clock, so overload fails tests instead of slowing
+# them. At 14 workers on a 16-core Mac, WezTerm spawns and captures timed out.
+_test_l2_threads:
+    @just _test_threads L2
 
 # Build the package
 _build package pkg_name *args="": _storage_preflight
@@ -2161,13 +2172,15 @@ _sanity pkg *args="": _storage_preflight
 # dominated by self-isolating tests (each spawns its OWN tmux session /
 # PTY — e.g. claudine) pays a steep serial tax for no isolation benefit.
 #
-# Setting `BISCUIT_L2_THREADS` to a value other than `1` switches this
-# recipe into parallel self-spawn mode: it skips the broker entirely and
-# exports NO `BISCUIT_SHARED_*` var, so EVERY `shared_or_spawn()` call
-# takes its fallback branch and spawns an OWNED, `Drop`-cleaned pane of
-# its own. With no shared resource, nextest runs at `-j N` safely. The
-# default (`1`, or unset) preserves the shared-pane serial path verbatim
-# for every other package area.
+# Parallel self-spawn mode is the default: the recipe skips the broker
+# entirely and exports NO `BISCUIT_SHARED_*` var, so EVERY
+# `shared_or_spawn()` call takes its fallback branch and spawns an OWNED,
+# `Drop`-cleaned pane of its own. With no shared resource, nextest runs at
+# `-j N` (`_test_l2_threads`) safely. A package whose L2 tests cannot run
+# concurrently declares the `l2-serial` runner tool with an
+# `l2-serial-reason`, and gets the shared-pane serial path above.
+# `BISCUIT_L2_THREADS` overrides both: `1` forces serial, any other value
+# sets the worker count.
 _test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2262,7 +2275,21 @@ _test_l2 pkg *args="": _storage_preflight
     # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
     # test self-isolates via `shared_or_spawn()`'s owned fallback, so
     # there is nothing to contend for. See the recipe comment above.
-    l2_threads="${BISCUIT_L2_THREADS:-1}"
+    # Archive mode has no Cargo to read metadata with; its callers (the CI
+    # workflow) always export BISCUIT_L2_THREADS.
+    l2_threads="${BISCUIT_L2_THREADS:-}"
+    if [[ -z "${l2_threads}" ]]; then
+        l2_threads=1
+        if (( archive_mode == 0 )); then
+            package_meta="$(cargo metadata --no-deps --format-version 1)"
+            serial="$(jq -r --arg p '{{ pkg }}' '.packages[] | select(.name == $p) | .metadata.ci.tests["runner-tools"] // [] | index("l2-serial") != null' <<< "${package_meta}")"
+            if [[ "${serial}" != "true" ]]; then
+                # Not NEXTEST_TEST_THREADS: this recipe exported the uncapped
+                # L1 budget into it above.
+                l2_threads="$(just _test_l2_threads)"
+            fi
+        fi
+    fi
     if [[ "${l2_threads}" != "1" ]]; then
         echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
         echo

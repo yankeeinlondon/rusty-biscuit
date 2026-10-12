@@ -10,6 +10,7 @@ use crate::render::render_terminal_output;
 use crate::request::MdRequest;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
+use darkmatter::markdown::cleanup::rules::{Indentation, Leaf, MarkdownRuleOverrides};
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use tracing::{debug, instrument};
@@ -30,9 +31,12 @@ pub fn run_render(
     // the argument opened, not beside its spelling (`@doc.md` has no parent).
     let input = resolved.as_ref();
 
-    // Apply cleanup with the specified or default indentation
-    let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
-    md.cleanup_with_indent(indent_size);
+    // Guarded cleanup under the default rules, with `--indent` (which only
+    // parses 2, 4, or 8) as an explicit override.
+    md.cleanup_with(&MarkdownRuleOverrides {
+        indentation: indent.and_then(Indentation::from_spaces).map_or(Leaf::Absent, Leaf::Value),
+        ..MarkdownRuleOverrides::default()
+    });
 
     // Only terminal rendering needs a real `Terminal`; MarkdownPlus and HTML
     // construct their own optimistic terminal inside the artifact builders so

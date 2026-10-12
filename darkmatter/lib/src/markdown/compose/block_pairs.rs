@@ -82,6 +82,16 @@ pub(crate) fn scan_block_pairs_in(
     data: Option<&DataRanges>,
 ) -> Result<Vec<BlockPair>, BlockPairError> {
     let code_regions = find_code_regions(&structural_view(content, data));
+    scan_block_pairs_with_code_regions(content, data, &code_regions)
+}
+
+/// [`scan_block_pairs_in`] with `code_regions` (every inline code span and code
+/// block of the structural view) already computed by the caller.
+pub(crate) fn scan_block_pairs_with_code_regions(
+    content: &str,
+    data: Option<&DataRanges>,
+    code_regions: &[(usize, usize)],
+) -> Result<Vec<BlockPair>, BlockPairError> {
     let bytes = content.as_bytes();
 
     // Stack entries: (block_start_byte, body_start_byte, start_line, kind, opening_text, quoted)
@@ -111,7 +121,7 @@ pub(crate) fn scan_block_pairs_in(
 
         if !trimmed.is_empty() {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions)
+            if !is_in_code_region(first_non_ws, code_regions)
                 && authored_directive(data, line_start, text_line_end)
             {
                 // Block-quote support is scoped to `::shell-block`. Page blocks

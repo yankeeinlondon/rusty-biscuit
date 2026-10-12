@@ -1,0 +1,7 @@
+error[E0599]: no method named `page_size` found for struct `TPager<Item, CursorK, No, No, No>` in the current scope
+ --> tests/ui/fail_b_page_size.rs:3:28
+  |
+3 |     let _ = list_roles_b().page_size(10);
+  |                            ^^^^^^^^^ method not found in `TPager<Item, CursorK, No, No, No>`
+  |
+  = note: the method was found for `TPager<T, K, Yes, R, B>`

@@ -330,20 +330,19 @@ pub struct ComposeOptions {
     pub shell_strip_ansi: bool,
 
     // ── Cleanup ────────────────────────────────────────────────────
-    /// Controls how blank lines between list items are handled
-    /// during the cleanup operation. Default: `Normal`.
-    pub(crate) list_spacing: crate::markdown::cleanup::ListSpacingMode,
+    /// The cleanup stage's `list-item-padding` (blank lines between sibling
+    /// list items). Default: `Preserve`.
+    pub(crate) list_spacing: crate::markdown::cleanup::rules::ListItemPadding,
 
-    /// Controls whether cleanup collapses incidental single newlines
-    /// in prose. Default: `Strip`.
+    /// Controls whether cleanup joins incidental single newlines in prose
+    /// (the `unwrap` rule). Default: `Strip`.
     pub(crate) incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode,
 
     /// Optional fixed column width for cleanup reflow. Default: `None`.
     pub(crate) fixed_width: Option<usize>,
 
-    /// Number of spaces per nesting level for list indentation
-    /// during cleanup. Default: 4.
-    pub(crate) indent_size: usize,
+    /// The cleanup stage's nested-list `indentation`. Default: `Four`.
+    pub(crate) indentation: crate::markdown::cleanup::rules::Indentation,
 
     // ── Caching ───────────────────────────────────────────────────
     /// Controls the run-local, in-memory compose cache (never persisted).
@@ -625,7 +624,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("list_spacing", &self.list_spacing)
             .field("incidental_newline_mode", &self.incidental_newline_mode)
             .field("fixed_width", &self.fixed_width)
-            .field("indent_size", &self.indent_size)
+            .field("indentation", &self.indentation)
             .field("cache_access_mode", &self.cache_access_mode)
             .field("cache_root", &self.cache_root)
             .field("cache_namespace", &self.cache_namespace)
@@ -894,10 +893,10 @@ impl ComposeOptions {
             shell_working_directory: None,
             shell_approval_handler: None,
             pre_approved_commands: None,
-            list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
+            list_spacing: crate::markdown::cleanup::rules::ListItemPadding::Preserve,
             incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode::Strip,
             fixed_width: None,
-            indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
+            indentation: crate::markdown::cleanup::rules::Indentation::Four,
             cache_access_mode: CacheAccessMode::default(),
             cache_root: None,
             cache_namespace: None,
@@ -1161,14 +1160,14 @@ impl ComposeOptions {
         &self.caller_input_records
     }
 
-    /// Sets the list spacing mode for the cleanup stage.
+    /// Sets the cleanup stage's `list-item-padding`.
     #[must_use]
-    pub fn with_list_spacing(mut self, mode: crate::markdown::cleanup::ListSpacingMode) -> Self {
+    pub fn with_list_spacing(mut self, mode: crate::markdown::cleanup::rules::ListItemPadding) -> Self {
         self.list_spacing = mode;
         self
     }
 
-    /// Sets whether cleanup collapses incidental single newlines in prose.
+    /// Sets whether cleanup joins incidental single newlines in prose.
     #[must_use]
     pub fn with_incidental_newline_mode(
         mut self,
@@ -1185,10 +1184,10 @@ impl ComposeOptions {
         self
     }
 
-    /// Sets the indentation width for nested list cleanup.
+    /// Sets the cleanup stage's nested-list `indentation`.
     #[must_use]
-    pub fn with_indent_size(mut self, size: usize) -> Self {
-        self.indent_size = size.max(1);
+    pub fn with_indentation(mut self, indentation: crate::markdown::cleanup::rules::Indentation) -> Self {
+        self.indentation = indentation;
         self
     }
 
@@ -2608,7 +2607,7 @@ impl ComposeOptions {
             list_spacing,
             incidental_newline_mode,
             fixed_width,
-            indent_size,
+            indentation,
             cache_access_mode,
             cache_root,
             cache_namespace,
@@ -2828,9 +2827,9 @@ impl ComposeOptions {
 
         enc.field("list_spacing");
         enc.tag(match list_spacing {
-            crate::markdown::cleanup::ListSpacingMode::Normal => 0,
-            crate::markdown::cleanup::ListSpacingMode::Compact => 1,
-            crate::markdown::cleanup::ListSpacingMode::Loose => 2,
+            crate::markdown::cleanup::rules::ListItemPadding::Preserve => 0,
+            crate::markdown::cleanup::rules::ListItemPadding::None => 1,
+            crate::markdown::cleanup::rules::ListItemPadding::One => 2,
         });
         enc.field("incidental_newline_mode");
         enc.tag(match incidental_newline_mode {
@@ -2846,7 +2845,7 @@ impl ComposeOptions {
             None => enc.tag(0),
         }
         enc.field("indent_size");
-        enc.u64(*indent_size as u64);
+        enc.u64(indentation.spaces().unwrap_or(0) as u64);
 
         enc.field("cache_access_mode");
         enc.tag(match cache_access_mode {
@@ -3070,12 +3069,12 @@ impl ComposeOptions {
 
         cenc.field("list_spacing");
         cenc.tag(match list_spacing {
-            crate::markdown::cleanup::ListSpacingMode::Normal => 0,
-            crate::markdown::cleanup::ListSpacingMode::Compact => 1,
-            crate::markdown::cleanup::ListSpacingMode::Loose => 2,
+            crate::markdown::cleanup::rules::ListItemPadding::Preserve => 0,
+            crate::markdown::cleanup::rules::ListItemPadding::None => 1,
+            crate::markdown::cleanup::rules::ListItemPadding::One => 2,
         });
         cenc.field("indent_size");
-        cenc.u64(*indent_size as u64);
+        cenc.u64(indentation.spaces().unwrap_or(0) as u64);
         cenc.field("replace_parent_wins");
         cenc.bool(*replace_parent_wins);
 

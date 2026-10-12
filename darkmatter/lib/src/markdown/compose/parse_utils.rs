@@ -412,23 +412,39 @@ pub(crate) fn authored_directive(data: Option<&DataRanges>, line_start: usize, k
     data.is_none_or(|data| !data.intersects(&(line_start.saturating_sub(1)..keyword_end)))
 }
 
-/// Finds byte ranges of inline code and fenced code blocks.
-pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
-    let mut regions = Vec::new();
+/// Byte ranges of the code in one text, from a single parse.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CodeRegions {
+    /// Inline code spans and fenced/indented code blocks, in document order.
+    pub all: Vec<(usize, usize)>,
+    /// Fenced and indented code blocks only.
+    pub blocks: Vec<(usize, usize)>,
+}
+
+/// Finds the code regions of `content` with one Markdown parse.
+///
+/// Every directive and expression scanner derives its code regions from
+/// here, so a caller that runs several scanners over the same text can
+/// compute them once and pass them to each `_with_code_regions` variant.
+pub(crate) fn scan_code_regions(content: &str) -> CodeRegions {
+    #[cfg(test)]
+    scanner_parse_count::record();
+    let mut regions = CodeRegions::default();
     let mut in_code_block = false;
     let mut code_block_start = 0;
 
     for (event, range) in Parser::new_ext(content, Options::all()).into_offset_iter() {
         match event {
             Event::Code(_) => {
-                regions.push((range.start, range.end));
+                regions.all.push((range.start, range.end));
             }
             Event::Start(Tag::CodeBlock(_)) => {
                 in_code_block = true;
                 code_block_start = range.start;
             }
             Event::End(TagEnd::CodeBlock) if in_code_block => {
-                regions.push((code_block_start, range.end));
+                regions.all.push((code_block_start, range.end));
+                regions.blocks.push((code_block_start, range.end));
                 in_code_block = false;
             }
             _ => {}
@@ -436,6 +452,35 @@ pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
     }
 
     regions
+}
+
+/// Finds byte ranges of inline code and fenced code blocks.
+pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
+    scan_code_regions(content).all
+}
+
+/// Thread-local tally of scanner parses ([`scan_code_regions`]), kept apart
+/// from cleanup's own parse count so a cleanup budget cannot hide repeated
+/// scanning.
+#[cfg(test)]
+pub(crate) mod scanner_parse_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn record() {
+        COUNT.with(|count| count.set(count.get() + 1));
+    }
+
+    /// Runs `operation` and returns its value alongside the number of
+    /// scanner parses it performed.
+    pub(crate) fn measure<T>(operation: impl FnOnce() -> T) -> (T, usize) {
+        let before = COUNT.with(Cell::get);
+        let value = operation();
+        (value, COUNT.with(Cell::get) - before)
+    }
 }
 
 /// Returns true if `position` falls inside any of the given code regions.

@@ -20,15 +20,17 @@
 //!
 //! ## Opaque regions
 //!
-//! Fenced code blocks, code spans, HTML comments, and explicit
-//! `<code-block>` bodies are moved into a [`Lifted`] table and replaced by a
-//! `\u{0002}<n>\u{0002}` placeholder that survives every later phase (the
-//! sentinel is non-word punctuation) and is resolved by the token parser
-//! straight into a `Code` or `InlineCode` node, or into nothing for a
-//! comment, never re-expanded into string markup. Recognized tag
-//! declarations, quoted attribute values included, are copied through
-//! unread. A later phase therefore never sees code contents, and never finds
-//! a fence or code span inside an attribute value.
+//! Fenced code blocks, code spans, HTML comments, explicit `<code-block>`
+//! bodies, and Markdown link destinations are moved into a [`Lifted`] table
+//! and replaced by a `\u{0002}<n>\u{0002}` placeholder that survives every
+//! later phase (the sentinel is non-word punctuation). The token parser
+//! resolves a code placeholder straight into a `Code` or `InlineCode` node,
+//! and a comment into nothing, never re-expanding it into string markup; a
+//! destination is resolved by link conversion into the link's href.
+//! Recognized tag declarations, quoted attribute values included, are copied
+//! through unread. A later phase therefore never sees code contents or a
+//! link destination, and never finds a fence or code span inside an
+//! attribute value.
 //!
 //! Literal sentinel characters in user input are backslash-escaped by
 //! [`lift_opaque`] outside code before anything else runs, so an unescaped
@@ -50,12 +52,13 @@
 //! A delimiter that cannot form valid emphasis stays literal text, so the
 //! pre-processor never emits an unbalanced tag.
 //!
-//! Link conversion is *atomic*: the reference (URL) portion of a link is
-//! lifted out of the input stream into a placeholder during link parsing
-//! and re-inserted only after bold/italics phases have run. This guarantees
-//! that `*` or `_` characters inside a URL — for example,
-//! `https://example.com/path_with_underscores` — are never re-interpreted
-//! as Markdown emphasis markers.
+//! Link destinations are *atomic*: [`lift_opaque`] lifts the destination of
+//! `[desc](ref)` before it recognizes any code span, comment, or tag, so
+//! backticks, `<!-- -->`, or `<code-block>` inside a URL stay destination
+//! text. Link conversion then holds the value in a placeholder and
+//! re-inserts it only after the bold/italics phases have run, so `*` or `_`
+//! inside a URL — for example, `https://example.com/path_with_underscores` —
+//! is never read as emphasis either.
 
 use super::tokens::{is_recognized_opening_tag, parse_opening_tag};
 
@@ -181,6 +184,11 @@ pub(super) enum Lifted {
     /// comment opaque to the later phases and reads as punctuation to the
     /// emphasis flanking rules, as the comment's `<` and `>` would.
     Comment,
+    /// A Markdown link destination, lifted so no later phase reads code,
+    /// comments, or tags in it. `href` is the value [`convert_links`] gives
+    /// the link; `source` is the authored text, rendered literally if no
+    /// link consumes the placeholder.
+    Destination { href: String, source: String },
 }
 
 /// Placeholder text referring to `lifted[index]`.
@@ -205,6 +213,10 @@ pub(super) fn parse_lift_placeholder(chars: &[char], start: usize) -> Option<(us
 /// region into `lifted`, and backslash-escape every literal sentinel
 /// character outside them (rule R1).
 ///
+/// `paragraphs` is `true` for `Prose`, whose blank lines and fences split
+/// paragraphs before links are recognized, so a link label cannot cross
+/// them; `InlineProse` passes `false`.
+///
 /// CRLF and lone CR become LF first, so the paragraph and break rules see
 /// the same structure whatever platform produced the text. One left-to-right
 /// scan then recognizes, whichever starts first:
@@ -222,20 +234,29 @@ pub(super) fn parse_lift_placeholder(chars: &[char], start: usize) -> Option<(us
 ///   value (newlines, backticks, fence lines, `>` and all) is copied through
 ///   unread. For `<code-block>` the body up to the first `</code-block>` (or
 ///   the end of input) is lifted verbatim as well.
+/// - a Markdown link destination: the `(…)` after the `]` that closes an
+///   open `[` label, ended by [`try_parse_link`]'s rule. It is lifted whole
+///   as [`Lifted::Destination`] before any code span, comment, or tag inside
+///   it can be recognized, so the destination keeps its literal text. Code
+///   and comments in the label are still lifted as usual.
 ///
-/// No later phase can therefore rewrite code or an attribute value, and a
-/// placeholder never lands inside one.
-pub(super) fn lift_opaque(input: &str) -> (String, Vec<Lifted>) {
+/// No later phase can therefore rewrite code, an attribute value, or a link
+/// destination, and a placeholder never lands inside one.
+pub(super) fn lift_opaque(input: &str, paragraphs: bool) -> (String, Vec<Lifted>) {
     let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
     let chars: Vec<char> = normalized.chars().collect();
     let mut output = String::with_capacity(normalized.len());
     let mut lifted: Vec<Lifted> = Vec::new();
+    // Whether an unescaped `[` is waiting for its `]`, as `try_parse_link`
+    // would read the label from it.
+    let mut label_open = false;
     let mut i = 0;
 
     while i < chars.len() {
         if (i == 0 || chars[i - 1] == '\n')
             && let Some(next) = lift_fence(&chars, i, &mut output, &mut lifted)
         {
+            label_open &= !paragraphs;
             i = next;
             continue;
         }
@@ -286,6 +307,43 @@ pub(super) fn lift_opaque(input: &str) -> (String, Vec<Lifted>) {
                 }
                 None => i = copy_opaque_tag(&chars, i, &mut output, &mut lifted),
             },
+            '[' => {
+                label_open = true;
+                output.push(ch);
+                i += 1;
+            }
+            ']' => {
+                let destination = if label_open && chars.get(i + 1) == Some(&'(') {
+                    destination_end(&chars, i + 2, paragraphs).filter(|&close| close > i + 2)
+                } else {
+                    None
+                };
+                label_open = false;
+                match destination {
+                    Some(close) => {
+                        let raw = &chars[i + 2..close];
+                        output.push_str("](");
+                        output.push_str(&lift_placeholder(lifted.len()));
+                        output.push(')');
+                        lifted.push(Lifted::Destination {
+                            href: destination_value(raw),
+                            source: raw.iter().collect(),
+                        });
+                        i = close + 1;
+                    }
+                    None => {
+                        output.push(ch);
+                        i += 1;
+                    }
+                }
+            }
+            '\n' => {
+                if paragraphs && blank_run_end(&chars, i).is_some() {
+                    label_open = false;
+                }
+                output.push(ch);
+                i += 1;
+            }
             _ => {
                 output.push(ch);
                 i += 1;
@@ -294,6 +352,40 @@ pub(super) fn lift_opaque(input: &str) -> (String, Vec<Lifted>) {
     }
 
     (output, lifted)
+}
+
+/// Index of the `)` closing the link destination that starts at
+/// `chars[start]`, by [`try_parse_link`]'s rule: the first `)` not escaped
+/// as `\)`. With `paragraphs`, a destination never crosses a blank line or
+/// a fence line, as the paragraph splitter would end it there.
+fn destination_end(chars: &[char], start: usize, paragraphs: bool) -> Option<usize> {
+    let mut i = start;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' if matches!(chars.get(i + 1), Some('(' | ')')) => i += 2,
+            ')' => return Some(i),
+            '\n' if paragraphs && (blank_run_end(chars, i).is_some() || is_fence_line(chars, i + 1)) => {
+                return None;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The href a raw destination yields: `\(` and `\)` lose their backslash,
+/// and every other character is literal.
+fn destination_value(raw: &[char]) -> String {
+    let mut value = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == '\\' && matches!(raw.get(i + 1), Some('(' | ')')) {
+            i += 1;
+        }
+        value.push(raw[i]);
+        i += 1;
+    }
+    value
 }
 
 /// Lift the fenced block opening on the line at `chars[start]`, if that line
@@ -452,9 +544,10 @@ pub(super) fn find_ci(chars: &[char], start: usize, needle: &str) -> Option<usiz
 /// output.
 ///
 /// Order: links → bold → italics. Every placeholder survives untouched for
-/// the token parser.
-pub(super) fn preprocess_inline(paragraph: &str) -> String {
-    let (with_links, hrefs) = convert_links(paragraph);
+/// the token parser, except a link's [`Lifted::Destination`], which
+/// [`convert_links`] resolves from `lifted`.
+pub(super) fn preprocess_inline(paragraph: &str, lifted: &[Lifted]) -> String {
+    let (with_links, hrefs) = convert_links(paragraph, lifted);
     let with_bold = convert_bold(&with_links);
     let with_italics = convert_italics(&with_bold);
     restore_hrefs(&with_italics, &hrefs)
@@ -567,10 +660,13 @@ fn copy_tag_declaration(chars: &[char], start: usize, output: &mut String) -> Op
 
 /// Phase 1: lift `[desc](ref)` into `<a href="...">desc</a>`.
 ///
-/// The `ref` value is replaced by an opaque placeholder of the form
-/// `\u{0001}HREF<index>\u{0001}` and stored in the returned `Vec`. This
-/// shields URL contents from later bold/italics phases.
-fn convert_links(input: &str) -> (String, Vec<String>) {
+/// [`lift_opaque`] already lifted `ref` as a [`Lifted::Destination`], so no
+/// code span, comment, or tag inside it was recognized; its value is
+/// resolved here. In the generated tag, `ref` is replaced by an opaque
+/// placeholder of the form `\u{0001}HREF<index>\u{0001}` and stored in the
+/// returned `Vec`, which shields it from the bold/italics phases until
+/// [`restore_hrefs`].
+fn convert_links(input: &str, lifted: &[Lifted]) -> (String, Vec<String>) {
     let chars: Vec<char> = input.chars().collect();
     let mut output = String::new();
     let mut hrefs: Vec<String> = Vec::new();
@@ -597,7 +693,7 @@ fn convert_links(input: &str) -> (String, Vec<String>) {
             && let Some((desc, href, end)) = try_parse_link(&chars, i)
         {
             let placeholder = format!("{m}HREF{n}{m}", m = HREF_PLACEHOLDER_MARK, n = hrefs.len());
-            hrefs.push(href);
+            hrefs.push(resolve_destination(href, lifted));
             output.push_str("<a href=\"");
             output.push_str(&placeholder);
             output.push_str("\">");
@@ -612,6 +708,21 @@ fn convert_links(input: &str) -> (String, Vec<String>) {
     }
 
     (output, hrefs)
+}
+
+/// The href of a destination [`lift_opaque`] lifted whole, or `href`
+/// unchanged when it is not one placeholder (an empty destination is never
+/// lifted).
+fn resolve_destination(href: String, lifted: &[Lifted]) -> String {
+    let chars: Vec<char> = href.chars().collect();
+    if chars.first() == Some(&LIFT_MARK)
+        && let Some((index, next)) = parse_lift_placeholder(&chars, 0)
+        && next == chars.len()
+        && let Some(Lifted::Destination { href, .. }) = lifted.get(index)
+    {
+        return href.clone();
+    }
+    href
 }
 
 /// Try to parse `[desc](ref)` starting at `start` (which must point at the
@@ -733,8 +844,8 @@ fn convert_bold(input: &str) -> String {
 }
 
 /// Phase 3: convert `_text_` into `<i>text</i>`. The `*italics*` form
-/// and `__double underscore__` are intentionally left untouched. URL
-/// contents are protected by the placeholder substitution from
+/// and `__double underscore__` are intentionally left untouched. Link
+/// destinations are protected by the placeholder substitution from
 /// [`convert_links`]; Markdown inside `<…>` tag declarations is also
 /// preserved verbatim.
 fn convert_italics(input: &str) -> String {
@@ -954,13 +1065,14 @@ mod tests {
 
     /// Run the pre-processor and return only the converted text.
     fn pp(input: &str) -> String {
-        preprocess_inline(&lift_opaque(input).0)
+        let (text, lifted) = lift_opaque(input, true);
+        preprocess_inline(&text, &lifted)
     }
 
     /// Run the pre-processor and return the text plus every lifted span value.
     fn pp_spans(input: &str) -> (String, Vec<String>) {
-        let (text, lifted) = lift_opaque(input);
-        let out = preprocess_inline(&text);
+        let (text, lifted) = lift_opaque(input, true);
+        let out = preprocess_inline(&text, &lifted);
         let spans = lifted
             .into_iter()
             .filter_map(|l| match l {
@@ -972,7 +1084,7 @@ mod tests {
     }
 
     fn fences(input: &str) -> (String, Vec<FencedCode>) {
-        let (text, lifted) = lift_opaque(input);
+        let (text, lifted) = lift_opaque(input, true);
         let blocks = lifted
             .into_iter()
             .filter_map(|l| match l {

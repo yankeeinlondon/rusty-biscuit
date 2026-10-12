@@ -364,14 +364,32 @@ whose `Cargo.toml` asks for it:
 l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
 ```
 
-Suites marked `l2-parallel-self-spawn` use isolated per-test resources instead
-of shared panes and can run concurrently. Their default worker count is
-`max(1, logical_cores - 2)` locally. CI uses all logical cores on runners with
-four or fewer, and `logical_cores - 2` on larger runners. This leaves capacity
-for developer work and larger shared hosts without crippling small CI runners;
-it controls test workers, not CPU affinity or a guaranteed reservation.
-`BISCUIT_L2_THREADS` can override the default. Suites that share terminal or
-other global resources remain serial.
+L2 suites run in parallel by default. Each test spawns its own terminal
+session, so tests do not share a pane and can run side by side. The worker
+count is half the host's logical cores, rounded down, with a minimum of one,
+on every host, CI runners included: each worker drives a real terminal, and a
+single WezTerm mux server serves every WezTerm test, so more workers make its
+spawn and capture calls time out rather than finish sooner. A 16-core Mac, for
+example, runs claudine-cli's L2 suite with 8 workers, not 14; a GitHub-hosted
+`ubuntu-latest` runner (4 cores) runs 2 and `macos-latest` (3 cores) runs 1. The count controls test workers, not CPU affinity or a
+guaranteed reservation.
+
+Serial L2 is a rare, declared exception. A package whose tests truly contend
+for one resource, such as a single visible GUI window, says so, and the CI
+planner rejects the marker without a reason:
+
+```toml
+[package.metadata.ci.tests]
+runner-tools = ["l2-serial"]
+l2-serial-reason = "every test reads and writes the one system clipboard"
+```
+
+Prefer serializing only the tests that contend over serializing a whole
+package. Apple Terminal tests, which each open a visible window, share the
+`apple-terminal-l2` nextest test group (one at a time) in
+`.config/nextest.toml`, while the rest of their package stays parallel.
+
+`BISCUIT_L2_THREADS` overrides the choice for one run (`1` forces serial).
 
 ## Linting and formatting
 

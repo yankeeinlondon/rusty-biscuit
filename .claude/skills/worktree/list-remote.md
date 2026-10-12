@@ -76,7 +76,7 @@ environment lookup: an adopted worker may have inherited another environment.
 - Only `anonymous` can produce the keyless notice; `unknown` (a migrated or
   pre-success record) never does.
 
-## PR store (`pull_requests`, format 6)
+## PR store (`pull_requests`, format 7)
 
 - File: `<repo hash>.prs.json`, bound to `origin_digest`
   (`biscuit_hash::blake3_hash` of the exact `origin_url(main)` value: what
@@ -88,14 +88,29 @@ environment lookup: an adopted worker may have inherited another environment.
   request's `credentials` in the same atomic write (an empty answer too).
   `stored_publication(store, origin, now) -> Option<StoredPublication { id,
   credentials }>` reads both under `select_cached`'s rules.
-- Format 5 (no `credentials`) is still read, with the same strictness, as
-  `unknown`; formats 4 and older, and 7 and newer, are misses. A malformed,
-  absent, or `null` `credentials` makes a format-6 publication a miss.
+- Format 7 adds each PR's `status` (`failing|running|passed|unknown`, written
+  explicitly; `OpenPullRequest::status` is sniff's `PrCheckStatus`, filled from
+  `PrSummary::status`, which production `SniffOpenPrSource` gets by calling
+  `open_pull_requests_with_status`). Status is lenient **per PR**: absent,
+  `null`, wrongly typed, or unrecognized reads as `unknown` and keeps the PR
+  (`status_form`); a repeated `status` key is still a miss (serde's duplicate
+  field check).
+- Formats 5 and 6 are still read as before, through status-free structs
+  (`StatuslessStoreFile`, `UncredentialedStoreFile`, `StatuslessPullRequest`)
+  that ignore any `status` they spell, so their PRs are always `unknown`;
+  format 5 also has `unknown` credentials. Formats 4 and older, and 8 and
+  newer, are misses. A malformed, absent, or `null` `credentials` makes a
+  format-6 or 7 publication a miss.
 - Reader is strict: every field present; missing, wrongly typed, duplicate, or
   trailing content is a miss; unknown keys are ignored. Proven by
   `pull_requests::tests::the_store_reader_walks_the_input_robustness_matrix`
   (its `credentials` rows included) and
-  `a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss`.
+  `a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss`,
+  `formats_5_and_6_read_as_unknown_status_whatever_a_pr_spells`, and
+  `statuses_round_trip_and_a_later_answer_replaces_them` (a later answer
+  replaces every status, a failure keeps the old ones, an empty answer clears).
+  The list may hold two records with one number; readers must not assume
+  uniqueness.
 - `select_cached(store, origin, now)`: `Fresh` (< 60 s), `Stale` (>= 60 s,
   still shown), or `Miss` (none, corrupt, other format, future `fetched_at`,
   other or no origin).

@@ -555,6 +555,20 @@ fn source_line_spans(source: &str) -> Vec<SourceLineSpan> {
     lines
 }
 
+/// The mapping a document's frontmatter YAML loads as, through the same
+/// fallback strategies [`parse_frontmatter`] uses; `None` when none of them
+/// loads it.
+///
+/// Cleanup's acceptance test for authored frontmatter: a block strict YAML
+/// rejects (a bare `{{ … }}` value, tab indentation) is still a supported
+/// Darkmatter document when this loads it.
+pub(crate) fn load_frontmatter_yaml(yaml: &str) -> Option<FrontmatterMap> {
+    if yaml.trim().is_empty() {
+        return Some(FrontmatterMap::default());
+    }
+    parse_yaml_with_fallbacks(yaml).ok().map(|parsed| parsed.map)
+}
+
 // UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file
 // were the only `markdown/*` sites that copied `yaml[pos..pos + 1]` into a
 // String. Sibling scanners under `markdown/` walk `as_bytes()` only for

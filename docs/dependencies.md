@@ -136,9 +136,8 @@
   `typescript`, `tsx`, and `vitest` as dev dependencies. Node is provisioned
   only for `test-toolkit`'s `ubuntu-latest` companion-suite cells, which own
   the tool's typecheck and Vitest suites; Rust test legs never do.
-- `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
-  WezTerm client configuration files through subprocess completion and remove
-  them afterward.
+- `biscuit-test-harness` uses `tempfile` as a regular dependency for the
+  private directories its Kitty and Xvfb instances own for their lifetime.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
   `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
   deadlines, and `windows-sys` for atomic replacement on Windows (its

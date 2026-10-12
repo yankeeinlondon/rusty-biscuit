@@ -1,59 +1,10 @@
 use biscuit_terminal::utils::UnicodeWidthStr;
-use pulldown_cmark::{CowStr, Event};
 use std::ops::Range;
 use unicode_script::{Script, UnicodeScript};
 
-use super::lists::list_marker_byte_width;
+use super::markers::list_marker_byte_width;
 
 mod semantic;
-
-pub(super) fn collapse_incidental_soft_break_events<'a>(
-    content: &str,
-    events: &[(Event<'a>, Range<usize>)],
-) -> Vec<(Event<'a>, Range<usize>)> {
-    let semantic = semantic::SoftBreakModel::from_events(content, events);
-    let mut boundaries = semantic.boundaries.iter();
-
-    events
-        .iter()
-        .map(|(event, span)| {
-            if matches!(event, Event::SoftBreak) {
-                let boundary = boundaries
-                    .next()
-                    .expect("semantic model records every soft-break event");
-                if boundary.eligible {
-                    let replacement = materialized_soft_break_separator(content, boundary)
-                        .map_or_else(String::new, |separator| separator.to_string());
-                    return (Event::Text(CowStr::from(replacement)), span.clone());
-                }
-            }
-            (event.clone(), span.clone())
-        })
-        .collect()
-}
-
-fn materialized_soft_break_separator(
-    content: &str,
-    boundary: &semantic::SemanticSoftBreak,
-) -> Option<char> {
-    if boundary.join_separator.is_some() {
-        return boundary.join_separator;
-    }
-
-    let previous_start = content[..boundary.soft_break.start]
-        .rfind(['\n', '\r'])
-        .map_or(0, |idx| idx + 1);
-    let previous_line = &content[previous_start..boundary.soft_break.start];
-    let previous_line = previous_line.strip_suffix(' ')?;
-    let next_end = content[boundary.next_prefix.end..]
-        .find(['\n', '\r'])
-        .map_or(content.len(), |len| boundary.next_prefix.end + len);
-
-    join_separator(
-        previous_line,
-        &content[boundary.next_prefix.end..next_end],
-    )
-}
 
 pub fn strip_incidental_newlines(content: &str) -> String {
     let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
@@ -549,7 +500,7 @@ fn join_separator(prev_line: &str, next_body: &str) -> Option<char> {
 /// Tibetan. Hangul is excluded because Korean is space-delimited. Non-letters
 /// (punctuation, symbols, emoji) are never spaceless, so they fall through to
 /// the space-delimited join rule.
-fn is_spaceless_letter(c: char) -> bool {
+pub(super) fn is_spaceless_letter(c: char) -> bool {
     if !c.is_alphabetic() {
         return false;
     }
