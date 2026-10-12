@@ -928,8 +928,9 @@ With it, the editor suggests rule forms (dates only) and flags an unknown rule
 or action, such as `Duration(3mo)`, `ValidFor(3w)`, or `action: delete`,
 before the document is ever checked. The schema is a convenience; evaluation
 is the authority and checks more. The schema checks a date's shape but not
-whether the day exists (`2026-02-30` passes), and it does not flag a
-`{rule, action}` entry that is missing `rule`, which evaluation reports. For
+whether the day exists (`2026-02-30` passes). A `{rule, action}` entry needs
+both fields: a missing or null `rule` or `action` is flagged, as evaluation
+rejects it. For
 `FileChanged` it flags the one-argument form and a path with `,`, `)`, `\`,
 surrounding spaces, or a leading `/`, `~`, `@`, `%`, or `{{`; it cannot see a
 drive letter, a `vault:` or URL prefix, a `{{` later in the path, or whether
