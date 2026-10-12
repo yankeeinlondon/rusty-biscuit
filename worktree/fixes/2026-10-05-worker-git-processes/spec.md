@@ -5,6 +5,8 @@ clarified: false
 implemented: true
 implemented_by: claude-code/claude-opus-5-5
 human_review: true
+review_iterations: 2
+completed: true
 ---
 
 # The refresh worker starts too many git processes
