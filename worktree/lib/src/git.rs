@@ -225,6 +225,11 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
         Ok::<_, WorktreeError>(output)
     })?;
 
+    #[cfg(test)]
+    if recorder::failed_after_running(args) {
+        return Err(WorktreeError::GitCommand("injected failure after running".to_string()));
+    }
+
     if !output.status.success() && !(allow_no_match && output.status.code() == Some(1)) {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(WorktreeError::GitCommand(stderr));
@@ -458,12 +463,53 @@ pub mod recorder {
         FailureGuard(())
     }
 
-    /// Ends a [`fail_matching`] injection when dropped.
+    /// Ends a [`fail_matching`] injection (or, in tests, a
+    /// `fail_after_running` one) when dropped.
     pub struct FailureGuard(());
 
     impl Drop for FailureGuard {
         fn drop(&mut self) {
             *FAIL_WHEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            #[cfg(test)]
+            {
+                *FAIL_AFTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            }
+        }
+    }
+
+    /// Runs after a call [`fail_after_running`] matches.
+    #[cfg(test)]
+    type Aftermath = Box<dyn Fn() + Send>;
+
+    #[cfg(test)]
+    static FAIL_AFTER: Mutex<Option<(FailWhen, Aftermath)>> = Mutex::new(None);
+
+    /// Makes every [`git_from`](super::git_from)-family call whose arguments
+    /// `predicate` matches run Git for real, then run `aftermath`, then fail,
+    /// until the returned guard drops: Git's own side effects happen, yet the
+    /// caller sees an error. `aftermath` runs under a lock, so it must not
+    /// start Git through this module.
+    #[cfg(test)]
+    #[must_use = "the failure injection ends when the guard drops"]
+    pub fn fail_after_running(
+        predicate: impl Fn(&[&str]) -> bool + Send + 'static,
+        aftermath: impl Fn() + Send + 'static,
+    ) -> FailureGuard {
+        *FAIL_AFTER.lock().expect("recorder mutex poisoned") = Some((Box::new(predicate), Box::new(aftermath)));
+        FailureGuard(())
+    }
+
+    /// Whether [`fail_after_running`] fails this completed call; runs its
+    /// aftermath when it does.
+    #[cfg(test)]
+    pub(crate) fn failed_after_running(args: &[&str]) -> bool {
+        let guard = FAIL_AFTER.lock().expect("recorder mutex poisoned");
+        match guard.as_ref() {
+            Some((predicate, aftermath)) if predicate(args) => {
+                aftermath();
+                true
+            }
+            _ => false,
         }
     }
 

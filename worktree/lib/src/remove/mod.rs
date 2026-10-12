@@ -431,6 +431,68 @@ mod tests {
         assert!(!wt.exists());
     }
 
+    /// Git really removes and unregisters the worktree, then `aftermath`
+    /// runs and the call reports failure, as when another program writes
+    /// into the folder while git deletes it.
+    fn remove_failing_after_git(repo: &TestRepo, wt: &Path, aftermath: impl Fn() + Send + 'static) -> Result<(), WorktreeError> {
+        let _failing = crate::git::recorder::fail_after_running(
+            |args| args.windows(2).any(|pair| pair == ["worktree", "remove"]),
+            aftermath,
+        );
+        remove_worktree(&repo.path(), wt, true)
+    }
+
+    fn assert_removed_with_branch_kept(repo: &TestRepo, wt: &Path, branch: &str) {
+        assert!(!wt.exists(), "folder deleted");
+        let listed = repo.git(&["worktree", "list", "--porcelain"]);
+        assert!(!listed.contains(branch), "unregistered:\n{listed}");
+        assert!(repo.try_git(&["rev-parse", "--verify", &format!("refs/heads/{branch}")]).is_ok(), "branch kept");
+    }
+
+    #[test]
+    fn a_failed_git_removal_that_unregistered_and_deleted_the_folder_succeeds() {
+        let repo = TestRepo::new();
+        let wt = repo.add_worktree("feat/gone", "gone", "main");
+
+        let result = remove_failing_after_git(&repo, &wt, || {});
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_removed_with_branch_kept(&repo, &wt, "feat/gone");
+    }
+
+    #[test]
+    fn a_failed_git_removal_that_left_deletable_remnants_is_finished() {
+        let repo = TestRepo::new();
+        let wt = repo.add_worktree("feat/refilled", "refilled", "main");
+        let leftover = wt.join("target").join("flycheck0");
+        let written = leftover.clone();
+
+        let result = remove_failing_after_git(&repo, &wt, move || {
+            std::fs::create_dir_all(&written).unwrap();
+            std::fs::write(written.join("x"), "x").unwrap();
+        });
+
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!leftover.exists());
+        assert_removed_with_branch_kept(&repo, &wt, "feat/refilled");
+    }
+
+    /// Git refuses a dirty worktree without `--force` and leaves it
+    /// registered, so its error is returned and nothing is deleted.
+    #[test]
+    fn a_failed_git_removal_that_left_the_worktree_registered_is_an_error() {
+        let repo = TestRepo::new();
+        let base = repo.path();
+        let wt = repo.add_worktree("feat/kept", "kept", "main");
+        std::fs::write(wt.join("scratch.txt"), "x").unwrap();
+
+        let result = remove_worktree(&base, &wt, false);
+
+        assert!(matches!(&result, Err(WorktreeError::GitCommand(_))), "{result:?}");
+        assert!(wt.join("scratch.txt").exists());
+        assert!(repo.git(&["worktree", "list", "--porcelain"]).contains("feat/kept"));
+    }
+
     #[test]
     fn an_unregistered_folder_is_never_deleted() {
         let repo = TestRepo::new();

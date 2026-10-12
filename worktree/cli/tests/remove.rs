@@ -466,6 +466,60 @@ fn a_process_standing_in_the_worktree_blocks_removal_before_the_report() {
     assert!(fixture.branch_exists("feat/busy"));
 }
 
+/// A `git` stand-in first on `wt`'s `PATH`: it runs the real Git, and when a
+/// `worktree remove` succeeds it writes `target/flycheck0/x` back into the
+/// removed folder and exits 1, as when a build tool refills the folder while
+/// git deletes it. Unix only: on Windows `wt` resolves `git.exe`, so a script
+/// cannot stand in without compiling a stub executable; the library tests
+/// cover the same decision on every OS.
+#[cfg(unix)]
+fn refilling_git(dir: &Path, folder: &Path) -> std::ffi::OsString {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = std::env::var_os("PATH").unwrap();
+    let real = std::env::split_paths(&path)
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("git on PATH");
+    let leftover = folder.join("target").join("flycheck0");
+    let script = format!(
+        "#!/bin/sh\n'{real}' \"$@\" || exit $?\ncase \" $* \" in\n  *' worktree remove '*)\n    \
+        mkdir -p '{leftover}' && : > '{leftover}/x'\n    exit 1 ;;\nesac\n",
+        real = real.display(),
+        leftover = leftover.display(),
+    );
+    let stub = dir.join("git");
+    fs::write(&stub, script).unwrap();
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path))).unwrap()
+}
+
+/// Git unregisters the worktree but fails on a refilled folder; `wt` finishes
+/// the delete and carries on to the branch step.
+#[cfg(unix)]
+#[test]
+fn a_folder_refilled_while_git_removes_it_is_finished_and_the_branch_deleted() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("chore/refilled", "refilled");
+    fixture.commit(&wt, "cleanup.txt");
+    git(&fixture.repo(), &["merge", "-q", "--no-ff", "-m", "merge", "chore/refilled"]);
+    let stub_dir = fixture.root.path().join("bin");
+    fs::create_dir(&stub_dir).unwrap();
+    let path = refilling_git(&stub_dir, &wt);
+
+    fixture
+        .wt(&fixture.repo())
+        .env("PATH", path)
+        .args(["remove", "refilled"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Removed worktree"))
+        .stderr(predicate::str::contains("Deleted branch"));
+    assert!(!wt.exists());
+    assert!(!git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("chore/refilled"));
+    assert!(!fixture.branch_exists("chore/refilled"));
+}
+
 // --- The spec's Examples table ----------------------------------------------
 
 #[test]
