@@ -35,9 +35,24 @@ Deletion and observation cannot be atomic with all possible writers. A report
 will identify partial deletion and coverage limits rather than promise that
 every concurrent write was preserved.
 
+Some checkouts will be refused before anything changes:
+
+- A checkout containing submodules, or holding a FIFO, a device, a nested
+  mount, or an unsupported reparse point, exits 3.
+- A checkout on a filesystem that cannot move a directory without risking
+  replacement exits 4. One example is a WSL checkout under `/mnt/<drive>`;
+  remove it from Windows instead. The same applies when change watching
+  cannot be started, or the recovery record cannot be written.
+- On Windows, a move blocked by a file open anywhere in the checkout exits 4,
+  as it does today.
+
+Exits 3 and 4 will keep meaning "nothing removed". A stop after the checkout
+has moved exits 1, even if no file was deleted yet.
+
 ```mermaid
 flowchart LR
-    A[Query usage] -->|Usage found| B[Pause; show processes]
+    W[Start watching for changes] --> A[Query usage]
+    A -->|Usage found| B[Pause; show processes]
     A -->|No usage observed| C[Move checkout]
     C --> D[Delete while observing both paths]
     D -->|Unexpected activity or failure| E[Preserve remnants; report recovery]
