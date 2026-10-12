@@ -8,7 +8,71 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - Cargo.toml
+    - Cargo.lock
+    - schematic/justfile
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/error.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/src/redact.rs
+    - schematic/runtime/src/response.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/compile_fail.rs
+    - schematic/runtime/tests/l1/decode_boundary.rs
+    - schematic/runtime/tests/l1/envelope.rs
+    - schematic/runtime/tests/l1/redaction.rs
+    - schematic/runtime/tests/l1/test_layout.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.stderr
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/encode.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/error.rs
+    - schematic/runtime/src/transport.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/runtime/tests/l1/decode_boundary.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.rs
+docs_updated_during_phase_3:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/windows.md
+packages:
+    - schematic-runtime
 ---
 
 # Schematic Runtime Envelope Implementation Plan
@@ -81,18 +145,18 @@ Entry: Phase 1 contracts are fixed; checked-in schema and consumers stay on the 
 
 ### Wave 3 — Package Setup (sequential)
 
-- [ ] **Create Runtime Package**
+- [x] **Create Runtime Package**
   - Create the workspace member, manifest, crate root, test registration, and module boundaries for metadata/errors, redaction, transport, credentials, origin, deadline, codecs, and hooks. Introduce only dependencies required by these contracts and document them as added.
   - Define `EndpointSpec`/API marker, `Decode` boundary, request parts, call options, and ABI interfaces before delegating module implementation. Keep the runtime independent of `schematic-define`.
   - Add runtime to package-enumerating area recipes, including build, sanity, test, lint, doctest, coverage, and applicable tier/real recipes. Preserve existing L2 generator coverage; do not fabricate runtime L2 tests. Confirm discovery with `sniff repo packages` and `just ci-local --plan` (R1, R37).
 
 ### Wave 4 — Foundation Modules (parallel after Wave 3)
 
-- [ ] **Define Response Types**
+- [x] **Define Response Types**
   - Implement metadata, `Response`/`Outcome`, `ApiError`, uninhabited `NoDeclaredError`, safe transport/build errors, and non-exhaustive failure kinds, including distinct redirect refusal/following failures.
   - Implement complementary data/error access, metadata-preserving `into_parts`, metadata-discarding `into_result`, and precise decode/interruption helpers. Add error-type rustdoc explaining the body Debug limitation now (R3, R4, R6, R8, R10–R13 groundwork).
   - Own response/error modules and their value/compile-fail tests; network classification checks follow in Phase 3.
-- [ ] **Implement Redaction**
+- [x] **Implement Redaction**
   - Implement the union of every D48 built-in name, effective-auth names, and API secret names. Headers match case-insensitively; query names exactly; ordered ordinary duplicate query values remain intact.
   - Produce safe stored URLs, query values, repeated header maps, URL-valued Location headers, request IDs, and diagnostic targets. Omit bodies/arbitrary error strings from Display; keep evidence bytes untouched.
   - Own redaction module and table tests; use all built-in names and distinguish non-secret values. Integrate sentinel checks across outcomes in Phase 3 (R5–R7).
@@ -105,22 +169,22 @@ Entry: metadata, redaction, live-decoder contracts, and request assembly interfa
 
 ### Wave 5 — Request Infrastructure (parallel)
 
-- [ ] **Build Managed Transport**
+- [x] **Build Managed Transport**
   - Implement standalone managed builder and `SharedTransport`, always with HTTP-library redirects disabled. Cover base URL, proxy, roots, invalid-certificate opt-in, connect/per-request timeouts, user agent, default headers, and transport attachment.
   - Validate HTTP(S) base URLs, reject user information and auth-bearing defaults, and enforce shared-settings conflict rules with typed safe `BuildError`.
   - Add local proxy/TLS fixtures, required-root/default-rejection tests, and sequential drained HTTP/1.1 connection-reuse evidence from two clients sharing one transport (R17–R19 groundwork, R18).
   - Own builder/transport modules and fixtures; raw client injection is never exposed.
-- [ ] **Resolve Credentials**
+- [x] **Resolve Credentials**
   - Implement effective-policy validation and one-time source resolution, caller environment-order replacement, independent Basic fields, environment mappings, custom bearer headers/API-key prefixes, query/cookie keys, and explicit anonymous mode.
   - Separate resolved secrets from redacted metadata, reject duplicate key injection, and ensure default/header/variant migration cannot add a second credential source.
   - Own credential module and isolated environment tests. Tests observe selected credentials at the server and source evidence, including policy differing from legacy strategy (R14–R16).
-- [ ] **Implement Deadlines**
+- [x] **Implement Deadlines**
   - Implement shared `Instant` expiration/counter, limiting-timeout cause, whole-send budget, and decoder-owned stream idle/deadline state. Count classified logical responses once; expose invalid-argument construction and page slot for later pagination.
   - Own deadline module and deterministic state tests; integrate short-delay, no-send-after-expiry, and cancellation server evidence in Wave 6 (R9, R26, R30).
 
 ### Wave 6 — Execution Integration (sequential)
 
-- [ ] **Implement Typed Send**
+- [x] **Implement Typed Send**
   - Assemble replayable request bytes and ordered query/header/cookie inputs; resolve credentials once; capture redacted application request metadata; receive and classify response heads before handing live bodies to codecs.
   - Ship JSON, text, binary, and draining Empty decoders. Preserve original/partial bytes on read/decode failures; decode declared errors on arrival, distinguish undeclared statuses, and preserve malformed 2xx status. JSON parses valid JSON despite misleading Content-Type.
   - Cover no-head Connect/TLS/Timeout/DeadlineExceeded versus post-head BodyInterrupted, safe network diagnostics, pre-send InvalidArgument, and API-specific request bounds. Outer errors always retain request metadata.
