@@ -27,6 +27,40 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 depends-on:
   - 2026-10-05-filesystem-watchers
+human_review: false
+message_to_agent: |-
+  Phase 1 (rulings and spikes) is closed. Read implementation-log.md "## Phase 1"
+  before starting: its rulings supersede the plan's proposals where they differ.
+  Nothing Phase 1 found blocks Phase 2 (records, journal, typed outcomes). Two
+  inputs for Phase 2: the deletion batch bound is "one directory or 256 entries,
+  whichever is smaller", and the operation ID is a 128-bit getrandom token in
+  lowercase hex.
+
+  Four decisions still need the author before the phase each one gates. Carry
+  them forward, and set human_review with plain-language items at the close of
+  Phase 3 at the latest if the author has not confirmed them:
+  (1) R1/R2/R3 are still "proceeding on the spec's recommendation" (gate
+  Phases 3-6).
+  (2) R4: notify 8.2 fails the coverage contract on every OS. Windows overflow
+  and lost watches are silent; on Linux notify drops a recursive watch when its
+  root is renamed; FSEvents drops 2,000-event bursts and delivers out of order
+  against a marker. So Phase 5 uses three focused native adapters (inotify,
+  FSEvents with FSEventStreamFlushSync, ReadDirectoryChangesW) behind one
+  internal observer type, adding the inotify (ISC) and fsevent-sys (MIT) crates.
+  (3) R5: renameat2(RENAME_NOREPLACE) returns EINVAL on WSL drvfs (/mnt/<drive>),
+  so such checkouts will be refused instead of removed (gates Phase 4).
+  (4) Windows: a directory rename blocked by an in-use subtree returns
+  ERROR_ACCESS_DENIED, the same code as an ACL denial. The ruling classifies a
+  5 or 32 from the rename call (after a successful DELETE open) as "in use"
+  (exit 4), and a 5 or 32 from the open as a permission error (gates Phase 4).
+
+  Phase 4 rules from S3: never use `git worktree move` (it replaces an existing
+  empty directory). Do a native no-replacement rename to a same-depth sibling,
+  rewrite only the admin gitdir in the record's existing link format (a
+  relative gitdir is relative to the admin directory itself), and leave the
+  .git file unchanged. The final unregister deletes content with .git last,
+  rmdirs the quarantine, and then reuses missing.rs remove_missing_record (a
+  plain `git worktree remove` of the absent path); never pass --force.
 ---
 
 # Graceful removal under filesystem contention

@@ -4,6 +4,19 @@ created: 2026-10-11
 phase: 1
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - worktree/fixes/2026-10-05-graceful-file-contention/spikes/README.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/wsl.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/linux.md
+  - .claude/skills/worktree/remove.md
+packages:
+  - worktree
 ---
 
 # Plan: Graceful removal under filesystem contention
@@ -131,7 +144,7 @@ The spec leaves these unresolved or only recommends an answer. Each needs the
 marked ruling before the phase it gates starts; outcomes and author overrides
 are recorded in `implementation-log.md` and the spec file stays unchanged.
 
-- [ ] **R1 - Git association strategy (author decision; gates Phases 4-6).**
+- [x] **R1 - Git association strategy (author decision; gates Phases 4-6).**
       The spec's first Open Question. This plan proceeds on the recommended
       **Option 1: controlled deletion with registration retained** — a move
       backend that enforces no replacement and verifies the same admin links
@@ -144,7 +157,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       checkouts initially refuse; the final unregister step carries the
       identity/recreation/index checks. Options 2 and 3 weaken the contract
       and are rejected unless the author overrides.
-- [ ] **R2 - Local observation strategy (author decision; gates Phase 5).**
+- [x] **R2 - Local observation strategy (author decision; gates Phase 5).**
       The spec's second Open Question. Proceed on the recommended
       **Option 1: native notifications plus one inventory and targeted
       checks**. Unusable local observation refuses before mutation as an
@@ -152,14 +165,14 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       permits continuation). Options 2 (polling) and 3 (repeated hashing)
       reduce protection or re-read ignored build output and are rejected
       unless the author overrides.
-- [ ] **R3 - Sniff latency contract (author confirmation; gates Phase 3).**
+- [x] **R3 - Sniff latency contract (author confirmation; gates Phase 3).**
       `wt` adopts `query_path_usage` under the dependent spec's finalized
       Option 1: the two-second budget stops scheduling work; a native call
       already running may overrun it; no scanning threads outlive the query.
       The fix spec already accepts this subject to that API decision, which
       landed as Option 1 — confirm and record. Typed `PathUsageError`s are
       matched by variant, never by message text.
-- [ ] **R4 - Watcher adapter (planning ruling from spike S2; gates Phase 5).**
+- [x] **R4 - Watcher adapter (planning ruling from spike S2; gates Phase 5).**
       Proposed default: the maintained portable adapter `notify` 8 with its
       per-backend capabilities recorded, or focused native adapters where
       `notify` cannot surface overflow/lost-watch or rename invalidation.
@@ -167,7 +180,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       watch invalidation on rename must be observable, no thread left behind
       after the session ends. Decision, version, license, and native build
       needs go to `worktree/docs/dependencies.md`.
-- [ ] **R5 - No-replacement rename primitive (planning ruling from spike S1;
+- [x] **R5 - No-replacement rename primitive (planning ruling from spike S1;
       gates Phase 4).** Proposed: Linux `renameat2(RENAME_NOREPLACE)`, macOS
       `renamex_np(RENAME_EXCL)`, Windows `NtSetInformationFile`
       `FileRenameInformation` with `ReplaceIfExists = FALSE` (fall back to
@@ -176,7 +189,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       contract permits destination replacement). Error kinds map to: sharing
       failure (Windows) → exit 4 path; collision/permission/other I/O →
       operational error, never evidence of another process's usage.
-- [ ] **R6 - `git worktree move` eligibility (planning ruling from spike S3;
+- [x] **R6 - `git worktree move` eligibility (planning ruling from spike S3;
       gates Phase 4).** Use it only where it enforces no replacement and
       leaves unrelated records alone; otherwise native rename plus checked
       updates of exactly the target's own links (admin `gitdir` back-reference
@@ -184,7 +197,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       Broad `git worktree repair` is forbidden (the worktree skill records it
       rewriting unrelated worktree links). Record the minimum Git version the
       behavior was verified against.
-- [ ] **R7 - Record and journal details (planning ruling; gates Phase 2).**
+- [x] **R7 - Record and journal details (planning ruling; gates Phase 2).**
       Operation ID: 128-bit `getrandom` token, hex/base32-rendered (existing
       dependency). Storage: `<common-git-dir>/wt-removal/<operation-id>/`
       containing the record, `report.json`, and the journal; owner-restricted
@@ -198,7 +211,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       bound: one directory or 256 entries, whichever is smaller (tunable,
       recorded in the log). A stale lock file is never treated as an active
       operation; only the held OS lock is.
-- [ ] **R8 - Disposition of the existing checks (planning ruling; gates
+- [x] **R8 - Disposition of the existing checks (planning ruling; gates
       Phase 3).** The early `check_no_processes` in `run` stays as a
       preliminary, question-sparing check; the decisive usage query is the
       fresh Sniff query inside the operation, immediately before the
@@ -206,7 +219,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       rename-and-back probe inside `remove_worktree` are replaced by the new
       preflight and the recorded quarantine move (spec-mandated), so a probe
       can no longer leave an unrecorded directory behind.
-- [ ] **R9 - Exit codes and typed outcomes (confirmed by the spec; no open
+- [x] **R9 - Exit codes and typed outcomes (confirmed by the spec; no open
       decision).** The spec's exit table is implemented verbatim: usage or
       changed approved state before mutation → 3; missing wrapper, invalid
       handoff, or Windows sharing failure before move → 4; anything after the
@@ -214,18 +227,18 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       file was deleted; checkout-removed-but-branch-failed → 1; verified
       completion or pre-mutation cancellation → 0. The typed outcome is
       preserved separately from the exit code.
-- [ ] **R10 - No performance spike (author ruling recorded, not scheduled).**
+- [x] **R10 - No performance spike (author ruling recorded, not scheduled).**
       The spec adds no performance spike or timing gate, and its own figures
       answer the timing questions (two-second shared budget; ~6 ms per Windows
       file-side query already measured in the dependent feature's log). Any
       wider measurement (deletion throughput on very large trees, watcher
       overhead) is the author's separate decision; none is scheduled here.
-- [ ] **R11 - CI scope (planning ruling; verified in Phase 8).** All new tests
+- [x] **R11 - CI scope (planning ruling; verified in Phase 8).** All new tests
       are self-contained in temp directories with fixture-owned child
       processes and stand-in remotes; no `[package.metadata.ci.tests]
       source-inputs`, no prompts, no terminal focus. Verify with
       `just ci-local --plan` before pushing.
-- [ ] **R12 - Self-exclusion mechanics (planning ruling; gates Phase 3/5).**
+- [x] **R12 - Self-exclusion mechanics (planning ruling; gates Phase 3/5).**
       Exclusions are matched by specifically identified operation-owned
       handles (the current `wt` process's own watcher/session handles,
       registered when created) using PID plus process-lifetime identity where
@@ -241,20 +254,20 @@ Each runs once, before the work it informs. None is a performance spike
 leaves to the plan. Output: a short finding in `implementation-log.md` and the
 ruling it feeds (R4, R5, R6). Hosts follow the `os` skill.
 
-- [ ] **S1 - Atomic no-replacement rename (hosts: macOS local, native Windows
+- [x] **S1 - Atomic no-replacement rename (hosts: macOS local, native Windows
       build host, Linux or WSL2).** Question: does the proposed primitive
       (R5) fail without replacing an existing destination, preserve directory
       identity across the rename, return distinguishable error kinds for
       collision / cross-device / sharing violation, and need no special
       privileges? Gates R5 and Phase 4.
-- [ ] **S2 - Watcher adapter capabilities (hosts: macOS, native Windows,
+- [x] **S2 - Watcher adapter capabilities (hosts: macOS, native Windows,
       Linux or WSL2).** Question: with the candidate adapter, what events
       arrive when a watched directory is renamed away; how are queue
       overflow and lost watches surfaced; can the admin dir's `index` and
       `sharedindex.*` be watched alongside the tree; what happens at
       platform watch limits; what is the bounded-queue behavior? Gates R4 and
       Phase 5.
-- [ ] **S3 - Git move and final-unregister semantics (host: macOS, current
+- [x] **S3 - Git move and final-unregister semantics (host: macOS, current
       Git).** Question: does `git worktree move` satisfy the no-replacement
       and scoped-update contract (which files it rewrites, how it refuses
       existing destinations and submodules); is the manual equivalence a
@@ -266,14 +279,14 @@ ruling it feeds (R4, R5, R6). Hosts follow the `os` skill.
 
 ### Tasks
 
-- [ ] **Record rulings** - Write R1-R12 outcomes, author confirmations, and
+- [x] **Record rulings** - Write R1-R12 outcomes, author confirmations, and
       any overrides into `implementation-log.md`; mark unresolved author
       rulings (R1-R3) as "proceeding on the spec's recommendation pending
       confirmation".
-- [ ] **Run spikes** - S1 (three hosts), S2 (three hosts), and S3 run
+- [x] **Run spikes** - S1 (three hosts), S2 (three hosts), and S3 run
       concurrently as Wave 1; each records its finding and the resulting
       ruling; failures to reach a host are reported, not skipped silently.
-- [ ] **Load skills** - Implementers load `worktree`, `rust-testing`, `os`,
+- [x] **Load skills** - Implementers load `worktree`, `rust-testing`, `os`,
       `rust`, and (for CLI waves) `biscuit-terminal` before their wave;
       subagent briefs repeat that the session tree is non-interactive.
 

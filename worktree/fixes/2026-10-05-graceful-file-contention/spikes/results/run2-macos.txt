@@ -1,0 +1,221 @@
+S1 os=macos base=/tmp/gfc-run/gfc-s1
+S1 absent-dest result=Ok identity_before=[dev=16777233 ino=856305770] identity_after=[dev=16777233 ino=856305770] same=true child_kept=true
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Err(kind=NotADirectory, os=Some(20), msg=Not a directory (os error 20)) src_still_there=true dest_replaced=false
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(66), msg=Directory not empty (os error 66)) src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=No such file or directory (os error 2))
+S1 cross-device to=/Volumes/coding/.gfc-xdev/gfc-s1-xdev-dst noreplace=Err(kind=CrossesDevices, os=Some(18), msg=Cross-device link (os error 18)) src_kept=true dest_exists=false
+S1 in-use open-file-no-share-delete noreplace=Ok src_kept=false
+S1 in-use open-file-std-default-share noreplace=Ok src_kept=false
+S1 in-use own-notify-watcher noreplace=Ok src_kept=false
+S1 in-use own-notify-watcher-on-parent-recursive noreplace=Ok moved=true
+S1 permission-denied-parent noreplace=Err(kind=PermissionDenied, os=Some(13), msg=Permission denied (os error 13)) src_kept=true
+S1 in-use child-cwd-in-subdir noreplace=Ok src_kept=false
+S2 os=macos root=/private/tmp/gfc-run/gfc-s2 watcher-kind=Fsevent
+S2 ===== strategy A-child-watch
+S2 watch parent=None checkout=None admin=None
+S2 threads before=1 with-watcher=4
+S2 [01 baseline-no-action] events=10
+    +   5ms Create(Folder) [parent]
+    +   5ms Create(Folder) [parent/checkout]
+    +   5ms Create(Folder) [parent/checkout/sub]
+    +   5ms Create(Folder) [admin]
+    +   5ms Create(File) [parent/checkout/a.txt]
+    +   5ms Modify(Data(Content)) [parent/checkout/a.txt]
+    +   5ms Create(File) [parent/checkout/b.txt]
+    +   5ms Modify(Data(Content)) [parent/checkout/b.txt]
+    +   5ms Create(File) [admin/index]
+    +   5ms Modify(Data(Content)) [admin/index]
+S2 [02 create checkout/sub/new.txt] events=2
+    +  11ms Create(File) [parent/checkout/sub/new.txt]
+    +  11ms Modify(Data(Content)) [parent/checkout/sub/new.txt]
+S2 [03 append checkout/a.txt] events=2
+    +  12ms Create(File) [parent/checkout/a.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=3
+    +   0ms Create(File) [parent/checkout/a.txt]
+    +   0ms Modify(Metadata(Ownership)) [parent/checkout/a.txt]
+    +   0ms Modify(Data(Content)) [parent/checkout/a.txt]
+S2 [05 delete checkout/b.txt] events=3
+    +  11ms Create(File) [parent/checkout/b.txt]
+    +  11ms Remove(File) [parent/checkout/b.txt]
+    +  11ms Modify(Data(Content)) [parent/checkout/b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=9
+    +  10ms Create(File) [admin/index.lock]
+    +  10ms Modify(Name(Any)) [admin/index.lock]
+    +  10ms Modify(Data(Content)) [admin/index.lock]
+    +  10ms Modify(Name(Any)) [admin/index]
+    +  10ms Create(File) [admin/index]
+    +  10ms Modify(Name(Any)) [admin/index]
+    +  10ms Modify(Data(Content)) [admin/index]
+    +  10ms Create(File) [admin/sharedindex.0123abcd]
+    +  10ms Modify(Data(Content)) [admin/sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=3
+    +   0ms Create(File) [parent/sibling.txt]
+    +   0ms Modify(Data(Content)) [parent/sibling.txt]
+    +   0ms Create(Folder) [parent/othersib]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=3
+    +   2ms Create(Folder) [parent/checkout]
+    +   2ms Modify(Name(Any)) [parent/checkout]
+    +   2ms Modify(Name(Any)) [parent/.checkout.wt-removal-q1]
+S2 [09 write inside quarantine (no new watch)] events=0
+S2 [10 recreate original checkout/ + recreated.txt] events=3
+    +  12ms Create(Folder) [parent/checkout]
+    +  12ms Create(File) [parent/checkout/recreated.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/recreated.txt]
+S2 unwatch(original checkout path) after rename = None
+S2 watch(quarantine) = None
+S2 [11 write inside quarantine (fresh watch)] events=2
+    +   4ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +   4ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+S2 [11b write inside recreated original (old watch removed)] events=0
+S2 [12 delete quarantine children (operation-owned)] events=10
+    +  14ms Remove(File) [parent/.checkout.wt-removal-q1/sub/new.txt]
+    +  14ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  14ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  14ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  14ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +  14ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +  14ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +  14ms Remove(File) [parent/.checkout.wt-removal-q1/a.txt]
+    +  14ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/a.txt]
+    +  14ms Remove(Folder) [parent/.checkout.wt-removal-q1/sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=2
+    +  12ms Remove(Folder) [parent/.checkout.wt-removal-q1]
+    +  12ms Modify(Name(Any)) [parent/.checkout.wt-removal-q1]
+S2 [14 parent still observed after quarantine root removed] events=2
+    +  12ms Create(File) [parent/after-root-removed.txt]
+    +  12ms Modify(Data(Content)) [parent/after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=4 after-drop+300ms=3
+S2 ===== strategy B-parent-recursive
+S2 watch parent(recursive)=None admin=None
+S2 threads before=3 with-watcher=4
+S2 [01 baseline-no-action] events=10
+    +   3ms Create(Folder) [parent]
+    +   3ms Create(Folder) [parent/checkout]
+    +   3ms Create(Folder) [parent/checkout/sub]
+    +   3ms Create(Folder) [admin]
+    +   3ms Create(File) [parent/checkout/a.txt]
+    +   3ms Modify(Data(Content)) [parent/checkout/a.txt]
+    +   3ms Create(File) [parent/checkout/b.txt]
+    +   3ms Modify(Data(Content)) [parent/checkout/b.txt]
+    +   3ms Create(File) [admin/index]
+    +   3ms Modify(Data(Content)) [admin/index]
+S2 [02 create checkout/sub/new.txt] events=2
+    +  12ms Create(File) [parent/checkout/sub/new.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/sub/new.txt]
+S2 [03 append checkout/a.txt] events=2
+    +  12ms Create(File) [parent/checkout/a.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=3
+    +  12ms Create(File) [parent/checkout/a.txt]
+    +  12ms Modify(Metadata(Ownership)) [parent/checkout/a.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/a.txt]
+S2 [05 delete checkout/b.txt] events=3
+    +  12ms Create(File) [parent/checkout/b.txt]
+    +  12ms Remove(File) [parent/checkout/b.txt]
+    +  12ms Modify(Data(Content)) [parent/checkout/b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=9
+    +  13ms Create(File) [admin/index.lock]
+    +  13ms Modify(Name(Any)) [admin/index.lock]
+    +  13ms Modify(Data(Content)) [admin/index.lock]
+    +  13ms Modify(Name(Any)) [admin/index]
+    +  13ms Create(File) [admin/index]
+    +  13ms Modify(Name(Any)) [admin/index]
+    +  13ms Modify(Data(Content)) [admin/index]
+    +  13ms Create(File) [admin/sharedindex.0123abcd]
+    +  13ms Modify(Data(Content)) [admin/sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=5
+    +  11ms Create(File) [parent/sibling.txt]
+    +  11ms Modify(Data(Content)) [parent/sibling.txt]
+    +  11ms Create(Folder) [parent/othersib]
+    +  11ms Create(File) [parent/othersib/x]
+    +  11ms Modify(Data(Content)) [parent/othersib/x]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=3
+    +  11ms Create(Folder) [parent/checkout]
+    +  11ms Modify(Name(Any)) [parent/checkout]
+    +  11ms Modify(Name(Any)) [parent/.checkout.wt-removal-q1]
+S2 [09 write inside quarantine (no new watch)] events=3
+    +  11ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  11ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  11ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/a.txt]
+S2 [10 recreate original checkout/ + recreated.txt] events=3
+    +  11ms Create(Folder) [parent/checkout]
+    +  11ms Create(File) [parent/checkout/recreated.txt]
+    +  11ms Modify(Data(Content)) [parent/checkout/recreated.txt]
+S2 [12 delete quarantine children (operation-owned)] events=7
+    +  12ms Remove(File) [parent/.checkout.wt-removal-q1/sub/new.txt]
+    +  12ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  12ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  12ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +  12ms Remove(File) [parent/.checkout.wt-removal-q1/a.txt]
+    +  12ms Modify(Data(Content)) [parent/.checkout.wt-removal-q1/a.txt]
+    +  12ms Remove(Folder) [parent/.checkout.wt-removal-q1/sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=2
+    +  11ms Remove(Folder) [parent/.checkout.wt-removal-q1]
+    +  11ms Modify(Name(Any)) [parent/.checkout.wt-removal-q1]
+S2 [14 parent still observed after quarantine root removed] events=2
+    +  13ms Create(File) [parent/after-root-removed.txt]
+    +  13ms Modify(Data(Content)) [parent/after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=3 after-drop+300ms=3
+S2 B1 round=0 files=2000 distinct-before-marker=1916 marker-latency-ms=None new-paths-after-marker=0
+S2 B1 round=1 files=2000 distinct-before-marker=2288 marker-latency-ms=Some(405) new-paths-after-marker=0
+S2 B1 round=2 files=2000 distinct-before-marker=2511 marker-latency-ms=Some(622) new-paths-after-marker=0
+S2 [O1 bounded(64) queue, 3000 creates, consumer idle] events=64
+    +   0ms Create(Folder) [flood1]
+    +   0ms Create(File) [flood1/f0]
+    +   0ms Modify(Data(Content)) [flood1/f0]
+    +   0ms Create(File) [flood1/f1]
+    +   0ms Modify(Data(Content)) [flood1/f1]
+    +   0ms Create(File) [flood1/f2]
+    +   0ms Modify(Data(Content)) [flood1/f2]
+    +   0ms Create(File) [flood1/f3]
+    +   0ms Modify(Data(Content)) [flood1/f3]
+    +   0ms Create(File) [flood1/f4]
+    +   0ms Modify(Data(Content)) [flood1/f4]
+    +   0ms Create(File) [flood1/f5]
+    +   0ms Modify(Data(Content)) [flood1/f5]
+    +   0ms Create(File) [flood1/f6]
+    +   0ms Modify(Data(Content)) [flood1/f6]
+    +   0ms Create(File) [flood1/f7]
+    +   0ms Modify(Data(Content)) [flood1/f7]
+    +   0ms Create(File) [flood1/f8]
+    +   0ms Modify(Data(Content)) [flood1/f8]
+    +   0ms Create(File) [flood1/f9]
+    ... 24 more ...
+    +   0ms Modify(Data(Content)) [flood1/f21]
+    +   0ms Create(File) [flood1/f22]
+    +   0ms Modify(Data(Content)) [flood1/f22]
+    +   0ms Create(File) [flood1/f23]
+    +   0ms Modify(Data(Content)) [flood1/f23]
+    +   0ms Create(File) [flood1/f24]
+    +   0ms Modify(Data(Content)) [flood1/f24]
+    +   0ms Create(File) [flood1/f25]
+    +   0ms Modify(Data(Content)) [flood1/f25]
+    +   0ms Create(File) [flood1/f26]
+    +   0ms Modify(Data(Content)) [flood1/f26]
+    +   0ms Create(File) [flood1/f27]
+    +   0ms Modify(Data(Content)) [flood1/f27]
+    +   0ms Create(File) [flood1/f28]
+    +   0ms Modify(Data(Content)) [flood1/f28]
+    +   0ms Create(File) [flood1/f29]
+    +   0ms Modify(Data(Content)) [flood1/f29]
+    +   0ms Create(File) [flood1/f30]
+    +   0ms Modify(Data(Content)) [flood1/f30]
+    +   0ms Create(File) [flood1/f31]
+S2 O1 received=64 dropped-by-our-handler=5049
+S2 O2 wrote 40000 files in 1896ms with the backend blocked
+S2 O2 created=40000 create-events=28080 other-events=28061 rescan-events=88 errors=0 rescan_info=["Other Some(\"rescan: user dropped\")", "Other Some(\"rescan: user dropped\")", "Other Some(\"rescan: user dropped\")"]
+S2 O2 watcher drop took 0ms
+S2 L1 watcher instances created=300 in 4848ms outcome=no limit hit threads=302
+S2 L1 threads after dropping all=3

@@ -1,0 +1,74 @@
+S3 git=git version 2.56.0
+S3 == Q1 git worktree move onto existing destinations
+    $ git -C main worktree move $R/q1a $R/holder  -> rc=0 
+S3   existing EMPTY holder/q1a (ino 856412336) now: ino 856412316, has .git=y
+    $ git -C main worktree move $R/q1b $R/q1b-empty  -> rc=0 
+S3   explicit existing empty dir destination: moved inside? y
+    $ git -C main worktree move $R/q1c $R/q1c-file  -> rc=128 fatal: '$R/q1c-file' already exists
+    $ git -C main worktree move $R/q1d $R/q1d-holder  -> rc=128 fatal: '$R/q1d-holder/q1d' already exists
+S3 == Q2 files a successful git move rewrites (absolute links)
+    $ git -C main worktree move $R/q2 $R/.q2.wt-removal-x  -> rc=0 
+    diff < main/.git/worktrees/q2/gitdir e856261c947b
+    diff > main/.git/worktrees/q2/gitdir 2df6c3f04e85
+    diff > ./.q2.wt-removal-x/.git -> gitdir: $R/main/.git/worktrees/q2
+    diff < ./q2/.git -> gitdir: $R/main/.git/worktrees/q2
+S3 == Q3 relative links (worktree.useRelativePaths; Git >= 2.48)
+    $ git -C main -c worktree.useRelativePaths=true worktree add -q -b q3 $R/q3  -> rc=0 
+S3   config after relative add: [extensions] 	relativeWorktrees = true 
+    $ git -C main worktree move $R/q3 $R/.q3.wt-removal-x  -> rc=0 
+    diff < main/.git/worktrees/q3/gitdir 5cbfb8d97264
+    diff > main/.git/worktrees/q3/gitdir 5b6f81ef9b27
+    diff > ./.q3.wt-removal-x/.git -> gitdir: $R/main/.git/worktrees/q3
+    diff < ./q3/.git -> gitdir: ../main/.git/worktrees/q3
+S3   manual native move to a same-depth sibling: .git=gitdir: ../main/.git/worktrees/q3b admin gitdir=../../../../q3b/.git
+    $ git -C $R/.q3b.manual rev-parse --absolute-git-dir  -> rc=0 $R/main/.git/worktrees/q3b
+    $ git -C main worktree list --porcelain  -> rc=0 worktree $R/main | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/main |  | worktree $R/.q2.wt-removal-x | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q2 |  | worktree $R/.q3.wt-removal-x | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q3 |  | worktree $R/gone | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/gone | prunable gitdir file points to non-existent location |  | worktree $R/holder/q1a | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q1a |  | worktree $R/other | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/other |  | worktree $R/q1b-empty/q1b | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q1b |  | worktree $R/q1c | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q1c |  | worktree $R/q1d | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q1d |  | worktree $R/q3b | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q3b | prunable gitdir file points to non-existent location
+S3   after rewriting only the admin gitdir (relative form):
+    $ git -C $R/.q3b.manual status --porcelain  -> rc=0 
+    $ sh -c git -C main worktree list --porcelain | grep -A3 q3b  -> rc=0 worktree $R/main/.q3b.manual | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q3b | prunable gitdir file points to non-existent location |  | worktree $R/other
+    $ git -C main worktree prune --dry-run -v  -> rc=0 Removing worktrees/gone: gitdir file points to non-existent location | Removing worktrees/q3b: gitdir file points to non-existent location
+S3   move one level deeper (relative .git now wrong):
+    $ git -C $R/deeper/q3c status --porcelain  -> rc=128 fatal: gitfile does not point to a valid repository: $R/deeper/q3c/.git
+S3 == Q4 manual native move + rewrite of exactly the admin gitdir (absolute links)
+    $ sh -c git -C main worktree list --porcelain | grep -A3 q4  -> rc=0 worktree $R/q4 | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q4 | prunable gitdir file points to non-existent location
+    $ sh -c git -C main worktree list --porcelain | grep -A3 q4  -> rc=0 worktree $R/.q4.manual | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff | branch refs/heads/q4 |  | worktree $R/gone | HEAD ec803cb8e9d9523ebf067f989b7877c760969cff
+    $ git -C $R/.q4.manual status --porcelain  -> rc=0 
+    $ git -C main worktree prune --dry-run -v  -> rc=0 Removing worktrees/gone: gitdir file points to non-existent location | Removing worktrees/q3c: gitdir file points to non-existent location | Removing worktrees/q3b: gitdir file points to non-existent location
+    diff < main/.git/worktrees/q4/gitdir b131fb58168c
+    diff > main/.git/worktrees/q4/gitdir 54b84f91600f
+    diff > ./.q4.manual/.git -> gitdir: $R/main/.git/worktrees/q4
+    diff < ./q4/.git -> gitdir: $R/main/.git/worktrees/q4
+S3 == Q5 locked worktree
+    $ git -C main worktree lock --reason kept $R/q5  -> rc=0 
+    $ git -C main worktree move $R/q5 $R/.q5.x  -> rc=128 fatal: cannot move a locked working tree, lock reason: kept | use 'move -f -f' to override or unlock first
+    $ git -C main worktree move -f $R/q5 $R/.q5.x  -> rc=128 fatal: cannot move a locked working tree, lock reason: kept | use 'move -f -f' to override or unlock first
+    $ git -C main worktree remove --force $R/q5  -> rc=128 fatal: cannot remove a locked working tree, lock reason: kept | use 'remove -f -f' to override or unlock first
+S3   lock survives a manual move: locked kept
+S3 == Q6 submodule
+    $ git -C $R/q6 -c protocol.file.allow=always submodule add -q $R/subrepo mod  -> rc=0 
+S3   submodule .git: gitdir: ../../main/.git/worktrees/q6/modules/mod
+    $ git -C main worktree move $R/q6 $R/.q6.x  -> rc=128 fatal: working trees containing submodules cannot be moved or removed
+    $ git -C main worktree remove $R/q6  -> rc=128 fatal: working trees containing submodules cannot be moved or removed
+S3 == Q7 index files of a linked worktree (split index, entry flags)
+    $ git -C $R/q7 config core.splitIndex true  -> rc=0 
+    $ git -C $R/q7 update-index --split-index  -> rc=0 
+    $ git -C $R/q7 add -N new.txt  -> rc=0 
+    $ git -C $R/q7 update-index --skip-worktree sub/s.txt  -> rc=0 
+S3   admin dir: commondir gitdir HEAD index logs ORIG_HEAD refs sharedindex.b1b2a4047bbf14fe1a44afe83205435a47222c0f sharedindex.e4021e8cedda95a837f086aa934db21ca5fe1dcf 
+S3   common dir sharedindex: 
+S3   ls-files -v: H a.txt H new.txt S sub/s.txt 
+S3   ls-files --stage --debug (new.txt): 100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 0	new.txt ctime: 0:0 mtime: 0:0 dev: 0	ino: 0 uid: 0	gid: 0 size: 0	flags: 20004000 
+S3 == Q8 final unregister of a quarantine emptied by Worktree
+S3   only .git left: .git 
+    $ git -C $R/.q8.wt-removal-final status --porcelain  -> rc=0  D a.txt |  D sub/s.txt
+    $ git -C main worktree remove $R/.q8.wt-removal-final  -> rc=128 fatal: '$R/.q8.wt-removal-final' contains modified or untracked files, use --force to delete it
+S3   (a) plain remove, only .git left: dir=kept record=2
+    $ git -C main worktree remove $R/.q8.wt-removal-final  -> rc=0 
+S3   (b) plain remove of the now-absent directory: record=0 admin=gone
+    $ git -C main worktree remove --force $R/.q8c.wt-removal-final  -> rc=0 
+S3   (c) single --force, only .git left: dir=gone record=0
+    $ git -C main worktree remove $R/.q8d.wt-removal-final  -> rc=128 fatal: validation failed, cannot remove working tree: '$R/.q8d.wt-removal-final/.git' does not exist
+S3   (d) dir recreated without .git before plain remove: dir=kept record=2
+S3   unrelated records intact: other=2 gone(prunable)=2
+S3 == Q9 locked + absent directory
+    $ git -C main worktree remove $R/q9  -> rc=128 fatal: cannot remove a locked working tree; | use 'remove -f -f' to override or unlock first
