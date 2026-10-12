@@ -7,6 +7,7 @@
 
 mod clean_quoting;
 mod clean_suggestions;
+mod positions;
 
 use super::*;
 use crate::markdown::Markdown;
