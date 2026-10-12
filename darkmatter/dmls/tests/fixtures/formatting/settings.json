@@ -1,0 +1,19 @@
+{
+  "dmls": {
+    "diagnostics": { "debounce_ms": 300 },
+    "formatting": {
+      "markdown": {
+        "frontmatter": false,
+        "table-layout": false,
+        "fixed-width": 80,
+        "unwrap": true,
+        "indentation": 2,
+        "ordered-lists": false,
+        "list-padding": false,
+        "list-item-padding": "one",
+        "list-interior-padding": "all",
+        "default-language": "sh"
+      }
+    }
+  }
+}

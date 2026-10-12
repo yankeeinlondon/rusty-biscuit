@@ -6,10 +6,13 @@
 
 mod blockquote;
 mod brackets;
+pub mod diagnostic;
 mod emphasis;
+pub mod frontmatter;
 mod lists;
 mod opaque;
 mod reflow;
+pub mod rules;
 mod tables;
 
 #[cfg(test)]

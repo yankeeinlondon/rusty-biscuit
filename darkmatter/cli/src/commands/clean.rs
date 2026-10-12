@@ -1,19 +1,29 @@
 //! `md clean` subcommand implementation.
 //!
-//! `clean` runs a raw-source frontmatter pass *before* it builds a
-//! [`Markdown`], so documents whose frontmatter does not parse can still be
-//! repaired. Output is assembled from the repaired frontmatter block verbatim
-//! plus the cleaned body, which keeps untouched frontmatter ranges — comments,
-//! key order, quote style — byte-identical rather than reserialized.
+//! `clean` runs the library's raw-source frontmatter repair
+//! ([`repair_frontmatter`]) *before* it builds a [`Markdown`], so documents
+//! whose frontmatter does not parse can still be repaired. Output is assembled
+//! from the repaired frontmatter block verbatim plus the cleaned body, which
+//! keeps untouched frontmatter ranges — comments, key order, quote style —
+//! byte-identical rather than reserialized.
+//!
+//! This module owns what is specific to the `md` binary: schema flags and the
+//! request contexts they resolve in, terminal suggestions, and (in [`json`])
+//! the version-1 JSON envelope.
 
-mod frontmatter_repair;
+mod json;
 
 use crate::io::{OpenedArgument, open_argument};
 use crate::request::MdRequest;
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::eyre::{Context, Report, Result, eyre};
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::cleanup::diagnostic::CleanDiagnostic;
+use darkmatter::markdown::cleanup::frontmatter::{
+    FrontmatterRepair, FrontmatterRepairError, repair_frontmatter,
+};
 use darkmatter::markdown::cleanup::{
     DEFAULT_INDENT, ListSpacingMode, cleanup_content_with_indent_compact_preserving_incidental,
     cleanup_content_with_indent_loose_preserving_incidental,
@@ -21,13 +31,35 @@ use darkmatter::markdown::cleanup::{
 };
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
+use darkmatter::markdown::schemas::CleanSchemaConfig;
 use darkmatter::markdown::Markdown;
 use std::io::{self, IsTerminal, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
-pub use frontmatter_repair::CleanSchemaFlags;
-use frontmatter_repair::{DocumentRequest, repair_frontmatter, report_suggestions};
+use json::json_report;
+
+/// Schema controls for `md clean`, mirroring the `md compose` flags of the
+/// same name.
+#[derive(Debug, Clone, Default)]
+pub struct CleanSchemaFlags {
+    /// `--schema PATH`: an explicit schema that replaces the document's own
+    /// `$schema` layer. Baseline and trigger layers still apply beneath it.
+    pub schema: Option<PathBuf>,
+    /// `--baseline-schema PATH`
+    pub baseline_schema: Option<PathBuf>,
+    /// `--no-baseline-schema`
+    pub no_baseline_schema: bool,
+    /// `--no-trigger-schemas`
+    pub no_trigger_schemas: bool,
+}
+
+/// The `md` request a `clean` run resolves schema references in, and the
+/// reference that opened the document (for a quoted `~/…` argument).
+struct DocumentRequest<'a> {
+    request: &'a MdRequest,
+    opening: Option<&'a biscuit_file::FileReference>,
+}
 
 /// Everything `md clean` needs beyond its input path.
 #[derive(Debug, Clone)]
@@ -88,7 +120,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     let raw = read_source(resolved.as_ref())?;
 
     let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
-    let repair = repair_frontmatter(&raw, resolved.as_deref(), &options.schema, &document_request)?;
+    let repair = repair_document(&raw, resolved.as_deref(), &options.schema, &document_request)?;
 
     // Building the document is what enforces the unrepairable-YAML contract.
     // JSON mode reports that domain failure through its machine channel before
@@ -96,7 +128,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     let original = match Markdown::try_from_content(repair.source.clone()) {
         Ok(markdown) => markdown,
         Err(_error) if options.json => {
-            let report = repair.json_report(resolved, &raw, false);
+            let report = json_report(&repair, resolved, &raw, false);
             println!("{}", serde_json::to_string_pretty(&report)?);
             io::stdout().flush()?;
             std::process::exit(1);
@@ -116,7 +148,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
 
     let Some(path) = save_path else {
         if options.json {
-            let report = repair.json_report(resolved, &raw, changed);
+            let report = json_report(&repair, resolved, &raw, changed);
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
             report_suggestions(&repair.diagnostics, &Terminal::new());
@@ -131,7 +163,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     }
 
     if options.json {
-        let report = repair.json_report(resolved, &raw, changed);
+        let report = json_report(&repair, resolved, &raw, changed);
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
@@ -155,6 +187,102 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     }
     print!("{}", report.render(&terminal));
     Ok(())
+}
+
+/// Runs the library frontmatter repair with this invocation's schema
+/// configuration, keeping each failure's original error so messages are
+/// unchanged.
+fn repair_document(
+    raw: &str,
+    document_path: Option<&Path>,
+    flags: &CleanSchemaFlags,
+    request: &DocumentRequest<'_>,
+) -> Result<FrontmatterRepair> {
+    repair_frontmatter(raw, document_path, || {
+        schema_config(flags, document_path, request)
+    })
+    .map_err(|error| match error {
+        FrontmatterRepairError::Extraction(error) => Report::new(error),
+        FrontmatterRepairError::Schema(error) => Report::new(error),
+        FrontmatterRepairError::Context(error) => error,
+    })
+}
+
+/// Builds the schema configuration for this `clean` invocation.
+///
+/// The library calls this at most once and only behind a non-empty
+/// frontmatter block, so contexts are built — and repository discovery paid
+/// for — only when the schema tier runs.
+fn schema_config(
+    flags: &CleanSchemaFlags,
+    document_path: Option<&Path>,
+    request: &DocumentRequest<'_>,
+) -> Result<CleanSchemaConfig> {
+    // A file resolves through its own context; stdin through the launch one.
+    let context = match document_path {
+        Some(path) => request.request.document_context(request.opening, path)?,
+        None => request.request.launch_context()?.clone(),
+    };
+    let mut config = CleanSchemaConfig::new(context);
+
+    if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
+        config = config.without_baseline_schema();
+    } else if let Some(path) = &flags.baseline_schema {
+        config = config.with_baseline_schema_file(crate::io::resolve_file_path(
+            path,
+            request.request.launch_context()?,
+        )?);
+    }
+
+    if let Some(schema) = &flags.schema {
+        // A string `$schema` is biscuit-file's file-reference form, which is
+        // exactly what a path-valued `--schema` means.
+        config = config.with_schema_override(serde_json::Value::String(
+            schema.to_string_lossy().into_owned(),
+        ));
+    }
+
+    Ok(config.with_trigger_schemas(!flags.no_trigger_schemas))
+}
+
+/// Renders report-only findings to STDERR as suggestions.
+///
+/// Suggestions deliberately do not affect the exit code: `md clean` runs in
+/// pre-commit hooks and agent loops, where a new failure mode would be more
+/// disruptive than the smells it reports.
+fn report_suggestions(diagnostics: &[CleanDiagnostic], terminal: &Terminal) {
+    let mut list = UnorderedList::empty();
+    let mut reported = 0_usize;
+
+    for entry in diagnostics {
+        if entry.classification.is_auto_apply_eligible() {
+            continue;
+        }
+        reported += 1;
+        list.add(Prose::new(format!(
+            "<b>{}</b>. {}",
+            escape_prose(entry.code.as_str()),
+            escape_prose(&entry.message)
+        )));
+    }
+
+    if reported == 0 {
+        return;
+    }
+
+    // `Prose`/`UnorderedList` render without a trailing newline, so the header
+    // and the list need their own line breaks or they arrive glued together.
+    eprintln!(
+        "{}",
+        Prose::new("frontmatter suggestions (not applied)").render(terminal)
+    );
+    eprintln!("{}", list.render(terminal));
+}
+
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
+fn escape_prose(text: &str) -> String {
+    Prose::escape_text_outside_code_spans(text)
 }
 
 /// Rebuilds the document from its repaired frontmatter block and cleaned body.

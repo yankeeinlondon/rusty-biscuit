@@ -62,10 +62,20 @@ strict = false
 # path = "docs/schemas/claudine.yaml"
 # globs = [".claude/**", "prompts/**"]
 
-[formatting]
-# cleanup = "compact"        # cleanup variant used by textDocument/formatting
-# fixed_width = 80
+# Workspace defaults for textDocument/formatting; the same rule keys as a
+# document's `style.markdown`, which overrides them per document.
+[formatting.markdown]
+# list-item-padding = "none" # preserve | none | one
+# fixed-width = 80           # 1..=1000, true (120), or false
 ```
+
+The older `formatting.cleanup` (`compact` → `list-item-padding = "none"`,
+`loose` → `"one"`, `default` → no override) and `formatting.fixed_width` keys
+are still read and translated, with one migration warning per key each time
+the configuration loads. A `[formatting]` table that mixes them with
+`formatting.markdown`, or that has an unknown key or invalid value, is ignored
+and the remaining settings apply. These findings are written to the server
+log; showing them in the editor is **planned**.
 
 See [spec.md](../../../features/2026-07-04-dmls/spec.md) § Configuration for the
 full key list.

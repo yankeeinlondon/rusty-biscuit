@@ -114,6 +114,10 @@ fn pre_validate_inner(value: &Value, canonical_path: &str) -> Result<(), StylePa
         let canonical_segment = kebabify(key);
         let canonical_child = join_path(canonical_path, &canonical_segment);
 
+        if canonical_child == "markdown" {
+            validate_markdown_rules(child)?;
+            continue;
+        }
         if let Some(leaf) = leaf_for_canonical(&canonical_child) {
             validate_leaf(leaf, child, &canonical_child)?;
             continue;
@@ -147,7 +151,31 @@ fn validate_leaf(
         | LeafType::HrWeight
         | LeafType::HrAlignment
         | LeafType::CompoundStyle
-        | LeafType::WordWrap => Ok(()),
+        | LeafType::WordWrap
+        | LeafType::MarkdownRule => Ok(()),
+    }
+}
+
+/// Validates `style.markdown` as a whole through the cleanup rules'
+/// validator, so rendering accepts exactly what cleanup accepts. Unknown
+/// rule names and snake-case spellings are rejected here: the rules have no
+/// aliases.
+fn validate_markdown_rules(value: &Value) -> Result<(), StyleParseError> {
+    if value.is_null() {
+        return Ok(());
+    }
+    match crate::markdown::cleanup::rules::rules_from_json(value) {
+        Ok(_) => Ok(()),
+        Err(errors) => {
+            let first = &errors[0];
+            Err(StyleParseError::InvalidRule {
+                path: match &first.key {
+                    Some(key) => format!("style.markdown.{key}"),
+                    None => "style.markdown".to_string(),
+                },
+                reason: first.message.clone(),
+            })
+        }
     }
 }
 
@@ -474,6 +502,45 @@ mod tests {
             StyleWarningKind::Deprecated { .. }
         ));
         assert_eq!(s.page.unwrap().left_margin, Some(Length::Ch(2)));
+    }
+
+    /// Valid cleanup rules are accepted silently, even by strict mode: they
+    /// are neither unknown keys nor inactive render styles.
+    #[test]
+    fn valid_markdown_rules_produce_no_warnings_and_pass_strict() {
+        let value = json!({"markdown": {
+            "frontmatter": false, "table-layout": false, "fixed-width": 80, "unwrap": true,
+            "indentation": 2, "ordered-lists": false, "list-padding": false,
+            "list-item-padding": "one", "list-interior-padding": "all", "default-language": "sh"
+        }});
+        let parsed = from_json_value(&value).unwrap();
+        assert!(parsed.1.is_empty(), "got: {:?}", parsed.1);
+        assert_eq!(into_strict(parsed).unwrap(), StyleFrontmatter::default());
+
+        for value in [json!({"markdown": null}), json!({"markdown": {}}), json!({"markdown": {"unwrap": null}})] {
+            let (_, warnings) = from_json_value(&value).unwrap();
+            assert!(warnings.is_empty(), "{value}: {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_markdown_rules_return_the_rule_validators_reason() {
+        for (value, path) in [
+            (json!({"markdown": {"indentation": "4"}}), "style.markdown.indentation"),
+            (json!({"markdown": {"fixed-width": 0}}), "style.markdown.fixed-width"),
+            (json!({"markdown": {"bogus": true}}), "style.markdown.bogus"),
+            (json!({"markdown": {"fixed_width": 80}}), "style.markdown.fixed_width"),
+            (json!({"markdown": 5}), "style.markdown"),
+            (json!({"markdown": []}), "style.markdown"),
+        ] {
+            match from_json_value(&value) {
+                Err(StyleParseError::InvalidRule { path: actual, reason }) => {
+                    assert_eq!(actual, path, "{value}");
+                    assert!(!reason.is_empty());
+                }
+                other => panic!("{value}: expected InvalidRule, got {other:?}"),
+            }
+        }
     }
 
     #[test]

@@ -1,15 +1,36 @@
 //! `DmlsConfig`: the server configuration model and its three sources.
 //!
-//! Precedence (design "Configuration"): editor `workspace/configuration`
+//! Precedence (design "Configuration"): editor `didChangeConfiguration`
 //! overlay > `.dmls.toml` at the workspace root > built-in defaults.
 //! Frontmatter never configures the server. All spec keys are parsed now
 //! even where their consumers land in later phases, so configs written
 //! today stay valid as features arrive.
+//!
+//! `formatting` is read differently from every other section. Each authored
+//! source (the file, the editor overlay) is validated and normalized on its
+//! own into a [`MarkdownRuleOverrides`], translating the legacy
+//! `formatting.cleanup` / `formatting.fixed_width` keys, and the two are then
+//! merged leaf by leaf: an overlay leaf with a value wins, and an absent or
+//! `null` overlay leaf releases to the file's leaf. Serialized defaults never
+//! enter that merge, so they cannot manufacture legacy keys. A source whose
+//! `formatting` is invalid contributes no formatting overrides at all. The
+//! document's own `style.markdown` and CLI flags rank above the merged
+//! workspace overrides; see `darkmatter::markdown::cleanup::rules::resolve`.
+//!
+//! Findings from a load are kept as [`ConfigDiagnostic`]s on
+//! [`ConfigState::diagnostics`], recomputed (never accumulated) on every load,
+//! reload, and settings change.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::cleanup::rules::{
+    FIXED_WIDTH_MAX_COLUMNS, FixedWidth, Leaf, ListItemPadding, MarkdownRuleOverrides,
+    rules_from_json,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 /// The repo config file name, discovered at each workspace root. Also serves
@@ -60,19 +81,6 @@ pub enum HeadingCompletionStyle {
     Text,
     /// The GitHub-style slug.
     Slug,
-}
-
-/// Which Darkmatter cleanup variant formatting uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CleanupVariant {
-    /// `Markdown::cleanup`.
-    #[default]
-    Default,
-    /// `Markdown::cleanup_compact`.
-    Compact,
-    /// `Markdown::cleanup_loose`.
-    Loose,
 }
 
 /// Workspace/library root and discovery globs.
@@ -181,14 +189,17 @@ pub struct CodeActionsConfig {
     pub categories: BTreeMap<String, bool>,
 }
 
-/// Formatting behavior (`textDocument/formatting` → `Markdown::cleanup`).
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
+/// Formatting behavior (`textDocument/formatting`).
+///
+/// Never serialized or deserialized implicitly: [`DmlsConfig::load_file`] and
+/// [`ConfigState`] read each source's `formatting` table through the shared
+/// rule validator, so this holds only validated, normalized overrides.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FormattingConfig {
-    /// Cleanup variant.
-    pub cleanup: CleanupVariant,
-    /// Reflow prose to this display-column width.
-    pub fixed_width: Option<u16>,
+    /// The workspace level of the `style.markdown` rules: the file's
+    /// `formatting.markdown` (or its translated legacy keys) with the editor
+    /// overlay merged over it leaf by leaf.
+    pub markdown: MarkdownRuleOverrides,
 }
 
 /// Document-symbol behavior.
@@ -246,7 +257,8 @@ pub struct DmlsConfig {
     pub hints: HintsConfig,
     /// Code-action category toggles.
     pub code_actions: CodeActionsConfig,
-    /// Formatting behavior.
+    /// Formatting behavior; read separately from the other sections.
+    #[serde(skip)]
     pub formatting: FormattingConfig,
     /// Document-symbol behavior.
     pub symbols: SymbolsConfig,
@@ -257,52 +269,193 @@ pub struct DmlsConfig {
 }
 
 impl DmlsConfig {
-    /// Loads a config file.
+    /// Loads a config file, reading its `formatting` table through the shared
+    /// rule validator.
     ///
     /// ## Errors
     ///
     /// [`ConfigError::Io`] when the file cannot be read and
-    /// [`ConfigError::Parse`] when it is not valid config TOML.
-    pub fn load_file(path: &Path) -> Result<Self, ConfigError> {
+    /// [`ConfigError::Parse`] when it is not valid TOML (including duplicate
+    /// keys and trailing garbage) or does not fit the config shape. An invalid
+    /// `formatting` table is not an error: the file's other settings load,
+    /// its formatting overrides are dropped, and the finding is in
+    /// [`LoadedConfig::diagnostics`].
+    pub fn load_file(path: &Path) -> Result<LoadedConfig, ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-        toml::from_str(&text).map_err(|source| ConfigError::Parse {
+        let parse_error = |source| ConfigError::Parse {
             path: path.to_path_buf(),
             source: Box::new(source),
+        };
+        let table: toml::Table = toml::from_str(&text).map_err(parse_error)?;
+        let formatting = table.get("formatting").cloned();
+        let mut config: DmlsConfig = toml::Value::Table(table).try_into().map_err(parse_error)?;
+
+        let source = ConfigSource::File(path.to_path_buf());
+        let mut diagnostics = Vec::new();
+        match formatting
+            .as_ref()
+            .map(|value| toml_to_json(value, "formatting"))
+            .transpose()
+        {
+            Ok(section) => {
+                config.formatting.markdown =
+                    normalize_formatting(section.as_ref(), &source, &mut diagnostics);
+            }
+            Err((key, message)) => diagnostics.push(source.rejected(key, message)),
+        }
+        Ok(LoadedConfig {
+            config,
+            diagnostics,
         })
     }
 
-    /// Discovers `.dmls.toml` at the workspace roots (first hit wins).
+    /// Discovers `.dmls.toml` at the workspace roots (first loadable hit
+    /// wins).
     ///
-    /// Unreadable or malformed files are logged and skipped so a broken
-    /// config degrades to defaults instead of killing the server.
-    pub fn discover(roots: &[PathBuf]) -> (Self, Option<PathBuf>) {
+    /// Unreadable or malformed files are skipped so a broken config degrades
+    /// to defaults instead of killing the server; each one leaves an error in
+    /// the returned diagnostics.
+    pub fn discover(roots: &[PathBuf]) -> (LoadedConfig, Option<PathBuf>) {
+        let mut skipped = Vec::new();
         for root in roots {
             let candidate = root.join(CONFIG_FILE_NAME);
             if !candidate.is_file() {
                 continue;
             }
             match Self::load_file(&candidate) {
-                Ok(config) => return (config, Some(candidate)),
-                Err(error) => {
-                    tracing::warn!("ignoring config {}: {error}", candidate.display());
+                Ok(mut loaded) => {
+                    skipped.append(&mut loaded.diagnostics);
+                    loaded.diagnostics = skipped;
+                    return (loaded, Some(candidate));
                 }
+                Err(error) => skipped.push(error.into_diagnostic()),
             }
         }
-        (Self::default(), None)
+        (
+            LoadedConfig {
+                config: Self::default(),
+                diagnostics: skipped,
+            },
+            None,
+        )
+    }
+}
+
+/// A loaded config and the findings loading it produced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadedConfig {
+    /// The loaded settings; `formatting.markdown` holds this source's
+    /// normalized overrides.
+    pub config: DmlsConfig,
+    /// Migration warnings and rejected settings, in discovery order.
+    pub diagnostics: Vec<ConfigDiagnostic>,
+}
+
+impl ConfigError {
+    /// The visible record of a file that contributed nothing.
+    fn into_diagnostic(self) -> ConfigDiagnostic {
+        let path = match &self {
+            ConfigError::Io { path, .. } | ConfigError::Parse { path, .. } => path.clone(),
+        };
+        ConfigDiagnostic {
+            severity: ConfigSeverity::Error,
+            source: ConfigSource::File(path),
+            key: None,
+            message: format!("{self}; none of its settings were applied"),
+        }
+    }
+}
+
+/// Where a configuration finding came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// A `.dmls.toml` (or `--config`) file.
+    File(PathBuf),
+    /// The editor's `didChangeConfiguration` settings.
+    EditorSettings,
+}
+
+impl fmt::Display for ConfigSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigSource::File(path) => write!(f, "{}", path.display()),
+            ConfigSource::EditorSettings => f.write_str("editor settings"),
+        }
+    }
+}
+
+impl ConfigSource {
+    /// What this source calls a mapping, for messages.
+    fn mapping(&self) -> &'static str {
+        match self {
+            ConfigSource::File(_) => "a table",
+            ConfigSource::EditorSettings => "an object",
+        }
+    }
+
+    fn rejected(&self, key: impl Into<String>, message: impl fmt::Display) -> ConfigDiagnostic {
+        ConfigDiagnostic {
+            severity: ConfigSeverity::Error,
+            source: self.clone(),
+            key: Some(key.into()),
+            message: format!("{message}; no formatting settings from this source were applied"),
+        }
+    }
+
+    fn migrated(&self, key: &str, message: impl fmt::Display) -> ConfigDiagnostic {
+        ConfigDiagnostic {
+            severity: ConfigSeverity::Warning,
+            source: self.clone(),
+            key: Some(key.to_string()),
+            message: message.to_string(),
+        }
+    }
+}
+
+/// How serious a configuration finding is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSeverity {
+    /// The setting was applied, possibly translated (legacy migration).
+    Warning,
+    /// Settings were rejected and not applied.
+    Error,
+}
+
+/// One visible configuration finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigDiagnostic {
+    /// Warning (applied) or error (not applied).
+    pub severity: ConfigSeverity,
+    /// The file or the editor settings.
+    pub source: ConfigSource,
+    /// The dotted setting path (`formatting.markdown.fixed-width`); `None`
+    /// when the whole source is at fault.
+    pub key: Option<String>,
+    /// What happened, phrased for the author.
+    pub message: String,
+}
+
+impl fmt::Display for ConfigDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.key {
+            Some(key) => write!(f, "{}: `{key}`: {}", self.source, self.message),
+            None => write!(f, "{}: {}", self.source, self.message),
+        }
     }
 }
 
 /// The three config sources and the effective merge.
 ///
 /// The file layer reloads from disk; the overlay layer holds the most recent
-/// `workspace/configuration` / `didChangeConfiguration` settings. The
-/// effective config is file → overlay deep-merged as JSON, then
-/// deserialized; a merge that no longer deserializes keeps the previous
-/// effective config (logged), so bad editor settings cannot wedge the
-/// server.
+/// `didChangeConfiguration` settings. For every section but `formatting`, the
+/// effective config is file → overlay deep-merged as JSON, then deserialized;
+/// a merge that no longer deserializes keeps the file's sections (with an
+/// error diagnostic), so bad editor settings cannot wedge the server.
+/// `formatting` is normalized per source and merged leaf by leaf (see the
+/// module docs).
 #[derive(Debug)]
 pub struct ConfigState {
     workspace_roots: Vec<PathBuf>,
@@ -310,33 +463,27 @@ pub struct ConfigState {
     explicit_path: Option<PathBuf>,
     file_path: Option<PathBuf>,
     file: DmlsConfig,
-    overlay: Option<serde_json::Value>,
+    file_diagnostics: Vec<ConfigDiagnostic>,
+    overlay: Option<Value>,
     effective: DmlsConfig,
+    diagnostics: Vec<ConfigDiagnostic>,
 }
 
 impl ConfigState {
     /// Loads config for the given workspace roots, honoring an explicit
     /// `--config` path when provided.
     pub fn load(workspace_roots: Vec<PathBuf>, explicit_path: Option<PathBuf>) -> Self {
-        let (file, file_path) = match &explicit_path {
-            Some(path) => match DmlsConfig::load_file(path) {
-                Ok(config) => (config, Some(path.clone())),
-                Err(error) => {
-                    tracing::warn!("ignoring --config {}: {error}", path.display());
-                    (DmlsConfig::default(), None)
-                }
-            },
-            None => DmlsConfig::discover(&workspace_roots),
-        };
         let mut state = Self {
             workspace_roots,
             explicit_path,
-            file_path,
-            file,
+            file_path: None,
+            file: DmlsConfig::default(),
+            file_diagnostics: Vec::new(),
             overlay: None,
             effective: DmlsConfig::default(),
+            diagnostics: Vec::new(),
         };
-        state.recompute();
+        state.reload();
         state
     }
 
@@ -350,66 +497,370 @@ impl ConfigState {
         self.file_path.as_deref()
     }
 
+    /// Findings from the most recent load, reload, or settings change: file
+    /// findings first, then editor-settings findings. Replaced, never
+    /// accumulated, so each authored legacy key appears once per change.
+    pub fn diagnostics(&self) -> &[ConfigDiagnostic] {
+        &self.diagnostics
+    }
+
     /// Applies `workspace/didChangeConfiguration` settings and reloads the
     /// config file in the same pass (editors don't watch `.dmls.toml` for
-    /// us in Phase 2).
+    /// us).
     ///
     /// Accepts either `{ "dmls": { ... } }` or the bare section object; a
-    /// `null` settings value clears the overlay.
-    pub fn apply_client_settings(&mut self, settings: serde_json::Value) {
+    /// `null` settings value clears the overlay. Any other non-object value
+    /// keeps the previous overlay and records an error.
+    pub fn apply_client_settings(&mut self, settings: Value) {
+        let mut rejected = None;
         self.overlay = match settings {
-            serde_json::Value::Null => None,
-            serde_json::Value::Object(mut map) => match map.remove("dmls") {
-                Some(serde_json::Value::Null) | None if map.is_empty() => None,
+            Value::Null => None,
+            Value::Object(mut map) => match map.remove("dmls") {
+                Some(Value::Null) | None if map.is_empty() => None,
                 Some(section) => Some(section),
-                None => Some(serde_json::Value::Object(map)),
+                None => Some(Value::Object(map)),
             },
             other => {
-                tracing::warn!("ignoring non-object configuration settings: {other}");
+                rejected = Some(ConfigDiagnostic {
+                    severity: ConfigSeverity::Error,
+                    source: ConfigSource::EditorSettings,
+                    key: None,
+                    message: format!(
+                        "settings must be an object, found {}; the previous settings remain",
+                        describe(&other)
+                    ),
+                });
                 self.overlay.take()
             }
         };
         self.reload();
+        if let Some(rejected) = rejected {
+            let at = self.file_diagnostics.len();
+            self.diagnostics.insert(at, rejected);
+        }
     }
 
     /// Re-reads the config file and recomputes the effective config.
     pub fn reload(&mut self) {
-        let (file, file_path) = match &self.explicit_path {
+        let (loaded, file_path) = match &self.explicit_path {
             Some(path) => match DmlsConfig::load_file(path) {
-                Ok(config) => (config, Some(path.clone())),
-                Err(error) => {
-                    tracing::warn!("ignoring --config {}: {error}", path.display());
-                    (DmlsConfig::default(), None)
-                }
+                Ok(loaded) => (loaded, Some(path.clone())),
+                Err(error) => (
+                    LoadedConfig {
+                        config: DmlsConfig::default(),
+                        diagnostics: vec![error.into_diagnostic()],
+                    },
+                    None,
+                ),
             },
             None => DmlsConfig::discover(&self.workspace_roots),
         };
-        self.file = file;
+        for diagnostic in &loaded.diagnostics {
+            tracing::warn!("{diagnostic}");
+        }
+        self.file = loaded.config;
+        self.file_diagnostics = loaded.diagnostics;
         self.file_path = file_path;
         self.recompute();
     }
 
     fn recompute(&mut self) {
-        let mut merged = serde_json::to_value(&self.file)
-            .expect("DmlsConfig always serializes to a JSON object");
-        if let Some(overlay) = &self.overlay {
+        let mut diagnostics = self.file_diagnostics.clone();
+        let mut overlay = self.overlay.clone();
+        // `None` = the overlay has no `formatting` key (absent, not null).
+        let overlay_formatting = match &mut overlay {
+            Some(Value::Object(map)) => map.remove("formatting"),
+            _ => None,
+        };
+
+        let mut merged =
+            serde_json::to_value(&self.file).expect("DmlsConfig always serializes to a JSON object");
+        if let Some(overlay) = &overlay {
             merge_json(&mut merged, overlay);
         }
-        match serde_json::from_value::<DmlsConfig>(merged) {
-            Ok(effective) => self.effective = effective,
+        self.effective = match serde_json::from_value::<DmlsConfig>(merged) {
+            Ok(effective) => effective,
             Err(error) => {
-                tracing::warn!("configuration overlay produced an invalid config: {error}");
-                self.effective = self.file.clone();
+                diagnostics.push(ConfigDiagnostic {
+                    severity: ConfigSeverity::Error,
+                    source: ConfigSource::EditorSettings,
+                    key: None,
+                    message: format!(
+                        "settings produced an invalid config ({error}); the file and default \
+                         settings remain"
+                    ),
+                });
+                self.file.clone()
+            }
+        };
+
+        let first_overlay_finding = diagnostics.len();
+        let overlay_rules = normalize_formatting(
+            overlay_formatting.as_ref(),
+            &ConfigSource::EditorSettings,
+            &mut diagnostics,
+        );
+        self.effective.formatting.markdown =
+            layer_rules(&overlay_rules, &self.file.formatting.markdown);
+        for diagnostic in &diagnostics[first_overlay_finding..] {
+            tracing::warn!("{diagnostic}");
+        }
+        self.diagnostics = diagnostics;
+    }
+}
+
+/// Merges two levels leaf by leaf: an `upper` value wins; otherwise a `lower`
+/// value; otherwise `upper`'s explicit `null` is kept so it stays visible.
+fn layer_rules(upper: &MarkdownRuleOverrides, lower: &MarkdownRuleOverrides) -> MarkdownRuleOverrides {
+    fn leaf<T: Clone>(upper: &Leaf<T>, lower: &Leaf<T>) -> Leaf<T> {
+        match (upper, lower) {
+            (Leaf::Value(_), _) => upper.clone(),
+            (_, Leaf::Value(_)) => lower.clone(),
+            (Leaf::Null, _) => Leaf::Null,
+            (Leaf::Absent, _) => lower.clone(),
+        }
+    }
+    MarkdownRuleOverrides {
+        frontmatter: leaf(&upper.frontmatter, &lower.frontmatter),
+        table_layout: leaf(&upper.table_layout, &lower.table_layout),
+        fixed_width: leaf(&upper.fixed_width, &lower.fixed_width),
+        unwrap: leaf(&upper.unwrap, &lower.unwrap),
+        indentation: leaf(&upper.indentation, &lower.indentation),
+        ordered_lists: leaf(&upper.ordered_lists, &lower.ordered_lists),
+        list_padding: leaf(&upper.list_padding, &lower.list_padding),
+        list_item_padding: leaf(&upper.list_item_padding, &lower.list_item_padding),
+        list_interior_padding: leaf(&upper.list_interior_padding, &lower.list_interior_padding),
+        default_language: leaf(&upper.default_language, &lower.default_language),
+    }
+}
+
+/// The keys `formatting` accepts; the last two are legacy.
+const FORMATTING_KEYS: [&str; 3] = ["markdown", "cleanup", "fixed_width"];
+
+/// Validates and normalizes one source's `formatting` value (`None` when the
+/// key is absent).
+///
+/// ## Returns
+///
+/// The source's overrides, or no overrides when anything in its `formatting`
+/// is rejected. Each authored legacy key adds exactly one diagnostic: a
+/// migration warning, or an error when its value is unsupported. A source that
+/// mixes a legacy key with `markdown` gets one error instead.
+fn normalize_formatting(
+    section: Option<&Value>,
+    source: &ConfigSource,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> MarkdownRuleOverrides {
+    // `None` means rejected, already reported in `diagnostics`: the source
+    // contributes no overrides.
+    read_formatting(section, source, diagnostics).unwrap_or_default()
+}
+
+fn read_formatting(
+    section: Option<&Value>,
+    source: &ConfigSource,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> Option<MarkdownRuleOverrides> {
+    let map = match section {
+        None | Some(Value::Null) => return Some(MarkdownRuleOverrides::default()),
+        Some(Value::Object(map)) => map,
+        Some(other) => {
+            diagnostics.push(source.rejected(
+                "formatting",
+                format!("must be {}, found {}", source.mapping(), describe(other)),
+            ));
+            return None;
+        }
+    };
+
+    let mut accepted = true;
+    for key in map.keys() {
+        if !FORMATTING_KEYS.contains(&key.as_str()) {
+            diagnostics.push(source.rejected(
+                format!("formatting.{key}"),
+                "unknown formatting setting; expected `markdown`",
+            ));
+            accepted = false;
+        }
+    }
+
+    // Key presence decides the shape: even `markdown = {}` or a `null`
+    // legacy value makes the source mixed.
+    let legacy: Vec<&str> = ["cleanup", "fixed_width"]
+        .into_iter()
+        .filter(|key| map.contains_key(*key))
+        .collect();
+    if map.contains_key("markdown") && !legacy.is_empty() {
+        let names = legacy
+            .iter()
+            .map(|key| format!("`formatting.{key}`"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        diagnostics.push(source.rejected(
+            "formatting",
+            format!(
+                "mixes the legacy {names} with `formatting.markdown`; express them as \
+                 `formatting.markdown` rules instead"
+            ),
+        ));
+        return None;
+    }
+
+    let mut overrides = MarkdownRuleOverrides::default();
+    match map.get("markdown") {
+        None | Some(Value::Null) => {}
+        Some(markdown @ Value::Object(_)) => match rules_from_json(markdown) {
+            Ok(rules) => overrides = rules,
+            Err(errors) => {
+                for error in errors {
+                    let key = match error.key {
+                        Some(name) => format!("formatting.markdown.{name}"),
+                        None => "formatting.markdown".to_string(),
+                    };
+                    diagnostics.push(source.rejected(key, error.message));
+                }
+                accepted = false;
+            }
+        },
+        Some(other) => {
+            diagnostics.push(source.rejected(
+                "formatting.markdown",
+                format!("must be {}, found {}", source.mapping(), describe(other)),
+            ));
+            accepted = false;
+        }
+    }
+
+    if let Some(cleanup) = map.get("cleanup") {
+        let key = "formatting.cleanup";
+        let deprecated = "`formatting.cleanup` is deprecated";
+        match cleanup {
+            Value::String(variant) if variant == "compact" || variant == "loose" => {
+                let (padding, spelled) = if variant == "compact" {
+                    (ListItemPadding::None, "none")
+                } else {
+                    (ListItemPadding::One, "one")
+                };
+                overrides.list_item_padding = Leaf::Value(padding);
+                diagnostics.push(source.migrated(
+                    key,
+                    format!(
+                        "{deprecated}; \"{variant}\" was applied as \
+                         `formatting.markdown.list-item-padding: {spelled}`"
+                    ),
+                ));
+            }
+            Value::String(variant) if variant == "default" => diagnostics.push(source.migrated(
+                key,
+                format!("{deprecated}; \"default\" sets no override and can be removed"),
+            )),
+            Value::Null => diagnostics.push(source.migrated(
+                key,
+                format!("{deprecated}; null sets no override and can be removed"),
+            )),
+            other => {
+                diagnostics.push(source.rejected(
+                    key,
+                    format!(
+                        "{deprecated} and accepted only \"default\", \"compact\", or \"loose\", \
+                         found {}",
+                        describe(other)
+                    ),
+                ));
+                accepted = false;
             }
         }
+    }
+
+    if let Some(width) = map.get("fixed_width") {
+        let key = "formatting.fixed_width";
+        let deprecated = "`formatting.fixed_width` is deprecated";
+        let columns = width
+            .as_u64()
+            .filter(|columns| (1..=u64::from(FIXED_WIDTH_MAX_COLUMNS)).contains(columns))
+            .and_then(|columns| u16::try_from(columns).ok());
+        match (width, columns) {
+            (_, Some(columns)) => {
+                overrides.fixed_width = Leaf::Value(FixedWidth::Columns(columns));
+                diagnostics.push(source.migrated(
+                    key,
+                    format!("{deprecated}; applied as `formatting.markdown.fixed-width: {columns}`"),
+                ));
+            }
+            (Value::Null, None) => diagnostics.push(source.migrated(
+                key,
+                format!("{deprecated}; null sets no override and can be removed"),
+            )),
+            (other, None) => {
+                diagnostics.push(source.rejected(
+                    key,
+                    format!(
+                        "{deprecated} and accepted only a whole number from 1 to \
+                         {FIXED_WIDTH_MAX_COLUMNS}, found {}",
+                        describe(other)
+                    ),
+                ));
+                accepted = false;
+            }
+        }
+    }
+
+    accepted.then_some(overrides)
+}
+
+/// Converts a TOML value to JSON for the shared rule validator.
+///
+/// ## Errors
+///
+/// The dotted key and reason for a value JSON cannot carry faithfully: a
+/// date/time, or a non-finite float.
+fn toml_to_json(value: &toml::Value, key: &str) -> Result<Value, (String, String)> {
+    Ok(match value {
+        toml::Value::String(text) => Value::String(text.clone()),
+        toml::Value::Integer(number) => Value::from(*number),
+        toml::Value::Float(number) => match serde_json::Number::from_f64(*number) {
+            Some(number) => Value::Number(number),
+            None => return Err((key.to_string(), format!("{number} is not a usable number"))),
+        },
+        toml::Value::Boolean(flag) => Value::Bool(*flag),
+        toml::Value::Datetime(datetime) => {
+            return Err((
+                key.to_string(),
+                format!("a date/time ({datetime}) is not a formatting value"),
+            ));
+        }
+        toml::Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| toml_to_json(item, key))
+                .collect::<Result<_, _>>()?,
+        ),
+        toml::Value::Table(table) => Value::Object(
+            table
+                .iter()
+                .map(|(name, item)| {
+                    toml_to_json(item, &format!("{key}.{name}")).map(|item| (name.clone(), item))
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+    })
+}
+
+/// Describes `value` for a message: scalars by their text, so `"80"` and `80`
+/// read differently, collections by their kind.
+fn describe(value: &Value) -> String {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => value.to_string(),
+        Value::Array(_) => "a list".to_string(),
+        Value::Object(_) => "a mapping".to_string(),
     }
 }
 
 /// Deep-merges `overlay` into `base`: objects merge key-wise, everything
 /// else replaces.
-fn merge_json(base: &mut serde_json::Value, overlay: &serde_json::Value) {
+fn merge_json(base: &mut Value, overlay: &Value) {
     match (base, overlay) {
-        (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+        (Value::Object(base_map), Value::Object(overlay_map)) => {
             for (key, value) in overlay_map {
                 match base_map.get_mut(key) {
                     Some(slot) => merge_json(slot, value),
@@ -442,8 +893,7 @@ mod tests {
         assert!(config.hints.inlay);
         assert!(config.semantic_tokens.enable);
         assert_eq!(config.diagnostics.debounce_ms, 200);
-        assert_eq!(config.formatting.cleanup, CleanupVariant::Default);
-        assert_eq!(config.formatting.fixed_width, None);
+        assert_eq!(config.formatting.markdown, MarkdownRuleOverrides::default());
         assert_eq!(
             config.workspace.include,
             vec!["**/*.md".to_string(), "**/*.markdown".to_string()]
@@ -486,14 +936,19 @@ mod tests {
             [code_actions.categories]
             "create-missing-file" = false
 
-            [formatting]
-            cleanup = "compact"
-            fixed_width = 80
+            [formatting.markdown]
+            list-item-padding = "none"
+            fixed-width = 80
 
             [diagnostics]
             debounce_ms = 150
         "#;
-        let config: DmlsConfig = toml::from_str(toml_text).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, toml_text).unwrap();
+        let loaded = DmlsConfig::load_file(&path).unwrap();
+        assert_eq!(loaded.diagnostics, Vec::new());
+        let config = loaded.config;
         assert_eq!(config.workspace.root, Some(PathBuf::from("docs")));
         assert_eq!(config.workspace.exclude, vec!["target/**".to_string()]);
         assert_eq!(config.wiki.wiki_root, Some(PathBuf::from("notes")));
@@ -520,8 +975,14 @@ mod tests {
             config.code_actions.categories.get("create-missing-file"),
             Some(&false)
         );
-        assert_eq!(config.formatting.cleanup, CleanupVariant::Compact);
-        assert_eq!(config.formatting.fixed_width, Some(80));
+        assert_eq!(
+            config.formatting.markdown,
+            MarkdownRuleOverrides {
+                list_item_padding: Leaf::Value(ListItemPadding::None),
+                fixed_width: Leaf::Value(FixedWidth::Columns(80)),
+                ..MarkdownRuleOverrides::default()
+            }
+        );
         assert_eq!(config.diagnostics.debounce_ms, 150);
     }
 
@@ -541,8 +1002,8 @@ mod tests {
         std::fs::create_dir_all(&root_a).unwrap();
         std::fs::create_dir_all(&root_b).unwrap();
         std::fs::write(root_b.join(CONFIG_FILE_NAME), "[wiki]\nenable = false\n").unwrap();
-        let (config, path) = DmlsConfig::discover(&[root_a, root_b.clone()]);
-        assert!(!config.wiki.enable);
+        let (loaded, path) = DmlsConfig::discover(&[root_a, root_b.clone()]);
+        assert!(!loaded.config.wiki.enable);
         assert_eq!(path, Some(root_b.join(CONFIG_FILE_NAME)));
     }
 
@@ -550,9 +1011,16 @@ mod tests {
     fn test_discover_malformed_degrades_to_defaults() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join(CONFIG_FILE_NAME), "not [valid toml").unwrap();
-        let (config, path) = DmlsConfig::discover(&[temp.path().to_path_buf()]);
-        assert_eq!(config, DmlsConfig::default());
+        let (loaded, path) = DmlsConfig::discover(&[temp.path().to_path_buf()]);
+        assert_eq!(loaded.config, DmlsConfig::default());
         assert_eq!(path, None);
+        // The skipped file is reported, not only logged.
+        assert_eq!(loaded.diagnostics.len(), 1);
+        assert_eq!(loaded.diagnostics[0].severity, ConfigSeverity::Error);
+        assert_eq!(
+            loaded.diagnostics[0].source,
+            ConfigSource::File(temp.path().join(CONFIG_FILE_NAME))
+        );
     }
 
     #[test]
@@ -633,6 +1101,9 @@ mod tests {
             "dmls": { "diagnostics": { "debounce_ms": "not-a-number" } }
         }));
         assert_eq!(state.effective().diagnostics.debounce_ms, 200);
+        assert_eq!(state.diagnostics().len(), 1);
+        assert_eq!(state.diagnostics()[0].source, ConfigSource::EditorSettings);
+        assert_eq!(state.diagnostics()[0].severity, ConfigSeverity::Error);
     }
 
     #[test]

@@ -1,0 +1,19 @@
+# Workspace formatting settings: the control fixture for the `.dmls.toml`
+# robustness matrix (tests/l1/workspace_formatting_settings.rs). Every rule
+# is set to a non-default value so each one is observable. Keep the
+# formatting table last and one rule per line: the matrix rewrites them.
+
+[diagnostics]
+debounce_ms = 150
+
+[formatting.markdown]
+frontmatter = false
+table-layout = false
+fixed-width = 80
+unwrap = true
+indentation = 2
+ordered-lists = false
+list-padding = false
+list-item-padding = "one"
+list-interior-padding = "all"
+default-language = "sh"

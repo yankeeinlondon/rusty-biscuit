@@ -55,6 +55,10 @@ pub enum LeafType {
     /// A `word-wrap` keyword (`"none" | "wrap" | "truncate" | "wrap-prose"`).
     /// Validated by serde during typed deserialization.
     WordWrap,
+    /// A `style.markdown` cleanup rule. Validated by
+    /// [`crate::markdown::cleanup::rules`], the rules' single validator;
+    /// rendering never reads it.
+    MarkdownRule,
 }
 
 /// A single schema leaf: its canonical kebab-case path, any documented
@@ -66,8 +70,8 @@ pub struct SchemaLeaf {
     /// Snake-case alias path, if any (e.g. `"page.left_margin"`). Kept for
     /// the alias-coverage tests; not used by the walker.
     pub alias: Option<&'static str>,
-    /// Sub-spec number that wires this key to rendering. All current entries
-    /// point to one of sub-specs #2..#7.
+    /// Sub-spec number that wires this key to rendering. `0` marks a
+    /// `markdown.*` cleanup rule, which rendering accepts but never reads.
     pub sub_spec: u8,
     /// Typed category of this leaf — drives typed-error pre-validation.
     pub leaf_type: LeafType,
@@ -227,6 +231,18 @@ pub const SCHEMA: &[SchemaLeaf] = &[
     SchemaLeaf { canonical: "code-block.border",    alias: Some("code_block.border"),    sub_spec: 9, leaf_type: LeafType::CompoundStyle },
     SchemaLeaf { canonical: "code-block.emphasis",  alias: Some("code_block.emphasis"),  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
     SchemaLeaf { canonical: "code-block.word-wrap", alias: Some("code_block.word_wrap"), sub_spec: 9, leaf_type: LeafType::WordWrap },
+
+    // ── markdown (cleanup rules, not render styles; sub_spec 0 = never inactive) ──
+    SchemaLeaf { canonical: "markdown.frontmatter",           alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.table-layout",          alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.fixed-width",           alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.unwrap",                alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.indentation",           alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.ordered-lists",         alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.list-padding",          alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.list-item-padding",     alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.list-interior-padding", alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
+    SchemaLeaf { canonical: "markdown.default-language",      alias: None, sub_spec: 0, leaf_type: LeafType::MarkdownRule },
 ];
 
 /// Return the canonical schema leaf for `raw_path` if it matches either a
@@ -267,6 +283,7 @@ pub fn is_canonical_container(path: &str) -> bool {
             | "page.code"
             | "disclosure"
             | "code-block"
+            | "markdown"
     )
 }
 

@@ -4,17 +4,20 @@
 //! `textDocument/formatting` delegates to the same `Markdown::cleanup` sequence
 //! the `md clean` CLI runs, so DMLS formatting is byte-equivalent to the library
 //! for the configured options ([`FormattingConfig`](crate::config::FormattingConfig)):
-//! the cleanup variant, then an optional fixed-width reflow. Frontmatter and
+//! the workspace `list-item-padding` picks the cleanup variant, then
+//! `fixed-width` adds an optional reflow. The other workspace rules are not
+//! consulted yet. Frontmatter and
 //! directive lines pass through untouched — cleanup only normalizes body prose,
 //! list, and table geometry, and the frontmatter round-trips through the same
 //! `as_string` path the CLI uses.
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::reflow_to_width;
+use darkmatter::markdown::cleanup::rules::{FixedWidth, ListItemPadding};
 use lsp_types::{Position, Range, TextEdit};
 
 use super::DocumentContext;
-use crate::config::{CleanupVariant, DmlsConfig};
+use crate::config::DmlsConfig;
 
 /// Whole-document formatting edits for the current buffer.
 ///
@@ -40,24 +43,26 @@ pub fn formatting(ctx: &DocumentContext) -> Vec<TextEdit> {
 /// Runs the configured cleanup over `text`.
 ///
 /// Mirrors `md clean`'s `apply_cleanup` (with no explicit indent): the variant
-/// cleanup first, then a fixed-width reflow of the body when configured. The
+/// cleanup first (`list-item-padding` `none` is the compact variant, `one` the
+/// loose one), then a fixed-width reflow of the body when configured. The
 /// document is reassembled through `Markdown::as_string`, exactly as the CLI
 /// does, so the output is byte-identical to the library for the same options.
 pub fn format_text(text: &str, config: &DmlsConfig) -> String {
     let mut md: Markdown = text.into();
-    match config.formatting.cleanup {
-        CleanupVariant::Default => {
-            md.cleanup();
-        }
-        CleanupVariant::Compact => {
+    let rules = &config.formatting.markdown;
+    match rules.list_item_padding.value() {
+        Some(ListItemPadding::None) => {
             md.cleanup_compact();
         }
-        CleanupVariant::Loose => {
+        Some(ListItemPadding::One) => {
             md.cleanup_loose();
         }
+        Some(ListItemPadding::Preserve) | None => {
+            md.cleanup();
+        }
     }
-    if let Some(width) = config.formatting.fixed_width {
-        let reflowed = reflow_to_width(md.content(), width as usize);
+    if let Some(FixedWidth::Columns(width)) = rules.fixed_width.value() {
+        let reflowed = reflow_to_width(md.content(), usize::from(*width));
         *md.content_mut() = reflowed;
     }
     md.as_string()
@@ -73,6 +78,7 @@ fn whole_document_range(ctx: &DocumentContext) -> Option<Range> {
 mod tests {
     use super::*;
     use crate::config::DmlsConfig;
+    use darkmatter::markdown::cleanup::rules::Leaf;
 
     /// The provider output must equal the library cleanup sequence verbatim
     /// (spec criterion 8): DMLS adds no formatting of its own.
@@ -92,7 +98,7 @@ mod tests {
     fn test_format_text_honors_compact_variant() {
         let source = "- a\n\n- b\n";
         let mut config = DmlsConfig::default();
-        config.formatting.cleanup = CleanupVariant::Compact;
+        config.formatting.markdown.list_item_padding = Leaf::Value(ListItemPadding::None);
 
         let mut md: Markdown = source.into();
         md.cleanup_compact();
@@ -103,7 +109,7 @@ mod tests {
     fn test_format_text_applies_fixed_width_reflow() {
         let source = "One two three four five six seven eight nine ten eleven twelve.\n";
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(20);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(20));
 
         let mut md: Markdown = source.into();
         md.cleanup();
@@ -120,7 +126,7 @@ mod tests {
             "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
         );
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
         let mut md: Markdown = source.into();
         md.cleanup();
@@ -145,7 +151,7 @@ mod tests {
     fn test_format_text_reflows_complete_list_paragraph_like_library_cleanup() {
         let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
         let mut md: Markdown = source.into();
         md.cleanup();
@@ -177,7 +183,7 @@ mod tests {
             ),
         ];
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
         for source in fixtures {
             let mut md: Markdown = source.into();
@@ -194,28 +200,28 @@ mod tests {
         let fixtures = [
             (
                 "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
-                CleanupVariant::Default,
+                ListItemPadding::Preserve,
             ),
             (
                 "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
-                CleanupVariant::Compact,
+                ListItemPadding::None,
             ),
             (
                 "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
-                CleanupVariant::Loose,
+                ListItemPadding::One,
             ),
         ];
 
-        for (source, cleanup) in fixtures {
+        for (source, padding) in fixtures {
             let mut config = DmlsConfig::default();
-            config.formatting.cleanup = cleanup;
-            config.formatting.fixed_width = Some(24);
+            config.formatting.markdown.list_item_padding = Leaf::Value(padding);
+            config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
             let mut direct: Markdown = source.into();
-            match cleanup {
-                CleanupVariant::Default => direct.cleanup(),
-                CleanupVariant::Compact => direct.cleanup_compact(),
-                CleanupVariant::Loose => direct.cleanup_loose(),
+            match padding {
+                ListItemPadding::Preserve => direct.cleanup(),
+                ListItemPadding::None => direct.cleanup_compact(),
+                ListItemPadding::One => direct.cleanup_loose(),
             };
             *direct.content_mut() = reflow_to_width(direct.content(), 24);
             let expected = direct.as_string();
@@ -310,7 +316,7 @@ mod tests {
             ),
         ];
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
         for (source, expected) in fixtures {
             assert_eq!(format_text(source, &config), expected);
@@ -334,7 +340,7 @@ mod tests {
             "2. second ordered item\n"
         );
         let mut config = DmlsConfig::default();
-        config.formatting.cleanup = CleanupVariant::Loose;
+        config.formatting.markdown.list_item_padding = Leaf::Value(ListItemPadding::One);
 
         let mut direct: Markdown = source.into();
         direct.cleanup_loose();
@@ -354,7 +360,7 @@ mod tests {
             "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
         ];
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(24));
 
         for source in fixtures {
             let mut direct: Markdown = source.into();

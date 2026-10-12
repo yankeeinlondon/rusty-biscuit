@@ -39,6 +39,8 @@ mod base_schema_end_to_end;
 mod benchmark_fixtures;
 mod blockquote_list_spacing;
 mod clean_counters;
+mod clean_frontmatter_repair;
+mod clean_rules;
 mod code_link;
 mod compose_phase6;
 mod compose_reuse_phase5;
