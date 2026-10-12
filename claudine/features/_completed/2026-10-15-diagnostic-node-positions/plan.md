@@ -55,10 +55,52 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+source_code:
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/diagnostic_positions.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+    - darkmatter/lib/tests/position_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/diagnostic_positions.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/README.md
+    - .claude/skills/darkmatter/schema.md
+completed_phase: 4
+implemented: true
 ---
 
 # Diagnostic Node Positions Implementation Plan
@@ -184,13 +226,13 @@ Both tasks depend on Wave 4. They may run concurrently with distinct ownership: 
 
 This wave is sequential. Run tests and lint separately, as required by Darkmatter's testing guidance; do not run their builds concurrently.
 
-- [ ] **Package Verification**
+- [x] **Package Verification**
   - **Prerequisite:** Wave 5. Run `just test` in `darkmatter/`; its current recipe includes the library, CLI, DMLS, and Zed CLI. Then run `just lint` there. Use nextest through the canonical recipes; never run consolidated suites with `cargo test` or run `cargo fmt` without explicit authorization.
   - The current lint recipe also runs `check-zed`, which requires a provisioned `wasm32-wasip2` target. Check that prerequisite before the final gate, report an environment blocker accurately if absent, and do not install toolchain components implicitly or claim the gate passed.
   - If the public map changed, compile the actual affected downstream consumers identified in Phase 1 using package-scoped checks. Do not substitute a workspace-wide build. Fix regressions and rerun the checks affected by the fix.
   - Record command results and the environment that produced them. Tests must remain portable on all four supported environments; do not claim unrun OS results. Consult the `os` skill before any platform-specific code change or claim that an OS cannot be tested.
 
-- [ ] **Review Handoff**
+- [x] **Review Handoff**
   - **Prerequisite:** Package Verification. Check the final diff against all seven specification acceptance criteria, the regression table, snapshot reuse, passivity, and the unchanged diagnostic/exit-code contract. Confirm no new CI cells or tier requirements were introduced.
   - Record completed tasks, evidence, environmental limitations, and any specification departures in the implementation log. Mark implementation complete and ready for review only when required implementation checks pass; otherwise identify the remaining blocker explicitly.
   - Leave this feature in its active directory for the author's review cycle. Do not move it to `_completed`, run `just complete`, commit, or modify the finalized specification as part of implementation.

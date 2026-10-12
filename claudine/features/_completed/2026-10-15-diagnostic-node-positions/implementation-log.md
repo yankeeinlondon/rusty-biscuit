@@ -54,10 +54,52 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+source_code:
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/diagnostic_positions.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+    - darkmatter/lib/tests/position_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/diagnostic_positions.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/README.md
+    - .claude/skills/darkmatter/schema.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-15-diagnostic-node-positions (4 phases)
@@ -568,3 +610,71 @@ mutating the map in memory, and the scalar test covers it that way.
 
 - No failures. The 11 darkmatter and 9 claudine skips are the suites' existing
   skips.
+
+## Phase 4
+
+Phase 4 is verification and review handoff. It changed no source, docs, or
+skills. Only the plan, this log, and the spec frontmatter were edited.
+
+### Package verification (macOS, this host, 2026-10-12)
+
+- `darkmatter/`: `just test` — **9510 passed, 11 skipped** (lib, CLI, DMLS,
+  zed-dmls-cli). `just lint` — **exit 0**, including `check-zed`; the
+  `wasm32-wasip2` target is installed (`rustup target list --installed`), so
+  this is not an environment blocker.
+- Downstream consumers: `rg -t rust 'PositionMap|build_position_map'` finds
+  no use outside `darkmatter/`, which agrees with the Phase 1 inventory.
+  `claudine` depends on darkmatter and was compiled and tested as the
+  downstream check.
+- `claudine/`: `just test`. The first run hit one failure,
+  `claudine-cli::l1 wrap_perf::composition_setup_and_provider_handoff_order_matches_phase_1_baseline`,
+  and nextest stopped at 6207/8684. That output was piped through a filter,
+  so the assertion message was not captured. Run alone, the test passed 3 of
+  3 times, and a full rerun passed **8684, with 9 skipped**. The test composes
+  a schema-valid document with a `goose` stub and checks stdout ordering. It
+  has no schema-validation problem, so no location code runs. It is treated
+  as an intermittent failure under load, unrelated to this feature, and is
+  recorded here for the reviewer. `just lint` — **exit 0**.
+- Other OSes were not run. As in Phases 2 and 3, the change is in-memory
+  byte/string processing with no `cfg`, path-comparison, or process code, and
+  CRLF and non-ASCII columns are tested explicitly. Linux, Windows, and WSL2
+  results are not claimed; CI's Linux and macOS PR legs will cover the change.
+
+### Review handoff
+
+Acceptance criteria against evidence (the test names are in the Phase 2 and
+Phase 3 mapping tables):
+
+1. Nested `sya` at `/start/0/then/1`, `offending_property: sya`, 5:9 in
+   JSON and human output: `darkmatter-cli::l1 diagnostic_positions::json_reports_the_acceptance_key_token`
+   (+ CRLF), `human_output_shows_line_and_column`.
+2. Block-list value without the dash, second-item mapping, key versus value,
+   flow mapping and flow sequence: `json_reports_block_list_items_and_mappings_without_the_dash`,
+   `json_distinguishes_same_line_flow_keys_and_values`, and the lib tests.
+3. `md compose` error block 5:9: `compose_error_block_shows_line_and_column`.
+4. DMLS parity in UTF-8 and UTF-16, with ASCII and a supplementary-plane
+   prefix, comparing byte offsets and checking that ranges are unchanged:
+   `dmls position_parity_tests::*`.
+5. Assignment, new nested and new top-level paths, root missing field, block
+   scalar, decoded descendant, unsupported YAML, and empty map: Phase 2 lib
+   tests plus `assigned_values_use_the_original_node_or_report_null`.
+6. Quoted, escaped, empty, and numeric keys; LF/CRLF; comments; delimiter
+   offset; field equality; locator consumers: `positions::*` tests, the
+   hash and interpolation suites.
+7. `just test` and `just lint` pass in `darkmatter/` (above); all tests are
+   L1, CLI spawns use `CliProcessFixture`, there are no windows, and the CI
+   configuration is unchanged. None of this feature's commits touches
+   `.github/`, a justfile, or the nextest configuration.
+
+- Snapshot reuse: one projection per validation source snapshot, shared
+  across problems and union arms (Phase 2,
+  `root_union_problems_are_located_in_the_shared_map`).
+- The diagnostic and exit-code contract is unchanged except for
+  `line`/`column` (Phase 2 field-equality tests and the CLI exit-code tests).
+- Specification departures: none beyond those already recorded in Phases 2
+  and 3, namely DMLS missing-field parity is checked only in strict mode,
+  and no public path decodes a quoted JSON or YAML scalar into an object.
+- The claudine skill needed no update; Claudine's behavior did not change.
+
+Implementation is complete and ready for review. The feature stays in its
+active directory.

@@ -28,23 +28,19 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 1
+completed: true
 human_review: false
 message_to_agent: |-
-    Phases 2 and 3 are done; see "## Phase 2" and "## Phase 3" in the
-    implementation log. Phase 4 is verification and handoff only. Notes:
-    (1) Shared fixture `darkmatter/lib/tests/position_fixtures/mod.rs` is
-    included by the lib L1, CLI L1, and DMLS unit tests; it is listed in the
-    cli and dmls `source-inputs`.
-    (2) DMLS hides `MissingRequired` diagnostics unless `schema.strict` is on
-    (existing behavior, unchanged), so missing-field parity is tested in
-    strict mode only; DMLS starts equal library byte offsets everywhere.
-    (3) The only production change in Phase 3 is the CLI's human location
-    text `(at line L, column C)`. The compose block already rendered `at L:C`.
-    (4) Downstream consumers of `PositionMap`: none outside darkmatter (Phase 1
-    inventory); `darkmatter/` and `claudine/` just test + just lint passed on
-    macOS at the end of Phase 3.
-    (5) `darkmatter/README.md`'s `hash:` was already stale before this feature.
+    All four phases are implemented; the feature is ready for review. Phase 4
+    changed no code. On macOS, darkmatter `just test` (9510 passed) and
+    `just lint` pass, and claudine `just test` (8684) and `just lint` pass.
+    One claudine test,
+    `wrap_perf::composition_setup_and_provider_handoff_order_matches_phase_1_baseline`,
+    failed once under full-suite load. It passed alone 3 of 3 times and in a
+    full rerun. It is unrelated to this feature. Linux, Windows, and WSL2 were
+    not run locally. See "## Phase 4" in the implementation log.
+implemented: true
 pipeline_step: 5
 related:
     - 2026-10-17-content-policy-base-schema
