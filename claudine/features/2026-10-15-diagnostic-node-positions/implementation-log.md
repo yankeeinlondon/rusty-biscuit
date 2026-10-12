@@ -7,7 +7,57 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/diagnostic_positions.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+    - darkmatter/lib/tests/position_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/diagnostic_positions.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/schema.md
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Implementation Log for 2026-10-15-diagnostic-node-positions (4 phases)
@@ -247,3 +297,274 @@ per-problem projection.
 - Requirement-to-test mapping: none for Phase 1, which changes no behavior.
   The fixture coordinates above are the planned targets for the Phase 2–3
   tests.
+
+## Phase 2
+
+Phase 2 implements the authored position index (Wave 2) and category-aware
+problem selection (Wave 3), following the Phase 1 binding design without
+departures except where noted below.
+
+### What changed
+
+- **New module `darkmatter/lib/src/markdown/schemas/positions.rs`.**
+  `PositionMap` is now a struct (opaque `PositionSource`: `Empty`,
+  `Located { root: SchemaValueNode, lines: LineIndex }`, `TopLevel(IndexMap)`)
+  instead of `IndexMap<String, (u32, u32)>`. `validate.rs` re-exports
+  `PositionMap` and `build_position_map`, so `validate::build_position_map`
+  and `schemas::PositionMap` paths are unchanged. Public surface:
+  `PositionMap::new()`/`Default` (empty, source-free), `is_empty()`, and
+  `build_position_map(yaml)`. Projection and lookup stay `pub(super)`.
+- **Projection** (`PositionMap::project(text, yaml_range, base_line, orders)`)
+  calls `locate_frontmatter_value` once, requires a mapping root, and accepts
+  the tree only when the alignment witness holds: every located mapping's
+  decoded keys equal `MappingOrders` at its pointer, in order; the located
+  mapping count equals `orders.len()`; and no located scalar is an alias
+  token. The `LineIndex` treats `\n`, `\r\n`, and a lone `\r` as one break and
+  reports 1-based UTF-8 byte columns. Unprojectable YAML falls back to the
+  legacy top-level scan (`PositionMap::top_level(yaml, base_line)`, column 1).
+- **`MappingOrders::len()`** was added (public, `#[must_use]`) for the
+  witness's mapping-count check.
+- **`positions_for`** (`schemas/mod.rs`) projects the loaded document bytes
+  (`extract_frontmatter_block` + `yaml_span`, base line 1, so the delimiter
+  offset is applied once by construction) only when `raw_source()` is present;
+  without loaded text it projects `raw_source()` at base line 2; on failure it
+  uses the top-level scan of `raw_source()` at base line 2 (today's behavior).
+  The serialized view for constructed documents is projected with
+  `MappingOrders::collect` of the value being serialized, falling back to the
+  top-level scan.
+- **`build_problem`** (`validate.rs`) selects a `PositionTarget` from the
+  typed error: `Required` → `Mapping` at the pointer; an error with an
+  `offending_property` → `Key(property)` in the mapping at the pointer;
+  anything else → `Value`. Lookup walks `JsonPointer::segments()` by node
+  kind (sequences parse indices; mappings match decoded keys; a scalar stops
+  the walk and supplies its start for any descendant). Off-tree paths use the
+  deepest located non-root node, else no position; a new top-level property
+  has none. In top-level mode the first pointer segment (or the unknown key
+  at the root) is looked up. Projection still happens once per
+  `DarkmatterSchemas::validate*` call in `positions_for`, outside problem and
+  union-arm loops; `build_problem` only reads the shared map.
+- **Comments.** `collect_problems` and `error_top_level_key` docs no longer
+  claim that problem positions use top-level attribution (`identify_key` is
+  now used only by `error_top_level_key`, for coercion/rewrite attribution,
+  unchanged). `positions_for` gained a doc describing the source order.
+
+### Behavior changes observed in existing tests
+
+These are the intended position changes; every non-position field stayed
+identical.
+
+- `darkmatter/lib/tests/l1/meta_schema_phase4.rs`: a value failure on
+  `candidate: string(min(nope))` now reports column 12 (the value) instead of
+  column 1 (the key).
+- `darkmatter/cli/tests/fixtures/schema_validate_baseline/*/expected.{json,pretty}`
+  regenerated for five cases. A script compared old and new JSON with `line`
+  and `column` removed: equal in all eight cases. Changes:
+  `enum_member_invalid` /status 4:1→4:9; `missing_required` root missing
+  field none→2:1 (root mapping start, the `$schema` key);
+  `property_union_invalid` /count 6:1→7:3 (the block sequence start);
+  `property_union_nested_object` /event/a 6:1→7:6 and /event/b 6:1→8:6;
+  `root_union_none_match` root missing field none→2:1. The pretty snapshots
+  still use the existing `(at line N of frontmatter)` wording, which Phase 3's
+  `format_location` change will replace.
+
+### Requirement-to-test mapping
+
+Unit tests in `darkmatter/lib/src/markdown/schemas/positions.rs` (`tests`):
+
+| Requirement | Test |
+| --- | --- |
+| slice-relative vs document-relative lines (acceptance 4:9 vs 5:9) | `nested_key_is_located_relative_to_the_indexed_text` |
+| CRLF original-byte offsets (`sya` at byte 52, 5:9) | `crlf_offsets_address_the_original_bytes` |
+| key vs value starts; flow mapping/sequence columns | `keys_and_values_have_distinct_starts_in_flow_collections` |
+| list item excludes dash; second item mapping start | `block_list_items_exclude_the_dash` |
+| root mapping start after comments/blank lines | `the_root_mapping_starts_at_its_first_key` |
+| `"0"`, `"a/b"`, `"a~b"`, `""` keys; mapping vs sequence | `decoded_keys_and_indices_follow_the_node_kind` |
+| block/quoted scalar descendants use scalar start | `decoded_scalar_descendants_use_the_scalar_start` |
+| fallback chain (ancestor / none for new top-level) | `unauthored_paths_fall_back_to_the_nearest_authored_non_root_node` |
+| UTF-8 byte columns | `columns_count_utf8_bytes` |
+| aliases (mapping and sequence), merge keys, unquoted templates → top-level fallback | `unsupported_yaml_keeps_the_top_level_fallback` |
+| witness rejects mismatched structure / empty orders | `a_mismatched_structure_is_not_projected` |
+| empty map yields no positions | `the_empty_map_has_no_positions` |
+| colon-in-key top-level scan (migrated) | `top_level_keys_keep_a_colon_inside_a_key` |
+| legacy base-line offset | `top_level_fallback_offsets_lines_by_its_base` |
+
+Public-path tests in `darkmatter/lib/src/markdown/schemas/tests/positions.rs`
+validate complete Markdown through `DarkmatterSchemas::validate` with a
+baseline schema, and every case also asserts that the source-free report
+(`EffectiveSchema::validate`) has the same validity and the same problems, in
+the same order, field for field (via `Debug`), once `line`/`column` are
+removed:
+
+| Requirement | Test |
+| --- | --- |
+| acceptance fixture, LF and CRLF: pointer, `offending_property`, 5:9 | `nested_unknown_key_reports_its_key_token` |
+| type error in block list → `oops` 4:5 | `a_wrong_list_item_reports_its_value_without_the_dash` |
+| missing field in second item → mapping 5:5 | `a_missing_field_reports_the_mapping_that_lacks_it` |
+| flow mapping unknown key 3:11, value 3:14; flow sequence 4:8 | `flow_collections_distinguish_same_line_keys_and_values` |
+| root missing field → root mapping start | `a_root_failure_reports_the_root_mapping_start` |
+| constraint and file-reference failures → value start | `constraint_and_file_reference_failures_report_their_values` |
+| multi-key unknown error → one problem at the selected key | `a_multi_key_unknown_error_locates_its_selected_property` |
+| property union unchanged and located | `a_property_union_keeps_its_problems_and_locates_them` |
+| block scalar → scalar start | `block_scalar_content_reports_the_scalar_start` |
+| replaced path → original node; new nested → ancestor; new top-level → none | `replaced_and_new_paths_use_the_original_source` |
+| valid alias stays valid; independent failure keeps top-level fallback | `unsupported_yaml_keeps_validity_and_top_level_positions` |
+| constructed document → serialized view | `a_constructed_document_uses_its_serialized_view` |
+| failed frontmatter parse with loaded text → no positions | `unparsed_frontmatter_reports_no_positions` |
+
+In `validate.rs` tests: `root_union_problems_are_located_in_the_shared_map`
+(one map shared across root-union arms; arm selection unchanged), and the two
+tests that inserted into the old map now build their map with
+`build_position_map` (`collect_problems_populates_line_for_type_mismatch`,
+`collect_problems_populates_line_for_missing_required`). The old
+`build_position_map_*` map-`get` tests moved into `positions.rs`.
+
+All new tests are in the `darkmatter` lib unit-test binary (L1, no marker
+prefixes, no filesystem fixtures beyond `std::env::temp_dir()` as an unused
+resolution `cwd`, no process spawns).
+
+### Gates (macOS, this host)
+
+- `darkmatter/`: `just test` — 9487 passed, 11 skipped; `just lint` — passed,
+  including `check-zed` (`wasm32-wasip2` is installed).
+- `claudine/`: `just test` — 8684 passed, 9 skipped; `just lint` — exit 0 (the
+  only warning is the existing macOS linker `__eh_frame` notice).
+- No other OS was exercised: the change is pure string/byte processing with no
+  `cfg`, path, or process code, and the tests use in-memory strings. CI's
+  Linux/macOS legs cover it.
+- The Input Robustness Matrix does not apply (no reader, deserializer, or
+  acceptance policy changed), as recorded in the plan.
+
+### Notes for Phase 3
+
+- `darkmatter/cli/src/commands/schema/validate.rs::format_location` still
+  prints `(at line N of frontmatter)` and its comment names the column-1
+  assumption; both are now wrong. Updating it will change the
+  `schema_validate_baseline` `expected.pretty` snapshots again.
+- A property union of two inline objects discriminated by `enum(...)` reports
+  `"bar" is not one of "foo"` at `/payload/type` and no unknown-key problem.
+  That is existing union reporting, unchanged by this phase.
+
+## Phase 3
+
+Phase 3 covers Wave 4 (CLI presentation, DMLS parity) and Wave 5 (regression
+coverage, behavior documentation). The only production change is the CLI's
+human-output location text. Everything else is tests and docs. The library's
+position index and DMLS's range rules are unchanged.
+
+### What changed
+
+- **CLI human output.** `format_location` in
+  `darkmatter/cli/src/commands/schema/validate.rs` now prints
+  `line L, column C`, or `line L` when the column is absent, and nothing when
+  there is no position. The obsolete "always column 1" comment and the
+  `of frontmatter` wording are gone; the line counts the complete document.
+  The five failing `schema_validate_baseline/*/expected.pretty` snapshots
+  changed only in that location text (`(at line 4 of frontmatter)` →
+  `(at line 4, column 9)` and so on). Their JSON snapshots were regenerated
+  in Phase 2 and did not change here. The existing test
+  `schema_validate_pretty_reports_line_for_type_mismatch` was renamed
+  `..._line_and_column_...` and now asserts `(at line 4, column 9)`. Its
+  comment about "re-serialised frontmatter" was stale and has been corrected.
+- **Compose error block.** `errors/blocks.rs::schema_validation_block`
+  already renders ` at L:C` and has no excerpt or caret. A nested-coordinate
+  test passes unchanged, so the block was not modified. Its
+  `(Some(line), None) => ":1"` branch was left alone: the library never
+  produces a line without a column.
+- **Shared fixture.** `darkmatter/lib/tests/position_fixtures/mod.rs` is
+  std-only and holds complete Markdown bytes plus `ExpectedStart`
+  (path, kind, offending property, line, column), together with `CASES` and
+  `byte_offset`. Cases: `ACCEPTANCE`, `BLOCK_LIST`, `FLOW`,
+  `NON_ASCII_PREFIX`, and `ROOT_MISSING`. Each document declares its
+  `$schema` *after* the authored properties, so the acceptance lines are
+  byte-identical to the spec's example. The darkmatter lib (`tests/l1`), the
+  CLI (`tests/l1`), and DMLS (unit tests) include it with `#[path]`. The cli
+  and dmls `Cargo.toml` list it under `source-inputs`, and every test that
+  uses it spells it with `include_str!`.
+
+### DMLS parity finding
+
+DMLS's diagnostic start equals the library's byte offset for every fixture
+problem, in both `PositionEncoding::Utf8` and `Utf16`, with LF and CRLF.
+With the default configuration, DMLS emits **no** diagnostic for
+missing-field problems: `classify` hides `MissingRequired` unless
+`schema.strict` is on. That is existing behavior and was left unchanged. The
+parity tests therefore check missing-field problems (the second item mapping
+and the root mapping) under strict mode, and values and unknown keys under
+both modes. The DMLS ranges recorded as unchanged literals are: `sya`,
+`oops`, `name: b\n` (item mapping), `b`, `x`, `two`, `zz`, `x`, and the root
+mapping through the last frontmatter line.
+
+### Requirement-to-test mapping (Phase 3 additions)
+
+| Requirement | Test |
+| --- | --- |
+| Acceptance 5:9 in CLI JSON (LF, CRLF) | `darkmatter-cli::l1 diagnostic_positions::json_reports_the_acceptance_key_token`, `..._with_crlf_line_ends` |
+| Acceptance 5:9 in human output, exit 1 | `diagnostic_positions::human_output_shows_line_and_column` |
+| Acceptance 5:9 in `md compose` error block, exit 1 | `diagnostic_positions::compose_error_block_shows_line_and_column` |
+| Block-list value excluding dash; second-item mapping | `diagnostic_positions::json_reports_block_list_items_and_mappings_without_the_dash` |
+| Flow key vs value same-line columns | `diagnostic_positions::json_distinguishes_same_line_flow_keys_and_values` |
+| UTF-8 byte columns after non-ASCII prefix | `diagnostic_positions::json_columns_count_utf8_bytes_after_a_non_ascii_prefix` |
+| Root missing → root mapping start | `diagnostic_positions::json_reports_the_root_mapping_for_a_root_missing_field` |
+| Replaced path → original node; new top-level → JSON `null` | `diagnostic_positions::assigned_values_use_the_original_node_or_report_null` |
+| Success exit 0, empty problems | `diagnostic_positions::a_valid_document_exits_zero_with_no_problems` |
+| Guard: every shared case has a CLI test | `diagnostic_positions::every_shared_case_has_a_json_test` |
+| Library positions and `offending_property` for every shared case, LF and CRLF | `darkmatter::l1 diagnostic_positions::every_shared_case_reports_its_expected_starts` |
+| Fixture starts address authored tokens; byte offsets 48 / 52 (CRLF) | `diagnostic_positions::expected_starts_address_the_authored_tokens` |
+| DMLS start = library byte offset (UTF-8, UTF-16), plus unchanged range end and ranged text | `dmls diagnostics::frontmatter::position_parity_tests::dmls_starts_match_library_starts_in_utf8`, `..._in_utf16` |
+| DMLS parity with CRLF | `position_parity_tests::dmls_starts_match_library_starts_with_crlf_line_ends` |
+| UTF-8 vs UTF-16 columns actually differ (conversion is load-bearing) | `position_parity_tests::non_ascii_prefix_columns_differ_between_encodings` |
+| Quoted/escaped keys `"0"`, `"a/b"`, `"a~b"`, `"escA"`; pointer `~1`/`~0`; mapping vs sequence | `darkmatter` lib `schemas::tests::positions::quoted_keys_are_matched_decoded_and_escaped_in_the_pointer` |
+| Empty key `""` is a property, not the root | `positions::an_empty_key_is_a_property_not_the_root` |
+| Literal/folded/quoted-JSON scalars and in-memory decoded descendants → scalar start | `positions::scalar_content_and_its_descendants_report_the_authored_scalar_start` |
+| BOM + CRLF + leading comments/blank line → one delimiter offset | `positions::a_bom_crlf_document_with_leading_comments_counts_lines_once` |
+| Root union nested failure, arm selection, field equality | `positions::a_root_union_locates_a_nested_failure_in_its_selected_arm` |
+| Shipped schema end-to-end (`content-policy/schemas/content-policy.yaml`) | `darkmatter::l1 content_policy_editor_schema::shipped_schema_problems_report_their_authored_positions` |
+
+The remaining rows of the plan's regression table were already covered by the
+Phase 2 tests listed under `## Phase 2`. The shared-locator consumers are
+covered by the existing hash and interpolation suites, which still pass
+(593/593 for `test(hash) | test(interpolation)`). The shipped-schema corpus
+tests `shipped_schema_corpus` and `meta_schema_repo_schemas` still pass.
+
+Finding: no public path decodes a quoted JSON or YAML string into an object.
+`json` and `yaml` are string-format types, and coercion only converts native
+values into strings. A "decoded descendant" is therefore reachable only by
+mutating the map in memory, and the scalar test covers it that way.
+
+### Documentation
+
+- `darkmatter/docs/topics/schemas/definition.md` has a new `### Problem Locations`
+  section: the nested example, how coordinates are counted, which node each
+  problem kind points at, flow columns, scalars, a fallback Mermaid diagram,
+  constructed and source-free documents, and `build_position_map`. The
+  Pretty, JSON, and assignment sections were corrected; the stale "no
+  line/column inside a list item" limitation was removed; and a `PositionMap`
+  key-type row was added. The assignment example (`count=many` → 2:8,
+  `user.age=x` → 4:3, `rating=x` → none) was checked with the real `md`
+  binary. The Documenter also corrected the vacuous-success message to the
+  text the CLI actually prints.
+- `darkmatter/docs/inline/schema-validation.md` and
+  `docs/errors/file-reference-failures.md` now use the real location format.
+- `darkmatter/README.md` has a one-bullet feature note. Its `hash:` was
+  already stale at HEAD (body hash mismatch before this change) and was not
+  re-stamped.
+- `.claude/skills/darkmatter/schema.md` has a "Problem positions" block, and
+  its stale "Known gaps: item problems carry the top-level key's line/column"
+  line was removed.
+
+### Gates (macOS, this host)
+
+- `darkmatter/`: `just test` — 9510 passed (1 slow), 11 skipped; `just lint` —
+  exit 0, including `check-zed`.
+- `claudine/`: `just test` — 8684 passed, 9 skipped; `just lint` — exit 0.
+- No other OS was exercised. The changes use in-memory strings and fixture
+  temp files only, with no `cfg`, path-comparison, or process-specific code.
+  CRLF is tested explicitly. Windows and WSL2 results are not claimed.
+- No test uses a tier marker prefix, and all new tests are hermetic L1 in
+  declared targets. The cli and lib layout gates pass.
+- The claudine skill needed no update; nothing about Claudine changed.
+
+### Pre-existing / skipped
+
+- No failures. The 11 darkmatter and 9 claudine skips are the suites' existing
+  skips.

@@ -8,7 +8,57 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/diagnostic_positions.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+    - darkmatter/lib/tests/position_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/diagnostic_positions.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/src/markdown/schemas/tests/positions.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/schema.md
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Diagnostic Node Positions Implementation Plan
@@ -56,7 +106,7 @@ Tasks in this wave are sequential: finish the contract inventory before the spik
 
 ### Wave 2 — Source Infrastructure
 
-- [ ] **Position Index**
+- [x] **Position Index**
   - **Prerequisite:** Wave 1. Implement the chosen `PositionMap` representation and update `build_position_map()` to invoke `locate_frontmatter_value()` once, retain decoded keys and distinct key/value spans, and build one byte-based line-start index. Retain the existing top-level scan as fallback when precise projection is unavailable.
   - Walk pointer segments by source node kind; distinguish root from an empty mapping key, and mappings from sequence indices. Stop descending at scalar nodes and select their start for decoded-content descendants. Exclude a block-list dash from the item value/mapping start.
   - Update `positions_for()` to project the original loaded YAML bytes and offset every key, value, root, and fallback location exactly once. Preserve raw-YAML and serialized-view fallbacks, including empty source-free maps.
@@ -67,7 +117,7 @@ Tasks in this wave are sequential: finish the contract inventory before the spik
 
 ### Wave 3 — Semantic Integration
 
-- [ ] **Problem Selection**
+- [x] **Problem Selection**
   - **Prerequisite:** Wave 2. Replace `build_problem()`'s top-level-key lookup with category-aware selection using existing typed error identity, `instance_path`, and `offending_property`. Do not parse messages or alter pointers to obtain a location.
   - Implement exact-node selection and the specified ancestor/top-level/no-position fallback chain. Cover missing root fields, nested missing fields, replaced authored paths, new nested paths, and new top-level paths.
   - Keep projection outside per-problem and union-arm loops. Verify reuse structurally, or with existing test instrumentation if available; do not introduce production counters solely for testing.
@@ -82,13 +132,13 @@ Tasks in this wave are sequential: finish the contract inventory before the spik
 
 These tasks may run concurrently in separate CLI/error-rendering and DMLS files after Wave 3. Share the same complete Markdown fixture bytes and expected offsets; neither task may change the position-index contract independently.
 
-- [ ] **CLI Presentation**
+- [x] **CLI Presentation**
   - Update `darkmatter/cli/src/commands/schema/validate.rs::format_location()` to show line and column when both are present; retain sensible output for a missing column or completely missing location. Correct the obsolete column-1 comment and the wording that labels document-absolute lines as frontmatter-relative.
   - Inspect `darkmatter/lib/src/markdown/errors/blocks.rs::schema_validation_block`: it already renders `line:column`. Preserve that behavior and verify excerpts/carets, where present, address the offending original node correctly. Make only changes justified by a failing nested-coordinate test; render through existing biscuit-terminal components.
   - Extend `darkmatter/cli/tests/l1/schema_validate.rs` and suitable compose L1 tests using Darkmatter's `CliProcessFixture`. Supply a fixture schema for `start`/`then`/`say`; do not depend on future lifecycle grammar.
   - Assert line 5, column 9 in human output, JSON fields, and `md compose`'s validation error. Include flow nodes whose errors differ only by column, JSON location nulls, and existing success/failure exit codes.
 
-- [ ] **DMLS Parity**
+- [x] **DMLS Parity**
   - Extend tests around `darkmatter/dmls/src/diagnostics/frontmatter.rs` using its existing `DocumentContext`, overlay, and `SourceMap` fixtures. Keep production DMLS range rules unchanged.
   - Validate the same complete Markdown bytes through the library and CLI evidence, then compare byte offsets with DMLS diagnostic starts for values, unknown keys, missing parent mappings, and root failures on supported nodes.
   - Exercise both supported position encodings, `PositionEncoding::Utf8` and `Utf16`, with ASCII and a same-line non-ASCII prefix containing a supplementary-plane character. Convert using the actual source line/SourceMap; do not compare raw CLI and LSP columns.
@@ -100,13 +150,13 @@ These tasks may run concurrently in separate CLI/error-rendering and DMLS files 
 
 Both tasks depend on Wave 4. They may run concurrently with distinct ownership: library regression tests versus README/topic/skill documentation. Coordinate any shared fixture changes before editing.
 
-- [ ] **Regression Coverage**
+- [x] **Regression Coverage**
   - Extend public validation/composition tests with the cases in the table below. Use data-driven fixtures where appropriate and assert public diagnostics, not merely locator return values.
   - Check block-scalar and quoted JSON/YAML-content coercion cases report the authored scalar start. Confirm valid unsupported YAML retains semantic validity and top-level fallback reporting when an independent schema violation exists.
   - Retain existing hash-writer and frontmatter-interpolation regression coverage; add a focused regression only if their shared locator behavior had to change. Include the existing shipped-schema corpus checks to detect accidental presentation regressions.
   - Keep all added tests hermetic L1, portable across macOS, Linux, native Windows, and WSL2, with no terminal/browser windows or focus changes. Avoid compile-time host paths and ambient CWD/home/provider dependencies.
 
-- [ ] **Behavior Documentation**
+- [x] **Behavior Documentation**
   - Update `darkmatter/docs/topics/schemas/definition.md`, `darkmatter/README.md`, and `.claude/skills/darkmatter/schema.md` with a compact nested example showing exact key/value coordinates, 1-based UTF-8 byte columns, and complete-document line numbering.
   - Explain original authored locations after assignments, ancestor and top-level fallbacks, unlocated generated properties, scalar-content boundaries, unsupported YAML, and serialized-view locations for constructed documents.
   - Review docs/comments on all behavior-changing symbols and remove or correct top-level-only descriptions. Keep topic docs self-contained and free of feature/spec references. No dependency documentation change is needed unless the implementation actually changes dependencies.

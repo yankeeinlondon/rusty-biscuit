@@ -31,24 +31,20 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 produced no source changes; its binding design is in the
-    implementation log under "Chosen design (binding for Phase 2)". Key points:
-    (1) Project positions from `Markdown::loaded_source()` via
-    `extract_frontmatter_block` + `locate_frontmatter_value(block.yaml,
-    block.yaml_span.start)`, but ONLY when `frontmatter().raw_source().is_some()`
-    — `From<String>` keeps loaded text even when frontmatter parsing failed.
-    (2) The semantic map may come from `parse_yaml_with_fallbacks` (tab
-    normalization, `$(…)`/`{{ … }}` protection), so accept the located tree only
-    if it matches `Frontmatter::mapping_orders()` (same keys in order at every
-    mapping pointer, same mapping count) and contains no alias scalar
-    (`yaml_scalar::alias_token`); otherwise use the legacy top-level scan. This
-    witness is what rejects aliases and merge keys.
-    (3) Index lines over the loaded frontmatter block so lines are document
-    lines and the delimiter offset is applied once by construction.
-    (4) Do not change `simplified/source.rs`; the hash writer and frontmatter
-    interpolation share the locator. The spike confirmed no locator change is
-    needed. Two `validate.rs` unit tests `insert` into `PositionMap` directly
-    and must be migrated when the alias becomes a struct.
+    Phases 2 and 3 are done; see "## Phase 2" and "## Phase 3" in the
+    implementation log. Phase 4 is verification and handoff only. Notes:
+    (1) Shared fixture `darkmatter/lib/tests/position_fixtures/mod.rs` is
+    included by the lib L1, CLI L1, and DMLS unit tests; it is listed in the
+    cli and dmls `source-inputs`.
+    (2) DMLS hides `MissingRequired` diagnostics unless `schema.strict` is on
+    (existing behavior, unchanged), so missing-field parity is tested in
+    strict mode only; DMLS starts equal library byte offsets everywhere.
+    (3) The only production change in Phase 3 is the CLI's human location
+    text `(at line L, column C)`. The compose block already rendered `at L:C`.
+    (4) Downstream consumers of `PositionMap`: none outside darkmatter (Phase 1
+    inventory); `darkmatter/` and `claudine/` just test + just lint passed on
+    macOS at the end of Phase 3.
+    (5) `darkmatter/README.md`'s `hash:` was already stale before this feature.
 pipeline_step: 5
 related:
     - 2026-10-17-content-policy-base-schema
