@@ -496,6 +496,7 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         E::CurrentDirectory(_)
         | E::Git(_)
         | E::RepositoryEscape { .. }
+        | E::BoundaryEscape { .. }
         | E::RelativeTreeEscape { .. }
         | E::RelativePath { .. }
         | E::Io { .. } => "permission_io",

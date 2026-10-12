@@ -2,7 +2,10 @@
 //!
 //! Resolves shell aliases to their underlying commands by querying the user's
 //! login shell (`$SHELL`). This allows `::shell` directives to use common
-//! aliases like `ll`, `la`, etc.
+//! aliases like `ll`, `la`, etc. Composition reads `SHELL` from the request's
+//! captured environment, never from the process, and looks each name up through
+//! the request's [`AliasResolutions`], so one compose run asks the shell about a
+//! name at most once.
 //!
 //! The shell is started through the bounded `shell_expansion::launcher`,
 //! whose module docs explain why the query runs in a detached session.
@@ -10,7 +13,9 @@
 use super::launcher::run_shell_query;
 use super::tokenize::ShellToken;
 use super::tokenize::tokenize;
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 /// Upper bound on how long the shell may take to report an alias definition.
@@ -58,6 +63,44 @@ pub struct ResolvedAlias {
 pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
     let shell = std::env::var("SHELL").ok()?;
     resolve_alias_with_shell(&shell, name, ALIAS_LOOKUP_TIMEOUT)
+}
+
+/// One compose run's alias lookups, keyed by login shell and name.
+///
+/// Preflight collection, the pre-approval check, and execution each resolve
+/// the same names; sharing this record (it lives on `ComposeOptions`, so every
+/// clone, nested compose, and `map_options` result shares it) means a run
+/// starts the shell at most once per name, and "not an alias" is recorded as
+/// well as a hit. It is never process-wide: a long-lived host must see alias
+/// edits, so a fresh `ComposeOptions` starts with an empty record.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AliasResolutions {
+    outcomes: Arc<Mutex<HashMap<AliasLookup, Option<ResolvedAlias>>>>,
+}
+
+/// `(login shell, name)`: the same name can be an alias in one shell only.
+type AliasLookup = (String, String);
+
+impl AliasResolutions {
+    /// [`resolve_alias`] against `login_shell`, the request's
+    /// [`login_shell`](super::probe::login_shell). With no shell, none is
+    /// started and the name is not an alias.
+    pub(crate) fn resolve(&self, login_shell: Option<&str>, name: &str) -> Option<ResolvedAlias> {
+        let shell = login_shell?;
+        let key = (shell.to_string(), name.to_string());
+        if let Some(outcome) = lock(&self.outcomes).get(&key) {
+            return outcome.clone();
+        }
+        // The lock is released while the shell runs, so parallel directives do
+        // not queue behind one slow profile; two racing lookups of one name may
+        // both start a shell, and the first recorded outcome wins.
+        let outcome = resolve_alias_with_shell(shell, name, ALIAS_LOOKUP_TIMEOUT);
+        lock(&self.outcomes).entry(key).or_insert(outcome).clone()
+    }
+}
+
+fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
+    value.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// [`resolve_alias`] with the shell and time budget injected, so tests can drive
@@ -296,6 +339,47 @@ mod tests {
         let shell = stub_shell(dir.path(), "exit 1");
 
         assert!(query_alias(shell.to_str().unwrap(), "ll", Duration::from_secs(10)).is_none());
+    }
+
+    /// Composition asks the shell its request names; a request whose
+    /// environment has no `SHELL` has no aliases, whatever the process has.
+    #[cfg(unix)]
+    #[test]
+    fn request_shell_decides_alias_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = stub_shell(dir.path(), "echo \"ll='ls -l'\"");
+        let environment =
+            std::collections::HashMap::from([("SHELL".to_string(), shell.to_string_lossy().into_owned())]);
+
+        let resolutions = AliasResolutions::default();
+
+        let resolved = resolutions
+            .resolve(super::super::probe::login_shell(&environment), "ll")
+            .expect("the request's shell reports ll as an alias");
+
+        assert_eq!(resolved.executable, "ls");
+        assert!(resolutions.resolve(super::super::probe::login_shell(&Default::default()), "ll").is_none());
+    }
+
+    /// The record answers a repeat lookup, a miss included, without starting
+    /// the shell again; a different login shell is asked for itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_record_starts_each_shell_once_per_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("starts.log");
+        let shell = stub_shell(dir.path(), &format!("echo started >> '{}'\nexit 1", log.display()));
+        let other_dir = tempfile::tempdir().unwrap();
+        let other = stub_shell(other_dir.path(), &format!("echo started >> '{}'\nexit 1", log.display()));
+        let starts = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+        let resolutions = AliasResolutions::default();
+
+        assert!(resolutions.resolve(shell.to_str(), "ll").is_none());
+        assert!(resolutions.clone().resolve(shell.to_str(), "ll").is_none());
+        assert_eq!(starts(), 1);
+
+        assert!(resolutions.resolve(other.to_str(), "ll").is_none());
+        assert_eq!(starts(), 2);
     }
 
     /// Integration test: resolve a known alias from the current shell.

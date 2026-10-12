@@ -8,6 +8,7 @@
 
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -119,8 +120,11 @@ pub enum FileLinksError {
     #[error("{source} (line {line})")]
     GlobReference {
         line: usize,
+        // Shared like `ExpressionError::GlobReference`, keeping this enum
+        // under clippy's `result_large_err` limit; `PathBuf` is wider on
+        // Windows.
         #[source]
-        source: biscuit_file::GlobReferenceError,
+        source: Arc<biscuit_file::GlobReferenceError>,
     },
 
     /// A `--dir` scan reached a directory it could not read, or an entry
@@ -199,7 +203,7 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                 )).with_line_breaks(LineBreaks::Hard))
                 .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
-            FileLinksError::GlobReference { line, source: source @ biscuit_file::GlobReferenceError::Io { path, .. } } => StatusBlock::new(StatusState::Error)
+            FileLinksError::GlobReference { line, source } if let biscuit_file::GlobReferenceError::Io { path, .. } = source.as_ref() => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "FileLinksError",
                     "glob search failed",

@@ -309,10 +309,12 @@ fn plan_with_union_templated_sibling(root: &Path) -> PathBuf {
 /// Stage a `goose` stub that records its argv, and its stdin when stdin is not
 /// the terminal, so the test can see which path the composed prompt carried.
 fn stage_recording_goose_stub(bin_dir: &Path, marker_file: &Path) {
+    // The marker appears by rename only once it holds the stdin prompt too,
+    // so a test polling for it never reads a half-written record.
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {marker}\n[ -t 0 ] || cat >> {marker}\nexit 0\n",
+            "#!/bin/sh\n{{ printf '%s\\n' \"$@\"; [ -t 0 ] || cat; }} > {marker}.tmp\nmv {marker}.tmp {marker}\nexit 0\n",
             marker = marker_file.display()
         ),
     );
@@ -581,11 +583,15 @@ const FIX_ARM_BODY: &str = "count: 5\n---\nSpec document: {{spec}}\nCount is a n
 /// Both arms accept the instance, so only the picked path's glob can select
 /// the `fixes` arm; its `number` typing of `count` is visible in the prompt
 /// the provider receives.
-#[test]
-fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
+///
+/// Each surface is its own test so the two PTY sessions spread across cores.
+fn assert_d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes(
+    fixture_name: &str,
+    with_initialize: bool,
+) {
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let fixture = CliProcessFixture::named("level1-provided-partial-d1");
+    let fixture = CliProcessFixture::named(fixture_name);
     // A repository makes the chooser's labels repository-relative, short
     // enough to read in the PTY's default width.
     fixture.initialize_repository();
@@ -606,40 +612,58 @@ fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
         "    count: 'number'\n",
     );
     let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+    let (label, extra) = if with_initialize {
+        ("with initialize", initialize)
+    } else {
+        ("without initialize", "")
+    };
 
-    for (label, extra) in [("with initialize", initialize), ("without initialize", "")] {
-        let md_file = fixture.cwd().join("plan.md");
-        fs::write(&md_file, format!("---\n{schema}{extra}{FIX_ARM_BODY}")).unwrap();
-        let _ = fs::remove_file(&marker);
+    let md_file = fixture.cwd().join("plan.md");
+    fs::write(&md_file, format!("---\n{schema}{extra}{FIX_ARM_BODY}")).unwrap();
 
-        let cmd = compose_command(&fixture, &md_file, "spec", "cli");
-        let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+    let cmd = compose_command(&fixture, &md_file, "spec", "cli");
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
-        let pre = wait_for_marker(&mut session, "Enter=Submit", Duration::from_secs(10));
-        let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-        let plain = common::strip_ansi(&pre);
-        assert!(
-            plain.contains("features/cli-colors/spec.md") && plain.contains("fixes/cli-switches/spec.md"),
-            "{label}: the chooser should list a match from each tree; transcript:\n{plain}"
-        );
-        assert!(!marker.exists(), "{label}: provider launched before the pick:\n{plain}");
+    let pre = wait_for_marker(&mut session, "Enter=Submit", Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    assert!(
+        plain.contains("features/cli-colors/spec.md") && plain.contains("fixes/cli-switches/spec.md"),
+        "{label}: the chooser should list a match from each tree; transcript:\n{plain}"
+    );
+    assert!(!marker.exists(), "{label}: provider launched before the pick:\n{plain}");
 
-        // Path order puts `features/…` first; `j` moves to `fixes/…`.
-        session.write_all(b"j\r").expect("pick the fixes spec");
-        session.flush().ok();
-        let transcript = drain_until(&mut session, pre, Duration::from_secs(15), || marker.exists());
-        let plain = common::strip_ansi(&transcript);
+    // Path order puts `features/…` first; `j` moves to `fixes/…`.
+    session.write_all(b"j\r").expect("pick the fixes spec");
+    session.flush().ok();
+    let transcript = drain_until(&mut session, pre, Duration::from_secs(15), || marker.exists());
+    let plain = common::strip_ansi(&transcript);
 
-        let launched_with = fs::read_to_string(&marker).unwrap_or_else(|_| {
-            panic!("{label}: the fixes arm should validate and launch; transcript:\n{plain}")
-        });
-        assert!(
-            launched_with.contains("fixes/cli-switches/spec.md")
-                && launched_with.contains("Count is a number: true"),
-            "{label}: the provider should receive the fixes spec under the fixes arm; stub saw:\n{launched_with}"
-        );
-        assert!(!plain.contains("schema validation"), "{label}: composition should validate:\n{plain}");
-    }
+    let launched_with = fs::read_to_string(&marker).unwrap_or_else(|_| {
+        panic!("{label}: the fixes arm should validate and launch; transcript:\n{plain}")
+    });
+    assert!(
+        launched_with.contains("fixes/cli-switches/spec.md")
+            && launched_with.contains("Count is a number: true"),
+        "{label}: the provider should receive the fixes spec under the fixes arm; stub saw:\n{launched_with}"
+    );
+    assert!(!plain.contains("schema validation"), "{label}: composition should validate:\n{plain}");
+}
+
+#[test]
+fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes_with_initialize() {
+    assert_d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes(
+        "level1-provided-partial-d1",
+        true,
+    );
+}
+
+#[test]
+fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes_without_initialize() {
+    assert_d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes(
+        "level1-provided-partial-d1-no-init",
+        false,
+    );
 }
 
 /// The D1 union again, but with the prompt in `prompts/`, no `initialize`,

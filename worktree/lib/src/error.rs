@@ -5,7 +5,7 @@ pub enum WorktreeError {
     #[error("git is not installed or not found on PATH")]
     GitNotFound,
 
-    #[error("not inside a git repository")]
+    #[error("This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again.")]
     NotInGitRepo,
 
     #[error(

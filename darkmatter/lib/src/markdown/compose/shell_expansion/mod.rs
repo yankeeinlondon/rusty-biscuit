@@ -230,7 +230,11 @@ pub(crate) fn prepare_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
-    let (effective, alias_name) = resolve_or_passthrough(directive);
+    let (effective, alias_name) = resolve_or_passthrough(
+        directive,
+        &options.alias_resolutions,
+        probe::login_shell(options.context().env()),
+    );
     let display_command = display_command(directive, alias_name.as_deref());
 
     // Collect all normalized commands from the pipeline (or single command)
@@ -712,8 +716,14 @@ fn handle_errors(
 ///
 /// If the executable is already on PATH, returns the original directive.
 /// If it resolves as a shell alias, returns a new directive with the resolved
-/// command and merged arguments.
-fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option<String>) {
+/// command and merged arguments. `login_shell` is the request's
+/// [`probe::login_shell`], the shell asked for alias definitions, and
+/// `aliases` is the request's lookup record, shared with preflight.
+fn resolve_or_passthrough(
+    directive: &ShellDirective,
+    aliases: &alias::AliasResolutions,
+    login_shell: Option<&str>,
+) -> (ShellDirective, Option<String>) {
     // For pipeline chains, resolve each action's executable independently
     if let Some(ref pipeline) = directive.pipeline
         && (pipeline.actions.len() > 1
@@ -728,7 +738,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             if which::which(&action.command.executable).is_ok() {
                 continue;
             }
-            if let Some(resolved) = alias::resolve_alias(&action.command.executable) {
+            if let Some(resolved) = aliases.resolve(login_shell, &action.command.executable) {
                 let mut merged_args = resolved.args;
                 merged_args.extend_from_slice(&action.command.args);
                 action.command.executable = resolved.executable;
@@ -766,7 +776,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
         return (directive.clone(), None);
     }
 
-    if let Some(resolved) = alias::resolve_alias(&directive.executable) {
+    if let Some(resolved) = aliases.resolve(login_shell, &directive.executable) {
         let mut merged_args = resolved.args;
         merged_args.extend_from_slice(&directive.args);
 
@@ -1259,7 +1269,7 @@ mod integration_tests {
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
-                timeout: std::time::Duration::from_secs(2),
+                timeout: std::time::Duration::from_secs(1),
                 timeout_behavior: ShellTimeoutBehavior::EmptyString,
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {

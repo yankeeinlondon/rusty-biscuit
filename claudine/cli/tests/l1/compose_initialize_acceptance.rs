@@ -16,7 +16,7 @@
 
 use crate::common;
 
-use common::prompt_staging::{stage_shipped_prompts, workspace_root};
+use common::prompt_staging::stage_frozen_prompts;
 use common::{CliProcessFixture, InlineAgentStub, sh_quote, strip_ansi, write, write_executable};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -572,16 +572,14 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
 
 // ── AC10: the shipped implementation router ─────────────────────────────────
 
-/// Stage the shipped router and the drift-guarded `implement-plan.md` fixture
-/// under `prompts/`, with fixture-owned spec/plan data at the reported
+/// Stage a frozen copy of the router, intentionally not kept in step with
+/// `prompts/`, and the drift-guarded `implement-plan.md` fixture under `prompts/`, with fixture-owned spec/plan data at the reported
 /// `fixes/2026-09-14-cicd-improvements/` location and no log file.
 fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str) {
     let manifest = biscuit_test_harness::manifest_dir!();
-    let repository = workspace_root();
-    stage_shipped_prompts(
-        &repository,
+    stage_frozen_prompts(
         &accept.path("prompts"),
-        &["prompts/implement.md", "prompts/_implement/implement-plan.md"],
+        &["implement.md", "_implement/implement-plan.md"],
     );
     let target = fs::read_to_string(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
@@ -640,31 +638,39 @@ fn the_shipped_router_implements_a_spec_whose_log_does_not_exist_yet() {
 /// and `phase > 1` blocks — appended to the shipped target and driven through
 /// the shipped router. Phase 1 excludes the log; a later phase includes the log
 /// `initialize` just created. Before the fix both failed with `File not found`.
-#[test]
-fn the_shipped_router_reaches_the_reported_guarded_log_include_at_each_phase() {
+/// Each phase is its own test so the two `claudine` runs spread across cores.
+fn assert_the_shipped_router_tracks_the_guarded_log_include(phase: u32, included: bool) {
     const REPORTED_BLOCK: &str = "\n::block when=\"file_exists(log)\"\n::block when=\"phase > 1\"\n\
                                   LOG-INCLUDE-START\n::file {{log}}\nLOG-INCLUDE-END\n\
                                   ::end-block\n::end-block\n";
 
-    for (phase, included) in [(1, false), (2, true)] {
-        let accept = Acceptance::new(&format!("init-accept-shipped-guard-{phase}"));
-        stage_shipped_route(&accept, phase, REPORTED_BLOCK);
+    let accept = Acceptance::new(&format!("init-accept-shipped-guard-{phase}"));
+    stage_shipped_route(&accept, phase, REPORTED_BLOCK);
 
-        let (success, output) =
-            accept.run(&["compose", "prompts/implement.md", REPORTED_SPEC_ARG, "-y", "--goose"]);
+    let (success, output) =
+        accept.run(&["compose", "prompts/implement.md", REPORTED_SPEC_ARG, "-y", "--goose"]);
 
-        assert_no_early_discovery(&output);
-        assert!(success, "phase {phase}:\n{output}");
-        assert!(accept.path(REPORTED_LOG).is_file(), "phase {phase}: initialize creates the log");
-        let attempts = accept.attempts();
-        assert_eq!(attempts.len(), 1, "phase {phase}:\n{output}");
-        assert_eq!(
-            attempts[0].contains("LOG-INCLUDE-START"),
-            included,
-            "phase {phase}: the guarded include tracks the phase:\n{}",
-            attempts[0]
-        );
-    }
+    assert_no_early_discovery(&output);
+    assert!(success, "phase {phase}:\n{output}");
+    assert!(accept.path(REPORTED_LOG).is_file(), "phase {phase}: initialize creates the log");
+    let attempts = accept.attempts();
+    assert_eq!(attempts.len(), 1, "phase {phase}:\n{output}");
+    assert_eq!(
+        attempts[0].contains("LOG-INCLUDE-START"),
+        included,
+        "phase {phase}: the guarded include tracks the phase:\n{}",
+        attempts[0]
+    );
+}
+
+#[test]
+fn the_shipped_router_excludes_the_reported_guarded_log_include_in_phase_one() {
+    assert_the_shipped_router_tracks_the_guarded_log_include(1, false);
+}
+
+#[test]
+fn the_shipped_router_reaches_the_reported_guarded_log_include_in_a_later_phase() {
+    assert_the_shipped_router_tracks_the_guarded_log_include(2, true);
 }
 
 // ── AC12: resolution parity ─────────────────────────────────────────────────

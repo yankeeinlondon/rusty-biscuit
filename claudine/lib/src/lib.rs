@@ -1,6 +1,10 @@
 // Production builds may not construct or clear a child command directly; see
 // `child_environment` and `clippy.toml`. Tests keep the plain constructors.
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
+// `large-error-threshold` in `clippy.toml` is sized to `CompositionError` on
+// Unix; a Windows `PathBuf` is 8 bytes wider, which lifts the enum to 144.
+// Linux lint runs keep enforcing the threshold.
+#![cfg_attr(windows, allow(clippy::result_large_err))]
 
 pub mod actions;
 pub mod badges;
@@ -19,6 +23,7 @@ pub mod linking;
 pub mod mcp;
 pub mod messaging;
 pub mod model_catalog;
+mod npm_shim;
 pub mod opencode_config;
 mod path_semantics;
 pub mod permissions;

@@ -223,6 +223,16 @@ fn outcome(output: &Output) -> Result<(), String> {
     }
 }
 
+/// Maps `items` through `f` on one thread each, keeping their order. A cell's
+/// candidates are independent process spawns, so they overlap.
+fn spawn_each<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R> {
+    std::thread::scope(|scope| {
+        let f = &f;
+        let handles: Vec<_> = items.into_iter().map(|item| scope.spawn(move || f(item))).collect();
+        handles.into_iter().map(|handle| handle.join().unwrap()).collect()
+    })
+}
+
 /// `claudine compose --dry-run <document>` from the repository root.
 fn dry_run(cli: &CliProcessFixture, fixture: &ParityFixture, document: &Path) -> Output {
     cli.command_builder()
@@ -294,12 +304,18 @@ fn complete_glob(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobVa
 }
 
 /// `claudine compose --dry-run <prompt> spec=<candidate>` from the cell's
-/// launch directory, for each candidate.
-fn supplied_glob_value(cli: &CliProcessFixture, fixture: &ParityFixture, cell: &GlobValueCell) -> Observed {
+/// launch directory, for each candidate in `keep`.
+fn supplied_glob_value(
+    cli: &CliProcessFixture,
+    fixture: &ParityFixture,
+    cell: &GlobValueCell,
+    keep: &[PathBuf],
+) -> Observed {
     let prompt = fixture.glob_value_document(cell);
     let outcomes = fixture
         .glob_candidates()
         .into_iter()
+        .filter(|candidate| keep.contains(candidate))
         .map(|candidate| {
             let output = cli
                 .command_builder()
@@ -358,7 +374,7 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
         Row::GlobValue(cell) => {
             let observed = match cell.entry {
                 EntryPoint::ClaudineCompletion => complete_glob(cli, fixture, cell),
-                EntryPoint::ClaudineSuppliedValue => supplied_glob_value(cli, fixture, cell),
+                EntryPoint::ClaudineSuppliedValue => supplied_glob_value(cli, fixture, cell, &fixture.glob_candidates()),
                 other => unreachable!("{other:?} runs no claudine-cli glob value row"),
             };
             (fixture.expected_glob_value(cell), observed)
@@ -419,14 +435,63 @@ fn fixtures() -> Fixtures {
     Fixtures { plain: (plain_cli, plain), declared: (declared_cli, declared) }
 }
 
-#[test]
-fn claudine_entry_points_agree_on_every_reference() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+/// The rows that spawn once per glob candidate (9 spawns each, too many for a
+/// shard): a supplied `match()` value, once per launch directory. Each runs
+/// in [`CANDIDATE_PARTS`] dedicated tests.
+fn is_candidate_sweep(row: &Row) -> bool {
+    matches!(row, Row::GlobValue(cell) if cell.entry == EntryPoint::ClaudineSuppliedValue)
+}
 
+/// How many dedicated tests split each candidate-sweep row's candidates.
+const CANDIDATE_PARTS: usize = 3;
+
+/// The candidates of part `part`: every `CANDIDATE_PARTS`-th one.
+fn candidate_part(candidates: Vec<PathBuf>, part: usize) -> Vec<PathBuf> {
+    candidates.into_iter().enumerate().filter_map(|(i, c)| (i % CANDIDATE_PARTS == part).then_some(c)).collect()
+}
+
+/// Runs candidate-sweep row number `sweep` on part `part` of its candidates.
+/// The expectation narrows to the same candidates, so across the parts every
+/// candidate is checked against its own expected verdict: an admitted
+/// candidate must be expected, and an expected one admitted.
+fn run_candidate_part(sweep: usize, part: usize) {
     let fixtures = fixtures();
-    let rows = rows_for(Owner::ClaudineCli);
+    let row = rows_for(Owner::ClaudineCli).into_iter().filter(is_candidate_sweep).nth(sweep).expect("a sweep row");
+    let (cli, fixture) = fixtures.for_entry(row.entry());
+    let Row::GlobValue(cell) = row else { unreachable!("{row:?} is not a candidate sweep") };
+    fixture.write_glob_value_document(&cell);
+    let keep = candidate_part(fixture.glob_candidates(), part);
+    let observed = supplied_glob_value(cli, fixture, &cell, &keep);
+    let verdict = match fixture.expected_glob_value(&cell) {
+        // Nothing expected of this part: validation must admit nothing.
+        Expected::Files(want) if !want.iter().any(|path| keep.contains(path)) => {
+            (observed == Observed::Unresolved).then_some(()).ok_or_else(|| format!("expected nothing, got {observed:?}"))
+        }
+        Expected::Files(want) => {
+            let want = want.into_iter().filter(|path| keep.contains(path)).collect();
+            fixture.compare(&Expected::Files(want), &observed)
+        }
+        other => fixture.compare(&other, &observed),
+    };
+    assert!(verdict.is_ok(), "{row:?} part {part}: {}", verdict.unwrap_err());
+}
+
+/// How many tests the matrix's rows are dealt across.
+const SHARDS: usize = 6;
+
+/// Runs every `SHARDS`-th row of the matrix, starting at `shard`. The rows
+/// are spawn-bound, so nextest runs the shards as separate processes in
+/// parallel. Each shard keeps the check that every owned entry point ran a
+/// cell, which holds because rows are grouped by entry point and each entry
+/// point has far more than `SHARDS` rows.
+fn run_matrix_shard(shard: usize) {
+    let fixtures = fixtures();
+    let rows: Vec<Row> = rows_for(Owner::ClaudineCli)
+        .into_iter()
+        .filter(|row| !is_candidate_sweep(row))
+        .enumerate()
+        .filter_map(|(index, row)| (index % SHARDS == shard).then_some(row))
+        .collect();
 
     // Documents are written before the spawns run concurrently, so two
     // threads never write one file.
@@ -452,8 +517,8 @@ fn claudine_entry_points_agree_on_every_reference() {
             }
         }
     }
-    const THREADS: usize = 8;
-    let chunk = rows.len().div_ceil(THREADS);
+    const THREADS: usize = 4;
+    let chunk = rows.len().div_ceil(THREADS).max(1);
     let results: Vec<(Row, Expected, Observed)> = std::thread::scope(|scope| {
         let handles: Vec<_> = rows
             .chunks(chunk)
@@ -478,6 +543,118 @@ fn claudine_entry_points_agree_on_every_reference() {
         report.record(fixture, row, expected, observed);
     }
     report.assert_parity();
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(0);
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference_shard_1() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(1);
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference_shard_2() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(2);
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference_shard_3() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(3);
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference_shard_4() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(4);
+}
+
+#[test]
+fn claudine_entry_points_agree_on_every_reference_shard_5() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_shard(5);
+}
+
+#[test]
+fn supplied_match_validation_row_0_candidates_part_0() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(0, 0);
+}
+
+#[test]
+fn supplied_match_validation_row_0_candidates_part_1() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(0, 1);
+}
+
+#[test]
+fn supplied_match_validation_row_0_candidates_part_2() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(0, 2);
+}
+
+#[test]
+fn supplied_match_validation_row_1_candidates_part_0() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(1, 0);
+}
+
+#[test]
+fn supplied_match_validation_row_1_candidates_part_1() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(1, 1);
+}
+
+#[test]
+fn supplied_match_validation_row_1_candidates_part_2() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    run_candidate_part(1, 2);
+}
+
+/// The parts of [`candidate_part`] cover every glob candidate exactly once, and
+/// the matrix has exactly the two candidate-sweep rows the tests above split.
+#[test]
+fn candidate_parts_cover_every_glob_candidate_once() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    let all: Vec<PathBuf> = matrix::GLOB_FILES.iter().map(PathBuf::from).collect();
+    let mut union: Vec<PathBuf> = (0..CANDIDATE_PARTS).flat_map(|part| candidate_part(all.clone(), part)).collect();
+    union.sort();
+    let mut want = all;
+    want.sort();
+    assert_eq!(union, want);
+    assert_eq!(rows_for(Owner::ClaudineCli).iter().filter(|row| is_candidate_sweep(row)).count(), 2);
 }
 
 /// `claudine <args>` launched from the cross-repository fixture's launch
@@ -538,23 +715,40 @@ fn external_prompt_schema_completion_keeps_both_anchors() {
         })
         .collect();
 
-    let mut failures = Vec::new();
-    for command in ["compose", "inline-compose", "sequence"] {
-        for (label, prompt, owner) in &prompts {
-            let mut values = complete_from_launch(&cli, &fixture, command, prompt, "zebra=");
-            values.sort();
-            let mut expected: Vec<String> =
-                owner.zebra_values().iter().map(|value| format!("zebra='{value}'")).collect();
-            expected.sort();
-            if values != expected {
-                failures.push(format!("{command} {label}: values {values:?}, expected {expected:?}"));
-            }
-            let names = complete_from_launch(&cli, &fixture, command, prompt, "a");
-            if names != ["zebra=", "apple="] {
-                failures.push(format!("{command} {label}: names {names:?}"));
-            }
-        }
-    }
+    // Each (command, prompt) pair is two spawns; run the pairs on a few
+    // threads, keeping failures in pair order.
+    let pairs: Vec<_> = ["compose", "inline-compose", "sequence"]
+        .into_iter()
+        .flat_map(|command| prompts.iter().map(move |(label, prompt, owner)| (command, label, prompt, owner)))
+        .collect();
+    let chunk = pairs.len().div_ceil(6).max(1);
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = pairs
+            .chunks(chunk)
+            .map(|pairs| {
+                let (cli, fixture) = (&cli, &fixture);
+                scope.spawn(move || {
+                    let mut failures = Vec::new();
+                    for &(command, label, prompt, owner) in pairs {
+                        let mut values = complete_from_launch(cli, fixture, command, prompt, "zebra=");
+                        values.sort();
+                        let mut expected: Vec<String> =
+                            owner.zebra_values().iter().map(|value| format!("zebra='{value}'")).collect();
+                        expected.sort();
+                        if values != expected {
+                            failures.push(format!("{command} {label}: values {values:?}, expected {expected:?}"));
+                        }
+                        let names = complete_from_launch(cli, fixture, command, prompt, "a");
+                        if names != ["zebra=", "apple="] {
+                            failures.push(format!("{command} {label}: names {names:?}"));
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|handle| handle.join().unwrap()).collect()
+    });
     assert!(failures.is_empty(), "external prompt completion:\n{}", failures.join("\n"));
 }
 
@@ -577,20 +771,21 @@ fn external_prompt_composition_keeps_both_anchors() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    let mut failures = Vec::new();
-    for (index, (label, reference, owner)) in fixture.schema_references().into_iter().enumerate() {
+    let references: Vec<_> = fixture.schema_references().into_iter().enumerate().collect();
+    let failures: Vec<String> = spawn_each(references, |(index, (label, reference, owner))| {
         let prompt = fixture.write_schema_document(
             &format!("composed-{index}"),
             &reference,
             &format!("zebra: {}\n", owner.zebra_values()[0]),
         );
-        let output = claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), prompt.as_os_str()]);
-        if !output.status.success() {
-            failures.push(format!(
-                "{label} `{reference}` ({owner:?}): {}",
-                strip_ansi(&String::from_utf8_lossy(&output.stderr))
-            ));
-        }
-    }
+        let output =
+            claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), prompt.as_os_str()]);
+        (!output.status.success()).then(|| {
+            format!("{label} `{reference}` ({owner:?}): {}", strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+        })
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(failures.is_empty(), "external prompt composition:\n{}", failures.join("\n"));
 }

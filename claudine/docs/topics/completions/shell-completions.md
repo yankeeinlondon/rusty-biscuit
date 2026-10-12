@@ -629,7 +629,11 @@ property and dispatches by `CompletionKind`:
   `_`-prefix and curated skip-list (`target`, `node_modules`, …) — so
   archived `_completed/` artefacts never surface. These rules only
   shape the suggestions: validation still accepts a hidden, ignored, or
-  `_`-prefixed file you type. A file symlink that a bare, `./`, or `../`
+  `_`-prefixed file you type. The walk also skips every folder the
+  patterns cannot reach, which changes no suggestion: `DOCS/*.md`
+  launched from your home folder, outside any repository, reads `DOCS/`
+  alone rather than the whole home folder, while `**/*.md` still searches
+  all of it. A file symlink that a bare, `./`, or `../`
   pattern matches and whose target leaves the file tree is left out
   silently; completion reports no warning for it.
 

@@ -15,14 +15,18 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, PropertyDef, SimplifiedSchema, coerce};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, EffectiveSchema, PropertyDef, SimplifiedSchema, coerce,
+};
 use serde_json::Value;
 
 use crate::errors::GenError;
+use crate::memo::FileMemo;
 
 /// One override entry: a catalog-shaped replacement value plus the
 /// mandatory human rationale.
@@ -84,9 +88,7 @@ pub fn load(
     let facts = load_optional_yaml_map(&area.join(format!("docs/providers/facts/{slug}.yaml")))?;
     let overrides =
         load_overrides(&area.join(format!("docs/providers/overrides/{slug}.yaml")))?;
-    // Schema resolution otherwise rediscovers the same repository and package
-    // area for every research topic in this provider generation pass.
-    let schemas = generator_schemas(&area, snapshot)?;
+    let context = area_resolution_context(&area, snapshot)?;
 
     let mut research = BTreeMap::new();
     let mut research_authored = BTreeMap::new();
@@ -97,7 +99,7 @@ pub fn load(
         if !sidecar.is_file() {
             return Err(GenError::SidecarMissing { path: sidecar });
         }
-        let frontmatter = validate_frontmatter(&doc_path, &schemas)?;
+        let frontmatter = validate_frontmatter(&doc_path, &context)?;
         research.insert((*topic).to_string(), frontmatter.coerced);
         research_authored.insert((*topic).to_string(), frontmatter.authored);
         sidecars.insert((*topic).to_string(), sidecar);
@@ -252,7 +254,7 @@ pub fn load_validated_frontmatter(
     path: &Path,
     context: &FileResolutionContext,
 ) -> Result<Value, GenError> {
-    Ok(validate_frontmatter(path, &DarkmatterSchemas::new(context.clone()))?.coerced)
+    Ok(validate_frontmatter(path, context)?.coerced)
 }
 
 /// One validated research document's frontmatter in both forms.
@@ -261,29 +263,16 @@ struct ValidatedFrontmatter {
     authored: Value,
 }
 
-fn validate_frontmatter(path: &Path, api: &DarkmatterSchemas) -> Result<ValidatedFrontmatter, GenError> {
-    let md = Markdown::try_from(path).map_err(|err| GenError::Markdown {
-        path: path.to_path_buf(),
-        message: err.to_string(),
-    })?;
-    let frontmatter = serde_json::to_value(md.frontmatter().as_map()).map_err(|err| {
-        GenError::Json {
-            message: err.to_string(),
-        }
-    })?;
-    let schema_override = frozen_contract_override(path, &frontmatter)?;
-    let effective = api
-        .effective_for_with_override(&md, schema_override.as_ref())
-        .map_err(|err| GenError::Markdown {
-            path: path.to_path_buf(),
-            message: err.to_string(),
-        })?
-        .ok_or_else(|| GenError::Markdown {
-            path: path.to_path_buf(),
-            message: "research document declares no `$schema`".into(),
-        })?;
+fn validate_frontmatter(
+    path: &Path,
+    context: &FileResolutionContext,
+) -> Result<ValidatedFrontmatter, GenError> {
+    let document = parsed_document(path)?;
+    let frontmatter = &document.frontmatter;
+    let schema_override = frozen_contract_override(path, frontmatter)?;
+    let effective = effective_schema(path, &document.markdown, schema_override.as_ref(), context)?;
 
-    let report = effective.validate(&frontmatter);
+    let report = effective.validate(frontmatter);
     if !report.valid {
         let problems = report
             .problems
@@ -297,10 +286,78 @@ fn validate_frontmatter(path: &Path, api: &DarkmatterSchemas) -> Result<Validate
         });
     }
 
-    let coerced = coerce::coerce_frontmatter(&effective.json_schema, &frontmatter).value;
+    let coerced = coerce::coerce_frontmatter(&effective.json_schema, frontmatter).value;
     Ok(ValidatedFrontmatter {
         coerced,
-        authored: frontmatter,
+        authored: frontmatter.clone(),
+    })
+}
+
+/// A research document parsed once per content revision.
+struct ParsedDocument {
+    markdown: Markdown,
+    /// The frontmatter as authored.
+    frontmatter: Value,
+}
+
+/// Parses the document at `path`, reusing the parse while its bytes are
+/// unchanged: the steering, signals, and vocabulary passes reload documents a
+/// provider pass has already parsed.
+fn parsed_document(path: &Path) -> Result<Arc<ParsedDocument>, GenError> {
+    static DOCUMENTS: LazyLock<FileMemo<Arc<ParsedDocument>>> = LazyLock::new(FileMemo::new);
+    DOCUMENTS.get_or_try_insert(format!("{path:?}"), || {
+        let markdown = Markdown::try_from(path).map_err(|err| GenError::Markdown {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        })?;
+        let frontmatter = serde_json::to_value(markdown.frontmatter().as_map()).map_err(|err| {
+            GenError::Json {
+                message: err.to_string(),
+            }
+        })?;
+        let document = ParsedDocument {
+            markdown,
+            frontmatter,
+        };
+        Ok((Arc::new(document), vec![path.to_path_buf()]))
+    })
+}
+
+/// The effective schema for the document at `path`.
+///
+/// WHY memoized: every provider's document of a topic shares one directory
+/// and one `$schema` reference, so the resolved schema is the same for all
+/// ten; resolving it per document dominated a generation pass. The key is
+/// everything resolution reads besides file content (the document directory,
+/// the `$schema` value or its frozen-revision override, and the context), and
+/// the schema's own [`EffectiveSchema::dependencies`] are the content inputs.
+fn effective_schema(
+    path: &Path,
+    markdown: &Markdown,
+    schema_override: Option<&Value>,
+    context: &FileResolutionContext,
+) -> Result<EffectiveSchema, GenError> {
+    static SCHEMAS: LazyLock<FileMemo<EffectiveSchema>> = LazyLock::new(FileMemo::new);
+    let schema = schema_override.or_else(|| markdown.frontmatter().as_map().get("$schema"));
+    let key = format!(
+        "{:?}|{}|{:?}",
+        path.parent(),
+        schema.map(Value::to_string).unwrap_or_default(),
+        context
+    );
+    SCHEMAS.get_or_try_insert(key, || {
+        let effective = DarkmatterSchemas::new(context.clone())
+            .effective_for_with_override(markdown, schema_override)
+            .map_err(|err| GenError::Markdown {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            })?
+            .ok_or_else(|| GenError::Markdown {
+                path: path.to_path_buf(),
+                message: "research document declares no `$schema`".into(),
+            })?;
+        let dependencies = effective.dependencies().to_vec();
+        Ok((effective, dependencies))
     })
 }
 
@@ -350,18 +407,21 @@ fn frozen_contract_override(path: &Path, frontmatter: &Value) -> Result<Option<V
 }
 
 /// The `literal` revision a sidecar's `schema_revision` property pins, if any.
+///
+/// Reused while the sidecar is unchanged: every provider's document of a
+/// topic asks the same sidecar.
 fn contract_revision(sidecar: &Path) -> Result<Option<u64>, GenError> {
-    let SimplifiedSchema::Single(shape) = crate::schema_compat::load_sidecar_schema(sidecar)? else {
-        return Ok(None);
-    };
-    Ok(match shape.properties.get("schema_revision") {
-        Some(PropertyDef::Single(atom)) => atom.literal_value().and_then(Value::as_u64),
-        _ => None,
+    static REVISIONS: LazyLock<FileMemo<Option<u64>>> = LazyLock::new(FileMemo::new);
+    REVISIONS.get_or_try_insert(format!("{sidecar:?}"), || {
+        let SimplifiedSchema::Single(shape) = crate::schema_compat::parse_sidecar_schema(sidecar)? else {
+            return Ok((None, vec![sidecar.to_path_buf()]));
+        };
+        let revision = match shape.properties.get("schema_revision") {
+            Some(PropertyDef::Single(atom)) => atom.literal_value().and_then(Value::as_u64),
+            _ => None,
+        };
+        Ok((revision, vec![sidecar.to_path_buf()]))
     })
-}
-
-fn generator_schemas(area: &Path, snapshot: &RequestSnapshot) -> Result<DarkmatterSchemas, GenError> {
-    Ok(DarkmatterSchemas::new(area_resolution_context(area, snapshot)?))
 }
 
 /// Builds the file-resolution context for `area` from `snapshot` rebased at
@@ -374,27 +434,48 @@ pub fn area_resolution_context(
     area: &Path,
     snapshot: &RequestSnapshot,
 ) -> Result<FileResolutionContext, GenError> {
-    build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
-        GenError::ResolutionContext {
-            area: area.to_path_buf(),
-            source,
-        }
+    // WHY: building a context discovers the repository and its package
+    // scopes, a git walk of a few hundred milliseconds that every load of
+    // every provider repeated for the same area, and that the parallel
+    // provider passes would otherwise all start at once. The key is the area
+    // plus everything the build reads from the snapshot, so a different home,
+    // environment, or `@` root never reuses a context. Failures are not
+    // cached.
+    static CONTEXTS: LazyLock<FileMemo<FileResolutionContext>> = LazyLock::new(FileMemo::new);
+    let mut env: Vec<_> = snapshot.env().iter().collect();
+    env.sort();
+    let key = format!("{area:?}|{:?}|{env:?}|{:?}", snapshot.home(), snapshot.magic_roots());
+    CONTEXTS.get_or_try_insert(key, || {
+        let context = build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
+            GenError::ResolutionContext {
+                area: area.to_path_buf(),
+                source: Box::new(source),
+            }
+        })?;
+        Ok((context, Vec::new()))
     })
 }
 
 /// Parses a YAML file into a `serde_json::Value`.
+///
+/// The parse is reused while the file's bytes are unchanged: every provider
+/// pass reads the same roster.
 pub(crate) fn read_yaml(path: &Path) -> Result<Value, GenError> {
-    let text = fs::read_to_string(path).map_err(|source| GenError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let yaml: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&text).map_err(|err| GenError::Yaml {
+    static YAML: LazyLock<FileMemo<Value>> = LazyLock::new(FileMemo::new);
+    YAML.get_or_try_insert(format!("{path:?}"), || {
+        let text = fs::read_to_string(path).map_err(|source| GenError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&text).map_err(|err| GenError::Yaml {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            })?;
+        let value = serde_json::to_value(yaml).map_err(|err| GenError::Yaml {
             path: path.to_path_buf(),
             message: err.to_string(),
         })?;
-    serde_json::to_value(yaml).map_err(|err| GenError::Yaml {
-        path: path.to_path_buf(),
-        message: err.to_string(),
+        Ok((value, vec![path.to_path_buf()]))
     })
 }

@@ -661,9 +661,14 @@ pub(crate) mod test_support {
         ComposeRequest::with_context(options, context).expect("test request context")
     }
 
-    /// A file source's directory, else the context's anchor, else the
-    /// process directory.
+    /// A file source's directory, else the context's anchor, else a
+    /// per-process temp directory outside any Git repository. The fallback is
+    /// deliberately not the process directory: under the test runner that is
+    /// inside this monorepo, and preparing a request there runs repository
+    /// discovery over all of it (~0.4s per call, more under load). Relative
+    /// file sources still join onto the process directory.
     pub(crate) fn legacy_request_dir(options: &ComposeOptions) -> PathBuf {
+        static SCRATCH: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
         let process = || std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         match options.source() {
             super::super::options::ComposeSource::File(path) => {
@@ -671,7 +676,10 @@ pub(crate) mod test_support {
                 absolute.parent().map(Path::to_path_buf).unwrap_or_else(process)
             }
             _ if options.context().anchor().is_absolute() => options.context().anchor().to_path_buf(),
-            _ => process(),
+            _ => SCRATCH
+                .get_or_init(|| tempfile::tempdir().expect("scratch request dir"))
+                .path()
+                .to_path_buf(),
         }
     }
 }

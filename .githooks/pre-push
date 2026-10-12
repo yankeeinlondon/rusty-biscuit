@@ -133,6 +133,11 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR G
 # The trigger review runs the committed tree's Python from a worktree that
 # must stay exactly the committed tree; a bytecode cache would dirty it.
 export PYTHONDONTWRITEBYTECODE=1
+# A native Windows `jq.exe` ends lines with CRLF, so a base branch read back
+# from it is `main\r` and no such ref exists; `--binary` keeps LF.
+if [ "${OS:-}" = "Windows_NT" ]; then
+    jq() { command jq --binary "$@"; }
+fi
 
 SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"

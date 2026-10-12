@@ -151,6 +151,11 @@ ORCHESTRATION_PREFIXES = (".github/actions/",)
 # not recoverable from the file alone.
 LOCKFILE_PATH = "Cargo.lock"
 
+# The repository's internal prompt folders. They are tools, may hold drafts or
+# deliberately broken prompts, and are never tested in CI, so a change under one
+# is never a test input. Their tests are opt-in (`just test-prompts`).
+INTERNAL_PROMPT_PREFIXES = ("prompts/", "darkmatter/prompts/", "claudine/prompts/")
+
 # The two execution models a registered suite can have. A `cargo` suite runs
 # inside its owner's ordinary Nextest cells, so no single environment hosts it.
 # A `companion` suite is a non-Cargo suite the owner's package job runs beside
@@ -4832,6 +4837,10 @@ def test_input_references(
     declaration names the cross-package couplings that are worth a narrowed
     cell — a contract suite that executes another package's script.
 
+    A file under one of the internal prompt folders is never a test input: the
+    folders are tools, possibly drafts, and CI never tests them
+    (`INTERNAL_PROMPT_PREFIXES`).
+
     A Markdown document that transcludes a changed path (`::file`, directly or
     through other documents) is searched too, and a test reading it is
     reported against the changed path. Only test references carry over: a
@@ -4841,7 +4850,8 @@ def test_input_references(
     candidates = [
         path
         for path in normalized_paths(paths)
-        if not is_package_source_path(PurePosixPath(path)) or path in source_inputs
+        if not path.startswith(INTERNAL_PROMPT_PREFIXES)
+        and (not is_package_source_path(PurePosixPath(path)) or path in source_inputs)
     ]
     if not candidates:
         return []

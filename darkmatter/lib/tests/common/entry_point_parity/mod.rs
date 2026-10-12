@@ -219,11 +219,9 @@ impl EntryPoint {
                 [document_rows(self, &[SchemaFile], &Form::ALL, false), glob_document_rows(self, &[MatchValidation])]
                     .concat()
             }
-            Self::MdCompose => [
-                process_document_rows(self, &[File, SchemaFile]),
-                one_glob_document_row(self, FileLinks),
-            ]
-            .concat(),
+            Self::MdCompose => {
+                [process_document_rows(self, &[File, SchemaFile]), one_glob_document_row(self, FileLinks)].concat()
+            }
             Self::MdSchemaValidate => {
                 [process_document_rows(self, &[SchemaFile]), one_glob_document_row(self, MatchValidation)].concat()
             }
@@ -256,11 +254,9 @@ impl EntryPoint {
             Self::DmlsLinkGraph => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsDefinition => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsCodeActions => document_rows(self, EDITOR, &Form::ALL, false),
-            Self::ClaudineComposition => [
-                process_document_rows(self, &[File, SchemaFile]),
-                one_glob_document_row(self, FileLinks),
-            ]
-            .concat(),
+            Self::ClaudineComposition => {
+                [process_document_rows(self, &[File, SchemaFile]), one_glob_document_row(self, FileLinks)].concat()
+            }
             // The value is the prompt itself, so the notes documents' own
             // references (rows (a) and (b)) are composition's, not completion's.
             Self::ClaudineCompletion => {
@@ -277,11 +273,7 @@ impl EntryPoint {
 
 /// Every row of both tables for the entry points `owner` runs.
 pub fn rows_for(owner: Owner) -> Vec<Row> {
-    EntryPoint::ALL
-        .into_iter()
-        .filter(|entry| entry.owner() == owner)
-        .flat_map(EntryPoint::rows)
-        .collect()
+    EntryPoint::ALL.into_iter().filter(|entry| entry.owner() == owner).flat_map(EntryPoint::rows).collect()
 }
 
 /// An `md` route that opens a caller-named source file. Output
@@ -768,13 +760,8 @@ fn document_rows(entry: EntryPoint, consumers: &[Consumer], forms: &[Form], thro
 /// input: the document's folder, the repository root and package catalog, the
 /// configured `@` root, the home directory, and the tree boundary. Every
 /// process cell is a spawn, which is why the process tables stay this small.
-const PROCESS_FORMS: &[Form] = &[
-    Form::BareBeside,
-    Form::RepositoryScoped,
-    Form::ConfiguredMagic,
-    Form::Home,
-    Form::TreeEscape,
-];
+const PROCESS_FORMS: &[Form] =
+    &[Form::BareBeside, Form::RepositoryScoped, Form::ConfiguredMagic, Form::Home, Form::TreeEscape];
 
 /// [`document_rows`] for a process entry point: [`PROCESS_FORMS`] at the
 /// deepest depth, plus the document opened by its absolute path, whose
@@ -807,10 +794,7 @@ fn one_glob_value_row_per_launch(entry: EntryPoint, consumer: GlobConsumer) -> V
         .into_iter()
         .find(|form| form.reaches(consumer))
         .expect("every glob consumer reads some glob form");
-    Launch::ALL
-        .into_iter()
-        .map(|launch| Row::GlobValue(GlobValueCell { entry, consumer, form, launch }))
-        .collect()
+    Launch::ALL.into_iter().map(|launch| Row::GlobValue(GlobValueCell { entry, consumer, form, launch })).collect()
 }
 
 fn glob_document_rows(entry: EntryPoint, consumers: &[GlobConsumer]) -> Vec<Row> {
@@ -970,9 +954,7 @@ impl ParityFixture {
         let consumer = cell.consumer;
         match cell.placement {
             Placement::Repository(form, depth) => {
-                let path = self
-                    .depth_dir(depth)
-                    .join(format!("cell-{}-{}.md", consumer.slug(), form.slug()));
+                let path = self.depth_dir(depth).join(format!("cell-{}-{}.md", consumer.slug(), form.slug()));
                 write(&path, &consumer.document(&form.spelling(depth.levels_below_root())));
                 path
             }
@@ -988,9 +970,7 @@ impl ParityFixture {
     }
 
     fn write_notes_document(&self, consumer: Consumer, reference: NotesReference) -> PathBuf {
-        let path = self
-            .home()
-            .join(format!("notes/cell-{}-{}.md", consumer.slug(), reference.slug()));
+        let path = self.home().join(format!("notes/cell-{}-{}.md", consumer.slug(), reference.slug()));
         write(&path, &consumer.document(reference.spelling()));
         path
     }
@@ -1068,11 +1048,7 @@ impl ParityFixture {
     /// repository root it sees only the repository root).
     fn expected_form(&self, form: Form, dir: &Path, in_package: bool) -> Expected {
         let file_or_miss = |path: PathBuf| {
-            if path.is_file() {
-                Expected::File(path)
-            } else {
-                Expected::Failure(ResolutionFailure::NoMatch)
-            }
+            if path.is_file() { Expected::File(path) } else { Expected::Failure(ResolutionFailure::NoMatch) }
         };
         match form {
             Form::ExplicitRelative => file_or_miss(dir.join("sibling.md")),
@@ -1143,8 +1119,7 @@ impl ParityFixture {
     /// The document a `::file-links` or `find_files()` cell composes, at
     /// [`GLOB_DEPTH`]; [`Self::write_glob_document`] writes it.
     pub fn glob_document(&self, cell: &GlobDocumentCell) -> PathBuf {
-        self.depth_dir(GLOB_DEPTH)
-            .join(format!("glob-{}-{}.md", cell.consumer.slug(), cell.form.slug()))
+        self.depth_dir(GLOB_DEPTH).join(format!("glob-{}-{}.md", cell.consumer.slug(), cell.form.slug()))
     }
 
     /// Writes [`Self::glob_document`].
@@ -1339,9 +1314,7 @@ impl ParityFixture {
             (Expected::Failure(want), Observed::Failure(got)) if want == got => Ok(()),
             (Expected::Failure(_), Observed::Unresolved) => Ok(()),
             (Expected::File(want), other) => Err(format!("expected {}, got {other:?}", self.show(want))),
-            (Expected::Failure(want), Observed::File(got)) => {
-                Err(format!("expected {want:?}, got {}", self.show(got)))
-            }
+            (Expected::Failure(want), Observed::File(got)) => Err(format!("expected {want:?}, got {}", self.show(got))),
             (Expected::Failure(want), Observed::Files(got) | Observed::FileSet(got)) => {
                 Err(format!("expected {want:?}, got {}", self.show_all(got)))
             }
@@ -1500,7 +1473,8 @@ fn expected_glob(root: &Path, form: GlobForm, consumer: GlobConsumer, order: &[&
     }
     let excluded = |id: &&&str| {
         let completed = id.contains("/_completed/");
-        (form == GlobForm::ScopedExcluding && completed) || (consumer == GlobConsumer::MatchCompletion && id.contains("/_"))
+        (form == GlobForm::ScopedExcluding && completed)
+            || (consumer == GlobConsumer::MatchCompletion && id.contains("/_"))
     };
     Expected::Files(order.iter().filter(|id| !excluded(id)).map(|id| root.join(id)).collect())
 }
@@ -1537,6 +1511,13 @@ impl ParityReport {
             .filter(|entry| entry.owner() == self.owner && !self.executed.contains(entry))
             .collect();
         assert!(missing.is_empty(), "{:?} runner executed no cell for {missing:?}", self.owner);
+        self.assert_cells_agree();
+    }
+
+    /// Panics naming every mismatched cell recorded so far. For a runner that
+    /// splits the matrix across tests, where no single report sees every
+    /// entry point.
+    pub fn assert_cells_agree(&self) {
         assert!(
             self.mismatches.is_empty(),
             "{} of {} cells disagree:\n{}",
@@ -1781,11 +1762,7 @@ impl CrossRepositoryFixture {
             ("repository root", "&schemas/order.yaml".into(), SchemaOwner::Source),
             ("repository scoped", "^schemas/order.yaml".into(), SchemaOwner::Source),
             ("explicit relative", "./order.yaml".into(), SchemaOwner::Source),
-            (
-                "absolute",
-                to_portable_string(&self.source().join("schemas/order.yaml")),
-                SchemaOwner::Source,
-            ),
+            ("absolute", to_portable_string(&self.source().join("schemas/order.yaml")), SchemaOwner::Source),
             ("magic", "@order.yaml".into(), SchemaOwner::Launch),
         ]
     }

@@ -104,7 +104,7 @@ The application that creates the engine configures its limits:
 
 - **Filesystem location (`mutation_root`).** File and directory operations are restricted to a configured directory. The engine rejects paths that escape that root through its lexical path-containment check.
 - **Network destinations (`allowed_hosts`).** No hosts are allowed by default. `http_post` rejects a host that is not allowed before making a network request.
-- **Markdown hashes (`auto_rehash`).** Enabled by default. When a frontmatter operation changes a document with a `hash:` field, the engine recomputes that hash so it reflects the updated document.
+- **Markdown hashes (`auto_rehash`).** Enabled by default. When a frontmatter operation changes a document with a `hash:` field, the engine recomputes that hash so it reflects the updated document, and advances `last_updated` to the current UTC date when the edit changed the hashed content. A malformed stored `hash:` fails the operation instead of being overwritten.
 
 The report's **Safety** column identifies which kind of change an operation makes:
 

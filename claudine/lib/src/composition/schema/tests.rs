@@ -3,8 +3,12 @@
 use super::*;
 use crate::composition::CompositionMode;
 use crate::composition::resolve::resolve_composition_source;
+#[cfg(feature = "prompt-tests")]
+use crate::composition::resolve::resolve_composition_source_in_context;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(feature = "prompt-tests")]
+use std::path::Path;
 use tempfile::TempDir;
 
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
@@ -18,6 +22,10 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     crate::composition::resolve_fixture_source(file.to_str().unwrap()).unwrap()
 }
 
+// These helpers and the two `shipped_implement_plan_*` tests read the live
+// `prompts/` tree, so they compile only with the opt-in `prompt-tests` feature
+// (`just test-prompts`); CI never runs them.
+#[cfg(feature = "prompt-tests")]
 fn shipped_implement_plan() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
         .ancestors()
@@ -26,11 +34,46 @@ fn shipped_implement_plan() -> PathBuf {
         .join("prompts/_implement/implement-plan.md")
 }
 
+#[cfg(feature = "prompt-tests")]
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Prepares the shipped `implement-plan` prompt from a byte-for-byte copy of
+/// the shipped `prompts/` tree inside a fresh git repository.
+///
+/// The prompt resolves its `::file ../_*.md` transclusions relative to its own
+/// directory and reads `ctx.*` from its repository, so it needs a repository
+/// around `prompts/`, not this checkout: capturing the monorepo's dirty-file
+/// list and topology cost seconds and decided nothing the test asserts.
+#[cfg(feature = "prompt-tests")]
 fn prepare_shipped_implement_plan(
     plan: &Path,
     commit_message: Option<&str>,
 ) -> PreparedComposition {
-    let source = resolve_composition_source(shipped_implement_plan().to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
+    let shipped = shipped_implement_plan();
+    let shipped_prompts = shipped.ancestors().nth(2).expect("prompts/ is two levels above the prompt");
+    let repo = TempDir::new().unwrap();
+    copy_tree(shipped_prompts, &repo.path().join("prompts"));
+    let status = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git must be available for repository-context tests");
+    assert!(status.success(), "git init failed for {}", repo.path().display());
+
+    let prompt = repo.path().join("prompts/_implement/implement-plan.md");
+    let context = crate::test_support::context_for(&prompt);
+    let source = resolve_composition_source_in_context(prompt.to_str().unwrap(), &context).unwrap();
     let mut overrides = serde_json::json!({
         "plan": plan,
     });
@@ -43,7 +86,6 @@ fn prepare_shipped_implement_plan(
 
     // The caller names the source's repository, as a canonical route derives
     // it from the source context.
-    let context = crate::test_support::context_for(&source.resolved_path);
     prepare_direct_with_schema(
         &source,
         PrepareOptions {
@@ -55,6 +97,7 @@ fn prepare_shipped_implement_plan(
     .expect("the shipped implement-plan prompt should prepare")
 }
 
+#[cfg(feature = "prompt-tests")]
 fn success_shell_commands(prepared: &PreparedComposition) -> Vec<String> {
     crate::composition::lifecycle::collect_lifecycle_shell_commands_for(
         &prepared.lifecycle,
@@ -120,6 +163,7 @@ fn no_schema_passes_through_unchanged() {
     assert!(prepared.prompt.contains("body"));
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     let dir = TempDir::new().unwrap();
@@ -142,7 +186,10 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     assert_eq!(
         commands,
         [
-            format!("git add {}", prepared.source_repo_root.as_ref().unwrap().display()),
+            format!(
+                "git add {}",
+                biscuit_file::to_portable_string(prepared.source_repo_root.as_ref().unwrap())
+            ),
             "just commit".to_string(),
             "git add ..".to_string(),
             "git commit -m \"\"".to_string(),
@@ -151,6 +198,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     );
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command() {
     let dir = TempDir::new().unwrap();

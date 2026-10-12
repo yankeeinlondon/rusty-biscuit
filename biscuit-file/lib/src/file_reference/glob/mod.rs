@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 pub use error::GlobReferenceError;
 
 use crate::file_reference::FileResolutionContext;
+use crate::file_reference::PathIdentity;
 use crate::file_reference::context::ResolutionContext;
 use crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind};
 use list::PreparedSet;
@@ -79,6 +80,42 @@ pub struct SkippedEntry {
     pub link: PathBuf,
     /// Where the symlink really leads.
     pub target: PathBuf,
+}
+
+/// A [`GlobReference`] resolved against one context by
+/// [`GlobReference::prepare`].
+///
+/// For a caller that walks the roots itself, to apply its own filters, and
+/// must offer exactly what [`GlobReference::list_files`] would.
+pub struct PreparedGlobReference {
+    set: PreparedSet,
+    cwd: PathBuf,
+}
+
+impl PreparedGlobReference {
+    /// The positive patterns' roots in precedence order, as
+    /// [`GlobReference::roots`] returns them.
+    pub fn roots(&self) -> Vec<PathBuf> {
+        self.set.roots()
+    }
+
+    /// Whether [`GlobReference::list_files`] would list the existing file
+    /// `path` if its walk reached it, as [`GlobReference::lists_file`] judges.
+    pub fn lists_file(&self, path: &Path) -> bool {
+        self.set.lists(path, &self.cwd)
+    }
+
+    /// Whether a walk of the roots that reached the directory `dir` could
+    /// still find a file to list below it.
+    ///
+    /// `dir` is the canonical identity of a directory below a root: the
+    /// root's canonical spelling joined with the names a walk read. `false`
+    /// means no positive pattern can admit anything below `dir`, because it
+    /// leads to none of a pattern's literal leading directories or lies
+    /// deeper than any match can, so the walk may skip it.
+    pub fn may_list_below(&self, dir: &PathIdentity) -> bool {
+        self.set.may_list_below(dir)
+    }
 }
 
 impl GlobReference {
@@ -183,8 +220,7 @@ impl GlobReference {
     /// own filters) and must offer exactly what a listing would. Reads the
     /// link's target, so it is not lexical.
     pub fn lists_file(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
-        self.prepare_available(ctx)
-            .is_some_and(|set| set.lists(path, ctx.cwd()))
+        self.prepare(ctx).is_some_and(|prepared| prepared.lists_file(path))
     }
 
     /// Whether the absolute `path` is a member, judged with no context: a
@@ -223,9 +259,23 @@ impl GlobReference {
     /// [`lists_file`](Self::lists_file).
     /// A pattern whose roots this context cannot supply contributes none.
     pub fn roots(&self, ctx: &FileResolutionContext) -> Vec<PathBuf> {
-        self.prepare_available(ctx)
-            .map(|set| set.roots())
+        self.prepare(ctx)
+            .map(|prepared| prepared.roots())
             .unwrap_or_default()
+    }
+
+    /// Resolve the patterns against `ctx` once, for a caller that walks
+    /// [`roots`](PreparedGlobReference::roots) itself and judges many files.
+    /// [`roots`](Self::roots) and [`lists_file`](Self::lists_file) each
+    /// resolve again on every call, which reads the filesystem.
+    ///
+    /// `None` for an invalid context; a pattern whose roots `ctx` cannot
+    /// supply contributes none, as in [`roots`](Self::roots).
+    pub fn prepare(&self, ctx: &FileResolutionContext) -> Option<PreparedGlobReference> {
+        self.prepare_available(ctx).map(|set| PreparedGlobReference {
+            set,
+            cwd: ctx.cwd().to_path_buf(),
+        })
     }
 
     fn prepare_all(&self, ctx: &FileResolutionContext) -> Result<PreparedSet, GlobReferenceError> {

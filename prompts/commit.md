@@ -52,6 +52,7 @@ You are being asked to commit files to git using the **Conventional Commits** na
     > {{message}}
 
 ::end-block
+
 - There are {{ length(ctx.staged_files) }} staged files to commit which {{resides_in}}
 - The staged files are:
 
@@ -84,13 +85,14 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 - Do not paraphrase in a close body; quote what the staged text says.
 
 ### Agent Skills
+
 ::block when="ctx.current_package_area && has_skill(ctx.current_package_area)"
 
 This git commit operation was called from within the **{{ctx.current_package_area}}** package area. There is an Agent Skill "{{ctx.current_package_area}}" that provides insights into this package area that you should consider using to help understand this package area.
 
 If the packages which have staged files in them are outside of the {{ctx.current_package_area}} package area
 you may also want to consider using the Agent Skill's associated with given package areas where the
-staged files exist. 
+staged files exist.
 
 > **Note:** not all package areas have a corresponding Agent Skill but many of them do
 ::end-block
@@ -102,7 +104,7 @@ Some but not all of the package areas in this monorepo have Agent Skill's of the
 
 ## Concurrent Repo Activity
 
-While you are committing the staged files across 1:M commits (based on semantic content) there may be other activity taking place in the same repo and branch. This should not be a surprise to you and it means that it's important not to unstage and then restage content during your task's timeframe. 
+While you are committing the staged files across 1:M commits (based on semantic content) there may be other activity taking place in the same repo and branch. This should not be a surprise to you and it means that it's important not to unstage and then restage content during your task's timeframe.
 
 Above you'll find the complete list of staged files at the beginning of this operation and you your responsibility is only to those files even if more files become _staged_ during the course of your work.
 
@@ -112,7 +114,7 @@ It is important that the git operations you perform do not interfere with this e
 
 You should act as an orchestrator when you see opportunities to do so effectively. This will be done primarily to:
 
-- allow for concurrent activity 
+- allow for concurrent activity
 - preserve the context window as much as possible
 
 > **IMPORTANT:** when you spawn a sub-agent always reinforce that they CAN NOT ask the user for feedback or permissions as they are in a non-interactive session!
@@ -149,8 +151,8 @@ Your task is to:
 
     - this context may help us contextualize the changes of some or all of the staged files you are responsible for
 ::end-block
-2. Look for files that have been _moved_ and make sure they are captured into groups first so that we can correctly commit these commits correctly
-3. Then organize the remaining staged files into **semantic groups**
+2.  Look for files that have been _moved_ and make sure they are captured into groups first so that we can correctly commit these commits correctly
+3.  Then organize the remaining staged files into **semantic groups**
     - a group will have one or more _staged files_ associated with it
     - _staged files_ must only belong to a single group
     - each "group" will eventually become an individual commit
@@ -158,10 +160,9 @@ Your task is to:
     - what should the top line description of this commit be?
     - under the top line description we should add bullet points that flesh out the characteristics of the changes this group is bringing with it
 
-4. Commit all of the groups to git:
-
-    - use your best judgment but this is likely something that 
-        - can be done in parallel 
+4.  Commit all of the groups to git:
+    - use your best judgment but this is likely something that
+        - can be done in parallel
         - and with you acting as an orchestrator of subagents
     - commit messages must have:
         - a top line description of a sentence or two that describes the commit
@@ -181,12 +182,11 @@ Your task is to:
     **IMPORTANT:** you and the subagent SHOULD NOT push commits to a remote!
 
     > When working with subagents:
-    > 
+    >
     > - if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
     > - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
-    
-5. Summarization and Closure
 
+5.  Summarization and Closure
     - once all of the staged files you were responsible for have been committed, report back to the caller in summary form: each commit's hash and subject, anything left staged and why, and any unrelated working-tree changes you noticed and left alone.
     - finally, decide whether this batch produced a journal entry. The journal (`{{lessons_learned}}`) holds only **very novel or surprising git mechanics**, and almost every batch produces none. Novelty is not how it felt; it is a test you can check. Add an entry only when **all** of these hold:
         1. a git command did something different from what its documentation, this prompt, or the journal says it does, and you confirmed the behavior a second time rather than inferring it from one failure;

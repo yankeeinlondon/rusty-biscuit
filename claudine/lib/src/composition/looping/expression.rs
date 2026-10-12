@@ -1,5 +1,6 @@
 //! Loop condition expression evaluation.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
@@ -140,7 +141,7 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         if let Some(env_key) = path.strip_prefix("env.") {
             if let Some(value) = self
                 .prepared_context
-                .and_then(|context| context.env().get(env_key))
+                .and_then(|context| env_var(context.env(), env_key))
             {
                 return Some(Value::String(value.clone()));
             }
@@ -247,7 +248,18 @@ fn resolve_env(context: &biscuit_file::FileResolutionContext, name: &str) -> Opt
     if trimmed.is_empty() {
         return None;
     }
-    context.env().get(trimmed).cloned().map(Value::String)
+    env_var(context.env(), trimmed).cloned().map(Value::String)
+}
+
+/// `name`'s value in `env`. Windows variable names are case-insensitive, so
+/// `env.PATH` finds the `Path` Windows reports.
+fn env_var<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a String> {
+    env.get(name).or_else(|| {
+        cfg!(windows)
+            .then(|| env.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)))
+            .flatten()
+            .map(|(_, value)| value)
+    })
 }
 
 fn resolve_ambient(path: &str, ambient: &LoopAmbient) -> Option<Value> {

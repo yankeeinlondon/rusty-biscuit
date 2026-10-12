@@ -345,16 +345,33 @@ fn open_document(session: &mut LspFixture<'_>, document: &Path) -> DocumentState
     }
 }
 
+/// One LSP session per part: a session's startup index and the cells' opens
+/// dominate the matrix's cost, so it is split across tests nextest runs in
+/// parallel. Documents share a part with every entry point on them; `match()`
+/// validation cells open one document per candidate, so they are spread
+/// separately.
+const DOCUMENT_PARTS: usize = 5;
+const GLOB_PARTS: usize = 2;
+
+/// Every owned entry point has a row, so the parts together run each one.
 #[test]
-fn dmls_entry_points_agree_on_every_reference() {
-    // The shared matrix is a test input of this test (CI's test-input index).
+fn every_dmls_entry_point_runs_a_matrix_row() {
     let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    let rows = rows_for(Owner::Dmls);
+    for entry in EntryPoint::ALL.into_iter().filter(|entry| entry.owner() == Owner::Dmls) {
+        assert!(rows.iter().any(|row| row.entry() == entry), "{entry:?} has no DMLS matrix row");
+    }
+}
+
+/// Runs part `part` of the matrix: a share of the documents or of the glob
+/// cells. The union of all parts is every row.
+fn run_matrix_part(part: usize) {
     let workspace = LspWorkspace::new();
     let fixture = ParityFixture::create(workspace.path());
 
     // Entry points sharing a consumer share one document. Every document is
     // written before startup, so the startup index holds every target and
-    // every cell document.
+    // every cell document, whichever part opens it.
     let mut documents: Vec<(PathBuf, Vec<(Row, DocumentCell)>)> = Vec::new();
     let mut glob_cells: Vec<(Row, GlobDocumentCell)> = Vec::new();
     for row in rows_for(Owner::Dmls) {
@@ -374,6 +391,18 @@ fn dmls_entry_points_agree_on_every_reference() {
             None => documents.push((path, vec![(row, cell)])),
         }
     }
+    let documents: Vec<_> = documents
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| index % DOCUMENT_PARTS == part)
+        .map(|(_, document)| document)
+        .collect();
+    let glob_cells: Vec<_> = glob_cells
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| DOCUMENT_PARTS + index % GLOB_PARTS == part)
+        .map(|(_, cell)| cell)
+        .collect();
 
     let snapshot = fixture_snapshot(&workspace, &fixture);
     let graph = index_workspace(
@@ -420,8 +449,58 @@ fn dmls_entry_points_agree_on_every_reference() {
         report.record(&fixture, row, &fixture.expected_glob_document(cell), &observed);
     }
     session.shutdown();
-    report.assert_parity();
+    report.assert_cells_agree();
 }
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_00() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(0);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_01() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(1);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_02() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(2);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_03() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(3);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_04() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(4);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_05() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(5);
+}
+
+#[test]
+fn dmls_entry_points_agree_on_every_reference_part_06() {
+    // The shared matrix is a test input of this test (CI's test-input index).
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(6);
+}
+
 
 /// Every authored form that reaches `repo/target.md` (or `HOME/target.md`)
 /// from `repo/docs/`, which lies below it.

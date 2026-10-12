@@ -1,9 +1,9 @@
 //! `GlobReference`: the pattern grammar, native order and ownership, the
 //! relative boundary and file symlinks, literal versus class brackets, `%`
 //! rebuilt on `take_first`, the absence of filters, and unreadable directories
-//! failing a search rather than shortening it. Every assertion goes
-//! through the public API (`list_files`, `take_first`, `matches`, `roots`,
-//! `FileReference`).
+//! failing a search rather than shortening it, and the prepared form a caller
+//! walks itself. Every assertion goes through the public API (`list_files`,
+//! `take_first`, `matches`, `roots`, `prepare`, `FileReference`).
 //!
 //! The fixture is a Git repository `repo/` holding the package area
 //! `repo/area` and the package `repo/area/pkg`, a home directory `home/`, and
@@ -16,6 +16,7 @@ mod directory_case;
 mod grammar;
 mod literal;
 mod order;
+mod prepared;
 mod unfiltered;
 #[cfg(unix)]
 mod unreadable;

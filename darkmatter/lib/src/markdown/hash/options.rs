@@ -2,6 +2,8 @@
 
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
+
 use super::kind::MdHashKind;
 
 /// Default name of the frontmatter property that stores the hash.
@@ -10,6 +12,14 @@ pub const DEFAULT_HASH_PROPERTY: &str = "hash";
 /// Frontmatter key recording the last content-change date. Always ignored
 /// during hash computation so rewriting it can never alter a hash.
 pub const LAST_UPDATED_KEY: &str = "last_updated";
+
+/// Formats `now` as the `YYYY-MM-DD` value written to [`LAST_UPDATED_KEY`].
+///
+/// The stamp is the UTC calendar date of `now`, so one instant produces the
+/// same stamp on every host whatever its time zone.
+pub fn last_updated_stamp(now: DateTime<Utc>) -> String {
+    now.format("%Y-%m-%d").to_string()
+}
 
 /// Inputs for computing or saving a markdown hash.
 ///
@@ -85,5 +95,17 @@ mod tests {
         assert!(set.contains("draft"));
         // The default "hash" property is not ignored once overridden.
         assert!(!set.contains("hash"));
+    }
+
+    #[test]
+    fn last_updated_stamp_uses_the_utc_date() {
+        let instant: DateTime<Utc> = "2026-09-28T23:30:00Z".parse().unwrap();
+        let east_of_utc = chrono::FixedOffset::east_opt(10 * 3600).unwrap();
+        assert_eq!(
+            instant.with_timezone(&east_of_utc).date_naive().to_string(),
+            "2026-09-29"
+        );
+
+        assert_eq!(last_updated_stamp(instant), "2026-09-28");
     }
 }
