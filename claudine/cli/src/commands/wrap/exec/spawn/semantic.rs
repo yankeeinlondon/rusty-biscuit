@@ -28,7 +28,7 @@ use super::super::control::StdioControl;
 use super::super::stream_capture::StreamCapture;
 use super::super::subagent_watchdog::WatchdogState;
 use super::super::termination::{
-    WatchdogTermination, apply_early_termination_to_summary, early_termination_guard_context,
+    ChildInterrupts, WatchdogTermination, apply_early_termination_to_summary, early_termination_guard_context,
     early_termination_message, wait_with_signal_early_termination_and_completion,
     wait_with_signal_handling,
 };
@@ -179,6 +179,8 @@ pub(crate) fn run_child_stream_semantic(
     let control = control.zip(stdin_seed);
     #[cfg(unix)]
     let mut descendant_watch = None;
+    // Both spawn paths below lead the child into its own process group.
+    let interrupts = ChildInterrupts::install(true)?;
     let (mut child, stdout_source, stderr_source, control_receivers): (Child, LineSource, LineSource, _) =
         match &control {
             Some((session, task)) => {
@@ -624,7 +626,7 @@ pub(crate) fn run_child_stream_semantic(
         // ladder (F5) applies: no human is mid-session to react to a SIGINT.
         wait_with_signal_early_termination_and_completion(
             &mut child,
-            true,
+            interrupts,
             rx,
             wd_rx,
             completion_rx,
@@ -632,7 +634,7 @@ pub(crate) fn run_child_stream_semantic(
             false,
         )?
     } else {
-        let (code, term) = wait_with_signal_handling(&mut child, true)?;
+        let (code, term) = wait_with_signal_handling(&mut child, interrupts)?;
         (code, term, None)
     };
     // The child is gone: nothing more can be written to it, and anything

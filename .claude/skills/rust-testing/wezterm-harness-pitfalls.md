@@ -98,13 +98,12 @@ before doing anything. The harness only ever talks to the mux named by
 `WEZTERM_UNIX_SOCKET`, so nothing in that config can change what its commands
 do — but it can stall them (a `dofile` of an unreachable network path blocked
 `spawn` for 21 s on the Windows build host, against a 15 s `SPAWN_TIMEOUT`),
-fail them, or add log lines to stderr. `WezTermHarness` therefore runs its
-clients under an empty `WEZTERM_CONFIG_FILE` unless the caller has set one.
-Each client owns a private temporary config until it exits, then removes it;
-concurrent clients never rewrite a shared path. Config preparation errors are
-reported through the operation's normal error path. A
-test that shells out to `wezterm cli` on its own should do the same, or go
-through the harness.
+fail them, or add log lines to stderr. `WezTermHarness` therefore runs every
+client as `wezterm --skip-config`, which also wins over the
+`WEZTERM_CONFIG_FILE` the GUI exports into its panes. A test that shells out
+to `wezterm cli` on its own should do the same, or better, go through the
+harness: harness clients also take turns at the mux (two at a time across all
+processes), and a test's own clients do not.
 
 Two related readings of a WezTerm gate worth knowing:
 
