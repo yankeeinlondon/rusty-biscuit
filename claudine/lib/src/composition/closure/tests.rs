@@ -211,14 +211,15 @@ fn cleans_the_agents_body_and_hashes_the_cleaned_text() {
     let (file, plan) = agent_run(
         &dir,
         original,
-        "---\nprompt: test\nlast_updated: '2026-01-01'\n---\n# Title\nNo blank line\n",
+        "---\nprompt: test\nlast_updated: '2026-01-01'\n---\n# Title\n\n```\ncode\n```\n",
     );
 
     let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
 
+    // Darkmatter's default cleanup labels an unlabeled fence.
     assert!(artifact.body_cleaned);
     let on_disk = std::fs::read_to_string(&file).unwrap();
-    assert!(on_disk.contains("# Title\n\nNo blank line"));
+    assert!(on_disk.contains("# Title\n\n```text\ncode\n```\n"), "{on_disk}");
     let markdown: Markdown = on_disk.into();
     let options = inline_hash_options();
     let stored = parse_inline_stored_hash(&markdown, &options)

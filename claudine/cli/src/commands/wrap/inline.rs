@@ -231,8 +231,9 @@ mod tests {
         let (file, plan) = agent_run(
             &dir,
             "---\nprompt: test\nlast_updated: '2026-01-01'\n---\nOld body\n",
-            // The agent wrote a heading with no blank line before the paragraph.
-            "---\nprompt: test\nlast_updated: '2026-01-01'\n---\n# Generated Title\nParagraph without blank line\n",
+            // The agent wrote an unlabeled fence, which Darkmatter's default
+            // cleanup labels.
+            "---\nprompt: test\nlast_updated: '2026-01-01'\n---\n# Generated Title\n\n```\ncode\n```\n",
         );
 
         let outcome = complete_inline(&file, &plan, false);
@@ -240,8 +241,8 @@ mod tests {
 
         let on_disk = std::fs::read_to_string(&file).unwrap();
         assert!(
-            on_disk.contains("# Generated Title\n\nParagraph without blank line"),
-            "body must be cleaned (blank line between header and paragraph); got:\n{on_disk}"
+            on_disk.contains("# Generated Title\n\n```text\ncode\n```\n"),
+            "body must be cleaned (fence labeled); got:\n{on_disk}"
         );
         assert!(on_disk.contains("last_updated: '2026-09-06'"), "got:\n{on_disk}");
         assert!(
