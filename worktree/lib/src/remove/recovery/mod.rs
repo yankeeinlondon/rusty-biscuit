@@ -39,7 +39,7 @@ pub mod lock;
 pub mod record;
 pub mod store;
 
-mod storage;
+pub(crate) mod storage;
 
 use std::fmt;
 

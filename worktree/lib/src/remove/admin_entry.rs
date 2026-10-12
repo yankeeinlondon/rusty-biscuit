@@ -68,13 +68,13 @@ pub fn read_back_reference(admin_dir: &Path) -> Result<PathBuf, BackReferenceErr
 }
 
 #[cfg(unix)]
-fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, BackReferenceError> {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, BackReferenceError> {
     use std::os::unix::ffi::OsStrExt;
     Ok(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
 }
 
 #[cfg(not(unix))]
-fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, BackReferenceError> {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, BackReferenceError> {
     std::str::from_utf8(bytes).map(PathBuf::from).map_err(|_| BackReferenceError::NotUtf8)
 }
 

@@ -135,7 +135,7 @@ pub(super) fn create_private_file(path: &Path) -> io::Result<File> {
 /// On Apple platforms this is plain `fsync` rather than std's `F_FULLFSYNC`,
 /// which also empties the drive's own cache: a power-loss guarantee the
 /// store does not claim, at roughly 25 ms per call.
-pub(super) fn flush(file: &File) -> io::Result<()> {
+pub(crate) fn flush(file: &File) -> io::Result<()> {
     #[cfg(target_vendor = "apple")]
     {
         use std::os::fd::AsRawFd;
@@ -150,7 +150,7 @@ pub(super) fn flush(file: &File) -> io::Result<()> {
 
 /// Flushes `dir`'s entries, so a rename or creation in it survives a crash.
 /// A no-op on Windows, which cannot open a directory as a file.
-pub(super) fn sync_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         flush(&File::open(dir)?)
