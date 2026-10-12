@@ -70,6 +70,12 @@ impl MappingOrders {
         self.orders.get(pointer).map(Vec::as_slice)
     }
 
+    /// The number of mappings indexed.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.orders.len()
+    }
+
     /// `true` when no mapping was indexed.
     #[must_use]
     pub fn is_empty(&self) -> bool {

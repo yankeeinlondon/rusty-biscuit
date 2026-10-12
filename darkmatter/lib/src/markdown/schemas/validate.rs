@@ -27,7 +27,6 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-use indexmap::IndexMap;
 use jsonschema::{
     Draft, JsonType, PatternOptions, Validator,
     error::{TypeKind, ValidationErrorKind},
@@ -39,10 +38,8 @@ use super::{
     ValidationProblemKind, errors::SchemaError, format,
 };
 
-/// Map of top-level frontmatter key → 1-based `(line, column)` within the
-/// serialised frontmatter YAML, used to annotate [`ValidationProblem`] sites
-/// with source coordinates.
-pub type PositionMap = IndexMap<String, (u32, u32)>;
+pub use super::positions::{PositionMap, build_position_map};
+use super::positions::PositionTarget;
 
 /// Environment variable for overriding the validator-cache bound.
 pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
@@ -525,8 +522,8 @@ fn build_validator_with(schema: &Value, file_values: &FileValues) -> Result<Vali
 
 /// Maps `jsonschema::ValidationError` into the public `ValidationProblem`
 /// shape (JSON pointer + plain message). Line/column come from `positions`,
-/// which the caller is expected to derive from the frontmatter source via
-/// [`build_position_map`].
+/// which the caller builds once per frontmatter source (for example with
+/// [`build_position_map`]) and shares across every problem.
 pub fn collect_problems(
     validator: &Validator,
     instance: &Value,
@@ -748,7 +745,6 @@ fn build_problem(
     anchors: FileRefAnchors<'_>,
 ) -> ValidationProblem {
     let path = err.instance_path().as_str().to_string();
-    let key = identify_key(&path, err.kind());
     let property = match err.kind() {
         ValidationErrorKind::Required { property } => property.as_str().map(str::to_string),
         _ => None,
@@ -756,11 +752,6 @@ fn build_problem(
     let kind = classify_kind(err.kind());
     let code = classify_code(err.kind());
     let offending_property = offending_property_of(err.kind());
-    let (line, column) = key
-        .as_deref()
-        .and_then(|k| positions.get(k).copied())
-        .map(|(l, c)| (Some(l), Some(c)))
-        .unwrap_or((None, None));
     let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
         Some((message, diagnostic)) => (message, Some(diagnostic)),
         None => (
@@ -769,6 +760,17 @@ fn build_problem(
         ),
     };
     let instance_path = JsonPointer::parse(&path);
+    // An unknown key's pointer names the parent mapping, and a missing key has
+    // no node of its own, so the category picks the authored token to report.
+    let target = match (err.kind(), offending_property.as_deref()) {
+        (ValidationErrorKind::Required { .. }, _) => PositionTarget::Mapping,
+        (_, Some(key)) => PositionTarget::Key(key),
+        _ => PositionTarget::Value,
+    };
+    let (line, column) = positions
+        .locate(instance_path.segments(), target)
+        .map(|(l, c)| (Some(l), Some(c)))
+        .unwrap_or((None, None));
     let schema_path = {
         let raw = err.schema_path().as_str();
         (!raw.is_empty()).then(|| JsonPointer::parse(raw))
@@ -964,12 +966,9 @@ fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
     }
 }
 
-/// Top-level frontmatter key a validation error is attributable to, if any.
-///
-/// Mirrors the attribution [`collect_problems`] uses (the missing-property name
-/// for `Required`, otherwise the first JSON-pointer segment), so callers that
-/// reason about which key caused a failure stay consistent with reported
-/// problems without re-deriving the rule.
+/// Top-level frontmatter key a validation error is attributable to, if any:
+/// the missing-property name for `Required`, otherwise the first JSON-pointer
+/// segment.
 pub(super) fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
     identify_key(err.instance_path().as_str(), err.kind())
 }
@@ -1223,36 +1222,6 @@ pub(super) fn is_null_schema(arm: &Value) -> bool {
 
 fn is_numeric_segment(segment: &str) -> bool {
     !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
-}
-
-/// Builds a top-level YAML key → (line, column) map by scanning the
-/// serialised frontmatter line by line.
-///
-/// Only top-level keys (column 1, not part of a comment or list item) are
-/// captured. Returned coordinates are 1-based. Quoted keys (`"foo"`,
-/// `'foo'`) are normalised to the bare key string.
-pub fn build_position_map(yaml: &str) -> PositionMap {
-    let mut out: PositionMap = PositionMap::new();
-    for (idx, line) in yaml.lines().enumerate() {
-        let Some(first) = line.chars().next() else {
-            continue;
-        };
-        if first.is_whitespace() || first == '#' || first == '-' || first == '.' {
-            continue;
-        }
-        let Some(colon) = super::simplified::mapping_separator(line, false) else {
-            continue;
-        };
-        let raw = line[..colon].trim();
-        let key = raw
-            .trim_start_matches(['"', '\''])
-            .trim_end_matches(['"', '\''])
-            .to_string();
-        if !key.is_empty() {
-            out.insert(key, (idx as u32 + 1, 1));
-        }
-    }
-    out
 }
 
 /// Adds the canonical `$schema` URI to an `anyOf` arm so the cache can
@@ -1835,11 +1804,10 @@ mod tests {
         });
         let v = build_structural_validator(&schema).unwrap();
         let instance = json!({ "n": "nope" });
-        let mut positions = PositionMap::new();
-        positions.insert("n".into(), (3, 1));
+        let positions = build_position_map("title: x\nother: y\nn: nope\n");
         let problems = collect_problems(&v, &instance, &positions);
         assert_eq!(problems[0].line, Some(3));
-        assert_eq!(problems[0].column, Some(1));
+        assert_eq!(problems[0].column, Some(4));
     }
 
     #[test]
@@ -1885,31 +1853,9 @@ mod tests {
         });
         let v = build_structural_validator(&schema).unwrap();
         let instance = json!({});
-        let mut positions = PositionMap::new();
-        positions.insert("title".into(), (5, 1));
+        let positions = build_position_map("# leading comment\n\nauthor: me\n");
         let problems = collect_problems(&v, &instance, &positions);
-        assert_eq!(problems[0].line, Some(5));
-    }
-
-    #[test]
-    fn build_position_map_captures_top_level_keys() {
-        let yaml = "title: hi\nbody: stuff\n  nested: skip\n";
-        let map = build_position_map(yaml);
-        assert_eq!(map.get("title"), Some(&(1, 1)));
-        assert_eq!(map.get("body"), Some(&(2, 1)));
-        assert!(map.get("nested").is_none());
-    }
-
-    /// A `:` inside a plain or quoted key is content, not the separator.
-    #[test]
-    fn build_position_map_keeps_a_colon_inside_a_key() {
-        let yaml = "a:b: one\na:'c: two\n'x: y': three\n\"u:v\": four\n";
-        let map = build_position_map(yaml);
-        assert_eq!(map.get("a:b"), Some(&(1, 1)));
-        assert_eq!(map.get("a:'c"), Some(&(2, 1)));
-        assert_eq!(map.get("x: y"), Some(&(3, 1)));
-        assert_eq!(map.get("u:v"), Some(&(4, 1)));
-        assert!(map.get("a").is_none() && map.get("x").is_none());
+        assert_eq!((problems[0].line, problems[0].column), (Some(3), Some(1)));
     }
 
     #[test]
@@ -1954,6 +1900,30 @@ mod tests {
         let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(!problems.is_empty());
         assert!(problems.iter().all(|p| p.arm_index == Some(0)));
+    }
+
+    /// One position map serves every arm; the selected arm's problems are
+    /// located without changing which arm is selected.
+    #[test]
+    fn root_union_problems_are_located_in_the_shared_map() {
+        let arm0 = json!({
+            "type": "object",
+            "properties": { "m": { "type": "object", "properties": { "a": { "type": "number" } } } },
+            "required": ["m"]
+        });
+        let arm1 = json!({ "type": "object", "required": ["x", "y"] });
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
+        let instance = json!({ "title": "t", "m": { "a": "nope" } });
+        let positions = build_position_map("title: t\nm:\n  a: nope\n");
+        let located = collect_root_union_problems(&[v0.clone(), v1.clone()], &instance, &positions);
+        let source_free = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].arm_index, Some(0));
+        assert_eq!(located[0].path, "/m/a");
+        assert_eq!((located[0].line, located[0].column), (Some(3), Some(6)));
+        assert_eq!((source_free.len(), source_free[0].arm_index), (1, Some(0)));
+        assert_eq!(source_free[0].path, located[0].path);
     }
 
     // The `darkmatter-file` format tests below resolve file values in a

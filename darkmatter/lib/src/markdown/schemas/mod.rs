@@ -72,6 +72,7 @@ pub mod roots;
 pub mod simplified;
 pub mod triggers;
 pub mod validate;
+mod positions;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -1738,24 +1739,37 @@ fn build_advisories(
     advisories.into_iter().collect()
 }
 
+/// The [`PositionMap`] for one validation source snapshot.
+///
+/// Positions come from the bytes the document was loaded from, so lines count
+/// the complete file, opening `---` included, and CRLF offsets stay exact.
+/// They name where a path was authored even after an assignment or coercion
+/// replaced its value. Without loaded text, the retained frontmatter YAML is
+/// used, offset by the opening delimiter line; a programmatically constructed
+/// document is located in its serialized view.
 pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
-    // Prefer the original frontmatter text so reported line/column numbers
-    // match the source the user is editing. The raw text is the body
-    // between the leading `---` markers — its line 1 is the file's line 2
-    // (the opening `---` is line 1), so we offset the captured positions
-    // by `LEADING_DELIMITER_LINES`.
-    const LEADING_DELIMITER_LINES: u32 = 1;
-    if let Some(raw) = source.frontmatter().raw_source() {
-        let mut map = validate::build_position_map(raw);
-        for (_, (line, _)) in map.iter_mut() {
-            *line = line.saturating_add(LEADING_DELIMITER_LINES);
-        }
-        return map;
+    // The raw YAML's first line is the file's second: the opening `---` is
+    // line 1.
+    const RAW_SOURCE_BASE_LINE: u32 = 2;
+    let frontmatter = source.frontmatter();
+    // Loaded text is kept even when frontmatter parsing failed, so only a
+    // parsed frontmatter's own source may be projected.
+    if let Some(raw) = frontmatter.raw_source() {
+        let orders = frontmatter.mapping_orders();
+        let projected = match source.loaded_source() {
+            Some(loaded) => crate::markdown::extract_frontmatter_block(&loaded.text)
+                .ok()
+                .flatten()
+                .and_then(|block| {
+                    PositionMap::project(&loaded.text, block.yaml_span.clone(), 1, orders)
+                }),
+            None => PositionMap::project(raw, 0..raw.len(), RAW_SOURCE_BASE_LINE, orders),
+        };
+        return projected.unwrap_or_else(|| PositionMap::top_level(raw, RAW_SOURCE_BASE_LINE));
     }
 
-    // Fall back to re-serialising the parsed map. Used only for
-    // programmatically constructed `Markdown` documents that never went
-    // through the parser; line numbers refer to the canonicalised view.
+    // Programmatically constructed documents never went through the parser;
+    // line numbers refer to the canonicalised view.
     let map = source.frontmatter().as_map();
     if map.is_empty() {
         return PositionMap::new();
@@ -1769,7 +1783,13 @@ pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
     }
     let yaml_value = serde_yaml_ng::Value::Mapping(yaml_map);
     match serde_yaml_ng::to_string(&yaml_value) {
-        Ok(rendered) => validate::build_position_map(&rendered),
+        Ok(rendered) => PositionMap::project(
+            &rendered,
+            0..rendered.len(),
+            1,
+            &crate::markdown::MappingOrders::collect(&yaml_value),
+        )
+        .unwrap_or_else(|| PositionMap::top_level(&rendered, 1)),
         Err(_) => PositionMap::new(),
     }
 }
