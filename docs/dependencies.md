@@ -7,6 +7,14 @@
 
 ## Recent Dependency Notes
 
+- Generated REST clients send through `schematic-runtime` (2026-10-12):
+  the regenerated `schematic-schema` depends on `schematic-runtime` and no
+  longer on `reqwest`, and re-exports the runtime, so its dependents need no
+  direct runtime dependency. `homelab`, `eversolo-integration`, and
+  `biscuit-speaks` add `wiremock` 0.6 as a **dev-dependency** for local HTTP
+  mocks of their generated-client paths; it was already in the graph, so the
+  lockfile gains edges and no package. `model-citizen` drops its unused
+  `schematic-schema` dependency (it uses `schematic-definitions` only).
 - `schematic-runtime` joins the workspace at `schematic/runtime/`
   (2026-10-12): the hand-written request runtime that generated REST clients
   will share. Its dependencies (`bytes`, `futures-core`, `http`, `tokio` with

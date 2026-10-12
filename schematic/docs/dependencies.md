@@ -334,11 +334,11 @@ stream, not a library response.
 
 ### Production Dependencies
 
-- [reqwest](https://github.com/seanmonstar/reqwest) _v0.13_ [📄](https://docs.rs/reqwest)
+- [schematic-runtime](../runtime) _v0.1.0_
 
-    _HTTP client; default features off, with `form`, `json`, `multipart`, and `rustls`._
+    _Sends every generated REST request (path dependency, re-exported as `schematic_schema::schematic_runtime`); the crate has no HTTP client of its own._
 
-    _Tags: http, client, async_
+    _Tags: workspace, http_
 
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 

@@ -139,7 +139,8 @@ definitions/src/
 7. Run verification:
    ```bash
    cargo run -p schematic-gen -- generate --api myapi --dry-run
-   cargo check -p schematic-schema
+   just -f schematic/justfile generate
+   cargo check --manifest-path schematic/schema/Cargo.toml   # excluded from the workspace
    ```
 
 ### Type Naming
