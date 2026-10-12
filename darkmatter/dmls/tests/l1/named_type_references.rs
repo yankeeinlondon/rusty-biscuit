@@ -684,3 +684,50 @@ fn an_array_of_a_union_reference_prepares_without_schema_diagnostics() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     fixture.shutdown();
 }
+
+/// A list before `[]` on a union reference: the `eager` marker prepares
+/// cleanly and still navigates to its definition, while a value constraint
+/// there is reported at the reference with the definition attached.
+#[test]
+fn a_marker_before_the_array_suffix_prepares_and_a_value_constraint_there_is_reported() {
+    let workspace = LspWorkspace::new();
+    let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n");
+    let accepted = write(
+        &workspace,
+        "accepted.md",
+        "---\n$schema:\n  p: 'choice(eager)[]@./types.yaml'\np: [a, 1]\n---\n\nBody\n",
+    );
+    let rejected = write(
+        &workspace,
+        "rejected.md",
+        "---\n$schema:\n  p: 'choice(max(2))[]@./types.yaml'\n---\n\nBody\n",
+    );
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+
+    open(&fixture, &accepted);
+    let diagnostics = fixture.wait_for_diagnostics(&accepted.uri);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let locations = request_at(
+        &mut fixture,
+        "textDocument/definition",
+        &accepted,
+        offset_of(&accepted.text, "choice(eager)") + 1,
+    );
+    assert_eq!(
+        locations,
+        json!([{ "uri": canonical_uri(&types.path), "range": range_of(&types.text, "choice", 0) }])
+    );
+
+    open(&fixture, &rejected);
+    let diagnostics = fixture.wait_for_diagnostics(&rejected.uri);
+    let named = named_type_diagnostics(&diagnostics);
+    assert_eq!(named.len(), 1, "{diagnostics:?}");
+    assert_eq!(named[0]["range"], range_of(&rejected.text, "choice", 0));
+    let message = named[0]["message"].as_str().unwrap();
+    assert!(message.contains("`max`") && message.contains("union-typed"), "{message}");
+    let related = named[0]["relatedInformation"].as_array().expect("the definition");
+    assert_eq!(related[0]["location"]["uri"], json!(canonical_uri(&types.path)));
+
+    fixture.shutdown();
+}

@@ -80,6 +80,14 @@ pub const OVERLAPPING_TYPES: &str = "kind: schema\ntypes:\n  entry:\n    - \"{ n
 /// A scalar/object union carrying an eager and a lazy `file` arm.
 pub const FILE_TYPES: &str = "kind: schema\ntypes:\n  asset: [\"file(eager)\", number]\n  lazy_asset: [file, number]\n";
 
+/// Direct and postfixed nested unions in pairs: `nested` and `nested_tag`
+/// postfix their inner union reference, `direct` and `direct_tag` are the
+/// unpostfixed controls. Both forms flatten into one list of alternatives.
+pub const NESTED_UNION_TYPES: &str = "kind: schema\ntypes:\n  toggle: [boolish, number]\n  direct: [toggle, object]\n  nested: [toggle(required), object]\n  tagged:\n    - \"{kind: literal(a; required), a: string(required)}\"\n    - \"{kind: literal(b; required), b: string(required)}\"\n  direct_tag: [tagged, number]\n  nested_tag: [tagged(required), number]\n";
+
+/// The file name [`NESTED_UNION_TYPES`] is written to.
+pub const NESTED_UNION_FILE: &str = "types.yaml";
+
 /// A union reached through two imports: `outer.yaml` → `middle.yaml`, whose
 /// arm is a bare name defined in `middle.yaml` itself.
 pub const MULTI_HOP_FILES: &[(&str, &str)] = &[

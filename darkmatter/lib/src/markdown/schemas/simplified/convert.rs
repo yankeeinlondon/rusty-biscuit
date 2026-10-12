@@ -177,8 +177,10 @@ fn attach_match_keyword(fragment: &mut Value, keyword: &Value) {
 
 fn property_def_to_schema(name: &str, def: &PropertyDef) -> Result<(Value, bool), SchemaError> {
     match def {
-        // A postfixed union reference without `[]` (`U(required)`, `U -> text`)
-        // is a property union whose markers and description sit on `atom`.
+        // A postfixed union reference without `[]` (`U(required)`, `U -> text`),
+        // or a union whose flattened postfixed arm hoisted its markers
+        // (`[U(required), T]`), is a property union whose markers and
+        // description sit on `atom`.
         PropertyDef::Single(atom) => match atom.union_arms() {
             Some(arms) if !atom.is_array => union_property_to_schema(name, arms, Some(atom)),
             _ => atom_to_schema(name, atom),

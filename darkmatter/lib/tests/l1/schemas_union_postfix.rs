@@ -21,7 +21,7 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::request_support::context_at;
 use crate::union_fixtures::{
     CONTENT_POLICY_CASES, CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, FILE_TYPES, MULTI_HOP_FILES,
-    content_policy_union_schema, write_files,
+    NESTED_UNION_FILE, NESTED_UNION_TYPES, content_policy_union_schema, write_files,
 };
 
 fn temp_root() -> (tempfile::TempDir, PathBuf) {
@@ -328,7 +328,7 @@ fn a_multi_hop_union_keeps_its_defining_scope() {
 }
 
 #[test]
-fn a_bare_nested_union_flattens_and_a_postfixed_one_stays_one_arm() {
+fn bare_and_postfixed_nested_unions_both_flatten() {
     let (_dir, root) = temp_root();
     let resolved = resolve_inline(
         &root,
@@ -336,16 +336,81 @@ fn a_bare_nested_union_flattens_and_a_postfixed_one_stays_one_arm() {
          a: flat[]\nb: nested[]\n",
     )
     .expect("resolves");
-    assert_eq!(
-        unwrap_optional(property(&resolved, "a"))["items"]["anyOf"],
-        json!([{ "type": "string" }, { "type": "number" }, { "type": "boolean" }])
-    );
+    let flat = json!([{ "type": "string" }, { "type": "number" }, { "type": "boolean" }]);
+    assert_eq!(unwrap_optional(property(&resolved, "a"))["items"]["anyOf"], flat);
     let b = property(&resolved, "b");
     assert_eq!(b["type"], "array", "the nested arm's required hoists through both unions");
+    assert_eq!(b["items"]["anyOf"], flat, "one list of alternatives, no inner anyOf");
+}
+
+#[test]
+fn a_postfixed_nested_union_lowers_like_its_direct_control_as_property_and_item() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES)]);
+    let resolved = resolve_inline(
+        &root,
+        "direct: \"direct@./types.yaml\"\nnested: \"nested@./types.yaml\"\n\
+         direct_list: \"direct[]@./types.yaml\"\nnested_list: \"nested[]@./types.yaml\"\n\
+         direct_tag: \"direct_tag[]@./types.yaml\"\nnested_tag: \"nested_tag[]@./types.yaml\"\n",
+    )
+    .expect("resolves");
+    assert_eq!(required(&resolved), ["nested", "nested_list", "nested_tag"]);
+
+    // `direct` is optional, so its null arm leads the same flat list.
+    let direct = property(&resolved, "direct")["anyOf"].as_array().expect("union");
+    assert_eq!(direct[0], json!({ "type": "null" }));
+    assert_eq!(property(&resolved, "nested")["anyOf"], json!(direct[1..]));
+    assert_eq!(direct.len(), 4, "boolish, number, object");
+
+    let direct_items = &unwrap_optional(property(&resolved, "direct_list"))["items"];
+    assert_eq!(property(&resolved, "nested_list")["items"], *direct_items);
+    let tag_items = &unwrap_optional(property(&resolved, "direct_tag"))["items"];
+    assert_eq!(property(&resolved, "nested_tag")["items"], *tag_items);
+    assert_eq!(tag_items["anyOf"].as_array().expect("items.anyOf").len(), 3);
+
+    let PropertyDef::Single(atom) = simplified_property(&resolved, "nested") else {
+        panic!("the hoisted marker makes nested one union atom");
+    };
+    assert_eq!(atom.constraints, vec![Constraint::Required]);
+    assert_eq!(atom.union_arms().expect("union").len(), 3);
+}
+
+#[test]
+fn a_flattened_postfixed_arm_keeps_descriptions_per_arm_and_eager_as_property_timing() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[("files.yaml", FILE_TYPES)]);
+    let resolved = resolve_inline(
+        &root,
+        "pair: [string -> a word, number]\n\
+         described: [\"pair -> a label\", boolean -> a flag]\n\
+         timed: [\"lazy_asset(eager)@./files.yaml\", boolean]\n\
+         checked: [\"asset(required)@./files.yaml\", boolean]\n",
+    )
+    .expect("resolves");
     assert_eq!(
-        b["items"]["anyOf"],
-        json!([{ "anyOf": [{ "type": "string" }, { "type": "number" }] }, { "type": "boolean" }])
+        property(&resolved, "described")["anyOf"],
+        json!([
+            { "type": "null" },
+            { "type": "string", "description": "a word" },
+            { "type": "number", "description": "a label" },
+            { "type": "boolean", "description": "a flag" }
+        ]),
+        "an arm's own description wins over the reference's"
     );
+
+    let timed = property(&resolved, "timed")["anyOf"].as_array().expect("union");
+    assert!(
+        timed.iter().all(|arm| arm.get("format") != Some(&json!("darkmatter-file"))),
+        "eager is property timing, not a file existence check: {timed:?}"
+    );
+    let PropertyDef::Single(atom) = simplified_property(&resolved, "timed") else {
+        panic!("the hoisted marker makes timed one union atom");
+    };
+    assert_eq!(atom.constraints, vec![Constraint::Eager]);
+    assert!(atom.union_arms().expect("union").iter().all(|arm| arm.constraints.is_empty()));
+
+    let checked = property(&resolved, "checked")["anyOf"].as_array().expect("union");
+    assert_eq!(checked[0]["format"], "darkmatter-file", "file(eager) keeps its own check");
 }
 
 #[test]
@@ -583,6 +648,10 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
         "choice[](min(1); max(3))",
         "choice(eager)@this",
         "choice[](min(1))@./types.yaml",
+        "choice(eager)[]",
+        "choice(eager)[]@this",
+        "choice(eager)[]@./types.yaml",
+        "choice(required; eager)[](min(1))@./types.yaml",
     ] {
         let parsed = parse_type_expr("p", authored).expect(authored);
         assert!(matches!(parsed.ty, TypeExpr::Imported { .. }), "{authored}: {parsed:?}");
@@ -590,6 +659,12 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
         let reparsed = parse_type_expr("p", &written).expect(&written);
         assert_eq!(reparsed, parsed, "{authored} -> {written}");
         assert_eq!(serialize_property_atom(&reparsed), written, "{authored}");
+        // A list before `[]` keeps its place rather than moving after it.
+        assert_eq!(
+            written.contains(")[]"),
+            authored.contains(")[]"),
+            "{authored} -> {written}"
+        );
     }
 
     // The resolved form is a display spelling the grammar refuses, so it can
@@ -610,4 +685,269 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
         let schema = format!("p: \"{anonymous}\"\n");
         resolve_inline(&root, &schema).expect_err(&schema);
     }
+}
+
+// ── AC 2 and AC 7: a postfixed alias is still a union target ─────────────
+
+/// Aliases of `choice: [string, number]` whose own postfix already applied:
+/// a marker alias and a description alias.
+const POSTFIXED_ALIASES: &[(&str, &str)] = &[
+    ("required_choice", "choice(required)"),
+    ("described_choice", "choice -> any choice"),
+];
+
+#[test]
+fn value_constraints_through_a_postfixed_alias_are_rejected_by_name() {
+    let (_dir, root) = temp_root();
+    for (alias, aliased) in POSTFIXED_ALIASES {
+        for (postfix, keyword, array_level) in [
+            ("(max(10))", "max", false),
+            ("(min(1))", "min", false),
+            ("(pattern(^a))", "pattern", false),
+            ("(default(x))", "default", false),
+            ("(required; unique)", "unique", false),
+            ("(integer)", "integer", false),
+            ("[](pattern(^a))", "pattern", true),
+            ("[](integer)", "integer", true),
+        ] {
+            let schema = format!(
+                "choice: [string, number]\n{alias}: \"{aliased}\"\np: \"{alias}{postfix}\"\n"
+            );
+            let err = resolve_inline(&root, &schema).expect_err(&schema);
+            let (name, rejection, site, definition) = union_error(err);
+            assert_eq!(name, *alias, "{schema}");
+            assert_eq!(
+                rejection,
+                SchemaUnionRejection::Constraint {
+                    keyword: keyword.to_string(),
+                    array_level
+                },
+                "{schema}"
+            );
+            assert_eq!(site, SchemaSourcePath::root().property("p"), "{schema}");
+            assert_eq!(definition, SchemaSourcePath::root().property(*alias), "{schema}");
+        }
+    }
+}
+
+#[test]
+fn an_array_arm_rejects_the_array_suffix_through_a_postfixed_alias() {
+    let (_dir, root) = temp_root();
+    let types = "kind: schema\ntypes:\n  list_choice: [\"string[]\", number]\n  required_list_choice: list_choice(required)\n";
+    write_files(
+        &root,
+        &[
+            ("types.yaml", types),
+            (
+                "alias.yaml",
+                "kind: schema\ntypes:\n  hop: \"required_list_choice@./types.yaml -> via a hop\"\n",
+            ),
+        ],
+    );
+    let local = "list_choice: [\"string[]\", number]\nrequired_list_choice: list_choice(required)\n";
+    for schema in [
+        format!("{local}p: required_list_choice[]\n"),
+        format!("{local}p: \"required_list_choice[]@this\"\n"),
+        "p: \"required_list_choice[]@./types.yaml\"\n".to_string(),
+        "p: \"hop[]@./alias.yaml\"\n".to_string(),
+        format!("{local}hop: required_list_choice -> again\np: hop[]\n"),
+    ] {
+        let err = resolve_inline(&root, &schema).expect_err(&schema);
+        let (_, rejection, site, _) = union_error(err);
+        assert_eq!(rejection, SchemaUnionRejection::ArrayArm { arm: 0 }, "{schema}");
+        assert_eq!(site, SchemaSourcePath::root().property("p"), "{schema}");
+    }
+
+    let schema = "  p: \"required_list_choice[]@./types.yaml\"\n";
+    assert!(validate(&root, schema, "p: [[a], 3]\n").is_err(), "the schema is rejected");
+}
+
+#[test]
+fn an_inherited_scalar_default_through_a_postfixed_alias_is_rejected() {
+    let (_dir, root) = temp_root();
+    for (alias, aliased) in POSTFIXED_ALIASES {
+        let schema = format!(
+            "choice: [string, \"number(default(3))\"]\n{alias}: \"{aliased}\"\np: {alias}[]\n"
+        );
+        let err = resolve_inline(&root, &schema).expect_err(&schema);
+        let (name, rejection, site, definition) = union_error(err);
+        assert_eq!(name, *alias);
+        assert_eq!(
+            rejection,
+            SchemaUnionRejection::ScalarDefault {
+                arm: 1,
+                value: json!(3)
+            },
+            "{schema}"
+        );
+        assert_eq!(site, SchemaSourcePath::root().property("p"));
+        assert_eq!(definition, SchemaSourcePath::root().property(*alias));
+    }
+}
+
+#[test]
+fn container_constraints_markers_and_descriptions_survive_a_postfixed_alias() {
+    let (_dir, root) = temp_root();
+    let resolved = resolve_inline(
+        &root,
+        "choice: [string, number]\n\
+         marked: \"choice(required; eager; generated) -> marked choice\"\n\
+         list: \"marked[](min(1); max(3); unique)\"\n\
+         single: marked -> renamed\n\
+         again: marked(required)\n",
+    )
+    .expect("allowed operations resolve through the alias");
+
+    let list = property(&resolved, "list");
+    assert_eq!(list["type"], "array", "a required array has no null wrapper");
+    assert_eq!(list["minItems"], 1);
+    assert_eq!(list["maxItems"], 3);
+    assert_eq!(list["uniqueItems"], true);
+    assert_eq!(list["items"]["anyOf"], json!([{ "type": "string" }, { "type": "number" }]));
+    assert_eq!(list["description"], "marked choice");
+    assert_eq!(list["x-darkmatter-generated"], true);
+    assert_eq!(property(&resolved, "single")["description"], "renamed");
+    assert_eq!(property(&resolved, "again")["description"], "marked choice");
+
+    for name in ["list", "single", "again"] {
+        let PropertyDef::Single(atom) = simplified_property(&resolved, name) else {
+            panic!("{name} is one union-typed atom");
+        };
+        assert!(matches!(atom.ty, TypeExpr::Union(_)), "{name}");
+        let markers: Vec<&Constraint> = atom
+            .constraints
+            .iter()
+            .chain(&atom.array_constraints)
+            .filter(|constraint| {
+                matches!(constraint, Constraint::Required | Constraint::Eager | Constraint::Generated)
+            })
+            .collect();
+        assert_eq!(
+            markers,
+            [&Constraint::Required, &Constraint::Eager, &Constraint::Generated],
+            "{name} keeps each inherited marker once"
+        );
+    }
+    let PropertyDef::Single(list_atom) = simplified_property(&resolved, "list") else {
+        unreachable!("checked above");
+    };
+    assert!(list_atom.constraints.is_empty(), "markers move to the container: {list_atom:?}");
+}
+
+// ── Spec "What a use site may add": a list before `[]` ───────────────────
+
+/// `U(m)[]` for each property marker `m` resolves exactly as `U[](m)` in the
+/// bare, `@this`, and cross-file forms: an array of the union whose marker
+/// is property-level and sits on the container.
+#[test]
+fn markers_before_the_array_suffix_match_markers_after_it_in_every_reference_form() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[("types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n")]);
+    for marker in ["eager", "required", "generated"] {
+        for (local, suffix) in [("choice: [string, number]\n", ""), ("choice: [string, number]\n", "@this"), ("", "@./types.yaml")] {
+            let schema = format!(
+                "{local}before: \"choice({marker})[]{suffix}\"\nafter: \"choice[]({marker}){suffix}\"\n"
+            );
+            let resolved = resolve_inline(&root, &schema).expect(&schema);
+            assert_eq!(property(&resolved, "before"), property(&resolved, "after"), "{schema}");
+            assert_eq!(
+                required(&resolved).contains(&"before"),
+                required(&resolved).contains(&"after"),
+                "{schema}"
+            );
+            let PropertyDef::Single(atom) = simplified_property(&resolved, "before") else {
+                panic!("one atom: {schema}");
+            };
+            assert_eq!(atom, &match simplified_property(&resolved, "after") {
+                PropertyDef::Single(after) => after.clone(),
+                other => panic!("one atom: {other:?}"),
+            }, "{schema}");
+            assert!(atom.is_array && atom.union_arms().is_some(), "{schema}: {atom:?}");
+            assert!(atom.constraints.is_empty(), "{schema}: {atom:?}");
+            assert_eq!(atom.array_constraints.len(), 1, "{schema}: {atom:?}");
+            assert_eq!(atom.array_constraints[0].keyword(), marker, "{schema}");
+        }
+    }
+}
+
+/// The review's reproduction: `eager` before `[]` is property timing, so
+/// `md schema validate` accepts a list of the union and a lazy `file` arm
+/// stays lazy.
+#[test]
+fn eager_before_the_array_suffix_is_property_timing_and_validates() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[("files.yaml", FILE_TYPES)]);
+    let resolved = resolve_inline(&root, "p: \"lazy_asset(eager)[]@./files.yaml\"\n").expect("resolves");
+    let PropertyDef::Single(atom) = simplified_property(&resolved, "p") else {
+        panic!("one atom");
+    };
+    assert_eq!(atom.array_constraints, vec![Constraint::Eager], "eager is property timing");
+    assert!(atom.union_arms().expect("union")[0].constraints.is_empty(), "the lazy arm is untouched");
+
+    write_files(&root, &[("types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n")]);
+    let problems = validate(&root, "  p: \"choice(eager)[]@./types.yaml\"\n", "p: [a, 3]\n").expect("loads");
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
+/// A value constraint before `[]` is not distributed across the arms: it is
+/// a structured union rejection naming the constraint, the reference, and
+/// both sources, in every reference form, even beside an accepted marker.
+#[test]
+fn value_constraints_before_the_array_suffix_are_rejected_by_name_in_every_form() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[("types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n")]);
+    for (local, reference, keyword) in [
+        ("choice: [string, number]\n", "choice(max(2))[]", "max"),
+        ("choice: [string, number]\n", "choice(eager; max(2))[]@this", "max"),
+        ("choice: [string, number]\n", "choice(pattern(^a))[](min(1))", "pattern"),
+        ("", "choice(max(2))[]@./types.yaml", "max"),
+        ("", "choice(default(x))[]@./types.yaml", "default"),
+    ] {
+        let schema = format!("{local}p: \"{reference}\"\n");
+        let err = resolve_inline(&root, &schema).expect_err(&schema);
+        let message = err.to_string();
+        let SchemaError::UnionReference { name, rejection, site, definition } = err else {
+            panic!("expected UnionReference for {schema}, got {err:?}");
+        };
+        assert_eq!(name, "choice");
+        assert_eq!(
+            *rejection,
+            SchemaUnionRejection::Constraint { keyword: keyword.to_string(), array_level: false },
+            "{schema}"
+        );
+        assert_eq!(site.source, SchemaSourceId::InlineDocument);
+        assert_eq!(site.path, SchemaSourcePath::root().property("p"));
+        assert_eq!(definition.path, SchemaSourcePath::root().property("choice"));
+        let expected_source = if local.is_empty() {
+            SchemaSourceId::File(root.join("types.yaml"))
+        } else {
+            SchemaSourceId::InlineDocument
+        };
+        assert_eq!(definition.source, expected_source, "{schema}");
+        assert!(message.contains(&format!("constraint `{keyword}` cannot apply")), "{message}");
+    }
+}
+
+/// Only a union gives a list before `[]` a meaning. On a single named type
+/// it is a schema error naming the constraint, never silently dropped or
+/// reinterpreted as item constraints; the list after `[]` still applies.
+#[test]
+fn a_list_before_the_array_suffix_on_a_single_named_type_is_rejected() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[("types.yaml", "kind: schema\ntypes:\n  name: string\n")]);
+    for (local, reference, keyword) in [
+        ("name: string\n", "name(eager)[]", "eager"),
+        ("name: string\n", "name(min(1))[]@this", "min"),
+        ("", "name(required)[]@./types.yaml", "required"),
+    ] {
+        let schema = format!("{local}p: \"{reference}\"\n");
+        let err = resolve_inline(&root, &schema).expect_err(&schema);
+        let SchemaError::Convert { property, message } = &err else {
+            panic!("expected Convert for {schema}, got {err:?}");
+        };
+        assert_eq!(property, "p", "{schema}");
+        assert!(message.contains(&format!("constraint `{keyword}` before `[]`")), "{message}");
+        assert!(message.contains("`name@"), "{message}");
+    }
+    resolve_inline(&root, "name: string\np: \"name[](min(1); eager)\"\n").expect("after `[]` applies");
 }

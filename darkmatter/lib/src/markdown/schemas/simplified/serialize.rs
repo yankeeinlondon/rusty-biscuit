@@ -55,18 +55,24 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push(')');
             }
         }
-        // Named-type reference: `name ('[]')? ('(' constraints ')')? ('@' ref)?`.
+        // Named-type reference:
+        // `name ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' ref)?`.
         // A local reference is written bare unless its name is a built-in
         // keyword, where only `@this` selects the local type.
         TypeExpr::Imported { name, reference } => {
             out.push_str(name);
-            if atom.is_array {
-                out.push_str("[]");
-            }
             if !atom.constraints.is_empty() {
                 out.push('(');
                 write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
                 out.push(')');
+            }
+            if atom.is_array {
+                out.push_str("[]");
+                if !atom.array_constraints.is_empty() {
+                    out.push('(');
+                    write_constraints(&mut out, &atom.array_constraints, SimplifiedType::Any);
+                    out.push(')');
+                }
             }
             if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
                 out.push('@');

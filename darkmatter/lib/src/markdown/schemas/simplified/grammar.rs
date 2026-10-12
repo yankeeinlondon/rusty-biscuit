@@ -15,7 +15,8 @@
 //!                     ( "(" item_constraints ")"
 //!                     | "[]" ( "(" arr_constraints ")" )?
 //!                     )?
-//! reference        := identifier ( "[]" )? ( "(" item_constraints ")" )?
+//! reference        := identifier ( "(" item_constraints ")" )?
+//!                                 ( "[]" ( "(" arr_constraints ")" )? )?
 //!                     ( "@" fileref )?
 //! property_list    := property_def ( "," ws* property_def )* ","?
 //! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
@@ -44,7 +45,9 @@
 //! identifier is a bare local reference, the same value as `Name@this`. So
 //! `string` is the built-in and `string@this` is a local type named `string`.
 //! A misspelled built-in therefore parses, and fails during resolution unless
-//! a local type has that name.
+//! a local type has that name. A reference's lists mean nothing until its
+//! target is known, so the resolver, not this parser, decides what each may
+//! carry (only a union accepts a list before `[]`).
 //!
 //! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
 //! keys a dictionary/pattern-keyed object; see [`PatternKey`].
@@ -993,9 +996,9 @@ impl<'a> Parser<'a> {
 
     /// Pure lookahead: returns `true` when the token stream immediately after
     /// the base identifier matches the import postfix
-    /// `('[]')? ('(' … ')')?` followed by `@`. Does not consume input and does
-    /// not interpret constraint contents (so it never raises spurious errors on
-    /// non-import expressions like `enum(a, b, c)`).
+    /// `('(' … ')')? ('[]' ('(' … ')')?)?` followed by `@`. Does not consume
+    /// input and does not interpret constraint contents (so it never raises
+    /// spurious errors on non-import expressions like `enum(a, b, c)`).
     fn looks_like_import_suffix(&self) -> bool {
         let bytes = self.lex.bytes;
         let mut pos = self.lex.pos;
@@ -1004,27 +1007,20 @@ impl<'a> Parser<'a> {
                 *pos += 1;
             }
         };
-        skip_ws(&mut pos);
-        // optional `[]`
-        if bytes.get(pos) == Some(&b'[') {
-            if bytes.get(pos + 1) == Some(&b']') {
-                pos += 2;
-                skip_ws(&mut pos);
-            } else {
-                return false;
+        // optional balanced `(...)`, quote-aware; `false` when unbalanced
+        let skip_parens = |pos: &mut usize| -> bool {
+            if bytes.get(*pos) != Some(&b'(') {
+                return true;
             }
-        }
-        // optional balanced `(...)`, quote-aware
-        if bytes.get(pos) == Some(&b'(') {
-            pos += 1;
+            *pos += 1;
             let mut depth = 1usize;
             let mut quote: Option<u8> = None;
-            while pos < bytes.len() && depth > 0 {
-                let b = bytes[pos];
+            while *pos < bytes.len() && depth > 0 {
+                let b = bytes[*pos];
                 match quote {
                     Some(q) => {
                         if b == b'\\' {
-                            pos += 1;
+                            *pos += 1;
                         } else if b == q {
                             quote = None;
                         }
@@ -1036,9 +1032,23 @@ impl<'a> Parser<'a> {
                         _ => {}
                     },
                 }
-                pos += 1;
+                *pos += 1;
             }
-            if depth != 0 {
+            depth == 0
+        };
+        skip_ws(&mut pos);
+        if !skip_parens(&mut pos) {
+            return false;
+        }
+        skip_ws(&mut pos);
+        // optional `[]`, then its optional container list
+        if bytes.get(pos) == Some(&b'[') {
+            if bytes.get(pos + 1) != Some(&b']') {
+                return false;
+            }
+            pos += 2;
+            skip_ws(&mut pos);
+            if !skip_parens(&mut pos) {
                 return false;
             }
             skip_ws(&mut pos);
@@ -1047,42 +1057,43 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the named-reference postfix after the base `name` has been read:
-    /// `('[]')? ('(' constraints ')')?`, followed by `'@' fileref` when
-    /// `explicit` is set. Without `explicit` the result is the local reference
-    /// [`TypeExpr::local`], the same value `name@this` produces.
+    /// `('(' constraints ')')? ('[]' ('(' constraints ')')?)?`, followed by
+    /// `'@' fileref` when `explicit` is set. Without `explicit` the result is
+    /// the local reference [`TypeExpr::local`], the same value `name@this`
+    /// produces.
     ///
-    /// Postfix `[]` and constraints ride on the enclosing [`PropertyAtom`] and
-    /// `array_constraints` stays empty. The constraints are parsed with a
+    /// As on a primitive atom, the list before `[]` lands in `constraints`
+    /// and the list after it in `array_constraints`. Both are parsed with a
     /// neutral type because their meaning depends on the target, which is
-    /// known only after resolution. `[]` after the constraint list is
-    /// rejected in both spellings.
+    /// known only after resolution; the resolver decides which constraints a
+    /// list before `[]` may carry.
     fn parse_named_reference(
         &mut self,
         name: String,
         explicit: bool,
     ) -> Result<PropertyAtom, SchemaError> {
+        let mut constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'(') {
+            self.lex.pos += 1;
+            self.defer_suggestion_target = true;
+            constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
+            self.defer_suggestion_target = false;
+            self.expect(Tok::RParen)?;
+        }
+
         let mut is_array = false;
+        let mut array_constraints = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'[') {
             self.lex.pos += 1;
             self.expect(Tok::RBracket)?;
             is_array = true;
-        }
-
-        let mut constraints = Vec::new();
-        self.lex.skip_ws();
-        if self.lex.peek_byte() == Some(b'(') {
-            self.lex.pos += 1;
-            self.defer_suggestion_target = !is_array;
-            constraints = self.parse_constraint_list(SimplifiedType::Any, is_array)?;
-            self.defer_suggestion_target = false;
-            self.expect(Tok::RParen)?;
             self.lex.skip_ws();
-            if !is_array && self.lex.peek_byte() == Some(b'[') {
-                return self.err(
-                    "`[]` must come before the constraint list in a named type reference",
-                    self.lex.pos..self.lex.pos + 1,
-                );
+            if self.lex.peek_byte() == Some(b'(') {
+                self.lex.pos += 1;
+                array_constraints = self.parse_constraint_list(SimplifiedType::Any, true)?;
+                self.expect(Tok::RParen)?;
             }
         }
 
@@ -1099,7 +1110,7 @@ impl<'a> Parser<'a> {
             ty,
             is_array,
             constraints,
-            array_constraints: Vec::new(),
+            array_constraints,
             description: None,
         })
     }
@@ -2079,18 +2090,17 @@ mod tests {
             let bare_atom = parse(bare);
             assert_eq!(bare_atom, parse(explicit), "{bare} vs {explicit}");
             assert_eq!(bare_atom.ty, TypeExpr::local("person"), "{bare}");
-            assert!(bare_atom.array_constraints.is_empty(), "{bare}");
         }
     }
 
     #[test]
     fn bare_reference_records_constraints_and_array_marker() {
-        // As for explicit references, constraints after `[]` are parsed at
-        // the array level but ride in `constraints`.
+        // As on a primitive atom, the list after `[]` is parsed at the array
+        // level and lands in `array_constraints`.
         let atom = parse("person[](min(1))");
         assert!(atom.is_array);
-        assert_eq!(atom.constraints, vec![Constraint::MinItems(1)]);
-        assert!(atom.array_constraints.is_empty());
+        assert!(atom.constraints.is_empty());
+        assert_eq!(atom.array_constraints, vec![Constraint::MinItems(1)]);
 
         let atom = parse("person(required) -> The author");
         assert!(!atom.is_array);
@@ -2108,14 +2118,40 @@ mod tests {
     }
 
     #[test]
-    fn named_reference_rejects_array_marker_after_constraints_in_both_spellings() {
-        for input in ["person(required)[]", "person(required)[]@this"] {
-            let SchemaError::Grammar { message, .. } = parse_err(input) else {
-                panic!("expected Grammar error for {input}");
-            };
+    fn named_reference_keeps_a_list_before_the_array_marker_apart_in_every_spelling() {
+        // The passive grammar accepts either order; the resolver decides what
+        // a list before `[]` may carry once the target is known.
+        for input in [
+            "person(eager)[]",
+            "person(eager)[]@this",
+            "person(eager)[]@./people.yaml",
+        ] {
+            let atom = parse(input);
+            assert!(atom.is_array, "{input}");
+            assert_eq!(atom.constraints, vec![Constraint::Eager], "{input}");
+            assert!(atom.array_constraints.is_empty(), "{input}");
+        }
+        assert_eq!(parse("person(eager)[]"), parse("person(eager)[]@this"));
+
+        let both = parse("person(required; max(2))[](min(1); eager)@./people.yaml");
+        assert_eq!(both.constraints, vec![Constraint::Required, Constraint::Max(2.0)]);
+        assert_eq!(
+            both.array_constraints,
+            vec![Constraint::MinItems(1), Constraint::Eager]
+        );
+
+        let after = parse("person[](eager)");
+        assert!(after.constraints.is_empty());
+        assert_eq!(after.array_constraints, vec![Constraint::Eager]);
+        assert_ne!(after, parse("person(eager)[]"));
+    }
+
+    #[test]
+    fn named_reference_rejects_a_second_list_or_a_malformed_array_marker() {
+        for input in ["person(eager)[", "person(eager)(required)", "person[](min(1))(eager)"] {
             assert!(
-                message.contains("`[]` must come before the constraint list"),
-                "{input}: {message}"
+                matches!(parse_err(input), SchemaError::Grammar { .. }),
+                "{input}"
             );
         }
     }

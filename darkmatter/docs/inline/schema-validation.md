@@ -156,6 +156,11 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
   constrains each present item, while `file[](eager)` validates the array
   property at launch when present. `required` independently controls whether
   the property must exist.
+- A named union's arms are not items in this sense, even under `[]`: an arm's
+  `required`, `generated`, and `eager` belong to the property holding the
+  reference. With `choice: ["string(required; eager)", number]`, both
+  `p: choice` and `p: choice[]` must be supplied at launch. An arm's `eager`
+  never adds an existence check to a lazy `file` arm.
 - Raw JSON Schema has no phase vocabulary and keeps its authored `required`
   behavior at both phases. Trigger match conditions reject `eager` outright,
   because matching is passive and has no launch.

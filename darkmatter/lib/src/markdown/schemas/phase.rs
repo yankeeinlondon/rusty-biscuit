@@ -138,8 +138,8 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
     }
 }
 
-/// Removes a union arm's hoisted presence markers, recursing into a nested
-/// postfixed union arm, and projects an object arm's own fields.
+/// Removes a union arm's hoisted presence markers, recursing into the item
+/// arms of an array-of-union arm, and projects an object arm's own fields.
 fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
     match &mut arm.ty {
         TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
@@ -159,21 +159,22 @@ fn strip_presence(atom: &mut PropertyAtom) {
 /// Whether `atom` sets the property's validation timing.
 ///
 /// `eager` is property timing in the property's own constraint list: the
-/// postfix `[](…)` list of an array, the value list otherwise. An item-level
-/// `eager` (`file(eager)[]`, or an arm of `U[]`) times the items, not the
-/// property. A non-array union type (`U(eager)`) counts its arms the way a
-/// property-level union does.
+/// postfix `[](…)` list of an array, the value list otherwise, so the
+/// item-level `eager` of `file(eager)[]` times the items, not the property.
+/// A union type's arms count whether or not it is a list (`U(eager)`, `U[]`),
+/// the way a property-level union's arms do and the way
+/// [`PropertyAtom::is_required`] counts them: an arm's markers belong to the
+/// property that holds the union.
 fn atom_has_property_eager(atom: &PropertyAtom) -> bool {
     let constraints = if atom.is_array {
         &atom.array_constraints
     } else {
         &atom.constraints
     };
-    let own = constraints
+    constraints
         .iter()
-        .any(|constraint| matches!(constraint, Constraint::Eager));
-    match atom.union_arms() {
-        Some(arms) if !atom.is_array => own || arms.iter().any(atom_has_property_eager),
-        Some(_) | None => own,
-    }
+        .any(|constraint| matches!(constraint, Constraint::Eager))
+        || atom
+            .union_arms()
+            .is_some_and(|arms| arms.iter().any(atom_has_property_eager))
 }

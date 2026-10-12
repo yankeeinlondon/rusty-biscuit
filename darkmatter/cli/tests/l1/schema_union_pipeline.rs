@@ -15,8 +15,8 @@ use serde_json::{Value, json};
 
 use crate::common::CliProcessFixture;
 use crate::union_fixtures::{
-    CONTENT_POLICY_CASES, CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, FILE_TYPES,
-    content_policy_union_schema, write_files,
+    CONTENT_POLICY_CASES, CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, FILE_TYPES, NESTED_UNION_FILE,
+    NESTED_UNION_TYPES, content_policy_union_schema, write_files,
 };
 
 /// The public outcome of `md schema validate --format json` for one document.
@@ -335,6 +335,21 @@ fn compose_coerces_an_unambiguous_union_item_and_keeps_ambiguous_items() {
 }
 
 #[test]
+fn compose_coerces_items_of_a_postfixed_nested_union_like_its_direct_control() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
+    let process = CliProcessFixture::new();
+    let root = process.cwd();
+    let document = "---\n$schema:\n  direct: \"direct[]@./types.yaml\"\n  nested: \"nested[]@./types.yaml\"\n\
+                    direct: [\"TRUE\"]\nnested: [\"TRUE\"]\n---\nBody\n";
+    write_files(root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES), ("doc.md", document)]);
+
+    let (stdout, frontmatter) = compose(&process, &root.join("doc.md"));
+
+    assert_eq!(frontmatter["direct"], json!([true]), "{stdout}");
+    assert_eq!(frontmatter["nested"], json!([true]), "{stdout}");
+}
+
+#[test]
 fn compose_rewrites_an_eager_file_union_item_and_keeps_lazy_items() {
     let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let (process, doc) = union_items_workspace(NORMALIZABLE_ITEMS, NORMALIZATION_PROBE);
@@ -365,6 +380,111 @@ fn recomposing_normalized_union_items_is_idempotent_and_inserts_nothing() {
     keys.sort_unstable();
     assert_eq!(keys, ["$schema", "assets", "counts", "labels", "lazy"]);
     assert_eq!(first_frontmatter["counts"][1], json!({"name": "x"}));
+}
+
+// ── Rejected operations through a postfixed alias ────────────────────────
+
+/// A union alias that already carries a postfix is still a union: the
+/// forbidden value constraint and the `[]` over an array arm fail schema
+/// resolution (exit 2) naming the alias, while an allowed container postfix
+/// through the same alias validates.
+#[test]
+fn schema_validate_rejects_union_operations_through_a_postfixed_alias() {
+    let process = CliProcessFixture::new();
+    let types = "kind: schema\ntypes:\n  choice: [string, number]\n  required_choice: choice(required)\n  list_choice: [\"string[]\", number]\n  required_list_choice: list_choice(required)\n";
+    write_files(
+        process.cwd(),
+        &[
+            ("types.yaml", types),
+            (
+                "value.md",
+                "---\n$schema:\n  p: required_choice(max(2))@./types.yaml\np: abcd\n---\nBody\n",
+            ),
+            (
+                "array_arm.md",
+                "---\n$schema:\n  p: required_list_choice[]@./types.yaml\np: [[a], 3]\n---\nBody\n",
+            ),
+            (
+                "allowed.md",
+                "---\n$schema:\n  p: \"required_choice[](min(1); max(3); unique)@./types.yaml\"\np: [a, 3]\n---\nBody\n",
+            ),
+        ],
+    );
+    let validate = |doc: &str| {
+        let output = process
+            .command()
+            .args(["schema", "validate", "--format", "json", doc])
+            .output()
+            .expect("run md schema validate");
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let report: Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|err| panic!("expected one JSON report ({err}): {stdout}"));
+        (output.status.code(), report)
+    };
+
+    for (doc, needle) in [
+        ("value.md", "constraint `max` cannot apply"),
+        ("array_arm.md", "union arm 0 is already an array"),
+    ] {
+        let (code, report) = validate(doc);
+        assert_eq!(code, Some(2), "{doc}: {report}");
+        assert_eq!(report["error"], json!("schema"), "{doc}: {report}");
+        let message = report["message"].as_str().expect("schema error message");
+        assert!(message.contains(needle), "{doc}: {message}");
+        assert!(message.contains("`required_"), "{doc} names the alias: {message}");
+    }
+    let (code, report) = validate("allowed.md");
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], json!(true), "{report}");
+}
+
+// ── A list before `[]` on a union reference ──────────────────────────────
+
+/// The review's cross-file reproduction: `eager` before `[]` validates as
+/// `[]` followed by `eager` does, while a value constraint there, or any list
+/// before `[]` on a single named type, fails schema resolution (exit 2).
+#[test]
+fn schema_validate_accepts_eager_before_the_array_suffix_and_rejects_value_constraints() {
+    let process = CliProcessFixture::new();
+    let types = "kind: schema\ntypes:\n  choice: [string, number]\n  name: string\n";
+    let document = |reference: &str| format!("---\n$schema:\n  p: \"{reference}\"\np: [a, 3]\n---\nBody\n");
+    write_files(
+        process.cwd(),
+        &[
+            ("types.yaml", types),
+            ("before.md", &document("choice(eager)[]@./types.yaml")),
+            ("after.md", &document("choice[](eager)@./types.yaml")),
+            ("value.md", &document("choice(max(2))[]@./types.yaml")),
+            ("single.md", &document("name(eager)[]@./types.yaml")),
+        ],
+    );
+    let validate = |doc: &str| {
+        let output = process
+            .command()
+            .args(["schema", "validate", "--format", "json", doc])
+            .output()
+            .expect("run md schema validate");
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let report: Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|err| panic!("expected one JSON report ({err}): {stdout}"));
+        (output.status.code(), report)
+    };
+
+    for doc in ["before.md", "after.md"] {
+        let (code, report) = validate(doc);
+        assert_eq!(code, Some(0), "{doc}: {report}");
+        assert_eq!(report["valid"], json!(true), "{doc}: {report}");
+    }
+    for (doc, needle) in [
+        ("value.md", "constraint `max` cannot apply to a union-typed type"),
+        ("single.md", "constraint `eager` before `[]`"),
+    ] {
+        let (code, report) = validate(doc);
+        assert_eq!(code, Some(2), "{doc}: {report}");
+        assert_eq!(report["error"], json!("schema"), "{doc}: {report}");
+        let message = report["message"].as_str().expect("schema error message");
+        assert!(message.contains(needle), "{doc}: {message}");
+    }
 }
 
 // ── Schema-aware assignments and the shape catalog ───────────────────────

@@ -2429,6 +2429,7 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
         "marked": "loose(required)",
         "optional": "loose -> any",
         "timed": "loose(eager)",
+        "loose_list": "loose[]",
     });
     let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
         &schema,
@@ -2446,4 +2447,7 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
     assert!(classify::is_eager(Some(shape), "timed"), "use-site timing");
     assert!(classify::is_eager(Some(shape), "optional"), "an eager arm, as in a property union");
     assert!(classify::is_eager(Some(shape), "loose"));
+    // Darkmatter's launch projection agrees: an arm's `eager` times a list
+    // of the union exactly as it times the union.
+    assert!(classify::is_eager(Some(shape), "loose_list"), "an eager arm times the list");
 }

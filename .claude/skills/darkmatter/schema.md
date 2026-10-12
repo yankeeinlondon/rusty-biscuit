@@ -186,14 +186,20 @@ References; Choosing an Arm: Reporting versus Changing Data).
   value constraints without `[]` (`U(max(10))`), non-list constraints after
   `[]`, `[]` when a flattened arm's outer value is an array (looks through
   imports and nested postfixed unions; arrays inside object arms are fine),
-  and any arm `default` under `[]`. `U(c)[]` is a grammar error. Match on the
+  and any arm `default` under `[]`. A list before `[]` parses into the atom's
+  `constraints` (the list after `[]` into `array_constraints`, as on a
+  primitive); on a union only the markers are accepted there and join the
+  container (`U(eager)[]` == `U[](eager)`), a value constraint is a
+  `Constraint { array_level: false }` rejection, and on a single named type
+  any list before `[]` is a `SchemaError::Convert`. Match on the
   fields, never the message. DMLS projects it as
   `dm.schema.invalid_type_definition` with the definition as related info.
 - Scope: arm constraints stay on items; post-`[]` constraints go on the
   container (merged via `merge_constraints`, so contradictions are
-  `ConstraintConflict`). Arm `required`/`generated` hoist to the property.
-  `eager` on the reference is property timing and never makes a lazy `file`
-  arm eager; on `U[]`, an arm's `eager` times items only (`phase.rs`).
+  `ConstraintConflict`). Arm `required`/`generated`/`eager` hoist to the
+  property, on `U` and `U[]` alike (`phase.rs` counts arms under `[]` as
+  `is_required` does). `eager` there is property timing and never makes a
+  lazy `file` arm eager; only an arm declared `file(eager)` probes files.
 - Defaults: `default([...])` is a string in the grammar, so every arm default
   under `[]` fails as `ScalarDefault`; do not document list defaults as
   working. No default is ever inserted.
@@ -206,7 +212,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
 - Lowering (`convert.rs`): `type: array` + `items.anyOf` of the flattened
   arms; items get no null arm; the optional `anyOf: [null, …]` wrapper (and a
   use-site description) goes on the property only. A nested postfixed arm
-  stays one nested `anyOf`.
+  flattens into the one `anyOf`, its markers hoisted to the property.
 - Consumers must not read `properties` off an `anyOf` wrapper. Use
   `schemas::flattened_alternatives(def)` (`Alternative { atom, arm,
   is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
@@ -218,9 +224,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   when exactly one candidate validates; eager-file rewriting needs exactly one
   validating arm containing an eager `file`; cleanup never repairs inside a
   union.
-- Known gaps: item problems carry the top-level key's line/column; Claudine's
-  `classify.rs` treats an arm's `eager` under `U[]` as property timing while
-  darkmatter `phase.rs` does not.
+- Known gaps: item problems carry the top-level key's line/column.
 
 ## Special types
 

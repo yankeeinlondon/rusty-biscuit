@@ -15,8 +15,8 @@ use darkmatter::markdown::schemas::DarkmatterSchemas;
 
 use crate::request_support::context_at;
 use crate::union_fixtures::{
-    CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, OVERLAPPING_TYPES, TAGGED_TYPES,
-    content_policy_union_schema, write_files,
+    CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, NESTED_UNION_FILE, NESTED_UNION_TYPES,
+    OVERLAPPING_TYPES, TAGGED_TYPES, content_policy_union_schema, write_files,
 };
 
 /// A tagged union whose arms describe their fields. `shell` and `say` share
@@ -298,4 +298,25 @@ fn an_item_union_reports_like_the_same_union_used_as_a_property() {
             assert_eq!(item.len() + property.len(), problems.len(), "{value}: {problems:?}");
         }
     }
+}
+
+#[test]
+fn a_literal_tag_inside_a_postfixed_nested_union_narrows_as_property_and_item() {
+    let (_dir, root) = temp_root();
+    write_files(&root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES)]);
+    let reported = |type_expr: &str, frontmatter: &str| {
+        report(&root, &format!("  p: \"{type_expr}\"\n"), frontmatter)
+    };
+
+    let direct = reported("direct_tag@./types.yaml", "p: {kind: a}\n");
+    assert_eq!(direct.len(), 1, "{direct:?}");
+    assert_eq!(direct[0].0, "/p");
+    assert_eq!(direct[0].2.as_deref(), Some("a"), "the selected arm's missing field: {direct:?}");
+    assert_eq!(reported("nested_tag@./types.yaml", "p: {kind: a}\n"), direct);
+
+    let direct_items = reported("direct_tag[]@./types.yaml", "p: [{kind: a}]\n");
+    assert_eq!(direct_items.len(), 1, "{direct_items:?}");
+    assert_eq!(direct_items[0].0, "/p/0");
+    assert_eq!(direct_items[0].2.as_deref(), Some("a"), "{direct_items:?}");
+    assert_eq!(reported("nested_tag[]@./types.yaml", "p: [{kind: a}]\n"), direct_items);
 }

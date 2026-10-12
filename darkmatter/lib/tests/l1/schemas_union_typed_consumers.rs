@@ -130,9 +130,54 @@ fn about_catalog_describes_named_union_references_without_anonymous_syntax() {
 
     for shape in shapes {
         for text in [shape.form, shape.example, shape.description] {
-            assert!(!text.contains(")[]"), "{}: anonymous union array syntax in {text:?}", shape.name);
+            assert!(
+                !has_anonymous_union_array(text),
+                "{}: anonymous union array syntax in {text:?}",
+                shape.name
+            );
             assert!(!text.contains(" | "), "{}: anonymous union syntax in {text:?}", shape.name);
         }
+    }
+}
+
+/// Whether `text` spells `[]` after an anonymous group, `(A | B)[]` or
+/// `[A, B][]`. A constraint list before `[]` on a named reference
+/// (`step(eager)[]`) is attached to its name and is not one.
+fn has_anonymous_union_array(text: &str) -> bool {
+    if text.contains("][]") {
+        return true;
+    }
+    text.match_indices(")[]").any(|(close, _)| {
+        let mut depth = 0usize;
+        let open = text[..=close].char_indices().rev().find_map(|(at, ch)| {
+            match ch {
+                ')' => depth += 1,
+                '(' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(at);
+                    }
+                }
+                _ => {}
+            }
+            None
+        });
+        open.is_none_or(|open| {
+            !text[..open]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+        })
+    })
+}
+
+#[test]
+fn the_anonymous_union_array_guard_tells_a_named_reference_list_apart() {
+    for anonymous in ["(string | number)[]", "[string, number][]", "a (x)[]"] {
+        assert!(has_anonymous_union_array(anonymous), "{anonymous}");
+    }
+    for named in ["step(eager)[]", "`step(required; eager)[](min(1))`", "step[](min(1))"] {
+        assert!(!has_anonymous_union_array(named), "{named}");
     }
 }
 
@@ -288,29 +333,63 @@ fn inherited_required_on_a_list_of_a_union_waits_for_completion_unless_the_list_
     assert!(!phase_valid(&schema, json!({ "eager_list": [true] }), SchemaPhase::Launch), "items still type-check");
 }
 
+/// `instance` without the top-level `key`.
+fn without(instance: &Value, key: &str) -> Value {
+    let mut instance = instance.clone();
+    instance.as_object_mut().expect("object").remove(key);
+    instance
+}
+
+/// An arm's `eager` is a marker of the property that holds the union, so it
+/// times a list of the union exactly as it times the union, in every
+/// reference form. Each case supplies `choice` itself and omits only `p`.
 #[test]
-fn an_eager_alternative_times_a_marked_union_but_only_the_items_of_a_list() {
+fn an_eager_alternative_times_the_property_whether_it_holds_the_union_or_a_list() {
     let (_dir, root) = temp_root();
-    let schema = effective_in(
-        &root,
-        concat!(
-            "  choice: [\"string(required; eager)\", number]\n",
-            "  described: choice -> Either kind of value\n",
-            "  listed: choice[]\n",
-        ),
-    );
-    let supplied = json!({ "choice": "c", "described": 1, "listed": [2] });
-    assert!(phase_valid(&schema, supplied.clone(), SchemaPhase::Launch));
-    let without = |key: &str| {
-        let mut instance = supplied.clone();
-        instance.as_object_mut().expect("object").remove(key);
-        instance
-    };
-    // As in a property-level union, an eager arm times the property.
-    assert!(!phase_valid(&schema, without("described"), SchemaPhase::Launch));
-    // As with `string(eager)[]`, an item's `eager` times the items only.
-    assert!(phase_valid(&schema, without("listed"), SchemaPhase::Launch));
-    assert!(!phase_valid(&schema, without("listed"), SchemaPhase::Completion));
+    write_files(&root, &[("types.yaml", "kind: schema\ntypes:\n  choice: [\"string(required; eager)\", number]\n")]);
+    for (reference, supplied) in [
+        ("choice", json!(1)),
+        ("choice(required)", json!(1)),
+        ("choice -> Either kind of value", json!(1)),
+        ("choice[]", json!([2])),
+        ("choice[]@this", json!([2])),
+        ("choice[]@./types.yaml", json!([2])),
+        ("choice[](eager)", json!([2])),
+    ] {
+        let schema = effective_in(
+            &root,
+            &format!("  choice: [\"string(required; eager)\", number]\n  p: \"{reference}\"\n"),
+        );
+        let complete = json!({ "choice": "c", "p": supplied });
+        assert!(phase_valid(&schema, complete.clone(), SchemaPhase::Launch), "{reference} supplied");
+        assert!(phase_valid(&schema, complete.clone(), SchemaPhase::Completion), "{reference} supplied");
+        let missing = without(&complete, "p");
+        assert!(!phase_valid(&schema, missing.clone(), SchemaPhase::Launch), "{reference} at launch");
+        assert!(!phase_valid(&schema, missing, SchemaPhase::Completion), "{reference} at completion");
+    }
+}
+
+/// The arms' presence and timing markers reach a list of the union exactly
+/// as they reach the union: for each marker combination, `p: U` and
+/// `l: U[]` agree at both phases and in ordinary validation.
+#[test]
+fn inherited_markers_govern_a_list_of_the_union_as_they_govern_the_union() {
+    let (_dir, root) = temp_root();
+    for markers in ["required", "generated", "eager", "required; eager", "required; generated", "generated; eager"] {
+        write_files(&root, &[("types.yaml", &format!("kind: schema\ntypes:\n  choice: [\"string({markers})\", number]\n"))]);
+        let schema = effective_in(&root, "  p: choice@./types.yaml\n  l: choice[]@./types.yaml\n");
+        let complete = json!({ "p": 1, "l": [1] });
+        assert!(schema.validate(&complete).valid, "markers `{markers}`: supplied values are valid");
+        let verdicts = |key: &str| {
+            let missing = without(&complete, key);
+            (
+                schema.validate(&missing).valid,
+                phase_valid(&schema, missing.clone(), SchemaPhase::Launch),
+                phase_valid(&schema, missing, SchemaPhase::Completion),
+            )
+        };
+        assert_eq!(verdicts("l"), verdicts("p"), "markers `{markers}`: (validate, launch, completion)");
+    }
 }
 
 #[test]
@@ -354,9 +433,39 @@ fn eager_on_a_list_of_file_alternatives_is_timing_and_lazy_arms_stay_lazy() {
     assert!(!schema.validate(&probed).valid, "the inherited file(eager) arm owns its check");
     assert!(phase_valid(&schema, probed, SchemaPhase::Launch), "phase validation never probes a file");
 
-    assert!(phase_valid(&schema, json!({ "lazy": [1], "checked": [2] }), SchemaPhase::Launch), "later may wait");
+    // The `file(eager)` arm's `eager` is also a marker of the property, so
+    // `later` is launch-timed like `asset(required)` would be; the lazy arm
+    // gains timing from `lazy`'s list but never an existence check.
+    assert!(!phase_valid(&schema, json!({ "lazy": [1], "checked": [2] }), SchemaPhase::Launch), "later is eager by its arm");
     assert!(!phase_valid(&schema, json!({ "lazy": [1], "later": [2] }), SchemaPhase::Launch), "checked is eager");
+    assert!(!phase_valid(&schema, json!({ "checked": [1], "later": [2] }), SchemaPhase::Launch), "lazy is eager by its list");
     assert!(!phase_valid(&schema, json!({ "lazy": [1], "checked": [2] }), SchemaPhase::Completion));
+    assert_eq!(dir_listing(&root), before, "validation creates no file");
+}
+
+/// An eager sibling arm launch-times a list of the union, and the lazy `file`
+/// arm stays lazy: property timing never becomes `file(eager)`'s existence
+/// check, which only an arm declared `file(eager)` owns.
+#[test]
+fn inherited_list_timing_never_adds_an_existence_check_to_a_lazy_file_arm() {
+    let (_dir, root) = temp_root();
+    write_files(
+        &root,
+        &[(
+            "mix.yaml",
+            "kind: schema\ntypes:\n  lazy_mix: [file, \"number(required; eager)\"]\n  eager_mix: [\"file(eager)\", \"number(required; eager)\"]\n",
+        )],
+    );
+    let schema = effective_in(&root, "  lazy: lazy_mix[]@./mix.yaml\n  checked: eager_mix[]@./mix.yaml\n");
+    let before = dir_listing(&root);
+
+    assert!(!phase_valid(&schema, json!({ "checked": [1] }), SchemaPhase::Launch), "lazy is launch-timed");
+    let missing = json!({ "lazy": ["missing.md"], "checked": [1] });
+    assert!(schema.validate(&missing).valid, "the lazy arm checks no file: {:?}", schema.validate(&missing).problems);
+    assert!(phase_valid(&schema, missing, SchemaPhase::Launch));
+    let probed = json!({ "lazy": [1], "checked": ["missing.md"] });
+    assert!(!schema.validate(&probed).valid, "the declared file(eager) arm owns its check");
+    assert!(phase_valid(&schema, probed, SchemaPhase::Launch), "phase validation never probes a file");
     assert_eq!(dir_listing(&root), before, "validation creates no file");
 }
 

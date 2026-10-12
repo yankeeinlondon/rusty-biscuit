@@ -173,9 +173,9 @@ impl std::fmt::Display for SchemaConstraintConflictKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaUnionRejection {
     /// A constraint that would have to be pushed into every arm
-    /// (`U(max(10))`, `U(default(x))`), or one that is not valid on an
-    /// array container (`U[](pattern(x))`). `array_level` tells the two
-    /// apart.
+    /// (`U(max(10))`, `U(default(x))`, `U(max(2))[]`), or one that is not
+    /// valid on an array container (`U[](pattern(x))`). `array_level` tells
+    /// the two apart.
     Constraint {
         /// The rejected constraint's keyword, as authored.
         keyword: String,

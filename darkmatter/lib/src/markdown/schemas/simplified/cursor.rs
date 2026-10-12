@@ -1048,6 +1048,8 @@ mod tests {
             ("person(re)", "person(re)@this", 9, constraint(false)),
             ("person[](mi)", "person[](mi)@this", 11, constraint(true)),
             ("person[]", "person[]@./people.yaml", 8, SchemaCursorRole::Type),
+            ("person(ea)[]", "person(ea)[]@./people.yaml", 9, constraint(false)),
+            ("person(eager)[](mi)", "person(eager)[](mi)@this", 18, constraint(true)),
             (
                 "person(min(1))",
                 "person(min(1))@this",

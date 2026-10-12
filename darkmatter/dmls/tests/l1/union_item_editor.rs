@@ -19,8 +19,8 @@ use serde_json::{Value, json};
 mod union_fixtures;
 
 use union_fixtures::{
-    CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, OVERLAPPING_TYPES, TAGGED_TYPES,
-    content_policy_union_schema,
+    CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, NESTED_UNION_FILE, NESTED_UNION_TYPES,
+    OVERLAPPING_TYPES, TAGGED_TYPES, content_policy_union_schema,
 };
 
 fn initialize_params(root: &Path) -> Value {
@@ -294,6 +294,41 @@ fn a_problem_inside_an_item_is_published_as_the_library_reports_it() {
         "{diagnostics:#?}"
     );
     assert_eq!(document.text.lines().nth(5).map(|line| &line[12..]), Some("delete"));
+
+    fixture.shutdown();
+}
+
+#[test]
+fn a_tagged_item_inside_a_postfixed_nested_union_publishes_what_the_direct_form_does() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
+    let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let workspace = LspWorkspace::new();
+    let mut fixture = session(&workspace, shipped, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES)]);
+    let mut published = |name: &str, type_expr: &str, value: &str| -> Vec<(Value, Value, Value)> {
+        let text = format!("---\n$schema:\n  p: '{type_expr}@./types.yaml'\np:{value}---\n\nBody\n");
+        let (_, diagnostics) = open_text(&mut fixture, &workspace, name, &text);
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (diagnostic["range"].clone(), diagnostic["code"].clone(), diagnostic["message"].clone())
+            })
+            .collect()
+    };
+
+    for (form, value, direct, nested) in [
+        ("property", " {kind: a}\n", "direct_tag", "nested_tag"),
+        ("item", "\n  - kind: a\n", "direct_tag[]", "nested_tag[]"),
+    ] {
+        let direct_published = published(&format!("direct-{form}.md"), direct, value);
+        let nested_published = published(&format!("nested-{form}.md"), nested, value);
+        assert!(
+            nested_published
+                .iter()
+                .all(|(_, _, message)| !message.as_str().unwrap_or_default().contains("anyOf")),
+            "the tag selects the arm, so no generic union failure: {nested_published:?}"
+        );
+        assert_eq!(nested_published, direct_published, "{nested}");
+    }
 
     fixture.shutdown();
 }

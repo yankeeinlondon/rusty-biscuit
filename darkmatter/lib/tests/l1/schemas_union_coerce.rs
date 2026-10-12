@@ -15,7 +15,7 @@ use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
 use serde_json::{Value, json};
 
 use crate::request_support::{context_at, request};
-use crate::union_fixtures::write_files;
+use crate::union_fixtures::{NESTED_UNION_FILE, NESTED_UNION_TYPES, write_files};
 
 /// Unions whose arms coerce: a `boolish` arm beside an object arm, a
 /// `numberlike` arm beside an object arm, and an ambiguous `numberlike | string`.
@@ -187,5 +187,20 @@ fn a_union_item_coerces_exactly_as_the_same_union_property() {
         let as_item = coerced(&root, "v", &format!("{name}[]@./{file}"), &format!("[{value}]"));
         assert_eq!(&as_property, expected, "property `{name}` with {value}");
         assert_eq!(as_item, json!([as_property]), "item of `{name}[]` with {value}");
+    }
+}
+
+#[test]
+fn a_postfixed_nested_union_coerces_like_its_direct_control_as_property_and_item() {
+    let (_dir, root) = fixture();
+    write_files(&root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES)]);
+
+    for (key, type_expr, value, expected) in [
+        ("p", "direct@./types.yaml", "\"TRUE\"", json!(true)),
+        ("p", "nested@./types.yaml", "\"TRUE\"", json!(true)),
+        ("p", "direct[]@./types.yaml", "[\"TRUE\"]", json!([true])),
+        ("p", "nested[]@./types.yaml", "[\"TRUE\"]", json!([true])),
+    ] {
+        assert_eq!(coerced(&root, key, type_expr, value), expected, "{type_expr}");
     }
 }

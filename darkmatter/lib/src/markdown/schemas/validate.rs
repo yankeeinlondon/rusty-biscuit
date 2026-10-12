@@ -1062,8 +1062,8 @@ pub(super) fn resolve_problem_description(
 ///
 /// - a nullable wrapper (one non-null arm) is replaced by that arm (Decision
 ///   #5);
-/// - a genuine union (two or more non-null arms) — a property union, an item
-///   union under `items.anyOf`, or a nested postfixed union arm — is replaced
+/// - a genuine union (two or more non-null arms) — a property union or an
+///   item union under `items.anyOf` — is replaced
 ///   by the arm the shared literal discriminant selects for the instance value
 ///   at that location, else by every non-null arm. Arms that cannot take the
 ///   next segment drop out.

@@ -885,7 +885,7 @@ $schema:
     kind:       enum(a, b)
 ```
 
-Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? ('@' fileref)?`. A bare `ident` that is a built-in type keyword is the built-in; any other bare `ident` is a local reference. Postfix composes **outward**:
+Grammar: `type_ref := ident ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' fileref)?`. A bare `ident` that is a built-in type keyword is the built-in; any other bare `ident` is a local reference. Postfix composes **outward**:
 
 - `Name[]@file` — an array of the inlined `Name`.
 - `Name(constraints)@file` — the inlined type with `constraints` merged into its own (see [Merging use-site constraints](#merging-use-site-constraints)).
@@ -893,7 +893,7 @@ Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? ('@' fileref)?`. A ba
 - `Name -> description` — a use-site description replaces the inherited one; omitting it keeps the inherited description.
 - `@this` (or no `@` at all) — the current schema (self-target), including inline top-level documents.
 
-`[]` must come before the constraint list: `Name(c)[]` is a grammar error. Adding `[]` to a named type that is already an array is an error. A reference to a **union-typed** named type accepts `[]` with list constraints, the `required`, `generated`, and `eager` markers, and a description, in all three forms (bare, `@this`, and `Name@file`); any other constraint on it is an error. See [Named Union References](#named-union-references).
+A constraint list before `[]` (`Name(c)[]`) parses, but only a union-typed named type accepts one, and only its property markers; on any other named type it is a schema error, so write the list's constraints after `[]`. Adding `[]` to a named type that is already an array is an error. A reference to a **union-typed** named type accepts `[]` with list constraints, the `required`, `generated`, and `eager` markers (before or after `[]`), and a description, in all three forms (bare, `@this`, and `Name@file`); any other constraint on it is an error. See [Named Union References](#named-union-references).
 
 The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
@@ -1182,6 +1182,7 @@ The bare (`step[]`), `@this` (`step[]@this`), and cross-file
 | `U -> text` | The union, described as a whole. Each arm keeps its own description. |
 | `U[]` | A list whose every item is one of `U`'s arms. Each item is judged on its own and may match a different arm. |
 | `U[](min(n); max(n); unique; required; generated; eager)` | That list, with the constraints applied to the list itself. `default(...)` and `example(...)` are accepted after `[]` as on [any other array](#array-constraints). |
+| `U(required)[]`, `U(generated)[]`, `U(eager)[]`, or with a list after `[]` too | Exactly the same list as the marker written after `[]`: `step(eager)[]` and `step[](eager)` are one schema. The markers belong to the property, so their side of `[]` does not matter. |
 
 Anything else is rejected with `SchemaError::UnionReference`, rather than being
 copied into every arm. The error names the property, the union, what was
@@ -1190,14 +1191,31 @@ reports the same error at the reference.
 
 | Rejected use site | Why | `SchemaUnionRejection` |
 |---|---|---|
-| `U(max(10))`, `U(pattern(^a))`, `U(unique)`, `U(default(x))` | A value constraint without `[]` would have to apply to every arm. Put it on the arms instead. | `Constraint { keyword, array_level: false }` |
+| `U(max(10))`, `U(pattern(^a))`, `U(unique)`, `U(default(x))`, `U(max(2))[]` | A value constraint without `[]`, or before it, would have to apply to every arm. Put it on the arms instead. | `Constraint { keyword, array_level: false }` |
 | `U[](pattern(^a))`, `U[](integer)` | After `[]`, only list constraints apply. | `Constraint { keyword, array_level: true }` |
 | `U[]` where an arm is already a list, such as `[string[], number]` | Checked after imported and nested union arms are expanded, so an array arm behind an import is caught too. | `ArrayArm { arm }` |
 | `U[]` where an arm carries a `default(...)` | The arm's default cannot become the list's default; see [Defaults](#defaults-on-named-union-references). | `ScalarDefault { arm, value }` |
-| `U(c)[]` | `[]` must come before the constraint list. | `SchemaError::Grammar` |
 
 ```text
 p: constraint `max` cannot apply to a union-typed type (named type `choice`)
+```
+
+A named type that is itself a postfixed union reference is still a union, so
+references to it take exactly these postfixes and rejections. It keeps its own
+markers and description; with `[]`, its markers apply to the list:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    step: [string, number]
+    required_step: step(required)   # still union-typed
+```
+
+```yaml
+$schema:
+    steps: "required_step[](min(1))@./types.yaml"  # a required, non-empty list
+    bad:   "required_step(max(2))@./types.yaml"    # rejected: Constraint { keyword: "max", .. }
 ```
 
 A list *inside* an object arm is fine: `[string, "{ tags: string[] }"]` may be
@@ -1238,11 +1256,14 @@ $schema:
 - `generated` keeps its [usual meaning](#universal-constraints): it adds the
   `x-darkmatter-generated` annotation and removes the property from the static
   `required` list. It supplies no value.
-- `eager` written at the use site (`U(eager)` or `U[](eager)`) is property
-  timing: a supplied value is validated at launch. On `U`, an arm's `eager`
-  also times the property, as on a property-level union. On `U[]`, an arm's
-  `eager` times only the items, as with `file(eager)[]`.
-- `eager` on the reference never turns a lazy `file` arm into `file(eager)`.
+- `eager` written at the use site (`U(eager)`, `U(eager)[]`, or `U[](eager)`)
+  is property timing: a supplied value is validated at launch. An arm's
+  `eager` also times the property that holds the reference, whether that is
+  the union or a list of it, as on a property-level union. With
+  `choice: ["string(required; eager)", number]`, both `p: choice` and
+  `p: choice[]` must be supplied at launch.
+- Neither `eager` on the reference nor an eager sibling arm turns a lazy
+  `file` arm into `file(eager)`.
   An arm already declared `file(eager)` keeps its existence check either way.
 - Fields of an object arm keep their own `required`, `generated`, and `eager`.
 
@@ -1288,8 +1309,24 @@ wrapper. The `content_policy` property of the
 
 `U(required)` lowers to the union's `anyOf` with no `null` arm and the
 property in the parent's `required` list. A nested arm that carries its own
-postfix, such as `[pair(required), boolean]`, stays one nested `anyOf` arm
-instead of flattening.
+postfix flattens exactly like a bare one, so coercion, literal-discriminant
+selection, and error reporting see one list of alternatives:
+
+- its `required`, `generated`, and `eager` markers belong to the containing
+  property, as an arm's own presence markers do. `[pair(required), boolean]`
+  makes the property required, and a reference `choice[]` to that union makes
+  the list required.
+  `eager` sets the property's timing only: a `file` arm of `pair` stays lazy
+  unless `pair` itself says `file(eager)`;
+- its `-> description` describes each of its arms that has no description of
+  its own.
+
+```yaml
+pair: [string, number]
+choice: ["pair(required) -> a label", boolean]
+# choice lowers to one anyOf, with no null arm:
+#   [{type: string, description: a label}, {type: number, description: a label}, {type: boolean}]
+```
 
 In the typed model, a bare `U` stays a `PropertyDef::Union`. A postfixed
 reference becomes one `PropertyAtom` whose `ty` is `TypeExpr::Union(arms)`,
