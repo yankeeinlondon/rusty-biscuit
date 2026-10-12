@@ -29,100 +29,70 @@ depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: false
 message_to_agent: |-
-  Phases 1-8 are closed. The plan was renumbered to 12 phases on
-  2026-10-12; the log's Phase 1-2 text uses the old numbers, and its "Author
-  rulings and renumbering" section maps them. Every author decision is made:
-  see "## Decisions" below. Do not set human_review for them again.
+  Phases 1-10 are closed. Every author decision is made (see "## Decisions");
+  do not set human_review for them.
 
-  Read implementation-log.md "## Phase 1" (S2 for watchers), "## Phase 6",
-  "## Phase 7", and "## Phase 8" (observer decisions), and
-  .claude/skills/worktree/observation.md.
+  Read implementation-log.md "## Phase 10" and .claude/skills/worktree/
+  lifecycle.md first. Phase 10 built the whole removal at library level in
+  worktree/lib/src/remove/lifecycle.rs (+ lifecycle/resume.rs, resolve.rs);
+  `wt remove` does not call it yet. Phase 11 wires it; do not add a second
+  flow, store, or retry path in the CLI.
 
-  Library pieces in worktree/lib/src/remove/ (use them; do not add a second
-  store, lock, rename, move, or observer type):
-  - outcome.rs, recovery/ (OperationId, record, journal, lock, store,
-    storage). storage::flush is plain fsync on macOS; never sync_all in
-    per-batch code. Phase 9 adds an inventory line to the journal (bump
-    JOURNAL_VERSION, extend reader ordering, add journal_robustness_matrix
-    cells in recovery/store/tests.rs).
-  - usage.rs: check_usage(&SniffUsage, ..) with OwnedHandles.
-  - quarantine/: rename_no_replace, identity, quarantine_path, plan_move,
-    move_to_quarantine(base, &plan, activity_observed).
-  - observation/: Observation::start(Targets::new(original, quarantine,
-    admin)?, ObserverOptions) -> drain() -> Drain { events, lost } with
-    Scope::{Tree(rel), Original(rel), Quarantine(rel), Admin(name)};
-    moved_to_quarantine() right after the rename; release_admin() before the
-    Git unregister; register_handles(&mut OwnedHandles) before check_usage.
-    Lost coverage is sticky; Phase 7 added CoverageLost::DrainTimedOut.
-    ObservationError (Unsupported, Setup) is exit 4 before mutation
-    (Phase 10 maps it). Adapters: Linux inotify (Phase 6), macOS FSEvents
-    (Phase 7, observation/fsevents.rs), Windows ReadDirectoryChangesW
-    (Phase 8, observation/read_directory_changes.rs). Observation::start
-    now succeeds on all three; run Phase 9's engine against each.
+  Entry points: remove_checkout(&RemovalRequest, &Environment) -> Removal;
+  resolve_target(base, name) -> Target {Live, Pending, Ambiguous};
+  inspect(base, &id) -> Inspection {resolution, original, quarantine,
+  registration, journal, retained}; resume(&ResumeRequest, &Environment);
+  release_unstarted(base, &id). Removal::exit_class() gives
+  Success/Failure/Refused/Blocked = exit 0/1/3/4; map that, not the outcome.
+  Environment { usage: &SniffUsage, interrupted: &|| false (or a Ctrl-C
+  flag), observe: &native_observation }.
 
-  Phase 7 facts that bind Phase 9's deletion engine (measured on macOS):
-  - A directory's removal or rename can be reported IN PLACE OF changes
-    below it that were still pending (FSEvents coalesces them, even at
-    latency 0). The engine must drain after deleting a directory's children
-    and before rmdir of that directory (batching by depth level keeps the
-    cost to one drain per level), and must not expect one Removed event per
-    deleted child. The same holds for the move: changes in the tree just
-    before the rename can be hidden behind it, so the inventory's per-entry
-    revalidation before unlink and the final rmdir are the backstop for that
-    window. The module docs in observation/mod.rs state the rule.
-  - A macOS drain costs about 11 ms idle (marker plus flush; up to ~650 ms
-    under heavy load); a drain per entry would be far too slow.
-  - Item flags are cumulative: a deleted path can carry Created and
-    Modified as well as Removed, and the direction of a rename is inferred
-    from whether the path exists when read. Never classify an operation's
-    own unlink by kind alone.
-  - Name new macOS-native tests native_* in observation/tests.rs (or put
-    them in observation/fsevents/tests.rs): the nextest group fsevents-l1
-    (.config/nextest.toml) runs those one at a time, because concurrent
-    FSEvents stream starts each took up to 5 s.
+  Wiring facts the CLI must respect:
+  - Approval { inventory, fingerprint, tip, discard_files }. The record
+    requires a 64-hex fingerprint ALWAYS, but run() only computes
+    facts.reported when inside || needs_consent. Compute it for every
+    healthy-checkout removal (consent_state(base, path, branch) returns
+    (Inventory, fingerprint) exactly as Facts::local + fingerprint do).
+    Approval.tip = facts.head. files_unchanged is subsumed: the lifecycle
+    rechecks tip, dirty list, and fingerprint after discovery.
+  - BranchActions { local: Some(LocalBranchDeletion { name, expected_tip:
+    facts.head }) for BranchStep::Delete, remote:
+    Some(RemoteBranchDeletion { remote: "origin", destination, endpoint,
+    expected_sha }) only for RemoteState::Present }. Other remote states
+    (Unavailable, etc.) are still the CLI's to refuse or report as today;
+    the lifecycle deletes only what it is given, after verified removal.
+  - Removal::Finished always has a saved report_path; a Refused has no
+    record (a pre-move refusal after begin discards it). Refusal::Usage(
+    UsageRefusal::InUse) renders with commands/remove/usage.rs's
+    usage_refusal (then drop its #[allow(dead_code)]).
+  - Per R8 delete the early check_no_processes in run, and remove_worktree,
+    check_not_in_use, finish_unregistered (and their tests) once nothing
+    calls them; the missing-directory path keeps remove_missing_record and
+    never queries Sniff.
+  - Retry: resolve_target replaces find_worktree for remove. Pending ->
+    inspect -> NotStarted/MovedUnassociated: release_unstarted, then the
+    normal live flow; Quarantined: report + ask from
+    consent_state(base, record.quarantine, branch) and resume with that
+    Approval; ContentRemoved: inspect_missing on the quarantine's entry,
+    ask, resume with RecordApproval; CheckoutRemoved: reassess branches,
+    ask, resume with fresh BranchActions; anything else: render the
+    Inspection (Refusal::Recovery, exit 3). Ambiguous -> list candidates,
+    exit 3. Run recovery from the base checkout.
+  - The handoff second run: after handoff::verify, call remove_checkout
+    there (the decisive usage query must happen in the second run).
 
-  Phase 8 facts that bind Phase 9's deletion engine (measured on
-  build-win-native):
-  - On ReFS (build-win-native's B:, where real checkouts live; its temp dir
-    is NTFS C:), a directory deleted with POSIX semantics
-    (std::fs::remove_dir_all, FileDispositionInfoEx) raises NO notification,
-    empty or not; files deleted that way, and directories deleted by
-    RemoveDirectoryW, are reported. So: never infer that a directory still
-    exists, or that nobody touched it, from the absence of a Removed event;
-    the per-entry revalidation before each unlink/rmdir is what catches it.
-    Pinned by read_directory_changes::tests::
-    on_refs_a_directory_removed_with_posix_semantics_is_not_reported.
-  - Windows kinds: FILE_ACTION_MODIFIED covers attributes too (never
-    Metadata); a move between directories is Removed + Created; on ReFS a
-    replacing rename (index.lock -> index) is Removed + Modified. Never
-    classify by kind alone (same rule as macOS).
-  - Each Windows drain writes a self-deleting hidden marker
-    (.wt-observe-<hex>-<n>, FILE_FLAG_DELETE_ON_CLOSE) in the parent and,
-    until release_admin, in the admin directory; ~2 ms per drain. The
-    parent marker is a sibling of the checkout, never inside it: the
-    inventory walks the checkout only, so it never sees one.
-  - An open watch handle does not leave a deleted directory delete-pending
-    (NTFS and ReFS); release_admin closes the admin handle anyway before
-    returning, so call it before the Git unregister as planned.
-  - To check ReFS behavior on build-win-native, root test fixtures under
-    env!("CARGO_MANIFEST_DIR") (B:); tempfile fixtures land on NTFS C:.
-  - Linux clippy cannot run from the Mac (aws-lc-sys needs a Linux C cross
-    compiler) and cross-check has no lint mode; Windows cross-target clippy
-    works (`cargo clippy -p worktree --lib --tests --target
-    x86_64-pc-windows-gnu -- -D warnings`).
-
-  Rules from S3: never use `git worktree move` or `git worktree repair`; the
-  final unregister deletes content with .git last, rmdirs the quarantine, and
-  reuses missing.rs remove_missing_record; never pass --force.
-
-  Phase 3 hook still open for Phase 10: map a usage refusal with
-  worktree_cli::commands::remove::usage::usage_refusal (exit 3), then delete
-  the #[allow(dead_code)] and its comment on `pub mod usage` in
-  cli/src/commands/remove/mod.rs, and the early/inner check_no_processes +
-  Windows probe per R8.
-
-  Test trap: on macOS a TestRepo path is /var/... while Git's listing (and
-  so plan.original) is /private/var/...; compare with same_location.
+  Test facts:
+  - lifecycle/tests.rs has Usage (fake UsageSource) and Observers
+    (injected observer starter) helpers; run_with/resume_with take a
+    Boundary hook for crash injection.
+  - Windows: one lifecycle run is ~22 git calls; retry tests take 4.0-4.7 s
+    on build-win-native under load. Keep CLI tests to one lifecycle run
+    each, and do not loop fixtures inside a test.
+  - macOS: TestRepo paths are /var/... while Git lists /private/var/...;
+    compare with same_location.
+  - Pre-existing, not fixed: remove::missing::tests::
+    a_split_index_whose_shared_file_changes_after_inspection_refuses takes
+    ~7 s alone on native Windows.
 ---
 
 # Graceful removal under filesystem contention

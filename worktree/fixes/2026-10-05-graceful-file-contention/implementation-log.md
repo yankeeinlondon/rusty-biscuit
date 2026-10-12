@@ -128,6 +128,60 @@ skills_files_updated_during_phase_8:
   - .claude/skills/os/windows.md
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/observation.md
+source_files_during_phase_9:
+  - .config/nextest.toml
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/test_support.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inventory.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+docs_updated_during_phase_9:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_10:
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/resolve.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+docs_updated_during_phase_10:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
   - worktree-cli
@@ -1522,3 +1576,461 @@ Cross-OS (`just cross-check worktree --os <os> [observation]`):
 Not run: `just test-l2` (no terminal code changed).
 
 Phase 8 is complete; ready for review.
+
+## Phase 9
+
+Started and finished 2026-10-12. Phase 9 adds the operation-start deletion
+inventory (persisted as journal version 2), the checked deletion engine, and
+the final verification that ends in the worktree's unregister. Nothing calls
+them from `wt remove` yet (Phase 10 does), so the command's behavior is
+unchanged.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/observation/inventory.rs` | `DeletionInventory` (`capture`, `confirm`, `check`, `open_parent`, `get`, `root`, `entries`), `InventoryEntry { path, identity, shape }`, `Shape` (`File { size, modified, mode, content }`, `Directory { mode }`, `Link { target }`), `Content` (`Unhashed`, `Blake3`), `Timestamp`, `Ineligibility`, `Change`, `InventoryRefusal` (`Ineligible`, `Uninspectable`, `Changed`, `Coverage`). The persisted form is validated on read (plain relative paths, each once, parents first, BLAKE3 hex, non-empty NUL-free link targets). Shared `look`/`compare`/`open_root`/`dir_identity` used by the engine |
+| `worktree/lib/src/remove/observation/deletion.rs` | `delete_content(observation, journal, interrupted, DeletionOptions) -> Deletion { deleted, externally_absent, stop }`; `Stop` (`Activity`, `Uncertain`, `CoverageLost`, `Interrupted`, `Io`, `Journal`) with `outcome()`; `DeletionOptions { drain_every, cumulative_kinds }`; `OperationReport::record_deletion`; `own_move`; the crate-internal `delete_content_with(.., before_batch)` test seam |
+| `worktree/lib/src/remove/quarantine/unregister.rs` | `unregister_quarantine(base, observation, &IndexBinding)` and `UnregisterError` (`Activity`, `CoverageLost`, `IndexChanged`, `Registration`, `Refused`) with `outcome()` |
+| `worktree/lib/src/remove/missing.rs` | `IndexBinding { head, index_digest, entries_digest }` with `matches`, and `bind_index(base, admin, head)` (reuses the existing index-bytes and `ls-files --stage --debug` digests) |
+| `worktree/lib/src/remove/recovery/journal.rs` | `JOURNAL_VERSION` 2: a required `inventory` line after the header; `JournalLog::inventory`; `EntryKind::of`; batches must name inventory entries of the same kind (writer and reader); `JournalWriter::start(sink, id, Arc<DeletionInventory>, limit)`, `inventory()` |
+| `worktree/lib/src/remove/recovery/store.rs` | `RecoveryStore::begin(lock, record, Arc<DeletionInventory>)` writes the inventory inside the staging directory; `Recovered::inventory`; `StoreError::InventoryMismatch` from `begin` and `recover` when the inventory's root is not the record's `checkout_identity` |
+| `worktree/lib/src/remove/outcome.rs` | `REPORT_VERSION` 2: `deleted` (capped at `MAX_REPORTED_DELETED` = 200, `Truncation::deleted_omitted`), `notes: Vec<ReportNote>` with `ReportNote::ConcurrentWriteLimit`, `set_deleted` |
+| `worktree/lib/src/remove/inventory.rs` | `Inventory::consent_sensitive_paths()` (dirty entries plus selected included files that need consent) |
+| `worktree/lib/src/remove/quarantine/rename.rs` | `handle_identity` (Windows): the 128-bit file ID of an open handle, shared with `identity` |
+| `worktree/lib/src/remove/observation/injected.rs` | `Injector::drains()` |
+| `worktree/lib/src/remove/test_support.rs` | `link_dir`: a directory symlink, or on Windows a junction where symlinks need Developer Mode |
+| `.config/nextest.toml` | the macOS `fsevents-l1` group now selects every `remove::…::native_*` test |
+
+### Decisions and departures
+
+1. **Drains follow depth levels, not journal batches.** The engine deletes
+   one depth level at a time (deepest first, `.git` and anything below it
+   after all other content). Journal batches stay as Phase 2 defined them:
+   one directory, at most 256 entries. The observer is drained after each
+   level and after every `DEFAULT_DRAIN_EVERY` (2,048) entries, not after
+   every batch. A macOS drain costs ~11 ms (up to ~650 ms loaded), so a drain
+   per batch would cost seconds for a large tree with many small
+   directories. The plan's "drain and inspect exact affected paths between
+   batches" is read as between deletion levels. What the spec needs from it
+   still holds: a directory's children are drained before the directory is
+   removed (Phase 7's FSEvents coalescing), the per-level bound keeps the
+   observer queue (16,384) far from full, and every entry is re-checked
+   immediately before its unlink. `drains_follow_depth_levels_and_the_bound_not_entries`
+   pins the count.
+2. **What the inventory compares.** Identity, type, size, modification
+   time, and permission bits (Windows: the read-only, hidden, and system
+   attributes) for files; identity, type, and permission bits for
+   directories; identity and target for links; BLAKE3 only for
+   consent-sensitive files (at or below a dirty path, so an untracked nested
+   repository listed as `dir/` is hashed whole). Not compared: change time
+   and link count, because deleting one hard link changes both on the
+   other (Cargo hard-links `target/debug/<bin>` to `deps/`, which would have
+   stopped every Rust checkout's removal), and a directory's modification
+   time, which the operation's own deletions change.
+3. **Windows identity is by path.** `rename::identity` (128-bit file ID,
+   `FILE_FLAG_OPEN_REPARSE_POINT`) per entry, in capture and in
+   revalidation; directory handles opened through cap-std are checked with
+   the new `handle_identity`. Measured on build-win-native: about 0.5 ms per
+   entry (a 600-file fixture took 1.2 s). Unix uses `fstatat` through the
+   parent directory handle and costs nothing extra. Not measured on a large
+   tree (R10: no performance spike scheduled); recorded here for the author.
+4. **An entry found absent is recorded and stops.** The spec says an
+   externally disappeared approved entry is recorded as already absent,
+   never as deleted by `wt`, and that an unexplained disappearance stops the
+   operation. The engine does both: the journal result is
+   `externally_absent`, `Deletion::externally_absent` lists it, and deletion
+   stops with `Vanished` activity. Retry (Phase 10) takes a fresh inventory of
+   what survives, so no resume path needs "absent, continue".
+5. **Event resolution is by exact path and state.** A path this operation
+   deleted must still be absent, and its kinds must be `Removed` or
+   `Metadata` (link count), or `Modified` for a directory (Windows reports a
+   directory as modified when its children go). With
+   `DeletionOptions::cumulative_kinds` (default on macOS), any history that
+   includes `Removed` explains it. A write-like kind on a deleted file
+   elsewhere is `Stop::Uncertain` (`state_unverified`): the spec's "could
+   equally represent a concurrent write and cannot be resolved by checks".
+   An approved entry not yet reached is re-checked through verified
+   directory handles, and is explained only if it still matches. Anything
+   else, any admin-file event, and anything at the original path except the
+   operation's own move is activity.
+6. **Found while running the native tests (macOS):** FSEvents reported the
+   original path's own move with a `Created` flag from the fixture's
+   creation moments earlier, so the engine stopped on its own move in 3 of 4
+   native tests. `own_move` now applies the cumulative rule at the original
+   too. Recorded in the `os` skill (`macos.md`).
+7. **Outcomes of a stop.** `Activity` → `activity_detected`; `Uncertain`
+   and `CoverageLost` → `state_unverified`; `Interrupted`, `Io`, and
+   `Journal` → `cleanup_failed`. Interruption is not a failure as such, but
+   the spec's five outcomes have no closer fit; Phase 10 may revisit this
+   when it wires signals. Every stop after the move is exit 1 (R9).
+8. **Final verification is split by concern.** `delete_content` ends with
+   the filesystem half: the quarantine root is removed through a handle on
+   the parent after an identity check (`rmdir` fails if anything reappeared,
+   and the leftover names are reported), a final drain, and both paths
+   confirmed absent. `unregister_quarantine` is the Git half: one more drain
+   (admin events, recreation), a fresh listing showing the quarantine exactly
+   once, `inspect_missing` re-bound to the `IndexBinding` taken before the
+   move (index bytes, Git's reading of every entry including split-index
+   files, and HEAD), `release_admin`, then `remove_missing_record` (plain
+   `git worktree remove`, never `--force`).
+9. **The move's own admin event is not the engine's to explain.** The
+   association rewrites the admin `gitdir`, so the first drain after the
+   move carries `Admin("gitdir")`, which the engine treats as activity.
+   Phase 10's lifecycle must drain right after the move and confirm those
+   bytes (the plan's "re-list and validate links before deleting") before it
+   calls `delete_content`. The end-to-end test does that drain and asserts
+   only own-move events arrived.
+10. **Journal version 2.** The inventory is line 2, written with the header
+    inside `begin`'s staging directory, so a committed operation always has
+    one and a torn inventory can only be a corrupt file (refused). The
+    journal size limit counts batch lines only: the inventory scales with the
+    checkout, and counting it would make a large checkout's removal refuse to
+    start. With ~150 bytes of batch lines per entry, the 64 MiB limit still
+    covers about 440,000 entries; past that, deletion stops with
+    `LimitReached`. Phase 10 may size the limit from the inventory.
+11. **Report version 2.** `REPORT_VERSION`'s own rule is to bump with any
+    change to the persisted shape; nothing has written a report yet.
+12. **The copy record.** `remove_missing_record` deletes the copy record
+    keyed by the path it is given, here the quarantine (which has none). The
+    original's copy record is Phase 10's ("copy record removal only after
+    verification").
+13. **Not detected, as the spec states.** A change that keeps every
+    inspected metadata field of a file that is not hashed, and raises no
+    event, is not seen. The inventory test pins this as the stated limit
+    rather than leaving it implicit.
+
+### Requirement-to-test mapping
+
+All tests are L1 (no tier marker) in the `worktree` library binary, compiled
+by its unit-test target. `native_*` tests run against this platform's real
+adapter (macOS group `fsevents-l1`).
+
+| Requirement (plan Phase 9 / spec) | Test |
+| --- | --- |
+| Inventory after observation is active: every approved entry, ignored content included, parents first, identity, type, size, link target; links listed, never walked | `observation::inventory::tests::every_entry_is_recorded_parents_first_with_identity_and_metadata` |
+| Hashes only for consent-sensitive paths, including a dirty directory's files; ignored output not read | `…inventory::tests::every_entry_is_recorded_…`, `…inventory::tests::a_file_below_a_sensitive_directory_is_hashed`, `remove::inventory::tests::collects_dirty_and_ignored_entries_from_a_real_worktree` (`consent_sensitive_paths`) |
+| FIFO and socket are ineligible and never opened (marked sensitive, so a FIFO open would hang) | `…inventory::tests::a_fifo_or_socket_is_ineligible_and_never_opened` (Unix) |
+| A link at the checkout root is refused | `…inventory::tests::a_link_at_the_root_is_refused` |
+| Finishing consistency check: appended, same-size same-time rewrite of a hashed file, new file, deleted, replaced, directory replaced by a link | `…inventory::tests::the_finishing_check_refuses_each_kind_of_change_at_the_reported_path` |
+| Unchanged reported paths pass; an unhashed metadata-preserving write is the stated limit; a changed time is caught | `…inventory::tests::an_unchanged_path_or_no_event_passes_and_unreported_metadata_preserving_writes_are_the_stated_limit` |
+| A permission change is a modification | `…inventory::tests::a_permission_change_is_a_modification` (Unix) |
+| Lost coverage refuses before mutation; a replaced root refuses | `…inventory::tests::lost_coverage_or_a_replaced_root_refuses` |
+| Capture (including hashing) raises nothing the real observer's check refuses; a real late write is caught | `…inventory::tests::native_capturing_an_inventory_raises_nothing_the_check_refuses` |
+| Inventory JSON round trip, write-read-write stable | `…inventory::tests::the_inventory_round_trips_through_json` |
+| Journal v2: inventory line, ordering, cross-checks, every field shape (see the matrix below) | `recovery::store::tests::journal_robustness_matrix` |
+| Batches name only inventory entries of their kind (writer) | `recovery::journal::tests::a_batch_names_only_inventory_entries_of_their_kind` |
+| The limit counts batches only | `recovery::journal::tests::the_limit_refuses_an_intent_while_its_results_still_fit` |
+| `begin` refuses an inventory of another checkout, saving nothing | `recovery::store::tests::begin_refuses_an_inventory_of_another_checkout` |
+| Children first, `.git` last, batches ≤ 256 of one directory, both locations gone, a link's target untouched | `observation::deletion::tests::an_undisturbed_tree_is_deleted_children_first_with_git_last` |
+| No per-entry drains or rescans: drains = 1 + levels + bound + 1 | `…deletion::tests::drains_follow_depth_levels_and_the_bound_not_entries` |
+| Per-entry revalidation stops before deleting a modified, rewritten (hashed), or replaced entry, which is kept | `…deletion::tests::a_file_changed_without_any_event_is_kept_and_stops_deletion` |
+| A reported new file stops at the next drain and is preserved | `…deletion::tests::a_reported_write_stops_at_the_next_drain` |
+| An unreported new file stops when its directory cannot be removed | `…deletion::tests::an_unreported_new_file_stops_deletion_when_its_directory_cannot_be_removed` |
+| Externally disappeared entry: recorded absent, never as deleted, and stops | `…deletion::tests::an_entry_deleted_by_someone_else_is_recorded_absent_and_stops` |
+| Parent-directory handles: a descendant directory replaced by a link is never descended; the link target's files survive | `…deletion::tests::a_directory_replaced_by_a_link_is_never_descended` |
+| Original-path recreation stops and is never touched (event, and found only by the final check) | `…deletion::tests::recreation_at_the_original_stops_and_is_never_touched`, `…deletion::tests::a_recreated_original_found_only_by_the_final_check_stops` |
+| Overflow and lost watches stop with lost coverage; admin changes stop as activity | `…deletion::tests::lost_coverage_and_admin_changes_stop_deletion` |
+| Own deletion and move events explained narrowly | `…deletion::tests::events_of_its_own_deletions_are_explained_by_path_kind_and_absence` |
+| An ambiguous event stops as uncertain; cumulative kinds explain it | `…deletion::tests::a_write_like_event_on_a_deleted_file_is_uncertain_unless_kinds_are_cumulative` |
+| Interruption at the next entry boundary, with durable batch results | `…deletion::tests::an_interrupt_stops_at_the_next_entry_boundary` |
+| A journal write failure stops before the batch | `…deletion::tests::a_journal_that_cannot_record_an_intent_stops_before_its_batch` |
+| The report names deleted content and states the concurrent-write limit | `…deletion::tests::the_report_names_deleted_entries_and_states_the_concurrent_write_limit` |
+| Receipt times recorded | `…deletion::tests::received_times_are_recorded_for_reported_activity` |
+| Native: own events explained on each OS | `…deletion::tests::native_a_tree_is_deleted_with_its_own_events_explained` |
+| Native controlled writer: retained-cwd writes into the quarantine (Unix; the quarantine path on Windows, where that cwd blocks the move) stop with the file kept and remnants preserved | `…deletion::tests::native_a_writer_in_the_moved_checkout_stops_deletion_and_its_file_is_kept` |
+| Native controlled writer: absolute-path recreation at the original stops; the recreated tree is untouched | `…deletion::tests::native_recreation_at_the_original_path_stops_deletion` |
+| Native overflow (full queue) stops with lost coverage | `…deletion::tests::native_a_full_queue_stops_with_lost_coverage` |
+| End to end (acceptance items 3 and 4 at library level): dirty and ignored content inventoried and deleted, only this worktree unregistered, branch kept, other worktree untouched, one `git worktree remove` without `--force`, no `prune`/`repair`/`move` | `quarantine::unregister::tests::native_a_checked_removal_deletes_the_content_then_unregisters_only_this_worktree` |
+| Index and HEAD re-bound before unregistering | `…unregister::tests::an_entry_staged_after_approval_keeps_the_registration`, `…unregister::tests::a_branch_moved_after_approval_keeps_the_registration` |
+| Both locations and admin checked by the last drain; lost coverage keeps the registration | `…unregister::tests::a_recreated_original_keeps_the_registration`, `…an_index_write_keeps_the_registration`, `…an_unreported_recreated_quarantine_keeps_the_registration`, `…lost_coverage_keeps_the_registration` |
+
+Mutation checks on macOS, each restored afterwards: skipping the index
+re-bind failed `work_staged_or_committed_after_approval_keeps_the_registration`
+(since split into the two tests above); skipping per-entry revalidation
+failed `a_file_changed_without_any_event_is_kept_and_stops_deletion` and
+`the_report_names_deleted_entries_and_states_the_concurrent_write_limit`.
+
+Not covered by a test: a nested mount (needs root to mount inside a temp
+directory) and a Windows reparse point other than a link or junction (needs
+a cloud-files or deduplication provider). Both are code paths
+(`Ineligibility::MountPoint` by device number on Unix and by a volume target
+on Windows; `Ineligibility::ReparsePoint`).
+
+### Input robustness matrix (journal version 2)
+
+One test, `recovery::store::tests::journal_robustness_matrix`, walks every
+cell from a journal the store itself wrote, one edit per cell, asserting
+through `RecoveryStore::recover`. The control row (the unedited journal)
+recovers `d/a` deleted, `d/b` kept, `e/x` uncertain, with the inventory as
+written. The fixture inventory puts a hashed file first, so the
+first-occurrence duplicate-key edit lands on the edited member.
+
+| Shape | intent `path` | intent `kind` | results `state` | inventory `root` | inventory `entries` | entry `path` | entry `identity` | entry `shape` | file `size` | file `modified` | file `mode` | file `content` | link `target` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| absent | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid |
+| null | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid |
+| wrong type | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid (`"5"`) | invalid | invalid (`"644"`) | invalid | invalid |
+| one element wrong type | invalid (entries) | — | — | — | invalid | — | — | — | — | — | — | — | — |
+| every element wrong type | invalid (entries) | — | — | — | invalid | — | — | — | — | — | — | — | — |
+| empty | invalid (`{}`; batch `[]`) | invalid | invalid | invalid | invalid (`[]`: batches then name unlisted entries) | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid |
+| duplicate key | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid | invalid |
+| invalid content | invalid (`../d/a`) | invalid (`socket`) | invalid (`vanished`) | invalid (bad device) | invalid (entry without fields) | invalid (`/a`) | invalid (`plan9`) | invalid (`socket`) | invalid (-1) | invalid (negative nanos) | invalid (-1) | invalid (`zz` hash) | invalid (NUL) |
+
+Line-level cells: inventory absent, header only, repeated, after an intent,
+torn, trailing garbage, unknown member (line and entry), a path twice, a child
+before its directory, a root other than the record's checkout (all invalid);
+an intent naming an unlisted entry or another kind (invalid); the Phase 2
+cells (header absent/repeated/other version/other operation, blank line,
+trailing content, results for the wrong batch or misaligned) re-pointed at
+version 2's line numbers (all invalid). Valid: header plus inventory with no
+batches, torn intent, torn results, and the inventory re-spaced. Smell grep
+over the new readers: no `#[serde(default)]`, no `Option` field, no
+`unwrap_or_default`/`.ok()` on a load-bearing parse (the one `unwrap_or_default`
+in `deletion.rs` lists leftover names for a report after `rmdir` already
+failed).
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1320 passed, 14 skipped (the area's existing skips), 0
+  failed. The first full run had no slow tests (25 s). Two later runs, taken
+  while the host's load average was 121 from other work, marked 3–7 tests
+  that this phase does not touch as slow (`list::tests::pipeline` tests,
+  `graph::tests::fork_origin_cutoff_matrix`, two `worktree-cli::remove` tests,
+  `remove::missing::tests::a_split_index_whose_shared_file_changes_after_inspection_refuses`).
+  Alone, those take 1.4 s.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+- Native engine tests run 3 times in a row on macOS: all green.
+
+Cross-OS (`just cross-check worktree --os <os> remove::`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | in `just test` above |
+| Linux (`build-linux`) | 236 passed |
+| WSL2 (`build-win`) | 236 passed |
+| native Windows (`build-win-native`) | 228 passed (after splitting the unregister cases; see below) |
+
+Windows findings and pre-existing items:
+
+- The first Windows run had the unregister failure cases as two
+  multi-case tests taking 4.6 s and 7.3 s. They are now one test per case
+  (about 1.5–2.7 s each on Windows). The 3,000-file drain test took 2.8 s
+  and now uses 600 files (1.2 s) with the same assertions.
+- In that first run, the unrelated
+  `remove::safety::tests::a_pr_counts_only_for_the_same_repository_and_exact_tip`
+  failed once (4.2 s, under the load of the slow tests above); it passes
+  alone (2.0 s) and in the rerun.
+- Pre-existing and not touched by this phase:
+  `remove::missing::tests::a_split_index_whose_shared_file_changes_after_inspection_refuses`
+  takes 7.1 s alone on native Windows (14.3 s in the package run). It is over
+  the 5 s budget there and should be looked at separately.
+- ReFS (`B:`) was not exercised. Phase 8 found file deletions and
+  `RemoveDirectoryW` reported there, and only POSIX-semantics directory
+  deletes unreported; which call cap-std makes was not verified. Either way,
+  the per-entry revalidation and the final `rmdir` do not depend on events,
+  so an unreported deletion can stop a removal but never make it delete
+  something unapproved.
+
+Not run: `just test-l2` (no terminal code changed).
+
+Phase 9 is complete; ready for review.
+
+## Phase 10
+
+Started and finished 2026-10-12. Phase 10 adds `remove::lifecycle`, which
+runs one removal through every Phase 2-9 piece in the decided order, plus
+crash recovery (`inspect`), retry resolution (`resolve_target`), and resume
+(`resume`, `release_unstarted`). Everything is library-level: `wt remove`
+still calls `remove_worktree`, so the command's behavior is unchanged until
+Phase 11 wires it.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/lifecycle.rs` | `remove_checkout(&RemovalRequest, &Environment) -> Removal`; `Approval`, `consent_state`, `BranchActions` (`LocalBranchDeletion`, `RemoteBranchDeletion`), `Environment` (usage source, interrupt poll, observer starter), `native_observation`, `Refusal` with `exit_class()`, `Finished`, `Removal`, `ExitClass` (0/1/3/4), `Presence`; the crate-internal `run_with(.., hook)` crash seam (`Boundary`, `Crashed`); the shared `Attempt` that deletes, unregisters, runs branch actions, completes, or stops with the actual state |
+| `worktree/lib/src/remove/lifecycle/resume.rs` | `inspect(base, &id) -> Inspection` with `Resolution` (`NotStarted`, `MovedUnassociated`, `Quarantined`, `PartialCheckout`, `ContentRemoved`, `CheckoutRemoved`, `OriginalRecreated`, `Unresumable`); `release_unstarted`; `resume(&ResumeRequest, &Environment)` with `RecordApproval` |
+| `worktree/lib/src/remove/lifecycle/resolve.rs` | `resolve_target(base, name) -> Target` (`Live`, `Pending`, `Ambiguous(Vec<Candidate>)`), `ResolveError` |
+| `worktree/lib/src/remove/lifecycle/tests.rs` | 36 tests (one `#[ignore]` subprocess fixture besides) |
+| `worktree/lib/src/remove/recovery/store.rs` | `RecoveryStore::reopen` (archives `journal.jsonl` as `journal-<n>.jsonl` and starts a new journal with a fresh inventory), `Operation::advance_to`, `Operation::journal_entries`, `Operation::discard`; `complete` also deletes archived journals |
+| `worktree/lib/src/remove/quarantine/association.rs` | `verify_quarantined` (the moved checkout is still Git's worktree at the quarantine: identity, back-reference, `.git` link, listed once, unlocked, no submodules) and `MovePlan::back_reference_rewritten` |
+| `worktree/lib/src/remove/observation/{mod,injected,inotify,fsevents,read_directory_changes}.rs` | `Observation::start_at_quarantine` and `Observation::injected_at_quarantine`: each adapter can start with the tree already at the quarantine (a resumed removal) |
+
+### Order and decisions
+
+1. **Order (spec decision 8):** `plan_move` → no pending record for this
+   admin name → observer start → `DeletionInventory::capture` →
+   `register_handles` + `check_usage` → recheck the tip and the consent
+   fingerprint (`consent_state`, the same comparison as the CLI's
+   `files_unchanged`) → drain and confirm → `bind_index` → `begin` → drain and
+   confirm again → move → explain the move's own events → delete → unregister
+   → original's copy record → branch actions → `complete`.
+2. **Two drains before the move.** The recheck runs `git status`, which may
+   rewrite the index, so its admin events are drained (and allowed) before
+   `bind_index`. After `begin`, a last drain refuses any tree change and any
+   admin event (exit 3, nothing moved). The plan's single "binding rechecks"
+   step is split this way so the index binding never covers an event it did
+   not see.
+3. **A refusal after `begin` that changed nothing deletes the operation
+   directory** (`Operation::discard`), so no record describes a removal that
+   never happened. If deleting it fails, `inspect` resolves the leftover as
+   `NotStarted` and `release_unstarted` closes it.
+4. **Exit classes before the move** (spec decision 7 and R9): usage, an
+   unverified checkout, ineligible topology or content, changed approved
+   state, missing consent, an uninspectable index, a pending or unreadable
+   record → 3. Observation unavailable, lost coverage before the move, a store
+   that cannot be created or written, another `wt` holding the lock, a
+   Windows sharing failure, an unsupported no-replacement rename → 4. Any
+   other rename failure, or a rolled-back association → 1, nothing changed.
+   After the move every stop is 1. A verified removal whose branch action
+   failed is outcome `removed` with exit 1.
+5. **The move's own events** are explained by path and state, not kind:
+   `Original("")` with `own_move` kinds and the original absent;
+   `Quarantine("")`/`Tree("")` with the quarantine holding the checkout's
+   identity; `Admin("gitdir")` holding exactly the rewritten bytes. Anything
+   else (or lost coverage) stops after the move.
+6. **Stops report the actual state,** read fresh: both paths by identity
+   (`Presence`), the registration from the admin `gitdir`, what is left in the
+   quarantine (exact count, capped list), the journal summary (its
+   unconfirmed entries checked through a verified quarantine handle), every
+   intended branch action as `not_attempted`, and a diagnostic Sniff query of
+   each location that is a real directory (never through a link). A failed
+   diagnostic query is recorded as `failed` and changes nothing else.
+7. **Recovery reads the filesystem and Git, never the saved phase.** The
+   resolution table is in the `worktree` skill's `lifecycle.md`. Two
+   resolutions are additions to the plan's wording:
+   - `MovedUnassociated` (the process died between the rename and the
+     `gitdir` rewrite) is resolved by moving the checkout back with the
+     no-replacement rename and verifying it, which is the spec's rollback rule
+     (original absent, nothing deleted). Nothing else is ever moved back.
+   - `PartialCheckout` (the moved checkout's `.git` link is gone) is never
+     resumed: the inspection lists what remains and nothing is repaired, as
+     the spec requires for a partial checkout Git cannot read.
+   An admin directory whose identity changed under the recorded name (Git
+   reused the name) is `Unresumable`.
+8. **A retry reopens the same operation.** `RecoveryStore::reopen` keeps the
+   journal so far as `journal-<n>.jsonl` (no confirmed entry is discarded) and
+   starts a new journal whose inventory is a fresh capture of what survives.
+   Departure from a literal reading of "Persist ... completed phase": the
+   record's `consent_fingerprint`, `approved_tip`, and `discovery` keep the
+   first attempt's values; they describe what was decided, and the retry's
+   fresh approval is checked in memory and saved in its report. Completion
+   deletes every journal.
+9. **Retry needs fresh approvals for each resolution:** `Quarantined` takes an
+   `Approval` read from the quarantine (`consent_state(base, quarantine,
+   branch)`), a new usage query of the quarantine, a fresh inventory, the
+   recheck, and a new index binding. `ContentRemoved` takes a `RecordApproval`
+   (the `inspect_missing` result shown to the user) and goes through
+   `remove_missing_record`. `CheckoutRemoved` runs only the branch actions in
+   the request. A saved remote approval or expired handoff is never reused
+   (the record holds none).
+10. **Resolution by name** matches live registrations as
+    `resolve_worktree` does and pending records by `requested_name`, aliases
+    (branch and directory name), and the original's directory name. A live
+    entry is the same target as a pending record only at the record's
+    quarantine, or at the original with the recorded identity. Anything else
+    matched twice is `Ambiguous`. `base` is never pending. An unreadable
+    record matches nothing, but `remove_checkout` refuses while one exists.
+11. **Interruption stays `cleanup_failed`** (Phase 9 decision 7): nothing
+    installs a signal handler yet. `Environment::interrupted` is the hook
+    Phase 11 can connect.
+12. **The journal limit is not sized from the inventory.** The default 64 MiB
+    still covers about 440,000 entries per attempt, and a retry starts a new
+    journal. Left as is; no checkout in tests approaches it.
+
+### Requirement-to-test mapping
+
+All tests are L1 in the `worktree` library binary
+(`remove::lifecycle::tests::…`). `native_*` tests use this platform's real
+observer; the rest use the injected observer and a fake `UsageSource`.
+
+| Requirement (plan Phase 10 / spec acceptance) | Test |
+| --- | --- |
+| Whole lifecycle with the real observer: dirty and ignored content deleted, only this worktree unregistered, other worktree untouched, branch after the checkout, copy record removed after verification, one decisive query and no discovery chatter, record completed and journal deleted, no `--force`/`prune`/`repair`/`move`/`unlock` (items 2, 3) | `native_a_removal_runs_end_to_end_and_closes_its_record` |
+| Partial, unavailable, unsupported discovery remove and keep coverage in the report (item 2) | `partial_discovery_…`, `unavailable_discovery_…`, `unsupported_discovery_still_removes_and_is_kept_in_the_report` |
+| Usage refuses before anything moves, consent does not override, no record created (item 1) | `observed_usage_refuses_before_anything_moves` |
+| Root-validation error refuses (item 2) | `an_unverified_checkout_refuses` |
+| Consent required; files changed after approval; tip moved after approval (item 7) | `files_that_need_consent_refuse_without_it`, `files_changed_after_approval_refuse`, `a_tip_moved_after_approval_refuses` |
+| Unavailable observation is exit 4 before discovery | `unavailable_observation_is_an_environment_limit` |
+| Locked worktree refuses (item 5) | `a_locked_worktree_refuses` |
+| Change between `begin` and the move refuses, record discarded | `a_change_just_before_the_move_refuses_and_discards_the_record` |
+| Unexplained admin activity during the move stops after it: exit 1, both paths, registration, branch kept, record pending, report saved (items 4, 8) | `unexplained_activity_during_the_move_stops_after_it` |
+| Write into the quarantine mid-deletion: stop, new file kept, deletions so far and remaining entries reported, concurrent-write note, no branch action, diagnostic query of the quarantine (items 3, 8) | `a_write_into_the_quarantine_during_deletion_stops_with_an_honest_report` |
+| Recreation at the original stops; the recreated tree is untouched; diagnostic query of it (items 3, 7) | `recreation_at_the_original_path_stops_and_is_left_alone` |
+| Lost coverage after the move is `state_unverified`; a failed diagnostic query is recorded (item 4) | `lost_coverage_after_the_move_stops_and_a_failed_diagnostic_is_recorded` |
+| Interruption after the move preserves remnants; retry finishes (item 11) | `an_interrupted_removal_is_resumed` |
+| Branch failure keeps the record and stops later actions; retry by original name with fresh approvals (items 6, 11) | `a_failed_branch_deletion_keeps_the_record_and_a_retry_needs_fresh_approval` |
+| Crash after `begin`: nothing moved, new run refused while pending, name resolves to the pending record | `a_crash_after_the_record_leaves_nothing_moved_and_blocks_a_new_run` |
+| Releasing an unstarted record lets a new removal run | `a_released_unstarted_record_lets_a_new_removal_run` |
+| Crash between rename and association: moved back, never deleted | `a_crash_between_the_rename_and_the_association_is_moved_back` |
+| Crash after the move: retry by original name, branch, or quarantine basename reaches the pending record; fresh inventory and consent; finishes (items 6, 10) | `a_crash_after_the_move_is_resumed_by_the_original_name` |
+| New content needs fresh consent; missing consent refuses (items 6, 11) | `new_content_in_the_quarantine_needs_fresh_consent` |
+| Usage of the quarantine refuses a retry | `usage_of_the_quarantine_refuses_the_retry` |
+| Changed identity: a replaced quarantine is never resumed or inspected (items 6, 12) | `a_replaced_quarantine_is_never_resumed` |
+| Partial checkout without `.git` is reported, never repaired (item 10) | `a_partial_checkout_without_its_git_link_is_kept` |
+| Crash after content removal: record removal after index re-check; a crash between unlink and result is uncertain, not deleted (item 11) | `a_crash_after_the_content_is_removed_resumes_with_the_record_and_uncertain_entries` |
+| Crash after unregistering: retry runs only the branch actions | `a_crash_after_unregistering_runs_only_the_branch_actions_on_retry` |
+| Completed records never authorize a second removal (item 11) | `a_completed_record_never_authorizes_a_second_removal` |
+| Only a held lock blocks; a stale lock file does not (items 11) | `only_a_held_lock_blocks_a_retry`, `native_a_killed_removal_…` |
+| Malformed record blocks a new removal (item 11) | `an_unreadable_record_blocks_a_new_removal` |
+| Record write failure after the move stops before deleting and reports the last durable phase (item 11, Unix) | `an_unwritable_record_stops_before_deleting` |
+| A new worktree at the original path is ambiguous with the pending removal, and neither tree is cleaned up (item 10) | `a_new_worktree_at_the_original_path_is_ambiguous_and_never_cleaned_up` |
+| A reused branch is ambiguous with the pending removal (item 10) | `a_reused_branch_is_ambiguous_with_the_pending_removal` |
+| Unknown names, `base`, and an ordinary live name | `names_that_match_nothing_are_not_found_and_base_is_never_pending` |
+| Real process termination mid-deletion: lock released, found by original name, journal keeps confirmed deletions, resumed with the real observer starting at the quarantine (items 6, 11) | `native_a_killed_removal_is_found_and_resumed_by_its_original_name` (child: `lifecycle_child_blocks_mid_deletion`, `#[ignore]`, run with `--exact --ignored --nocapture` as Sniff's subprocess fixtures are) |
+
+Mutation checks on macOS, each restored afterwards: skipping the recheck
+failed `files_changed_after_approval_refuse` (the changed file was deleted)
+and `a_tip_moved_after_approval_refuses` (caught only by the unregister's
+index binding, after deletion); ignoring the move's own events failed
+`unexplained_activity_during_the_move_stops_after_it`; disabling the
+same-operation dedupe failed `a_crash_after_the_move_is_resumed_by_the_original_name`
+and `a_crash_after_the_record_leaves_nothing_moved_…`.
+
+Not covered by a test: a crash inside `move_to_quarantine` between the rename
+and the `gitdir` write is reached by renaming by hand after a crash at
+`Begun`, since the association seam (`Faults::after_rename`) is not exposed to
+the lifecycle; a crash inside a deletion batch between an unlink and its
+result is reached by dropping the journal's last results line.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12:
+
+- `just test`: 1356 passed, 15 skipped (the area's 14 existing skips plus the
+  new `#[ignore]` subprocess fixture), 0 failed, no slow tests.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+- `cargo doc -p worktree --no-deps`: no warning in the new or changed files.
+
+Cross-OS (`just cross-check worktree --os <os> remove::`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | in `just test` |
+| Linux (`build-linux`) | 273 passed |
+| WSL2 (`build-win`) | 273 passed |
+| native Windows (`build-win-native`) | 263 passed (after the split below) |
+
+Windows timing: the first native Windows run had
+`incomplete_discovery_still_removes_and_is_kept_in_the_report` (a loop over
+three fixtures) at 9.2 s and the begun-crash test at 5.0 s. Both were split
+into one test per case, and the fixture now writes the common `info/exclude`
+instead of committing a `.gitignore` and creates the neighbor worktree only
+for the end-to-end test. After that the slowest lifecycle tests take 4.0–4.7 s
+under the package's parallel load there (the retry tests run two lifecycles).
+One lifecycle run makes 22 Git calls; four of them are
+`unregister_quarantine`'s `inspect_missing` followed by
+`remove_missing_record` re-reading the same listing, HEAD, and index digest.
+That redundancy is in Phase 9's unregister and is a candidate for removal if
+these tests creep past 5 s on CI.
+
+Not run: `just test-l2` (no terminal code changed).
+
+Phase 10 is complete; ready for review.

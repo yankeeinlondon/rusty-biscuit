@@ -1,7 +1,7 @@
 ---
 total_phases: 12
 created: 2026-10-11
-phase: 8
+phase: 10
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -129,6 +129,60 @@ skills_files_updated_during_phase_8:
   - .claude/skills/os/windows.md
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/observation.md
+source_files_during_phase_9:
+  - .config/nextest.toml
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/test_support.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inventory.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+docs_updated_during_phase_9:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_10:
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/resolve.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+docs_updated_during_phase_10:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
   - worktree-cli
@@ -663,7 +717,7 @@ real adapter.
 
 ### Wave 9
 
-- [ ] **Deletion inventory** - `remove/observation/inventory.rs`: after
+- [x] **Deletion inventory** - `remove/observation/inventory.rs`: after
       observation is active and before the decisive usage query and the move,
       capture every entry approved for deletion (ignored content included,
       FIFOs/devices/nested mounts detected as ineligible, exit 3, rather than
@@ -675,7 +729,7 @@ real adapter.
       Persist it with the journal before the move: add an inventory line,
       bump `JOURNAL_VERSION`, extend the reader's ordering rules, and add the
       line's fields to `journal_robustness_matrix`.
-- [ ] **Checked deletion engine** - `remove/observation/deletion.rs`:
+- [x] **Checked deletion engine** - `remove/observation/deletion.rs`:
       children-first, bounded batches (R7), cap-std parent-directory handles
       and relative operations (no following links; an approved link itself
       is removed, never its target), per-entry identity revalidation
@@ -686,7 +740,7 @@ real adapter.
       entry as already absent while an unexplained disappearance stops the
       operation, journal updates at each boundary, and `.git` deleted last.
       No arbitrary sleep as proof, no retry-until-the-writer-loses.
-- [ ] **Final verification** - `rmdir` of the quarantine root (fails if
+- [x] **Final verification** - `rmdir` of the quarantine root (fails if
       anything reappeared); both locations checked (quarantine absence, no
       original-path recreation through the final drain and identity checks);
       index bytes and Git's interpreted entries re-bound to the approved
@@ -706,7 +760,7 @@ level.
 
 ### Wave 10 (parallel tasks, integrated at the phase checkpoint)
 
-- [ ] **Operation lifecycle** - `remove/lifecycle.rs`: one flow binding the
+- [x] **Operation lifecycle** - `remove/lifecycle.rs`: one flow binding the
       existing guards/preparation/questions/fingerprint checks, the fresh
       usage query (Phase 3), durable record creation (Phase 2), the move
       (Phases 4-5), checked deletion and final verification (Phases 6-9), the
@@ -721,7 +775,7 @@ level.
       before mutation exit 4, ineligible content exit 3, exit 1 only after a
       move or with uncertain state) and the operation report.
       - Prerequisite: Phases 2-9.
-- [ ] **Crash recovery** - On any start, a pending record blocks a new
+- [x] **Crash recovery** - On any start, a pending record blocks a new
       operation on the same target; restart inspects actual state to resolve
       the interrupted phase and never treats a saved completed-phase value as
       proof that paths or Git still have that state; a crash after rename
@@ -729,7 +783,7 @@ level.
       registration or directory name; recovery-record/journal write failures
       stop destructive work and report the last durable phase plus subsequent
       known or uncertain actions.
-- [ ] **Retry resolution** - Resolve the requested name against the union of
+- [x] **Retry resolution** - Resolve the requested name against the union of
       live registrations and pending records, deduplicating only when both
       identify this same operation's checkout; the quarantine's registered
       basename never bypasses the pending record; a new live worktree reusing
