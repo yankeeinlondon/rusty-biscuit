@@ -71,8 +71,101 @@ skills_files_updated_during_phase_3:
     - schematic/skill/SKILL.md
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - schematic/define/src/cross_origin.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/cross_origin_policy.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/definitions/tests/api_policy.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/justfile
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/origin.rs
+    - schematic/runtime/src/response.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.stderr
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/origin_policy.rs
+    - schematic/runtime/tests/l1/redirects.rs
+docs_updated_during_phase_4:
+    - schematic/define/README.md
+    - schematic/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
+source_files_during_phase_5:
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/raw.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+docs_updated_during_phase_5:
+    - schematic/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
 packages:
     - schematic-runtime
+    - schematic-define
+    - schematic-definitions
+    - schematic-gen
 ---
 
 # Schematic Runtime Envelope Implementation Plan
@@ -197,18 +290,18 @@ Entry: metadata, redaction, live-decoder contracts, and request assembly interfa
 
 ### Wave 7 — Policy Ownership (parallel)
 
-- [ ] **Define API Policy**
+- [x] **Define API Policy**
   - Add `CrossOrigin` with safe default and explicit dangerous opt-in, plus `RestApi::cross_origin`, `request_id_header`, and `secret_names`; update every API-level construction site, test fixture, importer-generated RestApi construction, and doctest required to compile.
   - Populate all 18 shipped definitions. Use only existing/offline provider evidence for request IDs and extra origins; log choices. Do not edit endpoint literals or add serde derives.
   - Own define/definitions and affected construction fixtures. Add the positive current-surface test for no endpoint override/no GraphQL primitive and document its later replacement (R20).
-- [ ] **Implement Origin Rules**
+- [x] **Implement Origin Rules**
   - Own runtime origin-policy module. Validate exact-origin allowlists and build the full tighten-only table, including deny → same-origin rejection naming both policies.
   - Implement pre-request origin enforcement and `check_link`, with no network work on refusal. Same-origin links pass under deny; disallowed destinations return CrossOriginRejected with safe request context.
   - Test effective-port normalization, scheme/host/port distinctions, sibling-host rejection, invalid URL/user-info schemes, allowlist paths/query/fragments, and clearly named dangerous opt-in (R9, R21, R23, R25).
 
 ### Wave 8 — Redirect Integration (sequential)
 
-- [ ] **Follow Redirect Hops**
+- [x] **Follow Redirect Hops**
   - Integrate the follower into the single managed execution path. Resolve relative Location, remove fragments, enforce 10 followed hops, and reconstruct each hop from unauthenticated request parts before conditional credential attachment.
   - Cover 301/302 POST conversion; 303 conversion except HEAD; 307/308 replay; removal of body-specific headers; missing/invalid Location; explicit Host removal; no cookie jar or forwarded proxy authorization.
   - Exercise all five policies and defaults with two mock origins. Prove refused origins receive zero requests and foreign hops strip authorization, custom auth/secret headers, Cookie, and secret query keys. A → B → B stays anonymous; B → A may restore the resolved credential.
@@ -221,18 +314,18 @@ Entry: metadata, redaction, live-decoder contracts, and request assembly interfa
 
 ### Wave 9 — Extension Surfaces (parallel)
 
-- [ ] **Implement Raw Responses**
+- [x] **Implement Raw Responses**
   - Add API-scoped typed-request `send_raw(request, &CallOptions)` through the common executor, returning metadata, bytes, and complete/interrupted/refused/failed completion disposition after any head.
   - Implement status/header convenience accessors from the single metadata record; complete HTTP errors remain complete raw responses. `json::<T>()` rejects incomplete disposition before parsing even when partial bytes are valid JSON.
   - Own raw module/tests; prove shared credentials, origin policy, deadline, redaction, and all incomplete evidence cases, with hooks bypassed (R27, PD14).
-- [ ] **Preserve JSON Hooks**
+- [x] **Preserve JSON Hooks**
   - Own hook module/tests. Implement JSON-codec capability marker and API-plus-endpoint keyed mutators; preserve successful JSON parse → global hook → success decode → typed mutator ordering.
   - Global hooks skip non-2xx and non-JSON endpoints; declared errors/raw sends bypass both hooks. Hook failures preserve original bytes and use safe Hook diagnostics, never arbitrary callback error text.
   - Compile-fail typed mutators on text/binary/empty endpoints; test two APIs sharing endpoint names cannot cross-dispatch hooks (R29, R30 extension contract).
 
 ### Wave 10 — Runtime Audit (sequential)
 
-- [ ] **Audit Shared Execution**
+- [x] **Audit Shared Execution**
   - Integrate both surfaces and rerun their boundary cases through the same execution core, including typed/raw API scoping, credentials, redirects, deadline/cancellation, and safe evidence.
   - Confirm runtime contains no ResponseKind guard or UnexpectedContentType kind. Record replacement mismatch tests and distinguish invalid JSON from a merely misleading Content-Type (R28).
   - Freeze runtime ABI/public contracts for generator integration; record PD14/hook/trait/enum choices for review and update runtime docs as behavior lands.

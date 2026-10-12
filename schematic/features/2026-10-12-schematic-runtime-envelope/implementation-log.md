@@ -70,8 +70,101 @@ skills_files_updated_during_phase_3:
     - schematic/skill/SKILL.md
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - schematic/define/src/cross_origin.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/cross_origin_policy.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/definitions/tests/api_policy.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/justfile
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/origin.rs
+    - schematic/runtime/src/response.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.stderr
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/origin_policy.rs
+    - schematic/runtime/tests/l1/redirects.rs
+docs_updated_during_phase_4:
+    - schematic/define/README.md
+    - schematic/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
+source_files_during_phase_5:
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/raw.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+docs_updated_during_phase_5:
+    - schematic/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - schematic/skill/SKILL.md
 packages:
     - schematic-runtime
+    - schematic-define
+    - schematic-definitions
+    - schematic-gen
 ---
 
 # Implementation Log for 2026-10-12-schematic-runtime-envelope (8 phases)
@@ -1302,3 +1395,549 @@ this phase. The pre-existing 10 skipped tests are unchanged.
    cookie-octet). It matches today's generated `encode_cookie_value`. A key
    that contains `%XX` is therefore ambiguous to a server that
    percent-decodes cookies.
+
+## Phase 4
+
+Started and finished 2026-10-12 on macOS, with Linux, native Windows, and WSL2
+runtime evidence through `just cross-check`. Phase 4 adds the cross-origin
+policy to `schematic-define` and all 18 definitions, and makes the runtime
+follow redirects itself under that policy. The checked-in `schematic-schema`
+and every dependent are unchanged, and the generator does not read the new
+fields yet (Phase 6).
+
+Work split: two subagents ran in parallel with disjoint write sets. One owned
+`schematic-define`, `schematic-definitions`, and `schematic-gen`'s construction
+sites; the other owned the pure `runtime/src/origin.rs` module. I wrote the
+redirect follower in `runtime/src/client.rs`, the `redirects.rs` suite, and the
+import flag, and reviewed both subagents' output.
+
+### Wave 7 — Define API Policy (`schematic-define`, `schematic-definitions`)
+
+- **`CrossOrigin`** (`define/src/cross_origin.rs`, exported from the crate
+  root and the prelude) has the five PD6 constructors `same_origin()`
+  (the default), `allow_origins(iter)`, `allow_without_credentials()`,
+  `danger_allow_any()`, and `deny()`, plus `name()`. It has no serde derives.
+- **`RestApi`** gains three fields: `cross_origin: CrossOrigin`,
+  `request_id_header: Option<String>`, and `secret_names: Vec<String>`.
+  - The drifted `env_auth` doc said "the request will fail with a
+    `MissingCredential` error". It now says the request is sent
+    anonymously (D56). Drift resolved toward the code.
+  - Every `RestApi` struct literal under `schematic/` was updated: define
+    (src, doctests, and the OpenAPI importer's literal), gen (src and tests),
+    definitions, and `define/README.md`. No crate outside `schematic/` builds
+    a `RestApi`. No endpoint literal was edited.
+  - `definition_gen.rs` emits the three fields from the `RestApi` values, so
+    an imported definition carries them.
+- **The 18 definitions (PD25).**
+  - `cross_origin`: `same_origin` for all 18. No definition or vendored spec
+    in the tree needs another origin, and the GitHub definition has no upload
+    endpoints.
+  - `request_id_header`: GitHub sends `x-github-request-id` (the parent
+    review's example). OpenAI sends `x-request-id`, as the vendored
+    `specs/openai/openapi.yaml` shows. The other 16 are `None`.
+  - `secret_names`: empty for all 18. A scan of every query, header, and
+    parameter name found no secret beyond the built-ins and each API's own
+    authentication names.
+- **OpenAI is importer-generated.** `definitions/src/openai/mod.rs` says "Do
+  not edit manually", so a hand-set `request_id_header` would be lost the next
+  time `just import-openai` runs. I added `--request-id-header <HEADER>` to
+  `schematic-gen import` (`ImportOptions::request_id_header`), and the recipe
+  now passes `x-request-id`.
+  - Re-running `just import-openai` reproduces the checked-in file exactly:
+    `types.rs` is byte-identical, and `mod.rs` differs from HEAD only by the
+    three new field lines.
+  - The evidence note moved from a code comment to the recipe's comment.
+- **`CrossOrigin` is deliberately not `#[non_exhaustive]`,** unlike this
+  crate's other public enums. The generator must translate every policy, and
+  an exhaustive match turns a new variant (spec 4a) into a compile error
+  there. A wildcard arm could instead emit a looser policy without any error.
+  This is recorded at the type and in the skill's enum convention.
+
+### Wave 7 — Origin Rules (`runtime/src/origin.rs`)
+
+- **`OriginPolicy`** is public and `#[non_exhaustive]`. It mirrors
+  `CrossOrigin` (PD29: define owns the data, runtime owns the behavior), with
+  the same five constructors and `name()`.
+- **`OriginRules`** is crate-private. It holds the client's base
+  `url::Origin` and the effective policy with parsed allowed origins.
+  - Comparison is on the effective origin (scheme, host, effective port),
+    with no domain matching.
+  - A target that is not `http`/`https`, or carries user info, is refused
+    under every policy, including `danger_allow_any`.
+  - `redirect(&Url)` refuses everything under `deny`.
+  - `link(&Url)` allows the base origin under every policy (PD2).
+  - Both report whether the credential goes. It goes only when the target is
+    the base origin or a listed origin, or under `danger_allow_any`. The
+    comparison is with the base origin, never the previous hop.
+- **Tighten-only (PD1, D56, D57 item 6).**
+  - Accepted overrides: `deny` over anything; `same_origin` over anything
+    but `deny`; an `allow_origins` subset of the definition's own list.
+  - Everything else is `BuildError::OriginPolicyNotPermitted { definition,
+    requested }`, whose `Display` names both policies.
+  - Allowed-origin entries in either list must be bare HTTP(S) origins,
+    otherwise `InvalidAllowedOrigin`. That check runs before the permission
+    check.
+- An `is_base` helper the subagent added was unused after integration, so I
+  removed it with its test. The R21 table already covers the effective-port
+  comparison it tested.
+
+### Wave 8 — Follow Redirect Hops (`runtime/src/client.rs`)
+
+- **One execution path.** `Client::send` is now a hop loop over the single
+  `Expiration` computed when the send starts.
+  - Each hop is rebuilt from the unauthenticated `Assembled` request; the
+    credential is then attached only if the origin decision allows it.
+  - Credential resolution still happens once per send (D11).
+  - `record_completed` runs once, after the final classification, including
+    `RedirectRefused` and `RedirectFailed` envelopes.
+- **Followed statuses.** 301, 302, 303, 307, and 308 are followed. Any other
+  3xx (300, 304, 305) is a final reply, as before (PD27).
+- **Location handling.**
+  - A missing `Location` is `MissingLocation`. A non-UTF-8 or unparsable one
+    is `InvalidLocation`.
+  - A target that is not HTTP(S), or carries user info, is
+    `UnsafeLocation`.
+  - Following more than `MAX_REDIRECTS` (10, a new public constant, PD3)
+    is `HopLimit`.
+  - A target the policy refuses is `CrossOrigin`.
+  - Each of these is an envelope `RedirectRefused`. It carries the 3xx's
+    status, sanitized headers including `Location`, its body, and the URL of
+    the request that received it (PD5).
+- **Rebuilding a hop.**
+  - `Location` is resolved against the hop's URL *before* any credential, so
+    a relative `Location` such as `?page=2` never inherits a query-string
+    credential.
+  - The fragment is removed and an explicit `Host` header is dropped.
+  - 301/302 on POST, and 303 on any method except HEAD, become GET. The body
+    and its headers (`Content-Type`, `-Length`, `-Encoding`, `-Language`,
+    `-Location`, `Transfer-Encoding`) are dropped with it. 307/308, and
+    301/302 on other methods, replay the method and the owned body bytes
+    (PD4).
+  - There is no cookie jar, so a `Set-Cookie` on a redirect is not sent on
+    the next hop.
+- **Hops without the credential.** On such a hop, every secret header (built
+  in, placement, or definition-marked, so `Authorization`,
+  `Proxy-Authorization`, `Cookie`, and custom authentication headers) and
+  every secret query value is removed. The base request keeps them, so
+  B → A restores both the credential and the application's own secret
+  headers. The envelope then reports `AuthMethod::Anonymous`.
+- **Failed hops (D57 item 7).** Suppose the next hop gets no head: a refused
+  connection, TLS failure, timeout, or shared-deadline expiry.
+  - The result is an envelope `RedirectFailed { target, category }` built
+    from the last 3xx: its metadata, its body, and the redacted failed
+    target.
+  - `meta.elapsed` is updated to the whole send's elapsed time.
+  - A hop is never started after the expiration has passed.
+- **Interrupted redirect body.** A 3xx's body is read before the next hop,
+  both as evidence and so its connection can be reused. If that read fails or
+  expires, the result is `BodyInterrupted` with the 3xx's status (R24).
+- **Pre-request origin check, and `check_link` (R23, PD30).**
+  - `send` checks the assembled request URL with `link()` before resolving
+    credentials. A refusal is `TransportError` `CrossOriginRejected` with
+    redacted request metadata, and no network work happens.
+  - To make that check reachable, an endpoint path that is an absolute
+    `http(s)://` URL is now used as-is instead of being appended to the base
+    URL. That is how a caller follows a next-page link today. See design
+    choice 2.
+  - `Client::check_link::<R>(&Url)` applies the same rule with no request.
+- **`RedirectRefusal::BodyNotReplayable` removed.** Phase 2 added it for
+  PD4's "non-replayable body", but every typed body is owned bytes, so it
+  could never be produced. Removing it keeps unreachable public surface out
+  of the ABI that Phase 6 freezes.
+
+### Design choices for review (Human review agenda item 2)
+
+1. **`check_link` is generic over the endpoint:
+   `check_link::<R>(&Url)`, not PD30's `check_link(&Url)`.** The refusal is a
+   `TransportError`, which carries request metadata (R9) including
+   `endpoint_id` and `method`. A pager in spec 3 always knows its endpoint
+   type, so the error names the real endpoint instead of an invented one.
+2. **Absolute URLs as request paths.** A `RequestParts::path` beginning with
+   `http://` or `https://` (any case) is sent to that URL after the origin
+   check, instead of being appended to the base.
+   - This is the "generated-client call that follows an absolute URL" of R23,
+     and it makes the pre-request `CrossOriginRejected` reachable.
+   - Today's 547 endpoint paths all begin with `/`, so no current request
+     changes.
+   - Under `allow_without_credentials`, a foreign absolute URL is sent
+     without the credential or secret headers.
+3. **The credential slot on a later hop is replaced, not refused.** On the
+   first hop, a request that already carries the credential's header, query
+   name, or cookie is still `InvalidArgument` (Phase 3). On a later hop, the
+   value comes from the server's `Location`, so the runtime's credential
+   replaces it rather than failing the send.
+   - A placement error on a later hop is effectively unreachable, because the
+     same value was already placed on the first hop. It is reported as
+     `RedirectFailed { category: Other }` rather than panicking.
+4. **Server-supplied secret query values are dropped on hops without the
+   credential.** For example, `Location: https://b/x?token=…` reaches B as
+   `/x`. This follows R22's "no credential in any form" rule literally, at
+   the cost of rewriting a server-chosen URL.
+5. **`CrossOrigin` exhaustive** (Wave 7 above).
+6. **`--request-id-header` on `schematic-gen import`** (Wave 7 above).
+7. **Eversolo's `key` query parameter is redacted.** `key` is a built-in
+   secret query name (Phase 2). Eversolo uses it for a remote-control key
+   name, not a secret, so its values will show as `[redacted]` in metadata.
+   This is safe but loses evidence. Options are to accept it, or later to
+   make built-in names overridable per API; I recommend accepting it.
+
+### PD dispositions touched in this phase (agenda item 1)
+
+| PD | Matched the planned disposition? |
+|---|---|
+| PD1 | Yes, the tighten-only table including D57 item 6 (`same_origin` over `deny` names both policies) |
+| PD2 | Yes: `deny` refuses every redirect (even same-origin) and allows same-origin links |
+| PD3 | Yes: `MAX_REDIRECTS = 10` in `schematic-runtime`. The 11th redirect response is `RedirectRefused { HopLimit }` |
+| PD4 | Yes for 301/302/303/307/308. The non-replayable-body refusal is moot, because every body is owned bytes; its unreachable variant was removed |
+| PD5 | Yes: the envelope shows the refused 3xx and the URL of the request that received it. No `redirects` chain field is added. Whether callers need the chain is left for review |
+| PD6 | Yes, names as proposed. `CrossOrigin` is exhaustive (design choice 5) |
+| PD25 | Yes: request ids for GitHub and OpenAI only, from tree evidence. `same_origin` and empty `secret_names` everywhere |
+| PD29 | Yes: define owns `CrossOrigin`, runtime owns `OriginPolicy`, and the runtime does not depend on define. Translation is Phase 6 |
+| PD30 | Departure: generic `check_link::<R>` (design choice 1) |
+
+### Deviations from the plan
+
+- **`check_link` signature** (design choice 1) and **absolute-URL paths**
+  (design choice 2). Neither is in the plan's text, which says only "pre-request
+  origin enforcement".
+- **The import flag and recipe change** were not planned. They are needed so
+  that a planned definition edit survives regeneration of an
+  importer-generated file.
+- **`just doctest` stops on four pre-existing `schematic-definitions`
+  doctest failures** (`definitions/src/lib.rs` GitHub 17 vs 16 endpoints and
+  Gitea 16 vs 15, plus the same two in `prelude.rs`). Neither file is changed
+  in this phase. The counts went stale in commit 9e65a90b5, which merged
+  duplicate endpoints. I left them alone (surgical scope) and report them. The
+  runtime, gen, and define doctests were run directly and pass.
+- **Tests:** two subagents wrote `define/tests/cross_origin_policy.rs`,
+  `definitions/tests/api_policy.rs`, the `definition_gen` emission tests,
+  `origin.rs` unit tests, and `tests/l1/origin_policy.rs`; I reviewed each.
+  I wrote `tests/l1/redirects.rs`, the trybuild fixture, and the import test.
+  The R19 test moved from `builder.rs` to `redirects.rs` and now covers four
+  constructors.
+
+### Requirement-to-test mapping (Phase 4 share)
+
+Boundary: the runtime's public send and builder API over loopback sockets.
+Fidelity is F2: real HTTP through wiremock servers on distinct loopback ports
+acting as origins A, B, and C. All tests are L1. They are declared in
+`runtime/tests/l1/main.rs` (`redirects`, `origin_policy`), in default
+autotests for `define/tests/` and `definitions/tests/`, and in
+`gen/tests/l1/` for the import test. No test name carries a tier marker.
+
+The input-robustness matrix does not apply. `CrossOrigin`/`OriginPolicy` are
+typed Rust values, and an allowed-origin string is validated as a value (that
+table is in the `origin.rs` unit tests). The import flag is a CLI argument,
+not a file format.
+
+| Requirement (part) | Tests |
+|---|---|
+| R19: no constructor lets the library follow (standalone, standalone with connection options, shared transport, configured shared transport) × {refused with zero requests at B, followed once by the runtime} | `redirects::no_constructor_lets_the_http_library_follow_a_redirect` |
+| R20: all 18 carry the field; default `same_origin`; frozen surface (no endpoint override, no GraphQL export); importer emits the fields | `definitions/tests/api_policy.rs::every_shipped_api_declares_the_expected_policy_fields`; `define/tests/cross_origin_policy.rs::{default_is_same_origin, each_constructor_yields_its_variant_and_name, allow_origins_keeps_order_and_exact_strings, endpoints_have_no_cross_origin_override_and_no_graphql_export}`; `definition_gen::tests::{emits_api_level_policy_fields, emits_same_origin_for_the_default_policy}`; `openapi_import_test::an_imported_definition_records_the_supplied_request_id_header` |
+| R21: exact origin table (same, explicit `:443`, scheme change, B, sibling subdomain, different port, parent domain, user info, ftp, file) × 5 policies × {redirect, link}; loopback ports; allowed-origin validation | `origin::tests::{r21_table_holds_for_every_policy_and_target, loopback_ports_are_distinct_origins, http_default_port_is_implicit, default_port_entry_matches_implicit_port_target, allowed_origin_entries_are_validated_in_definition_and_request, invalid_definition_entry_wins_over_permission_check}` |
+| R22: matrix, 6 policies (including unset) × 3 credential forms (header, cookie, query) × {A→A, A→B, A→C}, with zero requests at refused origins, the credential at allowed ones, and the reported source; chain A→A→B re-checked; A→B→B anonymous and B→A restored; foreign hops drop application secrets; `danger_` compile check | `redirects::{a_definition_that_sets_nothing_behaves_as_same_origin, same_origin_follows_only_redirects_to_the_base_origin, allow_origins_follows_listed_origins_with_the_credential_and_refuses_the_rest, allow_without_credentials_follows_anywhere_and_sends_the_credential_only_to_the_base, danger_allow_any_follows_anywhere_with_the_credential, deny_follows_no_redirect_at_all, a_chain_is_checked_again_at_every_hop_and_reports_the_refused_hop, a_foreign_hop_stays_anonymous_until_the_chain_returns_to_the_base_origin, a_foreign_hop_drops_every_secret_the_application_set_and_a_same_origin_hop_keeps_them}`; `origin::tests::credentials_follow_the_base_origin_not_the_previous_hop`; trybuild `allow_any_needs_the_danger_name` |
+| R23: `check_link` per policy (same-origin passes under `deny`; B and C refused or allowed; ftp and user info refused; redacted target; endpoint id; zero requests); absolute request URL refused before sending, sent anonymously under `allow_without_credentials`, same-origin under `deny` | `redirects::{check_link_applies_the_policy_with_no_request, an_absolute_request_url_is_checked_before_it_is_sent}` |
+| R24: one case per status (301/302 POST, 301 PUT, 303 POST/PUT/HEAD, 307/308 POST) with method, body, and body headers; missing, invalid, ftp, and user-info `Location` with 3xx evidence kept; relative resolution, no inherited credential, no fragment; 10 followed and the 11th refused; explicit `Host` and cookie jar; `RedirectFailed` to a refused port keeping the 302 while a policy refusal of the same 302 stays `RedirectRefused`; cut-off 3xx body → `BodyInterrupted` | `redirects::{each_redirect_status_rewrites_or_replays_the_request, a_redirect_without_a_usable_location_is_refused_with_its_evidence, a_relative_location_resolves_against_the_hop_without_its_credential_or_fragment, ten_redirects_are_followed_and_the_eleventh_is_refused, an_explicit_host_and_a_redirects_cookie_never_reach_the_next_hop, a_followed_redirect_whose_target_refuses_the_connection_keeps_the_redirect, a_redirect_whose_body_is_cut_off_is_an_interrupted_body}` |
+| R25: tighten-only table (5 definitions × 9 requests) through `OriginRules`; public build path: rejected forms with exact errors, the error naming both policies, invalid entries, and each accepted form taking effect over the network | `origin::tests::{tighten_only_table_holds_for_every_pair, subset_compares_parsed_origins, same_origin_over_deny_error_names_both_policies, accepted_overrides_take_effect}`; `redirects::a_cross_origin_override_can_only_tighten_the_definition` |
+| R26 (redirect share): hops share one expiration and never restart it; deadline expiry between hops → `RedirectFailed { DeadlineExceeded }` counted once; final-hop metadata and whole-send elapsed; redirect hops not counted | `redirects::{redirect_hops_share_one_expiration_and_never_restart_it, a_shared_deadline_expiring_between_hops_is_a_failed_redirect_counted_once, a_followed_send_reports_the_final_hop_and_the_whole_elapsed_time}`, plus the deadline count in `a_followed_redirect_whose_target_refuses_the_connection_keeps_the_redirect` |
+| R9 (`CrossOriginRejected` share) | `redirects::an_absolute_request_url_is_checked_before_it_is_sent`, `redirects::check_link_applies_the_policy_with_no_request` |
+
+**Mutation checks** (temporary edits to `client.rs`, each restored and
+verified with `diff`):
+
+| Mutation | Caught by |
+|---|---|
+| always attach the credential | 4 tests, including `allow_without_credentials_…` and `a_foreign_hop_drops_every_secret…` |
+| keep `Host` | `an_explicit_host_and_a_redirects_cookie_never_reach_the_next_hop` |
+| no POST → GET rewrite | `each_redirect_status_rewrites_or_replays_the_request` |
+| hop limit off by one | `ten_redirects_are_followed_and_the_eleventh_is_refused` |
+| restart the expiration per hop | `redirect_hops_share_one_expiration_and_never_restart_it` |
+
+Timing: the slowest new test takes 0.74 s
+(`redirect_hops_share_one_expiration_and_never_restart_it`), and the redirect
+suite runs in about 0.9 s wall. Its delays are server-side
+(`set_delay`) with at least 300 ms of margin on the branch asserted. There are
+no readiness sleeps.
+
+### Gates (all on the final tree)
+
+| Gate | Result |
+|---|---|
+| `just test` (`schematic/`) | PASS: L1 1925 / 0 failed / 10 skipped (Phase 3: 1879; +46: runtime +38, define +4, definitions +1, gen +3); fresh-output 4 / 0; compile-fail 1 / 0 (3 fixtures) |
+| `just lint` (`schematic/`) | PASS: define, gen, definitions, oauth, runtime |
+| `RUSTDOCFLAGS='-D warnings' cargo doc -p schematic-runtime --no-deps` | PASS |
+| doctests | runtime 0 and gen 18 PASS (`cargo test --doc`); define 168 PASS; definitions 59 PASS / **4 pre-existing failures** (see Deviations) |
+| `cargo check` of the 8 dependents | PASS (unchanged schema) |
+| `just cross-check schematic-runtime --os linux` | PASS 137 / 137 |
+| `just cross-check schematic-runtime --os windows` | PASS 133 / 133 (the four TLS tests stay `ignore`d) |
+| `just cross-check schematic-runtime --os wsl` | PASS 137 / 137 |
+| `just import-openai` round trip | reproduces the checked-in OpenAI definition |
+
+Cross-checks published no receipt because the tree is uncommitted, as
+expected. `schematic-gen`, `-define`, and `-definitions` were not
+cross-checked: their changes are string literals, a CLI flag, and a temp-dir
+test, and CI's Linux and macOS legs cover them.
+
+### Review items found in Phase 4
+
+1. **`check_link::<R>` and absolute-URL request paths** (design choices 1
+   and 2). Both are public contracts that spec 3's pager will use.
+2. **Dropping server-supplied secret query values on hops without the
+   credential** (design choice 4).
+3. **`CrossOrigin` exhaustive** versus the crate convention (design
+   choice 5).
+4. **Eversolo `key` redaction** (design choice 7).
+5. **Stale endpoint-count doctests in `schematic-definitions`**
+   (pre-existing; four asserts). Phase 8 runs `just doctest` as a final gate,
+   so they need a one-line fix each before then.
+6. **The trybuild `allow_any_needs_the_danger_name.stderr` quotes the
+   `OriginPolicy` constructor signatures** from rustc's suggestion note, so
+   renaming a constructor means regenerating it with `TRYBUILD=overwrite`.
+
+## Phase 5
+
+Started and finished 2026-10-12 on macOS. Runtime evidence for Linux, native
+Windows, and WSL2 came through `just cross-check`. Phase 5 adds the raw send
+and the two response hooks to `schematic-runtime`, both over one execution
+core. Only `schematic-runtime` changed: no generator, definition, schema, or
+consumer file was touched. I did the work myself, without subagents, because
+the three tasks share `client.rs`.
+
+### Wave 9 — Raw Responses (`runtime/src/raw.rs`, `runtime/src/client.rs`)
+
+- **Shared core first.** The Phase 4 hop loop moved from `Client::send` into
+  a private `Client::execute`. Its code is otherwise unchanged. It returns a
+  private `Exchange` with two cases:
+  - `Final { meta, body: LiveBody }`: a reply that is not a followable
+    redirect, with its body still unread.
+  - `Stopped { meta, body, stop }`: a redirect that ended the send. `stop`
+    is `Interrupted` (the 3xx body was cut off), `Refused(reason)`, or
+    `Failed { target, category }`.
+
+  `send` and `send_raw` each call `execute` and map its result. Neither
+  duplicates the origin check, credential resolution, hop rebuilding,
+  expiration, or redaction. `execute` does not count the send; each caller
+  counts it once, after classifying the outcome. The old
+  `redirect_failed` helper was folded into the loop's `failed_hop` closure.
+- **`Client::send_raw<R: EndpointSpec<Api = A>>(request, &CallOptions) ->
+  Result<RawResponse, TransportError>`** (PD14 as proposed).
+  - `RawResponse { meta, body, completion }` keeps a single metadata
+    record. `status()` and `headers()` read from `meta`, and a test checks
+    that `headers()` is the same reference as `meta.headers`. So the headers
+    are the redacted ones; see design choice 3.
+  - `RawCompletion` (`#[non_exhaustive]`) has four cases: `Complete`,
+    `BodyInterrupted`, `RedirectRefused { reason }`, and
+    `RedirectFailed { target, category }`. A 4xx or 5xx whose body was read
+    to the end is `Complete`, with no status classification and no
+    declared-error decode.
+  - `json::<T>()` returns `RawJsonError::Incomplete` before parsing when
+    the response is not complete, and `Malformed` when a complete body does
+    not parse. Neither carries parser text, which can quote the body.
+  - `Display` prints the metadata and the completion, never the body.
+    `Debug` derives and can print the body, as the module docs say.
+- **Raw sends bypass both hooks.** They never call a codec, so the hook
+  stage is never built.
+
+### Wave 9 — JSON Hooks (`runtime/src/hooks.rs`, `runtime/src/codec.rs`)
+
+- **Marker:** `pub trait SupportsHooks: Decode {}`, implemented only for
+  `Json<T>`. Spec 5 extends it to its stream and GraphQL codecs.
+- **How a codec receives the hooks.** `Decode` gained a provided method,
+  `decode_hooked(body, HookStage<'_>)`. Its default ignores the hooks and
+  calls `decode`. `Json<T>` overrides it.
+  - The runtime always calls `decode_hooked` for a 2xx reply. Without
+    specialization, a provided method is the only way the generic send can
+    reach JSON-specific behavior. See design choice 1.
+  - With no hooks registered, `Json` takes the old direct `from_slice` path.
+- **Order (R29):**
+  1. Parse the body as JSON. A parse failure is `MalformedSuccess` with the
+     original bytes, and the global hook never sees that body.
+  2. Run `pre_response_json`.
+  3. Decode the success type with `from_value`. A hook output that does not
+     decode is `MalformedSuccess` with the *original* bytes.
+  4. Run the endpoint's mutator.
+
+  A refusal in step 2 or 4 is `ErrorKind::Hook` with the original bytes.
+- **Registration** is on `ClientBuilder<A>`:
+  - `pre_response_json(F)`, where `F: Fn(&ResponseMeta, Value) ->
+    Result<Value, HookError>`.
+  - `mutate_response::<R, F>(F)`, with `R: EndpointSpec<Api = A>`,
+    `R::Decoder: SupportsHooks`, and `F: Fn(&ResponseMeta, &mut R::Success)
+    -> Result<(), HookError>`.
+  - Registering again replaces the earlier hook, as the generated hooks do
+    today.
+- **Lookup** uses the key `(TypeId::of::<R::Api>(), R::ENDPOINT_ID)`. The
+  storage types (`Hooks`, the type-erased mutator, the hook alias) are
+  crate-private. The public surface is `SupportsHooks`, `HookStage` (for
+  codec authors), and `HookError`.
+- **`HookError` carries no text.** `impl<E: std::error::Error> From<E>`
+  discards the source's text, so `?` works inside a hook. That is possible
+  only because `HookError` does not implement `Error` itself.
+
+### Wave 10 — Runtime Audit
+
+- **One core.** Every public send path (`send`, `send_raw`) goes through
+  `execute`; `check_link` does no network work. The parity test runs the
+  same six endings through both sends: 200, 418, HTML on JSON, a followed
+  301, a refused 302, and a failed 308 hop, plus a cut-off body. For each it
+  checks the same status, final URL, auth source, redacted headers, request
+  id, disposition, and kept bytes.
+- **R28 audit.** `grep -rn "ResponseKind\|UnexpectedContentType\|WrongResponseDecoder" runtime/src runtime/tests runtime/Cargo.toml`
+  finds nothing. The runtime has no response-kind guard and no
+  content-type error. These tests replace the guard (log list for R28):
+  - `send::html_on_a_json_endpoint_is_a_malformed_success_with_its_evidence`
+    (invalid JSON → `MalformedSuccess`, with status, headers, and body kept)
+  - `send::codecs_judge_the_body_not_the_content_type` (valid JSON under
+    `text/plain` decodes; text, binary, and empty accept any content type)
+  - `hooks::a_body_that_is_not_json_is_malformed_and_the_global_hook_never_sees_it`
+    (the same distinction on the hook path)
+
+  Invalid JSON is a malformed success. A merely misleading `Content-Type` is
+  not an error.
+- **ABI.** `schematic_runtime::ABI` stays `1`. No generated code embeds it
+  yet, so Phase 6's generator emits `1` as the first frozen value. Any later
+  change that generated code can observe must increment it.
+- **No scope creep.** No stream, SSE, NDJSON, or GraphQL codec was added, and
+  no generic middleware.
+
+### Design choices for review (Human review agenda item 2)
+
+1. **Hook delivery through a provided `Decode::decode_hooked`.** The
+   alternative was the spike's `DecodeCtx` argument on `decode` itself. That
+   would change every codec's signature, including the test-only stream and
+   two-shape decoders, which R30 wants to stay hook-agnostic. With the
+   provided method, a codec that knows nothing of hooks compiles unchanged.
+   The cost: a codec could override `decode_hooked` without implementing
+   `SupportsHooks`. That is harmless, because registration is still gated by
+   the marker.
+2. **Hooks receive the redacted `&ResponseMeta`, not a new
+   `ResponseContext`.** Today's generated `ResponseContext` exposes the
+   unredacted URL and headers. `ResponseMeta` already carries the endpoint
+   id, method, redacted URL and query, status, response headers, and request
+   id. Reusing it avoids a second record that could disagree with it, and
+   keeps secrets out of hook code. Phase 7 migrates any hook that read the
+   unredacted URL; no consumer registers a hook today (see the next
+   section).
+3. **`RawResponse::headers()` is redacted.** PD14 and the raw contract
+   require one metadata record. A raw caller therefore cannot read a secret
+   *response* header (for example a `Set-Cookie` value). If that turns out
+   to be needed, a separately named unredacted accessor would be a spec
+   change.
+4. **`HookError` is a unit struct, and a mutator lookup by type rather than
+   by API name.** The key uses `TypeId` of the API marker, not
+   `Api::NAME`, so two API markers that happen to share a name still cannot
+   cross-dispatch.
+5. **`RawJsonError` is a new public type** (`Incomplete`, `Malformed`).
+   PD14 does not name the error of `json::<T>()`.
+
+### PD dispositions touched in this phase (agenda item 1)
+
+| PD | Matched the planned disposition? |
+|---|---|
+| PD10 | Yes. No middleware; only `pre_response_json` and `mutate_response`, through the `SupportsHooks` marker implemented by `Json` only |
+| PD12 | Yes for hooks, `send`, and `send_raw`, which now live in the runtime |
+| PD14 | Yes, as proposed. `RawCompletion` is the four-way disposition that replaces the earlier boolean; recorded for author review as PD14 asks |
+| PD15 | Yes (D57 item 9). The global hook runs only on 2xx bodies of hook-supporting (JSON) endpoints |
+| PD26 | Yes. No guard; replacement tests listed above |
+
+### Hook consumers today (input for Phase 7)
+
+A repository-wide search for `pre_response_json` and `mutate_response`
+outside `schematic/gen/src` and `schematic/schema/src` finds only the
+typed-send spike under `schematic/reviews/`. No consumer crate registers a
+hook. The generated schema's own hook tests (in `schematic-gen`'s codegen
+tests and the generated variant builders) belong to Phases 6 and 7.
+
+### Deviations from the plan
+
+- None in scope. The plan's "record replacement mismatch tests" item is
+  satisfied by the tests that already existed (listed above), plus one new
+  hook-path case.
+- The parity test first failed on native Windows: its failed hop targeted a
+  closed loopback port twice, which takes about 2 s per refusal there (the
+  `os` skill already records this), and the `Date` headers of the two sends
+  straddled a second. It now targets a server that accepts and immediately
+  closes, and compares headers without `Date`. Measured on Windows, the
+  test went from 4.2 s to 0.07 s. The one remaining closed-port test
+  (`raw::a_failed_hop_after_…`, which checks the `Connect` category) takes
+  2.1 s there, as its Phase 4 counterpart does.
+
+### Requirement-to-test mapping (Phase 5 share)
+
+Boundary: the runtime's public send and builder API over loopback sockets.
+Fidelity is F2: real HTTP through wiremock servers and raw `TcpListener`
+mocks. Compile-time contracts use trybuild (F1). All tests are L1 and none
+carries a tier marker. `raw` and `hooks` are declared in
+`runtime/tests/l1/main.rs`. The trybuild fixtures run through the existing
+`compile_fail::slow_…` test (`just test-compile-fail`), and the hook-lookup
+unit tests sit in `src/hooks.rs`.
+
+The input-robustness matrix does not apply: no file format or configuration
+reader was added or changed. `RawResponse::json` parses a provider body,
+not configuration, and its two outcomes are tested.
+
+| Requirement (part) | Tests |
+|---|---|
+| R27: status, headers, and bytes from one record, with the JSON convenience | `raw::a_complete_reply_exposes_status_headers_and_body_from_one_record` |
+| R27/PD14: 4xx/5xx are complete raw responses, with no declared-error decode; `json` of a non-JSON body is `Malformed` | `raw::http_error_statuses_are_complete_raw_responses_with_no_classification` |
+| PD14: interrupted body (connection cut, and expiry after the head), partial bytes kept; `json` refuses even when the partial bytes parse (with a control) | `raw::a_cut_off_body_is_interrupted_and_json_refuses_it_even_when_the_bytes_parse`, `raw::a_body_read_still_waiting_at_the_expiration_is_interrupted_not_a_transport_error` |
+| R27: cross-origin redirect refused under `same_origin`, zero requests at B, sanitized `Location`, sentinel absent | `raw::a_cross_origin_redirect_is_refused_with_the_redirects_evidence_and_never_reaches_the_target` |
+| PD14/D57 item 7: failure connecting after a redirect → `RedirectFailed` with the 3xx evidence, counted once | `raw::a_failed_hop_after_a_followed_redirect_keeps_the_redirect_and_names_the_target` |
+| R27: same credential precedence (per call over client, anonymous mode), credential on followed same-origin hops, sentinel absent from metadata and `Display` | `raw::credentials_follow_the_same_precedence_and_never_reach_stored_metadata` |
+| R27: deadline honored (exhausted → nothing sent; shorter than the reply → `DeadlineExceeded` before the head); invalid argument and foreign absolute URL refused with zero requests | `raw::refusals_before_any_head_are_transport_errors_with_no_request`, `raw::a_deadline_shorter_than_the_reply_ends_the_raw_send_before_the_head` |
+| Wave 10: typed and raw share one core and report the same evidence for every ending | `raw::typed_and_raw_sends_report_the_same_evidence_for_every_ending` |
+| R27: a typed or raw send of another API's request fails to compile (API scoping), and so does hook registration | trybuild `request_of_another_api` |
+| R29: order parse → global → decode → mutator; each hook alone; no-hook control | `hooks::a_json_success_runs_parse_then_global_hook_then_decode_then_mutator`, `hooks::each_hook_runs_alone_when_it_is_the_only_one_registered` |
+| R29/D57 item 9: global hook and mutator skipped for a 4xx declared error (decoded from the original body), a 5xx undeclared reply, text/binary/empty bodies, and raw sends; positive control on the same client | `hooks::non_2xx_replies_non_json_endpoints_and_raw_sends_run_neither_hook` |
+| R29: parse failure stays `MalformedSuccess` and the hook never sees it; undecodable hook output is `MalformedSuccess` with the original bytes | `hooks::a_body_that_is_not_json_is_malformed_and_the_global_hook_never_sees_it`, `hooks::a_hook_output_that_does_not_decode_is_malformed_with_the_original_bytes` |
+| R29: a refusing hook (global or mutator) is `Hook` with the original bytes; no hook text in `Display`/`Debug` | `hooks::a_refusing_hook_is_a_hook_failure_with_the_original_bytes_and_no_hook_text` |
+| R29: a mutator applies only to its endpoint; re-registration replaces | `hooks::a_mutator_runs_only_for_its_own_endpoint_and_a_second_registration_replaces_the_first` |
+| R29/API identity: two APIs sharing an endpoint id never cross-dispatch (lookup level and over the network) | `hooks::tests::a_mutator_is_found_by_api_and_endpoint_not_by_endpoint_id_alone`, `hooks::apis_sharing_an_endpoint_id_never_run_each_others_mutators`, `hooks::tests::a_mutator_given_a_value_of_another_type_refuses_rather_than_skipping` |
+| R29: typed mutator on a text, binary, or empty endpoint is a compile error; the mutator is typed by the declared success type | trybuild `mutator_on_a_non_json_endpoint`, `mutator_typed_by_another_value` |
+| R28: guard gone; mismatch tests | grep above; `send::html_on_a_json_endpoint_…`, `send::codecs_judge_the_body_not_the_content_type` |
+
+**Mutation checks** (temporary edits, each restored and verified with
+`diff`):
+
+| Mutation | Caught by |
+|---|---|
+| key mutators by endpoint id only | `hooks::tests::a_mutator_is_found_by_api_and_endpoint_not_by_endpoint_id_alone` |
+| `send_raw` does not count its deadline | `raw::a_failed_hop_after_…` |
+| `json()` ignores the completion | 4 raw tests |
+| typed send calls `decode` instead of `decode_hooked` | 7 hooks tests |
+| raw interrupted body reported `Complete` | 3 raw tests, including the parity test |
+
+Timing: the slowest new test on macOS takes 0.36 s. On Windows,
+`raw::a_failed_hop_after_…` takes 2.1 s because of the closed-port refusal
+noted above. No test uses a readiness sleep. The deadline and timeout
+margins are at least 300 ms on the branch asserted.
+
+### Gates (all on the final tree)
+
+| Gate | Result |
+|---|---|
+| `just test` (`schematic/`) | PASS: L1 1945 / 0 failed / 10 skipped (Phase 4: 1925; +20 = 18 runtime L1 + 2 runtime unit); fresh-output 4 / 0; compile-fail 1 / 0 (6 fixtures, 3 new) |
+| `just lint` (`schematic/`) | PASS: define, gen, definitions, oauth, runtime |
+| `cargo clippy -p schematic-runtime --all-targets -- -D warnings` | PASS |
+| `RUSTDOCFLAGS='-D warnings' cargo doc -p schematic-runtime --no-deps` | PASS |
+| `cargo test --doc -p schematic-runtime` | PASS (0 doctests) |
+| `just cross-check schematic-runtime --os windows` | PASS 153 / 153 (the four TLS tests stay `ignore`d) |
+| `just cross-check schematic-runtime --os linux` | PASS 157 / 157 |
+| `just cross-check schematic-runtime --os wsl` | PASS 157 / 157 |
+
+No dependent crate uses `schematic-runtime` yet, and no other package
+changed, so no dependent build was needed. Cross-checks published no receipt
+because the tree is uncommitted. `just doctest` still stops on the four
+pre-existing `schematic-definitions` endpoint-count failures (Phase 4 review
+item 5); nothing in this phase touches them.
+
+### Review items found in Phase 5
+
+1. **Design choices 1–5 above.** The most consequential are hooks
+   receiving the redacted `ResponseMeta` (2) and raw headers being redacted
+   (3). Both are public contracts that Phase 6 emits against.
+2. **The `compile_fail` `.stderr` files quote source lines from
+   `src/client.rs` and `src/codec.rs`** (the `mutate_response` bounds and the
+   `SupportsHooks for Json` impl). Changing those lines means regenerating
+   the fixtures with `TRYBUILD=overwrite`, after checking that the new
+   diagnostics are still the intended ones.
