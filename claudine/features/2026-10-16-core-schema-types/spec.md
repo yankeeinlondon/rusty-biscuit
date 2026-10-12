@@ -30,6 +30,39 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+    Phase 1 (inventory + regex spike) changed no source. Read the `## Phase 1`
+    section of implementation-log.md before editing; it has the code map, the
+    presence-check sites, the validator builders, and the regex construction.
+    Points that are easy to miss:
+    - `SimplifiedType::Any` is also used in grammar.rs as a "target type not yet
+      known" placeholder for inline-object and named-reference postfixes. Do
+      not let the new `unknown` presence rule (never required) apply to that
+      placeholder; give it its own representation.
+    - The trigger matcher (`triggers/matcher.rs` `is_required`), triggers lint
+      `is_gate`, phase.rs, completion.rs, DMLS `providers/frontmatter.rs`
+      `is_required`, and three Claudine sites (classify.rs, inline_prompt.rs,
+      cli schema_completion/keys.rs) each decide presence on their own. Route
+      them all through one public seam in `simplified/types.rs`, which needs
+      resolved input.
+    - Coercion: `coerce.rs::coercion_target` turns every plain string target
+      into `ToString`. An alphanumeric target must opt out, or `3` becomes `"3"`
+      and passes the pattern. `shell` needs no coercion change.
+    - Claudine has exhaustive `match` statements on `SimplifiedType`
+      (`claudine/lib/src/composition/schema/classify.rs`,
+      `claudine/cli/src/commands/context/format.rs`) that will stop compiling
+      when the variants are added.
+    - An extra `any(required)` site that the spec does not list:
+      `darkmatter/docs/schemas/claudine.yaml` `state` should become
+      `object(generated; required)`. The log records why.
+    - `claudine/docs/schemas/partials/side-effect.yaml` does NOT load today (a
+      Draft corpus exception). Its `delete_frontmatter: null` … lines and
+      `partials/lifecycle.yaml`'s `initialize: null` … lines are placeholders
+      that will start to mean the real `null` type. In Phase 4, replace each
+      with `unknown` (meaning "not yet modeled") rather than let it mean "must
+      be null", and re-pin the corpus exceptions to their precise new errors.
+    - Keep the regex sample table from the log as ordinary L1 tests against
+      the real lowering.
 pipeline_step: 6
 related:
     - 2026-10-13-named-type-presence-and-local-names
