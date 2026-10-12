@@ -39,6 +39,9 @@ Some checkouts will be refused before anything changes:
 
 - A checkout containing submodules, or holding a FIFO, a device, a nested
   mount, or an unsupported reparse point, exits 3.
+- A checkout that can no longer be identified when usage is checked (it
+  vanished, or its path is no longer a directory) exits 3; run the command
+  again.
 - A checkout on a filesystem that cannot move a directory without risking
   replacement exits 4. One example is a WSL checkout under `/mnt/<drive>`;
   remove it from Windows instead. The same applies when change watching

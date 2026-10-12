@@ -246,7 +246,14 @@
   direct `libc` 0.2 dependency (already in the workspace graph) for `geteuid`
   in the store's owner check, `O_NOFOLLOW` when reading a record, and plain
   `fsync` on Apple platforms, where std's `sync_all` issues the much slower
-  `F_FULLFSYNC`.
+  `F_FULLFSYNC`. The same `libc` supplies the quarantine move's
+  no-replacement renames, `renameat2(RENAME_NOREPLACE)` on Linux and
+  `renamex_np(RENAME_EXCL)` on macOS. On Windows the move uses `windows-sys`
+  0.61 (the workspace's version; `Win32_Foundation` and
+  `Win32_Storage_FileSystem`) for `SetFileInformationByHandle(FileRenameInfo)`
+  without replacement and `FileIdInfo` directory identities.
+  `std::fs::rename` is not used for it because it may replace an existing
+  destination.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
   only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
   URL, the default branch, branch-name validity, `core.sshCommand`, and ref
@@ -1143,7 +1150,7 @@ This is a Rust workspace with the following modules:
 
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
-    _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`._
+    _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`, and for the quarantine move's no-replacement renames (`renameat2`, `renamex_np`)._
 
     _Tags: ffi, bindings, system_
 
@@ -1155,7 +1162,7 @@ This is a Rust workspace with the following modules:
 
 - [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
 
-    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`) and `FileIdInfo` directory identities. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
 
     _Tags: ffi, windows, platform_
 

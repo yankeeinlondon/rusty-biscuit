@@ -1,0 +1,10 @@
+---
+source: worktree/cli/tests/remove_usage_refusal.rs
+expression: "notes.join(\"\\n\")"
+---
+complete: None
+macOS: Some("Discovery is partial; FSEvents subscriptions and polling watchers cannot be listed on this system; open handles and working directories were only partly read.")
+budget ran out: Some("Discovery is partial; open handles were only partly read; loaded modules were not checked; the check ran out of time.")
+failed: Some("Discovery could not run; open handles and working directories could not be read.")
+unsupported: Some("Discovery is not supported on this system.")
+evidence omitted: Some("Discovery is partial; 12 more usage records were found but not kept.")

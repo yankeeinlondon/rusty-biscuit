@@ -398,8 +398,59 @@ the ones that cost time.
 - `OperationReport` is written, never read back by `wt`. Its lists are capped
   (`MAX_REPORTED_ACTIVITY`, `MAX_REPORTED_RETAINED`) with exact omitted counts.
   The journal is never truncated. The exit-code mapping is not in `outcome`;
-  the lifecycle (Phase 6) owns it, because exits 4 and cancel-0 are not
-  operation outcomes.
+  the lifecycle owns it, because exits 4 and cancel-0 are not operation
+  outcomes.
+
+## Usage check (`remove::usage`)
+
+The decisive check before the move: `check_usage(source, checkout, own)`
+queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
+options; tests inject reports) and `assess` applies the policy. Any evidence
+left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is
+`UsageRefusal::Unverified`. Both are exit 3. No match clears, whatever the
+coverage, and `UsageClearance` keeps the whole report.
+
+- **Sniff does not drop the caller's own evidence.** Only Windows open handles
+  are excluded, by the kernel. A watcher that `wt` itself opens would refuse
+  its own removal unless it is registered in `OwnedHandles` before the query.
+- **Exclusion is by `(EvidenceKind, descriptor)` under `wt`'s PID, never by
+  PID alone.** A record with `identity_uncertain`, or any record when
+  this PID's certain records disagree on their creation token, is never
+  excluded. Evidence without a descriptor, such as a loaded module when `wt`
+  runs from inside the checkout, always refuses.
+- **The CLI renderer** is `cli/src/commands/remove/usage.rs` (`refusal_markup`,
+  `usage_refusal`, `coverage_note`). Its snapshots are in
+  `cli/tests/remove_usage_refusal.rs`. Until `run` calls it, its module
+  declaration carries `#[allow(dead_code)]`, because the `wt` binary target
+  compiles it unused. Remove the attribute when wiring the call.
+- **Cost:** the real-query test (two queries of a small temp tree) takes
+  about 0.5 s on macOS and about 2 s on native Windows, where Sniff opens each
+  path to ask for its holders.
+
+## No-replacement move (`remove::quarantine::rename`)
+
+`rename_no_replace(from, to)` is the only move the quarantine may use:
+`renameat2(RENAME_NOREPLACE)` (raw syscall) on Linux, `renamex_np(RENAME_EXCL)`
+on macOS, and `SetFileInformationByHandle(FileRenameInfo)` with
+`ReplaceIfExists = FALSE` after a `DELETE` open on Windows. Failures carry a
+`RenameFailure`; match on it, never on the message. `identity(path)` reads the
+no-follow identity in Sniff's `FileIdentity` encoding (the Windows file ID is
+`u128::from_le_bytes`), so it compares equal to identities in a Sniff report
+or a recovery record.
+
+- **Never `std::fs::rename`, and never `git worktree move`, for the
+  quarantine.** Both replace an existing empty directory.
+- **Windows 5/32 depends on the stage.** From the `DELETE` open it is
+  `Permission`; from the rename after a successful open it is `Sharing`
+  (something in the tree is open, or is a process's working directory). An
+  ACL denial at the rename stage is indistinguishable and is reported as
+  `Sharing`; nothing moved either way.
+- **`EINVAL` is `Unsupported`** (WSL drvfs rejects `RENAME_NOREPLACE` for every
+  move), as are `ENOSYS` and `ENOTSUP`. `EEXIST` is still `Collision` there, so
+  a collision never proves the flag is supported.
+- **Unix in-use trees move freely**; only Windows blocks the move.
+- Tests for codes a host cannot produce (drvfs, another volume, a denied open)
+  go through `classify(Stage, &io::Error)`, which is `pub(crate)`.
 
 ## Tests
 

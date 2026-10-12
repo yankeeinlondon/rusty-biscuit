@@ -31,8 +31,14 @@ thiserror = "2.0"
 which = "8.0"
 
 [target.'cfg(unix)'.dependencies]
-# `geteuid` for the owner check on removal recovery records.
+# `geteuid` for the owner check on removal recovery records, and the
+# no-replacement renames (`renameat2`, `renamex_np`) for the quarantine move.
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The quarantine move's no-replacement rename (`SetFileInformationByHandle`)
+# and its `FileIdInfo` directory identity.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
 count-git = []

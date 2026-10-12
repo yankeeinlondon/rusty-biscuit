@@ -16,6 +16,11 @@
 
 mod policy;
 mod report;
+// Not yet called by the `wt` binary: `run` still uses `check_no_processes`
+// until the removal lifecycle makes the decisive usage check. The library
+// target's tests render it.
+#[allow(dead_code)]
+pub mod usage;
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

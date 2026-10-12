@@ -1,0 +1,14 @@
+---
+source: worktree/cli/tests/remove_usage_refusal.rs
+expression: quoted
+---
+Removal paused: another process is using it has spaces.
+
+PID 8124  <red>evil</red>\u{1b}[31m /bin/*bold*
+  Open handle: /work/fix-path-spelling/new\nline_`x`.txt
+
+Stop the relevant process or task, then rerun:
+  wt remove 'it has spaces'
+
+The checkout and branches were kept.
+Some of this usage may be harmless, such as a tool watching for changes, but removal pauses whenever usage is seen.

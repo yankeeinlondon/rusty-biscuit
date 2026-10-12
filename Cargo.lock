@@ -16850,6 +16850,7 @@ dependencies = [
  "test-toolkit",
  "thiserror 2.0.18",
  "which 8.0.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

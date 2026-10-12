@@ -6,7 +6,9 @@
 //! [`prepare`]: its worktree record is found ([`admin_entry`]), then a missing
 //! `.git` file is repaired and verified ([`repair`]) or a missing directory's
 //! surviving index is checked ([`missing`]). A contention-aware removal
-//! reports a typed [`outcome`] and keeps durable [`recovery`] state.
+//! reports a typed [`outcome`] and keeps durable [`recovery`] state; [`usage`]
+//! is its decisive check that no other process is using the checkout, and
+//! [`quarantine`] moves the checkout aside without replacing anything.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -18,10 +20,12 @@ pub mod included;
 pub mod inventory;
 pub mod missing;
 pub mod outcome;
+pub mod quarantine;
 pub mod recovery;
 pub mod remote;
 pub mod repair;
 pub mod safety;
+pub mod usage;
 
 #[cfg(test)]
 pub(crate) mod test_support;
