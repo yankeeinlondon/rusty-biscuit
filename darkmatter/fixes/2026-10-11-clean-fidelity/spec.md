@@ -33,39 +33,58 @@ packages:
     - dmls
 related:
     - 2026-08-27-preserve-backslash-escapes
-human_review: false
-implemented: false
+human_review: true
+human_review_items:
+    - |-
+        **Your prompt commit on this branch makes CI red for reasons that have nothing to do with this fix.**
+
+        **Why this needs a decision before merge:** this branch carries your commit `c5ad95142`
+        ("chore: update commit and review prompts"), which is not on `main`. Tests in Darkmatter and
+        Claudine read the shipped prompts, so CI will run them on this pull request and the merge gate
+        (`ci-gate`) will block. The clean-fidelity work itself is green on macOS, Linux, Windows and WSL2.
+
+        What fails, and why:
+
+        - `prompts/_reviews/feature-review.md` no longer parses. In its `finalize.stack` list, a bare
+          `stop` line (line 112, and again at line 143) sits inside a mapping, which is not valid YAML.
+          This fails 5 Darkmatter tests (`dasherized_identifier_corpus` x2, `feature_review_incident` x3)
+          and 4 Claudine CLI tests (`shipped_prompts`/`shipped_prompt_contract`).
+        - `prompts/_implement/implement-plan.md` changed, but Claudine's copy of it in
+          `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md` did not. This
+          fails `shipped_prompt_route_drift` x2 and
+          `shipped_prompts::shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+
+        Options:
+
+        - **A. You fix the two prompts in a small separate commit before merging (recommended).** Decide
+          what `stop` should be (for example `stop: true`, or an `action:` list ending in `- stop`, like the
+          `initialize` stack already uses), then copy the new `implement-plan.md` body into the Claudine
+          fixture.
+          *Pro:* only you know what `stop` was meant to do, and the fix stays out of this cleanup change.
+          *Con:* one more small commit for you.
+        - **B. Let an agent guess the `stop` syntax and refresh the fixture.**
+          *Pro:* no work for you.
+          *Con:* a wrong guess changes how the review loop ends, a much worse failure than a red test.
+        - **C. Take `c5ad95142` off this branch and land it separately.**
+          *Pro:* this pull request becomes green on its own.
+          *Con:* history rewrite, and the prompt is still broken wherever it lands.
+
+        **Recommendation: A.** The defect is in prompt intent, not code. A one-line fix by the author is
+        safer than a guess, and it unblocks this pull request without mixing scopes.
+implemented: true
 message_to_agent: |-
-    Phase 5 is done; read implementation-log.md "## Phase 5" before starting Phase 6.
-    - Corpus scan (AC 11) is final and recorded: 5436 tracked .md files; 3513 changed (all idempotent),
-      1877 unchanged, 1 declined (authored unpaired ::block in biscuit-tui's style guide), 23 invalid
-      (frontmatter Darkmatter itself cannot load: duplicate keys etc.), 13 typed schema errors on authored
-      $schema values (the installed pre-change `md` fails the same way), 9 unreadable (the tracked
-      2026-09-30-file-refs-use-magic files an external process moved, unstaged). No refusal of valid syntax
-      remains, so no _unscheduled fix was filed. Do not rerun the scan unless behavior changes again.
-    - One defect was fixed in Phase 5 (log section 3): `clean_document` reported `Invalid` (md clean exit 1)
-      for frontmatter strict YAML rejects but Darkmatter loads (bare `key: {{ ctx.area }}/x`, tab
-      indentation), including the shipped prompts/_reviews/cycles.md and comprehensive-review.md. It now
-      uses `frontmatter::load_frontmatter_yaml` (the `Markdown` loader's fallbacks) as the acceptance test;
-      such blocks are kept as authored with no repair and the body is cleaned. Parity row
-      `bare-interpolation-frontmatter` covers library, CLI and DMLS.
-    - AC 10 lives in lib/tests/l1/clean_real_world_prompt.rs with fixture
-      lib/tests/fixtures/clean/prompts-commit-464e2d90e.md (+ .provenance.yaml sidecar; a test checks the
-      Git blob hash). AC 14 docs are written: new docs/topics/markdown-formatting.md; rewritten
-      docs/cli/clean.md and docs/inline/cleaning.md (was empty); DMLS docs; skills cleanup.md/compose.md.
-    - Gates at the end of Phase 5 (macOS): `just test` 9141 run, 9136 passed, the same 5 pre-existing
-      failures caused by prompts/_reviews/feature-review.md (dasherized_identifier_corpus x2,
-      feature_review_incident x3); `just lint` clean; check-tier-coverage 0 stranded. Windows:
-      `just cross-check darkmatter --os windows clean_real_world_prompt` 3/3. Phase 4's Windows runs cover
-      the clean/formatting suites; Phase 6 still owns Linux/WSL2 evidence or reuse per the plan.
-    - `just cross-check <pkg> --os windows <name-filter>` works; an `-E 'test(...)'` filterset breaks the
-      recipe's argument quoting.
-    - Candidate follow-ups still open (not fixed, recorded in the Phase 4/5 logs): biscuit-file's
-      `yaml.line-ending` repair leaves CRLF delimiter lines around LF YAML; `Markdown`'s frontmatter split
-      drops the body's final newline; an empty interpolation leaves its surrounding spaces; an existing
-      repair respells a valid `area: {{ ctx.area }}` as `{{ctx.area}}`; the frontmatter schema tier is slow
-      on some large documents (pre-existing, up to ~10 s release).
-    - The external move of fixes/2026-09-30-file-refs-use-magic to _completed is still unstaged; leave it.
+    All six phases are implemented; the fix is ready for review. Read implementation-log.md "## Phase 6"
+    first: it has the criterion-to-test map for AC 1-14 and the cross-OS evidence table.
+    - The 5 failing darkmatter L1 tests and 16 of the 17 failing claudine-cli tests trace to the author's
+      branch-only prompt commit c5ad95142 (unparseable feature-review.md frontmatter, implement-plan.md
+      drift from Claudine's fixture) or to the unbuilt claudine-fake-codex binary. None involve cleanup.
+      The 17th, steering::automatic::tests::three_warnings_send_three_helper_messages_then_nothing,
+      failed once under load and passed 3/3 alone. human_review covers c5ad95142.
+    - Open follow-ups are recorded as observations in the Phase 4-6 logs, not fixed: biscuit-file's
+      yaml.line-ending repair leaves CRLF delimiter lines around LF YAML; Markdown's frontmatter split
+      drops the body's final newline; an empty interpolation leaves its surrounding spaces; a repair
+      respells a valid `area: {{ ctx.area }}` as `{{ctx.area}}`; the frontmatter schema tier is slow on some
+      large documents (pre-existing); dmls/docs/editors/README.md links to a DMLS feature spec.
 ---
 
 # Clean Fidelity and Formatting Rules

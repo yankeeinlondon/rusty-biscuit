@@ -177,6 +177,135 @@ docs_created_during_phase_5:
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/cleanup.md
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/style/descriptor.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/src/style/error.rs
+    - darkmatter/lib/src/style/schema/mod.rs
+    - darkmatter/lib/src/style/coverage_tests.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/clean/style-markdown-control.md
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - darkmatter/dmls/tests/l1/workspace_formatting_settings.rs
+    - darkmatter/dmls/tests/fixtures/formatting/dmls.toml
+    - darkmatter/dmls/tests/fixtures/formatting/settings.json
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/compare.rs
+    - darkmatter/lib/src/markdown/cleanup/edits.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/structure.rs
+    - darkmatter/lib/src/markdown/cleanup/transform.rs
+    - darkmatter/lib/src/markdown/cleanup/wrap.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/body_support.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/directive_fixed_points.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/fidelity_repro.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - claudine/cli/src/commands/wrap/inline.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_parity.rs
+    - darkmatter/cli/tests/l1/clean_rules.rs
+    - darkmatter/cli/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/lib/benches/clean_hot_paths.rs
+    - darkmatter/lib/fuzz/fuzz_targets/markdown_parser.rs
+    - darkmatter/lib/src/markdown/cleanup/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/markers.rs
+    - darkmatter/lib/src/markdown/cleanup/opaque.rs
+    - darkmatter/lib/src/markdown/cleanup/tables.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/escapes.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/tables.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/l1/clean_compose_equivalence.rs
+    - darkmatter/lib/tests/l1/clean_parity.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/tests/l1/clean_real_world_prompt.rs
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.md
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.provenance.yaml
+    - darkmatter/cli/src/args/command.rs
+documentation:
+    - darkmatter/dmls/docs/editors/README.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cleanup.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/lib/README.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/inline/cleaning.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/structs/Markdown.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/docs/topics/markdown-formatting.md
+    - .claude/skills/darkmatter/compose.md
+completed_phase: 6
+implemented: true
 packages:
     - darkmatter
     - darkmatter-cli
@@ -1699,3 +1828,186 @@ WSL2 by the nightly run.
 - No name uses a tier marker. `just test` selected and ran all of them.
 - The fixture and its sidecar are read through `include_str!`, which CI can
   index.
+
+## Phase 6
+
+Phase 6 validated the finished change and prepared it for review. It changed
+no source, documentation, or skill files; the only edits are to this log,
+the plan, and the spec frontmatter. The fix is **implementation complete,
+ready for review**. It stays in the active `fixes/` directory, and nothing
+was staged or committed.
+
+### 1. Scoped gates (macOS, this tree)
+
+- `just test --no-fail-fast` (darkmatter area): 9141 run, 9136 passed, 5
+  failed, 11 skipped. These are the same 5 failures as in every earlier
+  phase: `dasherized_identifier_corpus::{shipped_corpus_expressions_all_parse,
+  corpus_walk_reaches_every_present_surface}` and
+  `feature_review_incident::{the_shipped_feature_review_composes_and_names_its_spec,
+  the_original_typo_would_have_failed_to_compose,
+  the_typo_is_one_identifier_under_the_current_grammar}`.
+  - **Cause, now traced to its commit.** `prompts/_reviews/feature-review.md`
+    does not parse: "could not find expected ':'" at frontmatter line 112. A
+    bare `stop` sits inside a `finalize.stack` mapping, at file lines 112
+    and 143.
+  - The break came from `c5ad95142` ("chore: update commit and review
+    prompts"). That commit is on this branch only (`git merge-base
+    --is-ancestor c5ad95142 main` is false), and `main`'s copy of the file
+    has no `stop` lines.
+  - No cleanup code is involved, but CI on this branch's pull request reads
+    the prompt and will fail the same way. It is raised as the spec's
+    `human_review` item rather than fixed here, because what `stop` was
+    meant to do is the author's call.
+- `just lint`: passed, including the zed-dmls `wasm32-wasip2` check.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+
+### 2. Direct consumers
+
+- **Which crates were checked.** These crates depend on `darkmatter` outside
+  the area (found with a `Cargo.toml` search): research, biscuit-icon-cli,
+  claudine, claudine-cli, claudine-gen, playa-cli, sniff-cli, messenger,
+  messenger-cli, and biscuit-speaks-cli. Only Claudine calls the cleanup
+  surface (`cleanup_content` and compose's cleanup).
+- **Compilation.** `cargo check --tests` passes for the eight crates other
+  than Claudine.
+- **Claudine.** `cargo nextest run --no-fail-fast -p claudine -p
+  claudine-cli`: 8158 run, 8141 passed, 17 failed. Phase 5 changed
+  `body.rs`/`document.rs` after Phase 4's Claudine run, which is why it was
+  run again. The `claudine` crate passes in full. The 17 failures are all in
+  `claudine-cli`, and none involves cleanup:
+  - 9 `codex_app_server::*` tests copy `claudine-fake-codex`, which is not
+    built here, so they fail with `NotFound`. This is unchanged since
+    Phase 4.
+  - 4 tests fail on the unparseable `feature-review.md`:
+    `shipped_prompts::{shipped_prompt_corpus_parses_frontmatter,
+    shipped_lifecycle_artifacts_use_mapping_only_set}` and
+    `shipped_prompt_contract::{shipped_prompts_have_parseable_schemas_and_expressions,
+    feature_review_cli_preserves_numeric_iteration_and_dependent_paths}`.
+  - 3 tests fail because `c5ad95142` changed
+    `prompts/_implement/implement-plan.md` but not Claudine's fixture copy:
+    the two `shipped_prompt_route_drift::*` tests and
+    `shipped_prompts::shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+  - `steering::automatic::tests::three_warnings_send_three_helper_messages_then_nothing`
+    failed once under full-suite load. Run alone it passed 3 times out of 3.
+    It is a timing flake, playing the part Phase 4's `wrap_perf` flake did.
+
+### 3. Cross-OS evidence (this tree, `just cross-check`)
+
+The hosts came from `BUILD_LINUX`, `BUILD_WIN`, and `BUILD_WSL`, all set. The
+WSL leg runs a nextest archive, which is how CI runs it. Every run below
+executed the tests; none is compile-only evidence. The runs repeat Phase 4's
+Windows evidence because Phase 5 changed `body.rs`/`document.rs` after it.
+
+| Package (filter) | Linux | native Windows | WSL2 |
+| --- | --- | --- | --- |
+| `darkmatter` (`clean`) | 433/433 | 432/432 | 433/433 |
+| `darkmatter-cli` (`clean`) | 133/133 | 133/133 | 133/133 |
+| `dmls` (`formatting`) | 32/32 | 32/32 | 32/32 |
+
+macOS evidence is the full `just test` run in section 1. The `clean` filter
+selects every cleanup suite: the transaction, the rules matrix, parity, the
+compose-equivalence and real-world prompt tests, frontmatter repair, and
+JSON. The Windows library count is one lower because of a test that runs on
+Unix only. No terminal or browser behavior changed, so L2 and browser runs
+were not needed.
+
+### 4. Static review
+
+- **Registration.** Every new test file is declared in its binary's
+  `main.rs`: `lib/tests/l1` (`clean_rules`, `clean_frontmatter_repair`,
+  `clean_compose_equivalence`, `clean_parity`, `clean_real_world_prompt`),
+  `cli/tests/l1` (`clean_fidelity`, `clean_rules`, `clean_parity`), and
+  `dmls/tests/l1` (`formatting_transaction`, `style_markdown_parity`,
+  `workspace_formatting_settings`).
+  - The library unit tests are under `cleanup/tests/` and
+    `cleanup/document.rs`.
+  - No name carries a tier marker, and the layout gate tests pass.
+- **Feature gates.** `cleanup-test-hooks` is turned on through the CLI's and
+  DMLS's dev-dependency on `darkmatter`, so every CI build of those test
+  targets compiles it. No `required-features` was added.
+- **CI-visible repository reads.**
+  - Read through `include_str!`: `clean_real_world_prompt` (fixture and
+    sidecar) and `clean_rules` (`style-markdown-control.md`).
+  - Read through `manifest_dir!().join(literal)`: the DMLS formatting
+    fixtures and `docs/schemas/darkmatter.yaml`.
+  - The shared parity matrix, `lib/tests/common/clean_parity/mod.rs`, is
+    listed in the `source-inputs` of both `darkmatter-cli` and `dmls`.
+- **Robustness matrix (plan section "Input Robustness Matrix").** Each table
+  has a test that walks every row and column from a checked-in fixture:
+  - YAML: `lib/tests/l1/clean_rules.rs::yaml_matrix_walks_every_rule_and_shape`,
+    plus the object-root, semantic-invalid, and unknown-name tests;
+  - TOML: `dmls/tests/l1/workspace_formatting_settings.rs::toml_formatting_matrix`
+    (fixture `dmls.toml`);
+  - JSON: `…::json_formatting_matrix` (fixture `settings.json`), plus the
+    legacy-key, null-overlay, rejected-file, and duplicate-member tests.
+  - A grep for code smells in the new readers found nothing load-bearing:
+    - the `#[serde(default)]` hits in `dmls/src/config/mod.rs` are on older
+      config structs unrelated to formatting;
+    - `unwrap_or_default()` in `normalize_formatting` runs only after a
+      rejection has already been reported, which is the matrix's W cell;
+    - the one `.ok()` comes after a range filter and cannot fail.
+- **Shipped schema.** `docs/schemas/darkmatter.yaml` adds only the
+  `style.markdown` block. `base_schema_end_to_end` (17 tests) validates it
+  through the embedded baseline.
+- **JSON compatibility.** `darkmatter-cli::l1 clean_json` passes all 20 tests.
+- **Idempotence.** Every accepted case in `cleanup/tests/` goes through
+  `clean_accepted`, which checks that a second run is `Unchanged`.
+  `every_profile_is_idempotent_on_the_corpus` repeats that check for every
+  profile, and Phase 5's corpus scan found 0 non-idempotent documents.
+- **Parse counts.** `cleanup::tests::parse_count` passes all 12 tests.
+- **Final diff.** Every file in the branch diff under `darkmatter/`,
+  `claudine/`, and `.claude/skills/darkmatter/` is in a phase's frontmatter
+  list.
+  - No fixture or schema changed beyond what the plan lists.
+  - No `docs/` page names this fix. `docs/lsp/features.md` matched the
+    search only on its `last_updated` date.
+  - The other files in the branch diff come from other specs' planning
+    commits and the author's prompt commit.
+  - The `fixes/2026-09-30-file-refs-use-magic` move that earlier phases saw
+    unstaged is now committed (`973083e40`), and the worktree is clean.
+
+### 5. Acceptance criteria and their evidence
+
+| AC | Evidence (all passing in section 1 unless noted) |
+| --- | --- |
+| 1 Reproductions E1, D1, C1, A1, B1, F1 | `cleanup::tests::fidelity_repro` (9 tests), with the indentation, unwrap, width, and padding variants; multi-digit markers and code children in `cleanup::tests::lists` (42 tests) |
+| 2 A1/B1 compose equivalence with `when` true and false | `l1 clean_compose_equivalence` (2 tests) |
+| 3 Directive fixed points per rule | `cleanup::tests::directive_fixed_points` (10 tests) |
+| 4 One test per rule and value, list-spacing examples, required separators | `cleanup::tests::rules` (39), `cleanup::tests::lists` (42), `l1 clean_rules` (19) |
+| 5 DMLS migration, mixed config rejected, `--compact`/`--loose` equivalence | `dmls::l1 workspace_formatting_settings` (8 tests, including `file_legacy_keys_merge_with_editor_rules` and `migration_warnings_are_recomputed_not_accumulated`), `darkmatter-cli::l1 clean_rules::compact_and_loose_match_document_list_item_padding` |
+| 6 Precedence and invalid-object fallback | `l1 clean_rules::{precedence_resolves_each_rule_independently, an_invalid_document_object_falls_back_to_the_other_levels}`, `darkmatter-cli::l1 clean_rules::compact_and_loose_flags_beat_the_document` |
+| 7 Fidelity guard: broken-pass hook, `--save`, `--json`, DMLS empty edit and one warning, mutation list, reflow failure, refusal after repair | `cleanup::tests::guard` (11), `darkmatter-cli::l1 clean_fidelity` (17), `dmls::l1 formatting_transaction` (14) |
+| 8 Frontmatter parity, `frontmatter: false` | `l1 clean_frontmatter_repair` (10), the shared parity rows run by `l1 clean_parity`, `darkmatter-cli::l1 clean_parity`, and `dmls::l1 formatting_transaction` |
+| 9 Idempotence | `clean_accepted` in every body test; `cleanup::tests::source_fidelity::every_profile_is_idempotent_on_the_corpus` |
+| 10 Real-world fixture | `l1 clean_real_world_prompt` (3 tests; native Windows 3/3 in Phase 5, and in the table in section 3) |
+| 11 Corpus check | Phase 5 log, sections 2 and 5 (a passive scan, not a CI gate) |
+| 12 Parse counts and scanner accounting | `cleanup::tests::parse_count` (12 tests); Phase 4 log, section 3 |
+| 13 Source fidelity and invocation coverage | `cleanup::tests::source_fidelity` (12), `darkmatter-cli::l1 {clean, clean_json, clean_frontmatter, clean_fidelity}` through `CliProcessFixture`, including `md FILE --save`; DMLS protocol route in `formatting_transaction` and `stdio_subprocess` |
+| 14 Docs | Phase 5 log, section 4 |
+
+**Implementation rulings and spec departures.** Phase 6 added none. The
+rulings already recorded are:
+
+- Phase 1, sections 5 and 6: the frozen contracts and the robustness
+  departures.
+- Phase 5, section 3: Darkmatter's own frontmatter loader, not strict YAML,
+  decides whether frontmatter is `Invalid`.
+
+**Deferred items.** These are observations only, not filed as fixes:
+
+- biscuit-file's `yaml.line-ending` repair leaves CRLF delimiter lines around
+  LF YAML.
+- `Markdown`'s frontmatter split drops the body's final newline.
+- An empty interpolation leaves the spaces around it.
+- A repair respells a valid `area: {{ ctx.area }}` as `{{ctx.area}}`.
+- The frontmatter schema tier is slow on some large documents. This predates
+  the fix.
+- `dmls/docs/editors/README.md` links to a DMLS feature spec.
+
+### 6. Handoff
+
+- Both plan tasks in Phase 6 are checked. All six phases are complete.
+- **Needs the author before merge:** the spec's `human_review` item.
+  `c5ad95142` broke `feature-review.md` and caused `implement-plan.md` to
+  drift from Claudine's fixture, so CI will fail on this pull request until
+  the author fixes the two prompts.

@@ -3,7 +3,7 @@ area: darkmatter
 fix: 2026-10-11-clean-fidelity
 total_phases: 6
 created: 2026-10-11
-phase: 5
+phase: 6
 agent: "codex/gpt-6.1-sol"
 yolo: true
 source_files_during_phase_1: []
@@ -180,6 +180,135 @@ docs_created_during_phase_5:
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/cleanup.md
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/style/descriptor.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/src/style/error.rs
+    - darkmatter/lib/src/style/schema/mod.rs
+    - darkmatter/lib/src/style/coverage_tests.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/clean/style-markdown-control.md
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - darkmatter/dmls/tests/l1/workspace_formatting_settings.rs
+    - darkmatter/dmls/tests/fixtures/formatting/dmls.toml
+    - darkmatter/dmls/tests/fixtures/formatting/settings.json
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/compare.rs
+    - darkmatter/lib/src/markdown/cleanup/edits.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/structure.rs
+    - darkmatter/lib/src/markdown/cleanup/transform.rs
+    - darkmatter/lib/src/markdown/cleanup/wrap.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/body_support.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/directive_fixed_points.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/fidelity_repro.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - claudine/cli/src/commands/wrap/inline.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_parity.rs
+    - darkmatter/cli/tests/l1/clean_rules.rs
+    - darkmatter/cli/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/lib/benches/clean_hot_paths.rs
+    - darkmatter/lib/fuzz/fuzz_targets/markdown_parser.rs
+    - darkmatter/lib/src/markdown/cleanup/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/markers.rs
+    - darkmatter/lib/src/markdown/cleanup/opaque.rs
+    - darkmatter/lib/src/markdown/cleanup/tables.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/escapes.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/tables.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/l1/clean_compose_equivalence.rs
+    - darkmatter/lib/tests/l1/clean_parity.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/tests/l1/clean_real_world_prompt.rs
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.md
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.provenance.yaml
+    - darkmatter/cli/src/args/command.rs
+documentation:
+    - darkmatter/dmls/docs/editors/README.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cleanup.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/lib/README.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/inline/cleaning.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/structs/Markdown.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/docs/topics/markdown-formatting.md
+    - .claude/skills/darkmatter/compose.md
+completed_phase: 6
+implemented: true
 packages:
     - darkmatter
     - darkmatter-cli
@@ -671,7 +800,7 @@ Depends on all previous checkpoints. No new performance study or corpus CI cell.
 
 ### Wave 11 — Validation with independent environment work
 
-- [ ] **Run scoped checks**
+- [x] **Run scoped checks**
   - Run `just test` and `just lint` in `darkmatter/` through the area's nextest
     recipes. Include actual direct consumers affected by public API changes,
     identified with Sniff/call-site searches; avoid workspace-wide gates.
@@ -689,7 +818,7 @@ Depends on all previous checkpoints. No new performance study or corpus CI cell.
 
 ### Wave 12 — Sequential handoff
 
-- [ ] **Prepare review handoff**
+- [x] **Prepare review handoff**
   - Complete the log with criterion-to-test evidence, changed surfaces, pass
     dispositions, scanner/cleanup parse accounting, corpus counts, deferred
     reproductions, and any implementation rulings or departures.
