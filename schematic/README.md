@@ -139,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [schematic-definitions](./definitions/) | Pre-built API definitions      | [README](./definitions/README.md) |
 | [schematic-gen](./gen/)                 | Code generator CLI/library     | [README](./gen/README.md)         |
 | [schematic-oauth](./oauth/)             | OAuth2 runtime library         | Token lifecycle, storage          |
-| [schematic-runtime](./runtime/)         | Request runtime library        | Managed client and typed send, envelope, errors, redaction, credentials, deadline; generated clients adopt it later (planned) |
+| [schematic-runtime](./runtime/)         | Request runtime library        | Managed client with typed send and raw send (`send_raw`), envelope, errors, redaction, credentials, deadline, cross-origin policy and redirect following, response hooks (`pre_response_json`, typed `mutate_response`); generated clients adopt it later (planned) |
 | [schematic-schema](./schema/)           | Generated API clients          | [README](./schema/README.md)      |
 
 ## Available APIs

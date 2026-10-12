@@ -81,6 +81,8 @@ Match statements must include a wildcard arm for forward compatibility.
 
 Key enums: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
 
+Exception: `CrossOrigin` is exhaustive on purpose, so the generator's translation of a security policy cannot fall through a wildcard arm.
+
 ### 4) Env Mapping Field Names
 
 Use current `EnvMapping` names:
@@ -98,6 +100,24 @@ For `AuthStrategy::Basic`:
 
 - Username: `env_username` (or `env_mapping.basic_user`)
 - Password: `env_auth[0]` (or `env_mapping.basic_pass`)
+
+### 6) API-Level Runtime Policy Fields
+
+Every `RestApi` literal sets three fields (no `Default` for `RestApi`, no serde,
+no per-endpoint override):
+
+- `cross_origin: CrossOrigin` — redirects and followed next-page links.
+  `same_origin()` (default), `allow_origins([..])` (exact origins, credentials
+  sent), `allow_without_credentials()`, `danger_allow_any()`, `deny()` (same-origin
+  next-page links still pass). `name()` gives the snake_case name. Callers may
+  only tighten it; the runtime enforces it.
+- `request_id_header: Option<String>` — provider request-id response header,
+  case-insensitive; `None` unless the provider is known to send one.
+- `secret_names: Vec<String>` — extra header names (case-insensitive) and query
+  names (exact) never stored or shown, beyond built-in and auth names.
+
+`definitions/tests/api_policy.rs` pins all three for every shipped API; a new
+definition must add its row there.
 
 ## Generated-Client Contracts To Keep In Sync
 
@@ -215,6 +235,7 @@ writes `mod.rs` (a `define_{api}_api()` plus `openapi_registry()`) and `types.rs
 so the imported API flows through the normal `generate` pipeline.
 
 - `--exclude-path <PREFIX>` drops endpoints by path prefix (repeatable).
+- `--request-id-header <HEADER>` sets the imported `RestApi::request_id_header` (OpenAPI does not declare one); `just import-openai` passes `x-request-id`.
 - Out-of-`i64` schema bounds are clamped with a warning rather than failing the
   parse (`import/normalize.rs`) — OpenAI's `seed` bounds need this.
 - Bodies and responses with no named schema become the type path
