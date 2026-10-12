@@ -149,7 +149,7 @@ fn coerce_value(assignment: &Assignment, schema: Option<&EffectiveSchema>) -> Va
 }
 
 /// Returns `true` when `schema` declares `path` as a string-shaped scalar
-/// (string, date, datetime, time, url, email, enum, or file).
+/// (string, date, datetime, time, url, email, enum, file, or alphanumeric).
 ///
 /// Coercion only applies to **top-level** scalar property paths. Nested
 /// `user.email=...` paths land inside `object` typed properties which are
@@ -203,6 +203,9 @@ fn atom_prefers_string(atom: &PropertyAtom) -> bool {
             | SimplifiedType::Email
             | SimplifiedType::Enum
             | SimplifiedType::File
+            // Validation never coerces a number to `alphanumeric`, so `slug=123`
+            // must arrive as text or it could never satisfy the type.
+            | SimplifiedType::Alphanumeric
     )
 }
 
@@ -452,6 +455,20 @@ mod tests {
         let mut map: FrontmatterMap = FrontmatterMap::new();
         apply_all(&mut map, &[a], Some(&eff));
         assert_eq!(map["bar"], json!("42"));
+    }
+
+    #[test]
+    fn coerces_yaml_scalars_to_string_when_schema_says_alphanumeric() {
+        let eff = effective_for("$schema:\n  slug: 'alphanumeric(required)'\n  names: 'alphanumeric[]'");
+        let mut map: FrontmatterMap = FrontmatterMap::new();
+        let assignments = [
+            make_assignment(&["slug"], json!(123), "123"),
+            make_assignment(&["names"], json!([123]), "[123]"),
+        ];
+        apply_all(&mut map, &assignments, Some(&eff));
+        assert_eq!(map["slug"], json!("123"));
+        // Arrays keep their YAML parse, as for `string[]`.
+        assert_eq!(map["names"], json!([123]));
     }
 
     #[test]
