@@ -219,6 +219,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_runner_loss.py",
                 "test_build_key.py",
                 "test_consolidation.py",
+                "test_evidence_index.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -1506,6 +1507,7 @@ class PlanFedRunTests(unittest.TestCase):
                 "test_runner_loss.py",
                 "test_build_key.py",
                 "test_consolidation.py",
+                "test_evidence_index.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
