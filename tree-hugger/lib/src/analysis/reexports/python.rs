@@ -4,7 +4,9 @@
 //!
 //! Python has no forwarding syntax, so the extractor reads one file's
 //! module-scope statements only. Imports inside functions and classes are not
-//! part of the module interface and are never visited.
+//! part of the module interface and are never visited. Only the import a
+//! name finally holds is forwarded: an import that a later one of the same
+//! name always replaces is dropped (see `statement_relation`).
 
 use tree_sitter::Node;
 
@@ -29,6 +31,11 @@ struct ImportBinding<'t> {
     /// `import X as X` / `from m import X as X`: the typing spec's declared
     /// re-export spelling.
     redundant_alias: bool,
+    /// The module object a namespace import binds to `exported` (`a` for an
+    /// unaliased `import a.b`, `p` for `import p as p`); `None` for named and
+    /// renamed imports. Two imports binding the same module object do not
+    /// replace one another.
+    module_object: Option<String>,
     specifier: Node<'t>,
     statement: Node<'t>,
     import_span: Option<TextSpan>,
@@ -69,9 +76,13 @@ pub(super) fn extract(tree_file: &TreeFile, imports: &[ImportRecord]) -> Reexpor
     let all_readable = !limits.iter().any(|found| found.reason == ReexportLimitReason::ComputedExportList);
     let declared_names = declared_all_names(&scan, all_readable);
     let mut entries = Vec::new();
-    for binding in &scan.imports {
+    for (index, binding) in scan.imports.iter().enumerate() {
         if binding.form == ReexportForm::Wildcard {
             entries.push(build(binding, ReexportEvidence::Declared));
+            continue;
+        }
+        let replacement = later_import_replacement(binding, &scan.imports[index + 1..]);
+        if replacement == Replacement::Replaces {
             continue;
         }
         let listed = declared_names.as_ref().is_some_and(|names| names.contains(&binding.exported));
@@ -79,7 +90,8 @@ pub(super) fn extract(tree_file: &TreeFile, imports: &[ImportRecord]) -> Reexpor
         if !(binding.redundant_alias || listed || exposed) {
             continue;
         }
-        let rebound = scan
+        let rebound = replacement == Replacement::MayReplace
+            || scan
             .rebinds
             .iter()
             .any(|(name, at)| *name == binding.exported && *at > binding.specifier.start_byte());
@@ -114,6 +126,82 @@ fn declared_all_names(scan: &Scan<'_>, readable: bool) -> Option<Vec<String>> {
     Some(names)
 }
 
+/// How a later import of the same local name relates to an earlier one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Replacement {
+    /// No later import replaces it, or each one sits in a mutually exclusive
+    /// branch (`try`/`except`, `if`/`elif`/`else`, `match` cases).
+    None,
+    /// A later import may run after it, under a condition it does not share.
+    MayReplace,
+    /// A later import always runs after it, so it is never the final binding.
+    Replaces,
+}
+
+/// The strongest replacement of `binding` by any of the `later` imports
+/// (in source order) that bind the same local name to a different object.
+fn later_import_replacement(binding: &ImportBinding<'_>, later: &[ImportBinding<'_>]) -> Replacement {
+    let mut found = Replacement::None;
+    for other in later {
+        let same_object = binding.module_object.is_some() && binding.module_object == other.module_object;
+        if other.form == ReexportForm::Wildcard || other.exported != binding.exported || same_object {
+            continue;
+        }
+        match statement_relation(binding.statement, other.statement) {
+            Replacement::Replaces => return Replacement::Replaces,
+            Replacement::MayReplace => found = Replacement::MayReplace,
+            Replacement::None => {}
+        }
+    }
+    found
+}
+
+/// Whether the module-scope statement `later` (after `earlier` in source
+/// order) replaces what `earlier` binds. Bounded to the statement structure:
+/// sibling arms of one `if`, `match` or `try` (other than `finally`, and a
+/// `try` body followed by its `else`) are alternatives; any other condition
+/// around `later` that does not also enclose `earlier` makes the replacement
+/// possible rather than certain.
+fn statement_relation(earlier: Node<'_>, later: Node<'_>) -> Replacement {
+    if earlier.id() == later.id() {
+        return Replacement::Replaces;
+    }
+    let mut earlier_chain = vec![earlier];
+    while let Some(parent) = earlier_chain.last().and_then(Node::parent) {
+        earlier_chain.push(parent);
+    }
+    let mut conditional = false;
+    let mut later_child = later;
+    while let Some(ancestor) = later_child.parent() {
+        if let Some(at) = earlier_chain.iter().position(|node| node.id() == ancestor.id()) {
+            let Some(earlier_child) = at.checked_sub(1).map(|below| earlier_chain[below]) else {
+                return Replacement::None;
+            };
+            let alternatives = match ancestor.kind() {
+                "if_statement" => true,
+                "try_statement" => !matches!(
+                    (earlier_child.kind(), later_child.kind()),
+                    (_, "finally_clause") | ("block", "else_clause")
+                ),
+                _ => earlier_child.kind() == "case_clause" && later_child.kind() == "case_clause",
+            };
+            return match (alternatives, conditional) {
+                (true, _) => Replacement::None,
+                (false, true) => Replacement::MayReplace,
+                (false, false) => Replacement::Replaces,
+            };
+        }
+        conditional |= match ancestor.kind() {
+            "if_statement" | "elif_clause" | "else_clause" | "except_clause" | "except_group_clause"
+            | "while_statement" | "for_statement" | "match_statement" | "case_clause" => true,
+            "try_statement" => later_child.kind() != "finally_clause",
+            _ => false,
+        };
+        later_child = ancestor;
+    }
+    Replacement::None
+}
+
 fn build(binding: &ImportBinding<'_>, evidence: ReexportEvidence) -> ReexportEntry {
     let mut built = entry(
         binding.form,
@@ -142,7 +230,7 @@ impl<'t> Walker<'_, 't> {
 
     /// Visits `parent`'s children at module scope. `if`, `try`, loops and
     /// `match` make everything under them conditional; function and class
-    /// bodies are not module scope and are skipped.
+    /// bodies are not module scope, so only their `__all__` edits are noted.
     fn visit_children(&mut self, parent: Node<'t>, conditional: bool) {
         let mut cursor = parent.walk();
         for child in parent.children(&mut cursor) {
@@ -154,13 +242,18 @@ impl<'t> Walker<'_, 't> {
         match node.kind() {
             "import_statement" => self.import_statement(node, conditional),
             "import_from_statement" => self.import_from_statement(node, conditional),
-            "future_import_statement" | "lambda" | "list_comprehension" | "set_comprehension"
-            | "dictionary_comprehension" | "generator_expression" => {}
-            "function_definition" | "class_definition" => self.bind_definition(node),
+            "future_import_statement" => {}
+            "lambda" | "list_comprehension" | "set_comprehension" | "dictionary_comprehension"
+            | "generator_expression" => self.note_deferred_all_edits(node),
+            "function_definition" | "class_definition" => {
+                self.bind_definition(node);
+                self.note_deferred_all_edits(node);
+            }
             "decorated_definition" => {
                 if let Some(definition) = node.child_by_field_name("definition") {
                     self.bind_definition(definition);
                 }
+                self.note_deferred_all_edits(node);
             }
             "expression_statement" => self.expression_statement(node, conditional),
             "assignment" => self.assignment(node, node, conditional),
@@ -183,6 +276,7 @@ impl<'t> Walker<'_, 't> {
                 self.visit_children(node, conditional);
             }
             "as_pattern_target" => self.bind_target(node),
+            "call" => self.nested_call(node, conditional),
             _ => self.visit_children(node, conditional),
         }
     }
@@ -283,16 +377,51 @@ impl<'t> Walker<'_, 't> {
         self.bind_target(left);
     }
 
+    /// A body that is not module scope (function, class, lambda,
+    /// comprehension) may run any number of times, so an `__all__` method
+    /// call or `global __all__` inside it makes the list computed.
+    fn note_deferred_all_edits(&mut self, body: Node<'t>) {
+        let mut stack = vec![body];
+        while let Some(node) = stack.pop() {
+            let edits_all = match node.kind() {
+                "call" => self.all_method(node).is_some(),
+                "global_statement" => {
+                    let mut cursor = node.walk();
+                    node.named_children(&mut cursor).any(|name| self.text(name) == "__all__")
+                }
+                _ => false,
+            };
+            if edits_all {
+                self.scan.has_all = true;
+                self.scan.limits.push(limit(ReexportLimitReason::ComputedExportList, node));
+            }
+            let mut cursor = node.walk();
+            stack.extend(node.children(&mut cursor));
+        }
+    }
+
+    /// The method name of a `__all__.<method>(..)` call.
+    fn all_method(&self, call: Node<'_>) -> Option<String> {
+        let function = call.child_by_field_name("function").filter(|function| function.kind() == "attribute")?;
+        let object = function.child_by_field_name("object")?;
+        let attribute = function.child_by_field_name("attribute")?;
+        (object.kind() == "identifier" && self.text(object) == "__all__").then(|| self.text(attribute).to_owned())
+    }
+
+    /// A `__all__` method call inside a larger expression (`flag and
+    /// __all__.append("a")`, a call argument) may or may not run, so the
+    /// list is computed.
+    fn nested_call(&mut self, call: Node<'t>, conditional: bool) {
+        if self.all_method(call).is_some() {
+            self.scan.has_all = true;
+            self.scan.limits.push(limit(ReexportLimitReason::ComputedExportList, call));
+        }
+        self.visit_children(call, conditional);
+    }
+
     /// `__all__.append("a")`, `.extend([..])`, `.remove("a")`.
     fn all_method_call(&mut self, statement: Node<'t>, call: Node<'t>, conditional: bool) {
-        let target = call.child_by_field_name("function");
-        let is_all_method = target.filter(|function| function.kind() == "attribute").and_then(|function| {
-            let object = function.child_by_field_name("object")?;
-            let attribute = function.child_by_field_name("attribute")?;
-            (object.kind() == "identifier" && self.text(object) == "__all__")
-                .then(|| self.text(attribute).to_owned())
-        });
-        let Some(method) = is_all_method else {
+        let Some(method) = self.all_method(call) else {
             self.visit_children(call, conditional);
             return;
         };
@@ -304,16 +433,11 @@ impl<'t> Walker<'_, 't> {
             if named.next().is_some() { None } else { first }
         });
         match (method.as_str(), argument) {
-            ("append" | "remove", Some(argument)) if argument.kind() == "string" => {
-                let mut read = ReadList::default();
-                self.read_list(argument, &mut read);
-                if read.computed {
-                    self.scan.limits.push(limit(ReexportLimitReason::ComputedExportList, statement));
-                } else if method == "append" {
-                    self.scan.all_ops.push(AllOp::Add(read.names));
-                } else {
-                    self.scan.all_ops.push(AllOp::Remove(read.names));
-                }
+            ("append", Some(argument)) if argument.kind() == "string" => {
+                self.apply_all(statement, argument, conditional, AllOp::Add);
+            }
+            ("remove", Some(argument)) if argument.kind() == "string" => {
+                self.apply_all(statement, argument, conditional, AllOp::Remove);
             }
             ("extend", Some(argument)) => self.apply_all(statement, argument, conditional, AllOp::Add),
             _ => self.scan.limits.push(limit(ReexportLimitReason::ComputedExportList, statement)),
@@ -435,6 +559,7 @@ impl<'t> Walker<'_, 't> {
                 }
                 None => (first_segment, false),
             };
+            let module_object = (alias.is_none() || redundant_alias).then(|| exported.clone());
             self.scan.imports.push(ImportBinding {
                 exported,
                 original: None,
@@ -442,6 +567,7 @@ impl<'t> Walker<'_, 't> {
                 source: module_text,
                 conditional,
                 redundant_alias,
+                module_object,
                 specifier,
                 statement,
                 import_span: self.record_for(specifier),
@@ -467,6 +593,7 @@ impl<'t> Walker<'_, 't> {
                     source: source.clone(),
                     conditional,
                     redundant_alias: false,
+                    module_object: None,
                     specifier: child,
                     statement,
                     import_span: self.record_for(module),
@@ -493,6 +620,7 @@ impl<'t> Walker<'_, 't> {
                 source: source.clone(),
                 conditional,
                 redundant_alias,
+                module_object: None,
                 specifier,
                 statement,
                 import_span: self.record_for(specifier),

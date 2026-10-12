@@ -221,20 +221,114 @@ fn renamed_parts(item: Node<'_>) -> Option<(Node<'_>, Node<'_>)> {
 }
 
 /// Records the same-file `import` the export's qualifier goes through, when
-/// the qualifier is one name bound by an import declaration.
+/// the qualifier is one name bound by an import declaration that is in scope
+/// at the export: it precedes the export in the same or an enclosing
+/// template body or block, the nearest such import wins, and no definition or
+/// class parameter of that name sits between them (a definition takes
+/// precedence over an import).
 fn link_import(forwarded: &mut ReexportEntry, qualifier: &[Node<'_>], source: &str, imports: &[ImportRecord]) {
     let [only] = qualifier else { return };
     let used = text(*only, source).trim();
-    let Some(root) = only.parent().map(|parent| root_of(parent)) else { return };
-    let bound = imports.iter().find(|import| {
-        import.alias.as_deref().unwrap_or(&import.name) == used
-            && root
-                .descendant_for_byte_range(import.span.start_byte as usize, import.span.end_byte as usize)
-                .is_some_and(|node| inside_kind(node, "import_declaration"))
-    });
-    if let Some(import) = bound {
-        forwarded.local_name = Some(bare(used));
-        forwarded.import_span = Some(import.span.clone());
+    let Some(declaration) = only.parent() else { return };
+    let root = root_of(declaration);
+    // `(depth of the import's scope, start)` of the best candidate so far.
+    let mut nearest: Option<((usize, usize), &ImportRecord, Node<'_>)> = None;
+    for import in imports {
+        if import.alias.as_deref().unwrap_or(&import.name) != used {
+            continue;
+        }
+        let Some(import_declaration) = root
+            .descendant_for_byte_range(import.span.start_byte as usize, import.span.end_byte as usize)
+            .and_then(|node| ancestor_of_kind(node, "import_declaration"))
+        else {
+            continue;
+        };
+        let Some(scope) = import_declaration.parent() else { continue };
+        if import_declaration.end_byte() > declaration.start_byte() {
+            continue;
+        }
+        let Some(depth) = ancestor_depth(declaration, scope) else { continue };
+        // A smaller depth is a nearer scope; within one scope the later
+        // import wins.
+        let key = (usize::MAX - depth, import_declaration.start_byte());
+        if nearest.as_ref().is_none_or(|(best, _, _)| key > *best) {
+            nearest = Some((key, import, scope));
+        }
+    }
+    let Some((_, import, scope)) = nearest else { return };
+    if defined_between(declaration, scope, used, source) {
+        return;
+    }
+    forwarded.local_name = Some(bare(used));
+    forwarded.import_span = Some(import.span.clone());
+}
+
+/// How many parents up from `node` `ancestor` is, if it is an ancestor.
+fn ancestor_depth(node: Node<'_>, ancestor: Node<'_>) -> Option<usize> {
+    let mut current = node;
+    let mut depth = 0;
+    while let Some(parent) = current.parent() {
+        depth += 1;
+        if parent.id() == ancestor.id() {
+            return Some(depth);
+        }
+        current = parent;
+    }
+    None
+}
+
+/// Whether a scope from `node` up to and including `scope` directly defines
+/// `name`: a member or local definition, or a class parameter.
+fn defined_between(node: Node<'_>, scope: Node<'_>, name: &str, source: &str) -> bool {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        let mut cursor = parent.walk();
+        let found = parent.named_children(&mut cursor).any(|child| match child.kind() {
+            "class_parameters" => {
+                let mut inner = child.walk();
+                child
+                    .named_children(&mut inner)
+                    .any(|parameter| definition_name(parameter, source).as_deref() == Some(bare(name).as_str()))
+            }
+            _ => defines(child, name, source),
+        });
+        if found {
+            return true;
+        }
+        if parent.id() == scope.id() {
+            return false;
+        }
+        current = parent;
+    }
+    false
+}
+
+/// Whether the statement `child` is a definition binding `name`.
+fn defines(child: Node<'_>, name: &str, source: &str) -> bool {
+    match child.kind() {
+        "val_definition" | "var_definition" | "val_declaration" | "var_declaration" => child
+            .child_by_field_name("pattern")
+            .or_else(|| child.child_by_field_name("name"))
+            .is_some_and(|pattern| pattern_binds(pattern, name, source)),
+        // A class or trait name is a type, not the term an export path
+        // starts with; an enum also defines its companion term.
+        "function_definition" | "function_declaration" | "object_definition" | "enum_definition"
+        | "given_definition" | "package_object" => {
+            definition_name(child, source).as_deref() == Some(bare(name).as_str())
+        }
+        _ => false,
+    }
+}
+
+/// Whether a `val`/`var` pattern binds `name` as a plain identifier.
+fn pattern_binds(pattern: Node<'_>, name: &str, source: &str) -> bool {
+    match pattern.kind() {
+        "identifier" => bare(text(pattern, source)) == bare(name),
+        "identifiers" | "tuple_pattern" => {
+            let mut cursor = pattern.walk();
+            pattern.named_children(&mut cursor).any(|part| pattern_binds(part, name, source))
+        }
+        _ => false,
     }
 }
 
@@ -245,15 +339,12 @@ fn root_of(mut node: Node<'_>) -> Node<'_> {
     node
 }
 
-fn inside_kind(mut node: Node<'_>, kind: &str) -> bool {
+fn ancestor_of_kind<'t>(mut node: Node<'t>, kind: &str) -> Option<Node<'t>> {
     loop {
         if node.kind() == kind {
-            return true;
+            return Some(node);
         }
-        match node.parent() {
-            Some(parent) => node = parent,
-            None => return false,
-        }
+        node = node.parent()?;
     }
 }
 

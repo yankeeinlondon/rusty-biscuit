@@ -21,7 +21,7 @@ use crate::shared::{
 mod bindings;
 mod cjs;
 
-use bindings::{Binding, Kind, Resolved, Table, has_anonymous};
+use bindings::{Binding, Kind, Resolved, Table, has_anonymous, shadowed_below_program};
 
 pub(super) struct Ctx<'a> {
     source: &'a str,
@@ -104,7 +104,15 @@ fn scan(root: Node<'_>) -> Scan<'_> {
                 found.assigns.push(node);
                 found.writes.push(node);
             }
-            "augmented_assignment_expression" | "update_expression" => found.writes.push(node),
+            "augmented_assignment_expression"
+            | "update_expression"
+            | "for_in_statement"
+            | "variable_declaration"
+            | "function_declaration"
+            | "generator_function_declaration" => {
+                found.writes.push(node);
+            }
+            "unary_expression" => found.writes.push(node),
             "call_expression" => found.calls.push(node),
             _ => {}
         }
@@ -138,13 +146,15 @@ pub(super) fn extract(tree_file: &TreeFile, imports: &[ImportRecord]) -> Reexpor
     }
 
     let mut handled = HashSet::new();
-    visit_block(&ctx, &table, root, None, &HashSet::new(), &mut handled, &mut out);
+    visit_block(&ctx, &table, root, None, &mut handled, &mut out);
     for statement in &found.exports {
         if !handled.contains(&statement.id()) {
             stray_export(&ctx, &table, *statement, &mut out);
         }
     }
     cjs::scan(&ctx, &table, &found.assigns, &found.calls, &mut out);
+    let candidates = found.writes.iter().chain(&found.calls).chain(&found.exports).copied();
+    cjs::Interface::build(&ctx, &table, candidates).settle(&mut out);
     finish(out.entries, out.limits)
 }
 
@@ -221,13 +231,12 @@ fn visit_block(
     table: &Table,
     block: Node<'_>,
     scope: Option<&str>,
-    block_locals: &HashSet<String>,
     handled: &mut HashSet<usize>,
     out: &mut Out,
 ) {
     let mut cursor = block.walk();
     for statement in block.children(&mut cursor) {
-        visit_statement(ctx, table, statement, scope, block_locals, handled, out);
+        visit_statement(ctx, table, statement, scope, handled, out);
     }
 }
 
@@ -236,7 +245,6 @@ fn visit_statement(
     table: &Table,
     statement: Node<'_>,
     scope: Option<&str>,
-    block_locals: &HashSet<String>,
     handled: &mut HashSet<usize>,
     out: &mut Out,
 ) {
@@ -246,15 +254,15 @@ fn visit_statement(
             if let Some(declaration) = statement.child_by_field_name("declaration")
                 && matches!(declaration.kind(), "internal_module" | "module" | "ambient_declaration")
             {
-                visit_statement(ctx, table, declaration, scope, block_locals, handled, out);
+                visit_statement(ctx, table, declaration, scope, handled, out);
                 return;
             }
-            export_statement(ctx, table, statement, scope, block_locals, out);
+            export_statement(ctx, table, statement, scope, out);
         }
         "ambient_declaration" | "expression_statement" => {
             let mut cursor = statement.walk();
             for child in statement.children(&mut cursor) {
-                visit_statement(ctx, table, child, scope, block_locals, handled, out);
+                visit_statement(ctx, table, child, scope, handled, out);
             }
         }
         "internal_module" | "module" => {
@@ -267,12 +275,7 @@ fn visit_statement(
                 Some(outer) => format!("{outer}.{name}"),
                 None => name,
             };
-            let mut names = Vec::new();
-            let mut cursor = body.walk();
-            for child in body.children(&mut cursor) {
-                bindings::declared_names(ctx, child, &mut names);
-            }
-            visit_block(ctx, table, body, Some(&qualified), &names.into_iter().collect(), handled, out);
+            visit_block(ctx, table, body, Some(&qualified), handled, out);
         }
         _ => {}
     }
@@ -283,7 +286,6 @@ fn export_statement(
     table: &Table,
     statement: Node<'_>,
     scope: Option<&str>,
-    block_locals: &HashSet<String>,
     out: &mut Out,
 ) {
     if statement.has_error() {
@@ -339,7 +341,7 @@ fn export_statement(
             let Some(name) = specifier.child_by_field_name("name") else { continue };
             let exported = specifier.child_by_field_name("alias").unwrap_or(name);
             let local = ctx.text(name);
-            if block_locals.contains(local) {
+            if shadowed_below_program(ctx, specifier, local) {
                 continue;
             }
             match table.resolve_es(local) {
@@ -369,7 +371,7 @@ fn export_statement(
             return;
         };
         let local = ctx.text(value);
-        if block_locals.contains(local) {
+        if shadowed_below_program(ctx, value, local) {
             return;
         }
         match table.resolve_es(local) {
@@ -395,11 +397,11 @@ fn export_statement(
         else {
             return;
         };
-        export_equals(ctx, table, expression, statement_span, block_locals, out);
+        export_equals(ctx, table, expression, statement_span, out);
     } else if ctx.typescript
         && let Some(alias) = statement.child_by_field_name("declaration").filter(|d| d.kind() == "import_alias")
     {
-        export_import(ctx, table, alias, statement_span, scope, block_locals, out);
+        export_import(ctx, table, alias, statement_span, scope, out);
     }
 }
 
@@ -409,7 +411,6 @@ fn export_equals(
     table: &Table,
     expression: Node<'_>,
     statement_span: TextSpan,
-    block_locals: &HashSet<String>,
     out: &mut Out,
 ) {
     let module_entry = |source: String, local: Option<&str>, import_span: Option<TextSpan>| {
@@ -427,7 +428,7 @@ fn export_equals(
     match expression.kind() {
         "identifier" => {
             let local = ctx.text(expression);
-            if block_locals.contains(local) {
+            if shadowed_below_program(ctx, expression, local) {
                 return;
             }
             match table.resolve_es(local) {
@@ -465,7 +466,6 @@ fn export_import(
     alias: Node<'_>,
     statement_span: TextSpan,
     scope: Option<String>,
-    block_locals: &HashSet<String>,
     out: &mut Out,
 ) {
     let mut cursor = alias.walk();
@@ -482,7 +482,7 @@ fn export_import(
         return;
     }
     let local = ctx.text(leftmost);
-    if block_locals.contains(local) {
+    if shadowed_below_program(ctx, alias, local) {
         return;
     }
     let span = text_span_for_node(alias);

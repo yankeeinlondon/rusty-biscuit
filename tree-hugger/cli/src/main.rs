@@ -251,7 +251,7 @@ struct CommonArgs {
     )]
     filters: Vec<String>,
 
-    /// Show only exported symbols (`is_exported`, re-exports included)
+    /// Show only exported declarations (`is_exported`; forwarding is in `--json-full` `reexports`)
     #[arg(long, conflicts_with = "prelude", display_order = 30)]
     exported: bool,
 
@@ -316,7 +316,7 @@ struct ClassArgs {
     #[arg(long)]
     instance_only: bool,
 
-    /// Show only exported classes (`is_exported`, re-exports included)
+    /// Show only exported classes (`is_exported`; forwarding is in `--json-full` `reexports`)
     #[arg(long, conflicts_with = "prelude")]
     exported: bool,
 
