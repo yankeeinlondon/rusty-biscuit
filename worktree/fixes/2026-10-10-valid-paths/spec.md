@@ -27,30 +27,31 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 2 (library) is done. What Phase 3 needs to know:
-  - `worktree::config::validate_base_dir(raw, origin)` is public and pure.
-    `save_config(&Path)` keeps its signature; it now rejects non-Unicode and
-    invalid syntax (origin = `ConfigFile(actual path)`) before writing, and
-    still creates no directories. The setup loop should validate with
-    `BaseDirSource::Prompt` itself first so the user sees prompt-origin text.
-  - `resolve_base_dir()` can now also return `BaseDirectoryEmpty`,
-    `BaseDirectoryForeignPath`, `BaseDirectoryNotAbsolute`,
-    `BaseDirectoryNotDirectory`, `BaseDirectoryInvalidEncoding`,
-    `BaseDirectoryUnreadable`; `ConfigBaseDirIsGitRepo` is still the config
-    repo-root error and `BaseDirectoryIsGitRepo` the `WT` one.
-  - `config_path()`/`considered_dirs()` use biscuit-file `home_dir()`
-    (env-first: `HOME`; `USERPROFILE` on Windows). CLI integration tests must
-    set BOTH `HOME` and `USERPROFILE` for the child.
-  - A duplicate `base_dir` key is rejected as `ConfigInvalidFormat` (serde's
-    derived struct refuses repeated fields), not last-wins as Ruling 4
-    assumed; Phase 4 docs should say so.
-  - `BaseDirectoryUnreadable` (added in Phase 1) is what the resolver uses for
-    non-NotFound metadata errors; reuse it for the setup loop's I/O checks.
-  - The `wsl_drive_hint` helper is not written yet (planned for Phase 3, in
-    the lib config module).
-  - The path table's Windows column passes natively on build-win-native
-    (`just cross-check worktree --os windows config::tests`; a `-E '…'`
-    filterset breaks that recipe's quoting, use a plain name filter).
+  Phase 3 (CLI) is done. What Phase 4 (docs) needs to know about actual behavior:
+  - `wt create` enters setup only when no source is configured AND stdin/stderr
+    are terminals AND `CI` is unset/empty; otherwise it exits 1 with
+    `BaseDirectoryNotConfigured`, whose message now tells scripts to set `WT`
+    or create `~/.worktree.json` with `{"base_dir": "<absolute directory>"}`.
+  - Every base-directory/config error is rendered once by `main` through
+    `commands::base_dir_error_markup` (exit 1, stderr, no `cd:` line). Config-file
+    origins add an "Edit ~/.worktree.json" link to the actual path; a foreign
+    drive path under WSL adds "Under WSL, Windows drive B: is usually mounted at
+    /mnt/b. If it is mounted there, use /mnt/b/wt." (lib `config::wsl_drive_hint`).
+  - Setup retry: an unusable suggested directory (file, repo root) returns to the
+    menu; an unusable typed path (relative, `~/wt`, foreign, blank, file, repo
+    root) asks for another path. Nothing is created or saved until syntax passes;
+    a missing directory is created, re-checked, then saved. A creation/read
+    failure stops setup (exit 1); Esc/Ctrl-C exits 0.
+  - Setup now omits non-Unicode candidate directories from the menu.
+  - Repository-root wording is "a directory without .git directly inside it"
+    everywhere in create.rs; the setup intro/comment drift in other files (if
+    any) and `create_worktree`'s doc prerequisite are still Phase 4's.
+  - `config::example_base_dir()` is now public (host example path used in
+    messages: /Users/me/wt, /home/me/wt, C:\Users\me\wt).
+  - From Phase 2, still to document: a duplicate `base_dir` key is rejected as
+    `ConfigInvalidFormat` (serde refuses repeated fields), not last-wins.
+  - Testing trap recorded in the skill: a `wt create` child must
+    `env_remove("WT")`; the developer shell exports a real `WT`.
 ---
 
 # Valid base-directory paths

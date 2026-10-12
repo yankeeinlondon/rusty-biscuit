@@ -20,6 +20,19 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_3:
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/error.rs
+  - worktree/cli/src/commands/create.rs
+  - worktree/cli/src/commands/mod.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/tests/base_dir_fixture/mod.rs
+  - worktree/cli/tests/create_base_dir.rs
+  - worktree/cli/tests/create_config_errors.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/testing.md
 packages:
   - worktree
   - worktree-cli
@@ -341,7 +354,7 @@ Wave 5 (single task; one coherent rework of the create path):
 
 Wave 6 (two independent test files, parallelizable):
 
-- [ ] **Incident integration tests**
+- [x] **Incident integration tests**
     - New `worktree/cli/tests/` file: temporary repository plus temporary
       home with **both** `HOME` and `USERPROFILE` pointed at the fixture
       (adopting the home helper makes the lookup env-first); `WT` removed;
@@ -354,7 +367,7 @@ Wave 6 (two independent test files, parallelizable):
     - Also cover: invalid `WT` overriding a valid config (exit 1, origin
       `WT`, remedy says editing JSON alone will not override), and a missing
       base directory with source-aware recovery text.
-- [ ] **Config error and noninteractive tests**
+- [x] **Config error and noninteractive tests**
     - Malformed config and config pointing at a repository root exit 1 after
       their custom rendering (rendered exactly once); user-provided markup
       in values is shown literally; config-link attributes are quoted.

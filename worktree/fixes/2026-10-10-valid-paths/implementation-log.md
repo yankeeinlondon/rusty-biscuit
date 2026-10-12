@@ -19,6 +19,19 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_3:
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/error.rs
+  - worktree/cli/src/commands/create.rs
+  - worktree/cli/src/commands/mod.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/tests/base_dir_fixture/mod.rs
+  - worktree/cli/tests/create_base_dir.rs
+  - worktree/cli/tests/create_config_errors.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/testing.md
 packages:
   - worktree
   - worktree-cli
@@ -184,3 +197,114 @@ packages:
   Note: `just cross-check` cannot pass a nextest `-E '…'` filterset (the
   parentheses break its `bash -c` quoting); a plain name filter works.
 - skill: added the config-home isolation fact to `.claude/skills/worktree/testing.md` (both `HOME` and `USERPROFILE`; cache lookups unchanged). Fuller `cli-contracts.md` updates stay in Phase 4.
+
+## Phase 3
+
+- started: create-command rework (Wave 5), then the two integration test files (Wave 6).
+- lib additions in `lib/src/config.rs`:
+  - `pub fn wsl_drive_hint(value, RuntimeEnvironment) -> Option<String>`:
+    pure; `Some` only under WSL1/WSL2 for drive-absolute values (`B:\wt`,
+    `B:/wt`, `D:\`), mapping to `/mnt/<lowercase letter>/<rest with />`.
+    The sentence is conditional ("If it is mounted there, use /mnt/b/wt.").
+    `None` for `b:wt`, `b:`, `\\server\…`, `//server/…`, `\\?\…`, POSIX paths.
+  - `example_base_dir()` moved from a private helper in `error.rs` to a public
+    function in `config.rs`, so the CLI's JSON example and the lib remedies
+    share one host-valid example path.
+- `BaseDirectoryNotConfigured`'s message (lib `error.rs`) now gives script-usable
+  instructions: set `WT` to an absolute directory (host example), or create
+  `~/.worktree.json` with `{"base_dir": "<absolute directory>"}`; it notes that
+  running in an interactive terminal offers setup (conditional, not a promise).
+- `cli/src/commands/create.rs`:
+  - `run` enters setup only for `BaseDirectoryNotConfigured` **and**
+    `crate::env::is_interactive()`; every other resolution error (including
+    `ConfigInvalidFormat` / `ConfigBaseDirIsGitRepo`) is returned, so it exits 1
+    through `exit.rs`'s `_ => FAILURE` arm. The two `return Ok(())` branches are
+    gone.
+  - **design choice for Ruling 7 (render once):** rendering moved out of the
+    command. `pub fn base_dir_error_markup(&WorktreeError) -> Option<String>`
+    (re-exported from `commands`) builds the rich markup for every
+    base-directory and config error; `main`'s error handler uses it before the
+    plain `error_markup` fallback. So each error is printed once, by `main`, to
+    stderr, with no `cd:` line. The private `_with` variant takes the runtime
+    detector and the setup candidates as closures for tests.
+  - markup: `Prose::escape_text` on the whole library message (not
+    `escape_text_outside_code_spans`, so backticks in a user value cannot form
+    a code span); a `ConfigFile` origin appends an `Edit ~/.worktree.json` link
+    whose href is `Prose::quoted_attr(actual path)`; a `BaseDirectoryForeignPath`
+    appends `wsl_drive_hint(value, detect_runtime_environment())`. The detector
+    runs only in that arm (unit test injects a panicking detector for the others).
+  - invalid-format text: example JSON uses the host example path (backslashes
+    doubled on Windows); recovery is "delete the file and run wt create again in
+    an interactive terminal". **departure:** the old text interpolated the branch
+    (`wt create <branch>`); dropped as unnecessary.
+  - repository-root text now says "a directory without .git directly inside it"
+    (root-only check, Ruling 2) instead of "Worktrees cannot be stored inside a
+    git repo".
+  - setup loop: `trait SetupPrompt { select, enter_path, reject }`, thin
+    `InquirePrompt` adapter (`Select::raw_prompt` index, so an "Other" label can
+    never collide with a candidate), and `choose_base_dir(prompt, candidates,
+    save)`. Each choice goes through `prepare_base_dir(raw)`:
+    `validate_base_dir(raw, Prompt)` → metadata (existing file →
+    `NotDirectory`; other I/O → `BaseDirectoryUnreadable`, stops) → create when
+    missing (failure → `WorktreeError::Io` with the path in its text, stops) →
+    re-check is-dir → `.git` directly inside → `BaseDirectoryIsGitRepo{Prompt}`.
+    Only then is `save` called. Value errors (`Empty`, `ForeignPath`,
+    `NotAbsolute`, `NotDirectory`, `IsGitRepo`) are shown via `reject` and the
+    user asked again: an invalid suggestion returns to the menu, an invalid
+    typed path asks for another path (Esc there cancels → exit 0). Typed text
+    is trimmed; suggestions are not.
+  - candidates: repository roots are filtered as before, and non-Unicode
+    candidate paths are omitted (lossless `to_str`), so a shown choice is saved
+    exactly as shown.
+- tests (all L1):
+  - lib `config::tests::wsl_drive_hint_suggests_the_default_mount_for_drive_absolute_values`,
+    `…_is_never_offered_natively_or_for_other_spellings`.
+  - CLI unit (`commands::create::tests::*`, run under both `worktree_cli::` and
+    `wt::`; no snapshots): `invalid_typed_path_then_valid_one_saves_only_the_valid_one`
+    (incident value then a temp dir; only the valid one saved/created; foreign
+    value never created relative to cwd), `invalid_typed_path_then_cancel_saves_and_creates_nothing`
+    (foreign, `wt`, `./wt`, `~/wt`, blank), `a_home_relative_typed_path_gets_the_full_path_hint`,
+    `unusable_suggestions_return_to_the_menu_before_anything_is_saved` (file,
+    repo root, then a missing dir that is created then saved),
+    `a_path_that_cannot_be_created_stops_setup_without_saving`,
+    `setup_candidates_skip_repository_roots`,
+    `config_errors_link_the_config_file_and_show_values_literally`,
+    `env_and_prompt_errors_have_no_config_link`,
+    `foreign_drive_paths_get_the_wsl_hint_only_under_wsl`,
+    `runtime_is_detected_only_for_a_foreign_path`,
+    `invalid_format_markup_names_the_file_and_offers_no_unconditional_setup`,
+    `other_errors_are_left_to_the_plain_renderer`.
+  - integration, shared fixture `cli/tests/base_dir_fixture/mod.rs` (temp repo
+    + temp home; `HOME` and `USERPROFILE` both set; `WT` removed unless given;
+    `NO_COLOR=1`; stdin null; `WT_SHELL_WRAPPER=1` so an absent `cd:` line is
+    meaningful; `bin_exe!("wt")`; asserts exit 1, empty stdout, unchanged repo
+    entries / branches / `git worktree list --porcelain`):
+    - `create_base_dir.rs`: `the_fixture_home_config_is_the_one_wt_reads`
+      (control: valid config succeeds), `a_foreign_saved_base_dir_is_refused_without_changing_anything`
+      (incident replay: `b:\wt` on POSIX / `/home/me/wt` on Windows; config bytes
+      unchanged), `an_invalid_wt_is_refused_even_when_the_config_is_valid`
+      (foreign, `wt`, whitespace; no fallback), `a_missing_saved_base_dir_names_the_config_and_the_mount`.
+    - `create_config_errors.rs`: malformed config and repository-root config each
+      exit 1 with the message rendered exactly once; `markup_in_a_saved_value_is_shown_literally`;
+      `the_config_link_survives_a_home_path_with_markup_characters` (unix only:
+      Windows file names cannot hold `"<>`; href quoting is also unit-tested);
+      `no_configuration_and_no_terminal_exits_1_without_setup` (no prompt text,
+      no config file created).
+  - all new tests would fail on the pre-Phase-3 code (old branches exited 0,
+    setup ran without a terminal check, no hint, unescaped `escape_text_outside_code_spans`).
+- gates: `just lint` (worktree/) clean after one clippy fix
+  (`cloned_ref_to_slice_refs` in a test). `just test` (worktree/) 1173 passed,
+  14 skipped; 15 SLOW (>5 s) reports, all pre-existing list/remove/graph tests
+  under full-suite load, none touched here.
+- cross-OS: `just cross-check worktree-cli --os windows …` on build-win-native:
+  all `commands::create::tests` (both module paths) and all 8 Windows-compiled
+  integration tests pass. Linux/WSL share the POSIX code paths proven on macOS;
+  CI covers them.
+- incident during manual verification (no repository damage): a hand replay of
+  the binary inherited this shell's real `WT=/Volumes/coding/wt`, so it created
+  a worktree at `/Volumes/coding/wt/repo/fix-wsl` for a throwaway `/tmp` repo.
+  Inspected (only that directory, created seconds earlier) and removed it. Added
+  the "`env_remove("WT")` for a `wt create` child" fact to the worktree skill's
+  `testing.md`.
+- left for Phase 4: README/docs (`docs/base-directory.md`), `cli-contracts.md`,
+  dependency docs, `create_worktree` doc prerequisite, remaining drift sweep.
