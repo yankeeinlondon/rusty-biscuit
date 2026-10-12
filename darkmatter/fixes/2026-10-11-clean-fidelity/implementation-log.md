@@ -931,3 +931,97 @@ terminators per line, and `source_fidelity::{crlf_*, mixed_*,
 a_lone_carriage_return_*}` cover them. These tests read no checked-out
 files, so `core.autocrlf` cannot change their inputs. Linux and macOS are
 proven by pull-request CI; Windows by the push to `main`.
+
+## Phase 4
+
+Phase 4 rerouted every cleanup consumer to the guarded engine, assembled the
+raw-source transaction, and wired the CLI and DMLS to it. The library work
+(Wave 6 and the Wave 8 parity fixtures) was done directly; the old-test
+triage, the CLI adapter and the DMLS adapter ran as three parallel subagents
+against the frozen library contract and were reviewed afterwards.
+
+### 1. Transaction (`cleanup/document.rs`)
+
+- `clean_document(&CleanRequest { source, overrides, workspace,
+  document_path }, schema_closure) -> Result<CleanResult, FrontmatterRepairError<E>>`.
+  Order: `repair_frontmatter` on the raw text; one passive read of
+  `style.markdown` from `settings_yaml` (authored YAML, or the repair
+  candidate when only that parses, with rule-diagnostic spans projected back
+  through `SettingsYaml::authored_span`); one `resolve`; `clean_body` on the
+  body of the text being emitted; reassembly from that text's own
+  frontmatter bytes.
+- **Departure from the §5 sketch:** the request carries `overrides:
+  &MarkdownRuleOverrides` (named for what it is, not `cli`), and the schema
+  configuration stays the Phase 2 lazy closure rather than a
+  `CleanSchemaConfig` field, so absent or empty frontmatter still builds no
+  context.
+- Outcomes:
+  - `Invalid` when the frontmatter that would be emitted does not parse:
+    neither authored nor candidate parses, or `frontmatter: false` while only
+    the candidate parses. Source returned, nothing cleaned, `applied: []`.
+  - `Declined` when the body is refused: source returned, `applied: []`
+    (accepted candidate repairs are discarded), frontmatter findings kept as
+    report-only, the fallback finding appended last and located in authored
+    coordinates (the body is a suffix of both the source and the repaired
+    text, so its offset is unaffected by repairs).
+  - `Changed`/`Unchanged` by comparing the emitted text with the source;
+    `applied` is non-empty only for `Changed`.
+- Empty frontmatter blocks are now kept (the old CLI `assemble` dropped
+  them). A BOM before frontmatter is still removed as the existing applied
+  repair; with `frontmatter: false` it stays.
+- `CleanDiagnostic.reason: Option<FallbackReason>` became
+  `fallback: Option<Fallback>` (reason, document offset of the first affected
+  block, detail) and `Fallback::message(line, column)` formats the message,
+  so DMLS can restate the location in the client's position encoding. The
+  version-1 JSON envelope is built separately by the CLI and is unaffected.
+
+### 2. Wrappers, compose, render (Wave 6)
+
+- `cleanup/mod.rs` now exposes `cleanup_content` (defaults) and
+  `cleanup_content_with(&MarkdownRuleOverrides)` (overrides at CLI level),
+  both `clean_body(..).text`. Removed: `cleanup_content_{compact,loose}`,
+  every `cleanup_content_with_indent*` variant (including the three
+  `_preserving_incidental` ones), `cleanup_to_fixed_width`,
+  `ListSpacingMode`, `DEFAULT_INDENT`. `Markdown::cleanup` stays;
+  `Markdown::cleanup_with(&MarkdownRuleOverrides)` replaces
+  `cleanup_{compact,loose,with_indent*,with_fixed_width}`. No wrapper keeps
+  the old newline stripping. `Indentation::from_spaces` is new.
+- The old serializer pipeline and its modules are deleted: `lists.rs`,
+  `emphasis.rs`, `brackets.rs`, `blockquote.rs`, `tables.rs`,
+  `perf_profile.rs`. The list-marker width helpers the standalone reflow
+  helpers still use moved to `cleanup/markers.rs`; `opaque.rs` shrank to the
+  range scan `reflow/semantic.rs` uses; `reflow.rs` lost the dead
+  `collapse_incidental_soft_break_events`.
+- `strip_incidental_newlines` and `reflow_to_width` remain public standalone,
+  unguarded helpers with their existing counts (Phase 1 policy). Nothing in
+  cleanup, compose, the CLI or DMLS calls them any more.
+- Compose: `ComposeOptions.list_spacing` is a `rules::ListItemPadding`
+  (Normal/Compact/Loose became Preserve/None/One, cache tags unchanged) and
+  `with_indent_size(usize)` became `with_indentation(rules::Indentation)`
+  (the cache encoding still writes spaces, `0` for preserve). The cleanup
+  operation builds explicit overrides (`unwrap` from
+  `IncidentalNewlineMode`, `fixed_width`, `indentation`,
+  `list_item_padding`) and calls `cleanup_content_with`; it does not read the
+  document's `style.markdown`, as Phase 1 decided.
+- `md` rendering (`cli/src/commands/render.rs`) and `md compose`
+  (`cli/src/commands/compose.rs`) map `--indent` through
+  `Indentation::from_spaces` (the parser only admits 2, 4, 8).
+- `lib/README.md`'s cleanup section described the removed API and the old
+  Normal/Compact/Loose behavior; it now shows `cleanup`, `cleanup_with`,
+  `clean_document` and the compose options.
+
+### 3. Scanner parses (AC 12)
+
+- `compose::parse_utils::scan_code_regions` is the one place directive and
+  expression scanners parse to find code; it returns all code regions plus
+  code blocks only (what `ExpressionFinder` skips) and records a separate
+  `scanner_parse_count` under `cfg(test)`. `find_code_regions` and
+  `ExpressionFinder`'s private helper delegate to it, so every scanner parse
+  in the crate is counted.
+- `scan_block_pairs_with_code_regions`, `scan_darkmatter_directives_with_code_regions`,
+  `scan_disclosures_with_code_regions` and `ExpressionFinder::with_code_blocks`
+  take precomputed regions; the original entry points delegate.
+  `Protection::scan` computes regions once per text, so a cleanup run scans
+  once per text it inspects (input, re-wrap stage, candidate) instead of four
+  or five times. The scanners keep compose's `Options::all()` (Phase 1
+  lesson 5).
