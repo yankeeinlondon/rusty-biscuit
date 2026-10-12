@@ -95,6 +95,73 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/supplied.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_phase.rs
+documentation:
+    - claudine/docs/topics/completions/shell-completions.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 packages:
     - darkmatter
     - dmls
@@ -279,13 +346,13 @@ Depends on all earlier phases. No implementation spike is repeated here.
 
 ### Wave 8 — Verify Sequentially
 
-- [ ] **Acceptance Gates**
+- [x] **Acceptance Gates**
   - Run `just test` and then `just lint` in `darkmatter/`, covering the library, CLI, DMLS, and the area's normal crate set. Run `just test` and `just lint` in `claudine/` because its consumers changed, plus `just test` in every additional area whose shipped schema changed. Use nextest, not `cargo test`; do not run workspace-wide gates or terminal/browser tiers for this L1 feature.
   - Load the `rust-testing` skill and test-toolkit guidance before writing the planned tests. If new tests read repository artifacts, declare those inputs in the documented forms so existing CI scope selects their readers; add no new CI matrix cell or gate.
   - Use existing passing OS evidence where it qualifies; otherwise obtain the required environment evidence using the existing workflow and `os` skill. Record which environments were actually verified, and do not claim four-OS execution from a local macOS run.
   - Resolve failures, then rerun the affected checks. Review behavior-changing docs/comments, typed error wrappers, passive/context guards, and all grouped-pattern consumers. Do not run `cargo fmt`.
 
-- [ ] **Review Handoff**
+- [x] **Review Handoff**
   - Close the acceptance-to-test map with concrete test names and results for criteria 1–10. Record corpus/audit coverage, changed files, representation choices, spec departures if any, validation commands/environments, and material limitations in the implementation log.
   - Confirm there is no remaining stripping assertion, local-name schema-root lookup, unresolved consumer migration, speculative nullable/union syntax, or unsupported claim in current docs. Check the plan's phase/task state accurately reflects completed work.
   - Deliver implementation complete, ready for review. Leave lifecycle movement and any commit/push to the author or a separate explicit instruction.

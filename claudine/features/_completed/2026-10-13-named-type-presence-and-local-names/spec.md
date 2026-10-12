@@ -28,38 +28,32 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 1
+completed: true
+implemented: true
+implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-    Phase 5 is recorded under "## Phase 5" in implementation-log.md. Facts
-    for Phase 6 (Acceptance Gates, Review Handoff):
-    (1) Gates already green at the end of Phase 5 on macOS: darkmatter
-    `just test` 9299 passed / 11 skipped and `just lint` exit 0; claudine
-    `just test` 8682 passed / 9 skipped and `just lint` exit 0. Native
-    Windows cross-checks passed for the new corpus, matrix, and
-    `schema_validate` tests. `messenger` `just test` still has to be run as
-    a Phase 6 gate (only its research tests ran in Phase 5). No shipped
-    schema changed, so no other area needs a gate for an artifact change.
-    (2) New tests: darkmatter lib L1 `shipped_schema_corpus` (5 tests,
-    incl. the research contracts under claudine/docs/research and
-    messenger/docs that Phase 1 missed) and `schemas_constraints_block_matrix`
-    (2); darkmatter-cli L1 `schema_validate` (18 new) and
-    `schema_validate_phase` (2). On Windows the matrix tests take ~3.6 s and
-    the Markdown corpus scans ~3 s: under the 5 s budget, but watch them.
-    (3) Items for the review handoff, all recorded in the log and none
-    blocking: the ConstraintConflict message names bound kinds and
-    origins but not values; pretty CLI output hyphen-wraps long paths;
-    `Markdown::from(String)` drops unparseable frontmatter (pre-existing);
-    `parse_standalone_schema_document` discards YAML parse errors
-    (pre-existing); several shipped files (`darkmatter/schemas/**`,
-    `err.yaml`, `claudine/schemas/partials/lifecycle.yaml`) are not
-    loadable on either tree (pre-existing); exponential resolution time in
-    the lifecycle-grammar spike fixtures is pre-existing (pre-feature md
-    is equally slow), not a regression.
-    (4) The spec says an inline root union keeps an empty `@this`
-    namespace; the code (before and after this feature) resolves `this`
-    per arm against that arm's own entries, never across arms. Docs now
-    describe the code; record it as doc drift, not a spec departure.
+    All six phases are implemented; Phase 6 was verification only and
+    changed no source, test, doc, or skill file. Read "## Phase 6" in
+    implementation-log.md for the final acceptance-to-test map (AC1-AC10).
+    Gates green on macOS: darkmatter `just test` 9299 passed / 11 skipped and
+    `just lint` exit 0; claudine `just test` 8682 passed / 9 skipped and
+    `just lint` exit 0 (only the unrelated macOS `__eh_frame` linker note);
+    messenger `just test` 710 passed / 2 skipped. Linux cross-checks passed
+    for every feature test file in darkmatter, darkmatter-cli, claudine,
+    and claudine-cli; native Windows evidence is from Phase 5 on the same
+    tree; WSL2 was not run locally. A reviewer should know: (1) 12
+    messenger tests exceed the 5 s L1 budget, but the same tests take the
+    same time on the pre-feature commit f1d031f7a, so this is not a
+    regression of this feature; (2) the non-blocking observations from
+    Phase 5 (conflict messages omit bound values, standalone YAML parse
+    errors lose their location, `Markdown::from(String)` drops unparsable
+    frontmatter, exponential spike-fixture resolution) remain open and
+    unchanged; (3) an inline root union resolves `this` per arm, which is
+    the behavior from before this feature and is documented as such (doc
+    drift, not a spec departure). Lifecycle movement, commit, and push are
+    left to the author.
 pipeline_step: 3
 related:
     - 2026-10-14-union-type-constraints

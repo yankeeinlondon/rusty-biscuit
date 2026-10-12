@@ -94,6 +94,73 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/parity_tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/supplied.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_phase.rs
+documentation:
+    - claudine/docs/topics/completions/shell-completions.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 packages:
     - darkmatter
     - dmls
@@ -712,3 +779,70 @@ The corpus agent found that `claudine/features/2026-10-20-lifecycle-grammar/spik
 - Native Windows: `just cross-check darkmatter --os windows shipped_schema_corpus schemas_constraints_block_matrix` passed 8/8, and `just cross-check darkmatter-cli --os windows schema_validate` passed 71/71. **Timing note:** on Windows, the matrix tests take about 3.6 s and the Markdown corpus scans about 3 s, under the 5 s L1 budget but closer to it than on macOS (0.35 s and 1 s). Linux and WSL2 were not run locally; CI covers them.
 - `messenger` `just test` was not run as a gate in this phase because no schema it reads changed. The audit ran its `research_corpus` and `research_validation` (15 passed). Phase 6 runs it as planned.
 - Phase 5 complete: all four Wave 6/7 tasks are checked off in the plan.
+
+## Phase 6
+
+- Started 2026-10-11 by claude/opus. Verification only: **no source, test, doc, or skill file changed in this phase.** The tree under test is commit `b2cc72a00` (Phase 5 close) with a clean working tree; only this log, the plan, and the spec frontmatter were edited.
+
+### Wave 8 — Acceptance Gates
+
+| Area | Command | Result |
+|---|---|---|
+| `darkmatter/` (lib, CLI, DMLS, area crate set) | `just test` | 9299 passed, 11 skipped (31.1 s) |
+| `darkmatter/` | `just lint` | exit 0, no warnings; zed-dmls wasm32-wasip2 check passed |
+| `claudine/` | `just test` | 8682 passed, 9 skipped (85.6 s) |
+| `claudine/` | `just lint` | exit 0. The only warning is the macOS linker note `__eh_frame section too large` on the `claudine` binary, which is unrelated to this feature |
+| `messenger/` (AC8; reads shipped research schemas) | `just test` | 710 passed, 2 skipped |
+
+- No shipped schema changed in any phase (Phase 5 audit), so no other area's `just test` was required. `content-policy` readers were already run as evidence in Phase 5 (117 passed).
+- **Pre-existing slow messenger tests (not a regression).** Under `just test`, 12 messenger tests exceed the 5 s L1 budget. Run alone, `research_publication::a_generation_interrupted_before_selection_recovers_to_the_old_snapshot` takes 17.0 s and `research_refresh::an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on_retry` takes 13.3 s. Because both validate research schemas through Darkmatter, the same two binaries were run in a temporary detached worktree at the pre-feature commit `f1d031f7a`. That gave 16.5 s and 13.1 s, the same within noise, so this feature did not cause it. The worktree was removed afterwards. The `desktop_helpers::*::notice_only_timeout_maps_to_timeout_error` slow tests do not involve schemas. The slowness is recorded here and was not changed.
+- **OS evidence actually obtained:**
+  - macOS (this host): all gates above.
+  - Linux (`just cross-check … --os linux` on build-linux): darkmatter `shipped_schema_corpus schemas_constraints_block_matrix schemas_named_type_merge schemas_conjunctive_lowering file_match` 76/76; darkmatter-cli `schema_validate` 71/71; claudine-cli `schema_completion compose_schema_cli` 121/121; claudine `composition::schema` 106/106.
+  - Native Windows: Phase 5 evidence on the same tree (darkmatter corpus + matrix 8/8, darkmatter-cli `schema_validate` 71/71). Phase 6 changed no code, so that evidence still applies.
+  - **WSL2 was not run locally**, and the full suites were run on macOS only. CI's push-to-`main` (Windows) and nightly (WSL2) legs cover the remainder. Four-OS execution is not claimed.
+  - `just cross-check` passes its arguments through a remote `sh -c`, so a nextest `-E 'test(/a|b/)'` filterset fails with a shell syntax error. Plain positional name filters work.
+- No new test reads a repository file in this phase. The Phase 5 tests use `include_str!` or `manifest_dir!()` joins inside each `#[test]`. No CI matrix cell or gate was added.
+
+### Wave 8 — Review checks
+
+- **Stripping:** a search of `darkmatter/lib/src/markdown/schemas`, `darkmatter/dmls/src`, `claudine/lib/src/composition/schema`, and the darkmatter lib/dmls tests for `strip` finds only unrelated uses: `detect.rs::strip_required` (schema *detection* from sample documents), `strip_schema_uri`, the `$schema` control-key removal, and YAML chomping. No assertion or comment still describes presence stripping.
+- **Grouped-pattern consumers:** every `file_match`/`MatchGroups` user (darkmatter `completion.rs`, `validate.rs`, `convert.rs`, `grammar.rs`, `compose/schema_validation.rs`; claudine `supplied.rs`, `candidates.rs`) uses the grouped API. `candidates.rs::MatchGlobs` is now only an alias for the single-group `FileMatchGlobs` used by the one-group unit tests. No merged-glob consumer remains.
+- **Local-name lookup:** bare names resolve only in the defining file. Phase 5's corpus test checks this by moving each file into an empty directory and getting the same result. Phase 3 checks it with `a_bare_name_inside_an_imported_definition_resolves_in_its_defining_file` and `an_unknown_bare_name_is_a_typed_error_naming_the_type_and_schema`. No code path reads schema roots for a local name.
+- **Current docs:** the changed topic pages and skills name no feature or fix. The `/features/` and `/fixes/` matches in `schema-validation.md` and `composition.md` are example `match(...)` globs. Nullable unions appear only marked **planned** (`authoring-schemas.md`, `definition.md`), and no doc claims unsupported grammar.
+- **Typed error wrappers and passive/context guards:** covered by the green suites, including the claudine `context_construction_guard`, `path_lookup_guard`, `spawn_site_guard`, and `dispatch_inventory` guards. This phase found no drift.
+- `cargo fmt` was not run.
+
+### Acceptance-to-test map (final)
+
+All tests below passed in this phase's `just test` runs, plus the Linux cross-check where marked (L).
+
+| AC | Evidence (concrete tests) |
+|---|---|
+| 1 — presence through bare/`@this`/cross-file; authored vs effective | `schemas_named_type_merge::required_and_generated_survive_every_reference_spelling` (L); CLI `schema_validate::schema_validate_inherited_required_is_reported_for_every_reference_spelling`, `…_supplied_required_and_absent_generated_pass_authored_validation`, `…_rejects_a_wrong_typed_value_through_every_generated_spelling` (L); `schema_validate_phase::schema_validate_phase_absent_generated_passes_authored_and_fails_completion`, `…_wrong_typed_generated_value_fails_both_phases` (L) |
+| 2 — `req: expression(required)` at top level and in a mapping type | `schemas_named_type_merge::required_expression_type_is_required_at_top_level_and_inside_a_mapping_type` (L) |
+| 3 — presence combinations, multi-hop, nested, `person[]`, union arms | `each_presence_combination_is_inherited_as_declared`, `multi_hop_chains_inherit_presence_locally_and_across_files`, `a_required_inner_field_does_not_require_the_enclosing_property`, `an_array_of_a_required_type_is_a_required_property`, `union_arms_hoist_inherited_required` (L); claudine `composition::schema::tests::a_reused_file_type_keeps_inherited_presence_and_every_match_group` (L) |
+| 4 — merge table, conflicts with two origins, conjunctive lowering | `schemas_named_type_merge::a_multi_hop_bound_conflict_names_both_origins_with_the_defining_span`, `schemes_intersect_and_an_empty_intersection_is_a_conflict`, `defaults_must_be_equal_after_number_normalization`, `inherited_examples_resolve_from_their_defining_file_and_come_first`, `duplicate_suggestions_through_different_union_arms_fail`; `schemas_conjunctive_lowering::a_value_must_satisfy_every_pattern`, `equal_bounds_are_valid_and_contradictory_bounds_are_errors` (L); `convert::repeated_constraints::*`; CLI `schema_validate_multi_hop_bound_contradiction_names_both_origins`, `schema_validate_conjunctive_patterns_*` (L); `schemas_constraints_block_matrix::constraints_block_matrix_yaml`, `…_json_form` (L) |
+| 5 — bare ≡ `@this`; built-in collision; `UnknownNamedType`; defining-file resolution | grammar `bare_reference_postfixes_match_explicit_reference`, `bare_keyword_stays_primitive_and_explicit_keyword_is_a_reference`; `schemas_named_type_merge::bare_and_explicit_local_references_resolve_identically`, `a_bare_keyword_is_the_built_in_and_keyword_at_this_is_the_local_type`, `an_unknown_bare_name_is_a_typed_error_naming_the_type_and_schema`, `a_bare_name_inside_an_imported_definition_resolves_in_its_defining_file`, `a_cycle_through_bare_and_explicit_references_reports_the_chain` (L); CLI `schema_validate_unknown_bare_name_in_an_inline_schema_is_a_schema_error`, `…_in_a_referenced_schema_names_that_file` (L) |
+| 6 — DMLS assistance | `named_type_references::completion_offers_local_names_bare_collisions_with_this_and_imports_with_their_target`, `hover_on_a_reference_shows_the_definition_it_selects`, `definition_selects_the_defining_file_and_key_for_every_reference_spelling`, `a_missing_local_name_in_a_standalone_schema_is_reported_at_the_reference`, `a_multi_hop_contradiction_names_the_reference_and_both_declarations`, `a_standalone_contradiction_and_a_mixed_cycle_are_schema_definition_errors`, `editing_an_imported_definition_refreshes_every_assistance_without_reopening` (macOS) |
+| 7 — shipped-schema and test-suite audits; no stripping assertion | Phase 5 audit table; Phase 6 stripping search above |
+| 8 — area gates | Gates table above: darkmatter test+lint, claudine test+lint, messenger test |
+| 9 — round trip, passive corpus, CLI import fixtures | `serialize.rs::local_reference_serializes_bare_and_round_trips`, `local_reference_inside_an_inline_object_round_trips`; `shipped_schema_corpus::*` (5 tests, L); `schema_validate::*` (L) |
+| 10 — retained rejections, unaffected output, grouped match | `union_postfix_and_already_array_suffix_remain_rejected`, `schemas_without_repeats_keep_their_lowered_output`, `root_union_selection_requires_every_match_group`, `match_groups_stay_passive_in_a_single_schema` (L); `file_match::tests::groups_intersect_instead_of_widening`, `an_empty_intersection_constructs_and_prepares_without_a_walk` (L); claudine `schema_completion::tests::reused_match_groups_offer_only_files_every_group_admits`, `an_empty_match_intersection_offers_nothing_without_an_error`, `compose_schema_cli::completion_file_match_intersects_a_reused_types_groups`, `composition::schema::supplied::tests::an_existing_caller_file_selects_an_arm_only_when_every_match_group_admits_it` (L); CLI `schema_validate_grouped_match_*` (L) |
+
+### Representation choices, departures, and limitations (summary for review)
+
+- **Representation:** a bare name is a local reference (`@this`), and built-in keywords take precedence over it. Serialization writes bare names, and keeps `@this` only where a name collides with a keyword. Match groups are `Vec<Vec<String>>` per property and `alternatives: Vec<Vec<Vec<String>>>` across root-union arms (OR over arms, AND over groups).
+- **Departure recorded in Phase 5:** each arm of an inline root union expands as its own schema (`this` is that arm's own entries). The code did this before the feature too, and the docs now describe it.
+- **Open observations not changed (from Phase 5):**
+  - the `ConstraintConflict` message names bound kinds and origins but not their values;
+  - `standalone.rs` discards the YAML parse error location;
+  - `Markdown::from(String)` treats unparsable frontmatter as absent;
+  - the lifecycle-grammar spike fixtures resolve in time that doubles per nesting depth (pre-existing).
+- **Limitations:** WSL2 was not verified locally. The messenger slow tests above are pre-existing and over the L1 budget.
+
+### Verification and close
+
+- Both Wave 8 tasks are checked off in the plan. The plan and log frontmatter have the Phase 6 lists (all empty), plus `source_code`, `documentation`, `completed_phase: 6`, and `implemented: true`.
+- The `claudine` skill needed no update in this phase. Phase 5 already corrected `cli-commands.md`, and Phase 6 found no further drift.
+- **Implementation complete, ready for review.** Lifecycle movement, commit, and push are left to the author.
