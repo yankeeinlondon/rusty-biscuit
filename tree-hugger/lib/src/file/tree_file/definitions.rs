@@ -985,14 +985,15 @@ impl<'a> KindAgreement<'a> {
 mod tests {
     use super::*;
 
-    /// The imports read from the definition run's captures are exactly the
-    /// imports of `imported_symbols`' own run of the query, in every shipped
-    /// fixture and in grouped and repeated captures.
+    /// The imports read from the definition run's captures, with the same
+    /// forwarding flags, are exactly the imports of `imported_symbols`' own
+    /// run of the query, in every shipped fixture and in grouped and repeated
+    /// captures.
     #[test]
     fn imports_from_the_definition_run_equal_imported_symbols() {
         fn same_imports(tree_file: &TreeFile) -> usize {
             let definitions = tree_file.definitions(&MetadataSelection::ALL).expect("definitions");
-            let from_definitions = tree_file.imports_from_nodes(&definitions.import_nodes);
+            let from_definitions = tree_file.forwarded_imports_from_nodes(&definitions.import_nodes);
             let own_run = tree_file.imported_symbols().expect("imports");
             assert_eq!(format!("{from_definitions:?}"), format!("{own_run:?}"), "{}", tree_file.file.display());
             from_definitions.len()
