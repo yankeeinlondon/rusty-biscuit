@@ -29,14 +29,15 @@ depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: false
 message_to_agent: |-
-  Phases 1 and 2 are closed. The plan was renumbered to 12 phases on
+  Phases 1-4 are closed. The plan was renumbered to 12 phases on
   2026-10-12 (old 4 -> 4-5, old 5 -> 6-9, old 6/7/8 -> 10/11/12); the log's
   Phase 1-2 text uses the old numbers, and its "Author rulings and
   renumbering" section maps them. Every author decision is made: see
   "## Decisions" below. Do not set human_review for them again.
 
-  Read implementation-log.md "## Phase 1" (spike findings) and "## Phase 2"
-  (decisions 1-12) only as far as the phase you are running needs.
+  Read implementation-log.md "## Phase 1" (spike findings), "## Phase 2"
+  (decisions 1-12), "## Phase 3", and "## Phase 4" only as far as the phase
+  you are running needs.
 
   Phase 2 built the library contracts in worktree/lib/src/remove/: outcome.rs
   (RemovalOutcome, OperationReport) and recovery/ (OperationId, record.rs,
@@ -70,6 +71,32 @@ message_to_agent: |-
   with .git last, rmdirs the quarantine, and then reuses missing.rs
   remove_missing_record (a plain `git worktree remove` of the absent path);
   never pass --force.
+
+  Phase 3 left two hooks for later phases:
+  - Phase 6 (watchers): Sniff does not drop wt's own evidence, except Windows
+    open handles, which the kernel drops. Every watcher descriptor wt opens
+    must be registered in `remove::usage::OwnedHandles` (kind + descriptor)
+    before `check_usage` runs, or wt refuses its own removal.
+  - Phase 10 (lifecycle): call `check_usage(&SniffUsage, ..)` as the decisive
+    query and map a refusal with
+    `worktree_cli::commands::remove::usage::usage_refusal` (exit 3, including
+    `UsageRefusal::Unverified`). Then delete the `#[allow(dead_code)]` and its
+    comment on `pub mod usage` in `cli/src/commands/remove/mod.rs`, and the
+    early/inner `check_no_processes` + Windows probe per R8.
+
+  Phase 4 built `remove::quarantine::rename` (Phase 5 builds on it):
+  - `rename_no_replace(from, to)` is the quarantine move. It returns
+    `RenameError { kind: RenameFailure, source }`; map exits from `kind`
+    alone: `Sharing` and `Unsupported` -> exit 4 before mutation;
+    `Collision`, `CrossDevice`, `Permission`, `Other` -> operational
+    errors, never labeled as process usage. A missing source is `Other`
+    with `io::ErrorKind::NotFound` in `source`.
+  - `identity(path)` gives the no-follow `FileIdentity` in Sniff's encoding;
+    compare it with the record's `checkout_identity` after the move.
+  - `remove/quarantine/mod.rs` exists with only `pub mod rename;`. Put the
+    naming and association code beside it.
+  - Windows `std::path::absolute` is applied to the destination inside the
+    rename; a relative destination is fine but pass the same-depth sibling.
 ---
 
 # Graceful removal under filesystem contention

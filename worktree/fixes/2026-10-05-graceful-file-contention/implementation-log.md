@@ -34,8 +34,40 @@ skills_files_updated_during_phase_2:
   - .claude/skills/worktree/remove.md
   - .claude/skills/os/SKILL.md
   - .claude/skills/os/macos.md
+source_files_during_phase_3:
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/usage/tests.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove_usage_refusal.rs
+  - worktree/cli/tests/snapshots/remove_usage_refusal__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__every_evidence_location_and_holder_shape.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__untrusted_text_is_shown_literally.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__long_lists_are_counted.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__coverage_notes.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__an_unverified_checkout_refuses.snap
+docs_updated_during_phase_3:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_4:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/rename/tests.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+docs_updated_during_phase_4:
+  - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Implementation Log for 2026-10-05-graceful-file-contention (12 phases)
@@ -565,3 +597,244 @@ numbers:
 | 6 | 10 |
 | 7 | 11 |
 | 8 | 12 |
+
+## Phase 3
+
+Started and finished 2026-10-12. Phase 3 adds the decisive usage check (a
+library module) and the refusal `wt remove` prints for it (a CLI module).
+Neither is called by `wt remove` yet: the plan puts the call site in Phase 10's
+lifecycle, after observation starts. `run` and `remove_worktree` still use
+`check_no_processes` and the Windows probe, so user-visible behavior is
+unchanged.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/usage.rs` | `UsageSource` (the injection seam, like `PrSource`) and `SniffUsage` (`query_path_usage` with default options: the shared 2 s budget, no retry, no new flag). `OwnedHandles` (the R12 registry). `check_usage` (query once, then `assess`) and `assess` (the pure policy). `UsageClearance` keeps the whole report, the count of excluded own handles, and a `CoverageSummary`. `UsageRefusal::InUse(InUse)` holds `Holder`s (PID, creation token, `identity_uncertain`, name, executable, evidence). `UsageRefusal::Unverified(PathUsageError)` covers every typed query error. `EvidenceLocation` is `Path`, `Aliases` (every in-scope name, none preferred), or `Unnamed` (identity and observed spelling only) |
+| `worktree/lib/src/remove/usage/tests.rs` | Policy matrix against injected reports, plus two real Sniff queries |
+| `worktree/cli/src/commands/remove/usage.rs` | `refusal_markup` (Prose markup, one line per `\n`), `usage_refusal` (wraps the markup in `WorktreeError::RefusedToLoseWork`, so exit 3 through the existing mapping and printing in `main`), and `coverage_note` |
+| `worktree/cli/tests/remove_usage_refusal.rs` and six snapshots | Rendering through the library's real `assess`, snapshot-tested in an integration test because of the worktree skill's double-target trap |
+
+### Decisions and departures
+
+1. **Self-exclusion (R12).** Sniff does not drop the caller's own evidence;
+   only Windows open handles are excluded, by the kernel. `OwnedHandles`
+   therefore matches `(EvidenceKind, descriptor)` under `wt`'s own PID. A
+   live process's PID cannot be reused, so the PID identifies this process,
+   with two exceptions that are never excluded. One is a record Sniff marks
+   `identity_uncertain`. The other covers every record for this PID when its
+   certain records disagree on the creation token. `wt` cannot read its own
+   creation token through Sniff's public API, so token agreement is checked
+   across records instead. Evidence without a descriptor (working directory,
+   loaded module) is never excluded: `wt` running from inside the checkout
+   refuses. Nothing registers a handle yet; Phase 6's watchers must register
+   theirs before the query.
+2. **A `PathUsageError` is exit 3, not 4.** Every variant means the checkout
+   could not be verified right before the move: it vanished, it is no longer
+   a directory, or its identity could not be read in time. That is "changed
+   approved state before mutation" in the spec's table. Exit 4 means a
+   different environment is needed, which does not apply. `InvalidOption`
+   cannot occur with default options and is mapped the same way rather than
+   given its own path. Errors are matched by variant (`unverified_reason`),
+   never by message text (R3).
+3. **Rendering.** It follows the spec's example. The two departures in
+   wording are recorded here only (the spec is unchanged):
+   - The coverage note says "cannot be listed on this system" rather than
+     naming the OS, so the snapshots are identical on every host.
+   - It summarizes every non-complete mechanism by status, so a real macOS
+     report reads "Discovery is partial; FSEvents subscriptions and polling
+     watchers cannot be listed on this system; open handles and working
+     directories were only partly read." (`open_handles` and
+     `working_directories` are `partial` on macOS because other users'
+     processes cannot be read.)
+
+   The refusal lists up to 10 processes and 5 evidence lines per process, and
+   counts the rest. A process with no name says "name unavailable". An
+   uncertain lifetime is marked, and no name is looked up for it. Names,
+   executables, paths, and error text have control characters escaped
+   (`\u{1b}`, `\n`) and then Prose-escaped. The rerun command quotes the
+   name through the existing `shell_word`. A name no shell can spell
+   identically gets "wt remove for this worktree" instead of a pasteable
+   command.
+4. **`#[allow(dead_code)]` on `pub mod usage` in the CLI.** The `wt` binary
+   target compiles the module but does not call it until Phase 10. The
+   attribute and its comment must be removed when `run` calls
+   `usage_refusal`. A crate-level allow already exists in `dirty_tree.rs`.
+5. **R8 is unchanged in this phase.** The early `check_no_processes` in `run`
+   and the one inside `remove_worktree` (with the Windows probe) remain until
+   Phase 10 replaces them.
+
+### Requirement-to-test mapping
+
+All new tests are L1 (no tier marker). The library tests are in the
+`worktree` lib binary; the CLI tests are in the auto-discovered
+`worktree-cli` integration test `remove_usage_refusal`.
+
+| Requirement (plan Phase 3 / spec "Preflight and refusal") | Test |
+| --- | --- |
+| Each of `watch_registration`, `open_handle`, `working_directory`, `loaded_module` refuses, naming PID, name, executable, kind, and exact path | `usage::tests::every_evidence_kind_from_another_process_refuses` |
+| No match continues for `usable` (complete and partial), `unavailable`, and `unsupported`; coverage and the whole report are retained | `usage::tests::no_match_clears_whatever_the_coverage` |
+| A match in a partial report (budget exhausted, truncated) still refuses and carries the coverage | `usage::tests::a_match_in_a_partial_report_refuses_with_its_coverage` |
+| Exclusion of exactly the registered operation handles. Near misses refuse: the same descriptor in another PID, an unregistered descriptor, a different kind, no descriptor, an uncertain lifetime, and conflicting lifetimes for this PID | `usage::tests::only_this_operations_registered_handles_are_excluded` |
+| Not every record of the current PID is excluded | `usage::tests::this_processes_other_evidence_still_refuses` |
+| Several aliases and identity-only evidence reported as facts; no name for an uncertain lifetime | `usage::tests::locations_report_aliases_and_identity_only_evidence_as_facts` |
+| Every typed `PathUsageError` refuses before mutation, matched by variant; exactly one query (no automatic retry) | `usage::tests::every_query_error_refuses_as_unverified_without_a_retry` |
+| Real Sniff query (crosses the library → Sniff → OS boundary): a fixture-owned child's working directory refuses by PID; an empty tree clears | `usage::tests::a_real_query_names_a_process_working_in_the_checkout` |
+| Real Sniff query of a vanished checkout refuses as unverified | `usage::tests::a_real_query_of_a_vanished_checkout_refuses` |
+| The spec's example output (concise preamble, PID line, evidence line, rerun command, "kept" line, harmless-usage line, coverage note) | `remove_usage_refusal::the_specs_example` (snapshot) |
+| Several holders, each evidence kind, aliases, unnamed objects, a nameless and uncertain holder; no note when coverage is complete | `remove_usage_refusal::every_evidence_location_and_holder_shape` (snapshot) |
+| Untrusted names and paths are escaped (markup, ANSI escape, newline); the rerun argument is quoted, or omitted when unquotable | `remove_usage_refusal::untrusted_text_is_shown_literally` (snapshot + assertions) |
+| Long lists are counted, not listed | `remove_usage_refusal::long_lists_are_counted` (snapshot) |
+| Coverage notes: complete, macOS-typical, budget exhausted plus not attempted, failed, unsupported, omitted evidence | `remove_usage_refusal::coverage_notes` (snapshot) |
+| An unverified checkout refuses, one message per error variant | `remove_usage_refusal::an_unverified_checkout_refuses` (snapshot) |
+| Exit 3 for both refusals; no override flag offered | `remove_usage_refusal::refusals_exit_3_and_offer_no_override` |
+
+The input robustness matrix does not apply: this phase reads no file or
+configuration format. Sniff's report is consumed as typed values.
+
+"Exits 3 and 4 still remove nothing" holds without a new test: the module
+mutates nothing and `wt remove`'s flow is unchanged. The existing remove
+tests still pass.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1225 passed, 14 skipped (the area's existing skips), 0 failed.
+- `just lint`: clean for `worktree` and `worktree-cli`. The first run flagged
+  `clippy::type_complexity` in a test, fixed with a type alias.
+
+Cross-OS (`just cross-check worktree --os <os> remove::usage …`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | 9 library + 7 CLI tests passed; the real query test takes 0.47 s |
+| Linux (`build-linux`) | 9 library tests passed |
+| native Windows (`build-win-native`) | 9 library tests passed; the real query test takes 1.9 s for two queries |
+| WSL2 | not run: same Unix code path as Linux, and nothing here depends on the filesystem |
+
+`cross-check worktree` runs the `worktree` library package only, so the CLI
+rendering tests ran on macOS alone. They are pure string rendering from
+in-memory values and have no OS-dependent input.
+
+Not run: `just test-l2`. No terminal-interaction code path changed, and
+nothing calls the new rendering from `wt` yet.
+
+Phase 3 is complete; ready for review.
+
+## Phase 4
+
+Started and finished 2026-10-12. Phase 4 adds the no-replacement rename the
+quarantine move will use, with one FFI surface per OS behind one function.
+Nothing calls it yet (Phase 5 does), and nothing here touches Git, so
+`wt remove`'s behavior is unchanged.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/quarantine/mod.rs` | The `quarantine` module; only `pub mod rename` for now |
+| `worktree/lib/src/remove/quarantine/rename.rs` | `rename_no_replace(from, to) -> Result<(), RenameError>`; `RenameError { kind: RenameFailure, source: io::Error }`; `RenameFailure` = `Collision`, `Unsupported`, `CrossDevice`, `Permission`, `Sharing`, `Other`; `identity(path) -> io::Result<FileIdentity>` (no-follow); `pub(crate) classify(Stage, &io::Error)` |
+| `worktree/lib/src/remove/quarantine/rename/tests.rs` | Real-filesystem tests per OS plus classification tables |
+| `worktree/lib/Cargo.toml` | `windows-sys` 0.61 for Windows (`Win32_Foundation`, `Win32_Storage_FileSystem`); the existing Unix `libc` gains a second use |
+
+Primitives, as R5 decided: Linux `renameat2(RENAME_NOREPLACE)`, macOS
+`renamex_np(RENAME_EXCL)`, Windows `SetFileInformationByHandle(FileRenameInfo,
+ReplaceIfExists = FALSE)` on a handle opened with `DELETE | SYNCHRONIZE`,
+full sharing, `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`.
+Windows identity is `GetFileInformationByHandleEx(FileIdInfo)`.
+
+Error mapping:
+
+| Kind | Unix | Windows |
+| --- | --- | --- |
+| `Collision` | `EEXIST`, `ENOTEMPTY` | 183 `ERROR_ALREADY_EXISTS`, 80 `ERROR_FILE_EXISTS` |
+| `Unsupported` | `EINVAL` (drvfs), `ENOSYS` (kernel before 3.15), `ENOTSUP` | 50 `ERROR_NOT_SUPPORTED`, 1 `ERROR_INVALID_FUNCTION` |
+| `CrossDevice` | `EXDEV` | 17 `ERROR_NOT_SAME_DEVICE` |
+| `Permission` | `EACCES`, `EPERM` | 5 or 32 from the `DELETE` open |
+| `Sharing` | never | 5 or 32 from the rename after a successful open |
+| `Other` | everything else, including `ENOENT`, `EROFS`, a NUL byte in a path | everything else, including 2/3 (missing source) |
+
+### Decisions and departures
+
+1. **Raw `SYS_renameat2` on Linux**, not libc's `renameat2` wrapper (which the
+   S1 probe used). Older glibc and some musl builds do not export the wrapper;
+   the syscall works with any libc, and `ENOSYS` on an old kernel maps to
+   `Unsupported`.
+2. **`identity` lives in the rename module** rather than calling Sniff's
+   `identity::of_path`, which is `pub(crate)` in Sniff. Making it public would
+   touch `sniff` and widen CI scope to its reverse dependencies for a function
+   of a few lines; the Windows open helper is shared with the rename anyway.
+   The encoding matches Sniff's (`u128::from_le_bytes` of the 128-bit ID), so
+   identities compare equal with a Sniff report or a recovery record. If a
+   later phase needs Sniff's version anyway, replace this one rather than
+   keeping both.
+3. **The rename returns `()`, not the moved identity.** Phase 5 reads
+   `identity(to)` after the move and compares it with the record's
+   `checkout_identity`; the destination is a random hidden sibling, so reading
+   it by path is not a meaningful race.
+4. **Unix targets other than Linux and macOS** refuse with `ENOTSUP`
+   (`Unsupported`) rather than falling back to a rename that may replace. The
+   repository supports only macOS, Linux, and Windows; the fallback exists so
+   the crate still compiles elsewhere.
+5. **Windows destination** is made absolute with `std::path::absolute`
+   before the call, because `FileRenameInfo` without a root handle needs a
+   full path.
+6. **Unrelated fix in Phase 2 code.** A cross-target clippy for Windows
+   (`cargo clippy -p worktree --lib --tests --target x86_64-pc-windows-gnu
+   -- -D warnings`) failed on `recovery/storage.rs::create_private_dir`: its
+   `let mut builder` is mutated only under `#[cfg(unix)]`, so Windows reported
+   an unused `mut`. CI lints on Linux only, so this was latent. Fixed by
+   building the `DirBuilder` inside each `cfg` branch. Behavior is unchanged;
+   the recovery tests pass on macOS and native Windows.
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in the `worktree` library binary, module
+`remove::quarantine::rename::tests` (no tier marker; each runs in under
+0.1 s). The input robustness matrix does not apply: nothing here reads a file
+format or configuration.
+
+| Requirement (plan Phase 4) | Test | Hosts |
+| --- | --- | --- |
+| An absent destination receives the tree; the original path is gone; identity survives | `an_absent_destination_receives_the_tree_with_its_identity` | all |
+| An existing empty directory, file, non-empty directory, or dangling link is never replaced; `Collision`; both sides keep identity and content | `an_existing_destination_is_never_replaced` | all (the link cell ran on native Windows: no skip message) |
+| A failed rename leaves the original intact | asserted in every failure test above and below | all |
+| Missing source → `Other` with `NotFound`; nothing created | `a_missing_source_fails_as_other_and_creates_nothing` | all |
+| Identity is no-follow; missing path is `NotFound` | `identity_names_a_link_itself_not_its_target` | all |
+| A link source moves as itself, not its target | `a_link_is_moved_as_itself` | all |
+| Unix permission denial → `Permission`, nothing moved (skips as root) | `a_parent_this_user_cannot_write_is_a_permission_failure` | macOS, Linux, WSL2 |
+| Invalid path input (NUL) → `Other`, nothing moved | `a_path_with_a_nul_byte_fails_as_other` | macOS, Linux, WSL2 |
+| Native (non-UTF-8) names move losslessly | `a_name_that_is_not_utf8_moves_losslessly` | Linux, WSL2 |
+| Windows: an open file in the subtree (std default sharing, and without delete sharing) → `Sharing`; nothing moved; moves once released | `an_open_file_in_the_tree_is_a_sharing_failure` | native Windows |
+| Error kinds a host cannot produce on demand: drvfs `EINVAL`, `ENOSYS`, `ENOTSUP`, `EXDEV`, `EACCES`/`EPERM`, `ENOENT`/`EROFS`/`EBUSY` | `unix_error_codes_classify` | macOS, Linux, WSL2 |
+| Windows codes by stage: 5/32 at the open → `Permission`, at the rename → `Sharing`; 183/80, 17, 50/1, 2/3/87 | `windows_error_codes_classify_by_stage` | native Windows |
+| A non-OS error is `Other` | `an_error_without_an_os_code_is_other` | all |
+
+Mutation check: replacing `RENAME_EXCL` with `0` (a plain, replacing rename)
+on macOS made `an_existing_destination_is_never_replaced` fail at the empty
+directory cell; restored afterwards.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1234 passed, 14 skipped (the area's existing skips), 0 failed.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows clippy (cross-target, see decision 6): clean after the fix.
+
+Cross-OS (`just cross-check worktree --os <os> quarantine`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | 9 passed |
+| Linux (`build-linux`) | 10 passed (adds the non-UTF-8 test) |
+| native Windows (`build-win-native`) | 8 passed; `remove::recovery quarantine` rerun after decision 6: 32 passed |
+| WSL2 (`build-win`) | passed (ext4 home; drvfs `EINVAL` is covered by classification, as the plan says) |
+
+Not run: `just test-l2` (no terminal code changed); a Linux-target clippy
+(no remote lint recipe; the Linux code compiled and ran on `build-linux`, and
+CI lints on Linux).
+
+Phase 4 is complete; ready for review.

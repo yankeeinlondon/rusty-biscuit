@@ -1,7 +1,7 @@
 ---
 total_phases: 12
 created: 2026-10-11
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -35,8 +35,40 @@ skills_files_updated_during_phase_2:
   - .claude/skills/worktree/remove.md
   - .claude/skills/os/SKILL.md
   - .claude/skills/os/macos.md
+source_files_during_phase_3:
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/usage/tests.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove_usage_refusal.rs
+  - worktree/cli/tests/snapshots/remove_usage_refusal__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__every_evidence_location_and_holder_shape.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__untrusted_text_is_shown_literally.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__long_lists_are_counted.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__coverage_notes.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__an_unverified_checkout_refuses.snap
+docs_updated_during_phase_3:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_4:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/rename/tests.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+docs_updated_during_phase_4:
+  - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/remove.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Plan: Graceful removal under filesystem contention
@@ -410,7 +442,7 @@ tests green on macOS; record/journal code compiles for all targets
 
 ### Wave 4 (parallel)
 
-- [ ] **Library usage module** - `remove/usage.rs`: wrap
+- [x] **Library usage module** - `remove/usage.rs`: wrap
   `sniff::filesystem::query::query_path_usage` with default options (shared
   two-second budget, no new timeout flag or automatic retry), an
   operation-handle registry for self-exclusion (R12), and mapping to a typed
@@ -425,7 +457,7 @@ tests green on macOS; record/journal code compiles for all targets
   watchers.
       - Prerequisites: R3, R12; the decisive call site lands in Phase 10's
         orchestration, behind this module's seam from the start.
-- [ ] **CLI refusal rendering** - In `cli/src/commands/remove/`: render the
+- [x] **CLI refusal rendering** - In `cli/src/commands/remove/`: render the
       typed refusal through `biscuit-terminal` `Prose` per the spec's example
       (concise preamble, per-PID evidence lines, rerun command with quoted
       arguments, "checkout and branches were kept", coverage note such as
@@ -448,7 +480,7 @@ here touches Git.
 
 ### Wave 5 (per-OS backends in parallel)
 
-- [ ] **Rename backends** - `remove/quarantine/rename.rs` with per-OS
+- [x] **Rename backends** - `remove/quarantine/rename.rs` with per-OS
       primitives (R5): Linux `renameat2(RENAME_NOREPLACE)`, macOS
       `renamex_np(RENAME_EXCL)`, Windows `SetFileInformationByHandle`
       (`FileRenameInfo`, `ReplaceIfExists = FALSE`) after a `DELETE` open.
@@ -457,7 +489,7 @@ here touches Git.
       successful open; 5/32 from the open is permission), other I/O. Windows
       directory identity from `GetFileInformationByHandleEx(FileIdInfo)`.
       Adds `windows-sys` 0.61 (workspace version) for Windows.
-- [ ] **Tests** - Per OS: an existing destination (empty directory, file,
+- [x] **Tests** - Per OS: an existing destination (empty directory, file,
       non-empty directory, dangling link) is never replaced; a failed rename
       leaves the original intact; identity survives the move; each error kind
       maps as above. Windows: an open file in the subtree yields the sharing
