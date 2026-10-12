@@ -2,37 +2,37 @@
 
 //! Convenient re-exports for working with generated API clients.
 //!
-//! This prelude exports the client structs, request enums, and shared error
-//! types. Response types are **not** re-exported here to avoid naming conflicts.
-//! Import them from specific API modules instead:
+//! This prelude exports each API's marker type and client alias, and
+//! the runtime types every send uses. Request and response types are
+//! **not** re-exported here to avoid naming conflicts. Import them
+//! from specific API modules instead:
 //!
 //! ```text
-//! use schematic_schema::openai::Model;
-//! use schematic_schema::anthropic::CreateMessageResponse;
+//! use schematic_schema::openai::{ListModelsRequest, ListModelsResponse};
 //! ```
 //!
 //! ## Re-exports
 //!
-//! **Clients and request enums:**
+//! **APIs and their clients:**
 //!
-//! - [`Anthropic`] + [`AnthropicRequest`]
-//! - [`ArtificialAnalysisData`] + [`ArtificialAnalysisDataRequest`]
-//! - [`ArtificialAnalysisCritPt`] + [`ArtificialAnalysisCritPtRequest`]
-//! - [`Bitbucket`] + [`BitbucketRequest`]
-//! - [`OpenAI`] + [`OpenAIRequest`]
-//! - [`ElevenLabs`] + [`ElevenLabsRequest`]
-//! - [`Gitea`] + [`GiteaRequest`]
-//! - [`GitHub`] + [`GitHubRequest`]
-//! - [`GitLab`] + [`GitLabRequest`]
-//! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
-//! - [`LmStudio`] + [`LmStudioRequest`]
-//! - [`OllamaNative`] + [`OllamaNativeRequest`]
-//! - [`OllamaOpenAI`] + [`OllamaOpenAIRequest`]
-//! - [`EmqxBasic`] + [`EmqxBasicRequest`]
-//! - [`EmqxBearer`] + [`EmqxBearerRequest`]
-//! - [`Eversolo`] + [`EversoloRequest`]
-//! - [`SamsungSmartTv`] + [`SamsungSmartTvRequest`]
-//! - [`UnfoldedCircleCoreRest`] + [`UnfoldedCircleCoreRestRequest`]
+//! - [`Anthropic`] + [`AnthropicClient`]
+//! - [`ArtificialAnalysisData`] + [`ArtificialAnalysisDataClient`]
+//! - [`ArtificialAnalysisCritPt`] + [`ArtificialAnalysisCritPtClient`]
+//! - [`Bitbucket`] + [`BitbucketClient`]
+//! - [`OpenAI`] + [`OpenAIClient`]
+//! - [`ElevenLabs`] + [`ElevenLabsClient`]
+//! - [`Gitea`] + [`GiteaClient`]
+//! - [`GitHub`] + [`GitHubClient`]
+//! - [`GitLab`] + [`GitLabClient`]
+//! - [`HuggingFaceHub`] + [`HuggingFaceHubClient`]
+//! - [`LmStudio`] + [`LmStudioClient`]
+//! - [`OllamaNative`] + [`OllamaNativeClient`]
+//! - [`OllamaOpenAI`] + [`OllamaOpenAIClient`]
+//! - [`EmqxBasic`] + [`EmqxBasicClient`]
+//! - [`EmqxBearer`] + [`EmqxBearerClient`]
+//! - [`Eversolo`] + [`EversoloClient`]
+//! - [`SamsungSmartTv`] + [`SamsungSmartTvClient`]
+//! - [`UnfoldedCircleCoreRest`] + [`UnfoldedCircleCoreRestClient`]
 //!
 //! **WebSocket definition helpers:**
 //!
@@ -42,56 +42,51 @@
 //! - [`define_unfolded_circle_integration_ws_api_definition`] (UnfoldedCircleIntegrationWs)
 //! - [`define_samsung_smart_tv_remote_ws_api_definition`] (SamsungSmartTvRemote)
 //!
-//! **Shared types:**
-//!
-//! - [`SchematicError`] - Error type for all API operations
-//! - [`RequestParts`] - Low-level request decomposition tuple
+//! **Runtime types:** [`CallOptions`], [`Credential`], [`Deadline`],
+//! [`OriginPolicy`], [`Response`], [`RawResponse`], and
+//! [`TransportError`] from [`schematic_runtime`].
 //!
 //! ## Examples
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::openai::RetrieveModelRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), SchematicError> {
-//!     let client = OpenAI::new();
-//!
-//!     // Typed request with new()
-//!     let models = client.list_models().await?;
-//!
-//!     // Ergonomic From<&str> for single-param endpoints
-//!     use schematic_schema::openai::{RetrieveModelRequest, Model};
-//!     let model: Model = client
-//!         .request(RetrieveModelRequest::from("gpt-4"))
-//!         .await?;
-//!
-//!     Ok(())
+//! let client = OpenAI::new()?;
+//! let response = client
+//!     .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
+//!     .await?;
+//! if let Some(model) = response.data() {
+//!     println!("{}", model.id);
 //! }
 //! ```
-pub use crate::shared::{RequestParts, SchematicError};
-pub use crate::anthropic::{Anthropic, AnthropicRequest};
+pub use schematic_runtime::{
+    CallOptions, Credential, Deadline, OriginPolicy, RawResponse, Response,
+    TransportError,
+};
+pub use crate::anthropic::{Anthropic, AnthropicClient};
 pub use crate::artificial_analysis::{
-    ArtificialAnalysisData, ArtificialAnalysisDataRequest,
+    ArtificialAnalysisData, ArtificialAnalysisDataClient,
 };
 pub use crate::artificial_analysis::{
-    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest,
+    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtClient,
 };
-pub use crate::bitbucket::{Bitbucket, BitbucketRequest};
-pub use crate::openai::{OpenAI, OpenAIRequest};
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use crate::gitea::{Gitea, GiteaRequest};
-pub use crate::github::{GitHub, GitHubRequest};
-pub use crate::gitlab::{GitLab, GitLabRequest};
-pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
-pub use crate::lmstudio::{LmStudio, LmStudioRequest};
-pub use crate::ollama::{OllamaNative, OllamaNativeRequest};
-pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIRequest};
-pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
-pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};
-pub use crate::eversolo::{Eversolo, EversoloRequest};
-pub use crate::samsung_smart_tv::{SamsungSmartTv, SamsungSmartTvRequest};
+pub use crate::bitbucket::{Bitbucket, BitbucketClient};
+pub use crate::openai::{OpenAI, OpenAIClient};
+pub use crate::elevenlabs::{ElevenLabs, ElevenLabsClient};
+pub use crate::gitea::{Gitea, GiteaClient};
+pub use crate::github::{GitHub, GitHubClient};
+pub use crate::gitlab::{GitLab, GitLabClient};
+pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubClient};
+pub use crate::lmstudio::{LmStudio, LmStudioClient};
+pub use crate::ollama::{OllamaNative, OllamaNativeClient};
+pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIClient};
+pub use crate::emqx::{EmqxBasic, EmqxBasicClient};
+pub use crate::emqx::{EmqxBearer, EmqxBearerClient};
+pub use crate::eversolo::{Eversolo, EversoloClient};
+pub use crate::samsung_smart_tv::{SamsungSmartTv, SamsungSmartTvClient};
 pub use crate::unfolded_circle_core_rest::{
-    UnfoldedCircleCoreRest, UnfoldedCircleCoreRestRequest,
+    UnfoldedCircleCoreRest, UnfoldedCircleCoreRestClient,
 };
 pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
 pub use crate::unfolded_circle_core_ws::define_api as define_unfolded_circle_core_ws_api_definition;

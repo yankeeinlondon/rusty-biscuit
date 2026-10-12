@@ -2,13 +2,17 @@
 
 //! Generated REST API clients and WebSocket API definition helpers.
 //!
-//! Each API is available as a separate module with its client struct,
-//! request types, and response types re-exported from definitions.
+//! Each REST API module holds the API's marker type with its
+//! constructors, a `{Name}Client` alias for its
+//! [`schematic_runtime::Client`], its request types, and its response
+//! types re-exported from the definitions. Sending, credentials,
+//! redirects, deadlines, and the response envelope belong to
+//! [`schematic_runtime`].
 //!
 //! ## Available REST APIs
 //!
-//! | Module | Client | Description | Auth |
-//! |--------|--------|-------------|------|
+//! | Module | API | Description | Auth |
+//! |--------|-----|-------------|------|
 //! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
 //! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
 //! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
@@ -40,64 +44,34 @@
 //!
 //! ## Quick Start
 //!
-//! Use the prelude for convenient imports:
-//!
 //! ```text
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::anthropic::ListModelsRequest;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), SchematicError> {
-//!     let client = Anthropic::new();
-//!     let response = client.list_models().await?;
-//!     println!("{:?}", response);
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let client = Anthropic::new()?;
+//!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
+//!     println!("{}", response.meta);
+//!     let data = response.into_result()?;
 //!     Ok(())
 //! }
 //! ```
 //!
-//! ## Ergonomic Features
+//! ## Results
 //!
-//! Generated clients include several convenience features:
-//!
-//! - **`From<&str>` / `From<String>`** on single-param request structs
-//! - **`From<BodyType>`** on body-only request structs
-//! - **`#[must_use]`** on all async methods to catch missing `.await`
-//! - **`DOCS_URL`** constant on each client for programmatic doc access
-//! - **`variant()`** method for creating alternate configurations
-//!
-//! ## Variants
-//!
-//! Create alternate client configurations for staging, testing, or different
-//! environments using the [`variant()`](anthropic::Anthropic::variant) builder
-//! or [`variant_with()`](anthropic::Anthropic::variant_with) convenience method:
-//!
-//! ```text
-//! use schematic_schema::prelude::*;
-//! use schematic_define::UpdateStrategy;
-//!
-//! let client = Anthropic::new();
-//!
-//! // Simple environment switch with variant_with()
-//! let staging = client.variant_with(
-//!     "https://staging.example.com/v1",
-//!     vec!["STAGING_ANTHROPIC_API_KEY".to_string()],
-//!     UpdateStrategy::NoChange,
-//! );
-//!
-//! // Full builder with response hooks
-//! let custom = client.variant()
-//!     .base_url("http://localhost:8080/v1")
-//!     .env_auth(vec!["LOCAL_KEY".to_string()])
-//!     .auth_update(UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
-//!         header: "X-API-Key".to_string(),
-//!     }))
-//!     .pre_response_json(|_ctx, json| Ok(json))
-//!     .build();
-//! ```
-//!
-//! ## Error Handling
-//!
-//! All request methods return `Result<T, SchematicError>`. See
-//! [`shared::SchematicError`] for the full error enum and handling examples.
+//! A send returns `Ok` with a [`schematic_runtime::Response`] whenever
+//! the server answered, whatever the status, and
+//! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
+//! arrived.
+/// The `schematic-runtime` ABI this crate was generated against.
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+const _: () = assert!(
+    schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
+    "schematic-schema was generated for schematic-runtime ABI 1, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
+);
+/// The runtime that sends this crate's requests.
+pub use schematic_runtime;
 pub mod shared;
 pub mod prelude;
 pub mod anthropic;

@@ -629,6 +629,16 @@
               "path": [
                 "v2",
                 "voices"
+              ],
+              "query": [
+                {
+                  "key": "page_size",
+                  "description": "Voices per page (at most 100)"
+                },
+                {
+                  "key": "page_token",
+                  "description": "The previous page's `next_page_token`"
+                }
               ]
             },
             "description": "Lists all available voices"

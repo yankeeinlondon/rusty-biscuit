@@ -1367,6 +1367,7 @@ dependencies = [
  "tokio",
  "tracing",
  "which 8.0.2",
+ "wiremock",
 ]
 
 [[package]]
@@ -3934,6 +3935,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unfolded-integration-helper",
+ "wiremock",
 ]
 
 [[package]]
@@ -6041,6 +6043,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -8199,7 +8202,6 @@ dependencies = [
  "gguf-rs-lib",
  "reqwest 0.13.2",
  "schematic-definitions",
- "schematic-schema",
  "serde",
  "serde_json",
  "serial_test",
@@ -11805,9 +11807,9 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
- "reqwest 0.13.2",
  "schematic-define",
  "schematic-definitions",
+ "schematic-runtime",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
