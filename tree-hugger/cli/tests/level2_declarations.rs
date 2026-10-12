@@ -23,7 +23,9 @@
 //!
 //! The report views (`--tree`, `--stats`, `--signatures full|none`, and
 //! `classes --format table`) are compared row for row, indentation included,
-//! so those checks need a pane at least 80 columns wide.
+//! so those checks need a pane at least 80 columns wide. Each view is a
+//! separate nextest case on every backend; the broker shares the pane without
+//! bundling the views into one long-running test.
 //!
 //! Skip-clean: when no terminal harness is available each test prints a skip
 //! notice and passes.
@@ -43,7 +45,7 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
 use tempfile::TempDir;
-use terminal_report::{Report, run_scoped};
+use terminal_report::{Report, has_hyperlink, run_scoped};
 use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
@@ -218,7 +220,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         // The location is the text of a link to its file and line.
         let row = report.row(CREATE);
         assert!(
-            row.raw.contains("/geometry.ts#L14\x1b\\geometry.ts:14:3"),
+            has_hyperlink(&row.raw, "/geometry.ts#L14", "geometry.ts:14:3"),
             "expected the location linked to geometry.ts#L14.\nrow:\n{:?}",
             row.raw,
         );
@@ -335,7 +337,7 @@ fn check_declarations<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     if pane.osc8 {
         let row = report.row(SHAPE);
         assert!(
-            row.raw.contains("/geometry.ts#L10\x1b\\[10:8]"),
+            has_hyperlink(&row.raw, "/geometry.ts#L10", "[10:8]"),
             "expected the container location linked to geometry.ts#L10.\nrow:\n{:?}",
             row.raw,
         );
@@ -421,7 +423,7 @@ fn check_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     if pane.osc8 {
         // The Location cell is the text of a link to its file and line.
         assert!(
-            report.raw().contains("/geometry.ts#L14\x1b\\geometry.ts:14"),
+            has_hyperlink(&report.raw(), "/geometry.ts#L14", "geometry.ts:14"),
             "expected the location linked to geometry.ts#L14.\nreport:\n{:?}",
             report.raw(),
         );
@@ -538,7 +540,7 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     if pane.osc8 {
         let row = report.row(CREATE);
         assert!(
-            row.raw.contains("/geometry.ts#L14\x1b\\[14:3]"),
+            has_hyperlink(&row.raw, "/geometry.ts#L14", "[14:3]"),
             "expected the member location linked to geometry.ts#L14.\nrow:\n{:?}",
             row.raw,
         );
@@ -689,7 +691,6 @@ fn check_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
             }
         }
     }
-    check_package_stats(harness, pane);
 }
 
 fn check_package_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
@@ -773,7 +774,7 @@ fn check_signature_modes<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     assert_style(&report, FULL, "geometry.ts:14:3", &["2"], &["1"], "a dim location");
     if pane.osc8 {
         assert!(
-            report.row(FULL).raw.contains("/geometry.ts#L14\x1b\\geometry.ts:14:3"),
+            has_hyperlink(&report.row(FULL).raw, "/geometry.ts#L14", "geometry.ts:14:3"),
             "expected the location linked to geometry.ts#L14.\nrow:\n{:?}",
             report.row(FULL).raw,
         );
@@ -882,7 +883,7 @@ fn check_signature_modes<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     );
     if pane.osc8 {
         assert!(
-            report.raw().contains("/geometry.ts#L14\x1b\\geometry.ts:14"),
+            has_hyperlink(&report.raw(), "/geometry.ts#L14", "geometry.ts:14"),
             "expected the location linked to geometry.ts#L14.\nreport:\n{:?}",
             report.raw(),
         );
@@ -915,7 +916,7 @@ fn check_classes_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     );
     if pane.osc8 {
         assert!(
-            report.raw().contains("/geometry.ts#L10\x1b\\geometry.ts:10"),
+            has_hyperlink(&report.raw(), "/geometry.ts#L10", "geometry.ts:10"),
             "expected the container location linked to geometry.ts#L10.\nreport:\n{:?}",
             report.raw(),
         );
@@ -967,7 +968,7 @@ fn check_refs<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     if pane.osc8 {
         let row = report.row(CALL);
         assert!(
-            row.raw.contains("/geometry.ts#L15\x1b\\15:16"),
+            has_hyperlink(&row.raw, "/geometry.ts#L15", "15:16"),
             "expected the location linked to geometry.ts#L15.\nrow:\n{:?}",
             row.raw,
         );
@@ -999,23 +1000,50 @@ fn check_refs<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
 // tmux — headless; capture keeps SGR but not OSC 8
 // ------------------------------------------------------------------
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_declarations_in_tmux() {
+macro_rules! declaration_view_tests {
+    ($backend:ident => $run:ident) => {
+        mod $backend {
+            use super::*;
+            #[test]
+            #[serial(level2_terminal)]
+            fn declarations() { $run(check_declarations); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn wrapping() { $run(check_wrapping); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn table() { $run(check_table); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn outline() { $run(check_outline); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn stats() { $run(check_stats); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn package_stats() { $run(check_package_stats); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn signature_modes() { $run(check_signature_modes); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn classes_table() { $run(check_classes_table); }
+            #[test]
+            #[serial(level2_terminal)]
+            fn refs() { $run(check_refs); }
+        }
+    };
+}
+
+declaration_view_tests!(level2_declarations_in_tmux => run_tmux_view);
+
+fn run_tmux_view(check: fn(&mut TmuxHarness, &Pane<TmuxHarness>)) {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let pane = tmux_pane();
-    check_declarations(&mut harness, &pane);
-    check_wrapping(&mut harness, &pane);
-    check_table(&mut harness, &pane);
-    check_outline(&mut harness, &pane);
-    check_stats(&mut harness, &pane);
-    check_signature_modes(&mut harness, &pane);
-    check_classes_table(&mut harness, &pane);
-    check_refs(&mut harness, &pane);
+    check(&mut harness, &pane);
 }
-
 /// tmux: `-S -` reads the whole history and `-J` rejoins rows tmux
 /// soft-wrapped (rows `hug` broke stay apart).
 fn tmux_pane() -> Pane<TmuxHarness> {
@@ -1039,9 +1067,9 @@ fn tmux_pane() -> Pane<TmuxHarness> {
 // WezTerm — SGR and OSC 8
 // ------------------------------------------------------------------
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_declarations_in_wezterm() {
+declaration_view_tests!(level2_declarations_in_wezterm => run_wezterm_view);
+
+fn run_wezterm_view(check: fn(&mut WezTermHarness, &Pane<WezTermHarness>)) {
     require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
@@ -1058,23 +1086,15 @@ fn level2_declarations_in_wezterm() {
                 .raw
         },
     };
-    check_declarations(harness, &pane);
-    check_wrapping(harness, &pane);
-    check_table(harness, &pane);
-    check_outline(harness, &pane);
-    check_stats(harness, &pane);
-    check_signature_modes(harness, &pane);
-    check_classes_table(harness, &pane);
-    check_refs(harness, &pane);
+    check(harness, &pane);
 }
-
 // ------------------------------------------------------------------
 // Kitty — SGR and OSC 8; `get-text` returns soft-wrapped rows whole
 // ------------------------------------------------------------------
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_declarations_in_kitty() {
+declaration_view_tests!(level2_declarations_in_kitty => run_kitty_view);
+
+fn run_kitty_view(check: fn(&mut KittyHarness, &Pane<KittyHarness>)) {
     require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard =
@@ -1086,16 +1106,8 @@ fn level2_declarations_in_kitty() {
         wrap_cols: |_| None,
         capture: |harness| harness.capture_extent("all").expect("capture failed").raw,
     };
-    check_declarations(harness, &pane);
-    check_wrapping(harness, &pane);
-    check_table(harness, &pane);
-    check_outline(harness, &pane);
-    check_stats(harness, &pane);
-    check_signature_modes(harness, &pane);
-    check_classes_table(harness, &pane);
-    check_refs(harness, &pane);
+    check(harness, &pane);
 }
-
 
 /// Sources of the tags reader fixture, relative to its scan root. A path
 /// starting with `../` sits outside the root and is selected with an absolute

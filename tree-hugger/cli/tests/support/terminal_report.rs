@@ -444,3 +444,20 @@ pub fn run_scoped<H: TerminalHarness>(
         std::thread::sleep(Duration::from_millis(100));
     }
 }
+
+/// Captured terminals may insert SGR between an OSC 8 destination and its
+/// label. Styling is checked separately; the link must still name this text.
+pub fn has_hyperlink(raw: &str, destination_suffix: &str, text_prefix: &str) -> bool {
+    raw.split("\x1b]8;;").skip(1).any(|link| {
+        let Some((destination, mut text)) = link.split_once("\x1b\\") else { return false };
+        if !destination.ends_with(destination_suffix) { return false; }
+        while let Some(sgr) = text.strip_prefix("\x1b[") {
+            let Some(end) = sgr.find('m') else { return false };
+            if !sgr[..end].bytes().all(|byte| byte.is_ascii_digit() || matches!(byte, b';' | b':')) {
+                return false;
+            }
+            text = &sgr[end + 1..];
+        }
+        text.starts_with(text_prefix)
+    })
+}

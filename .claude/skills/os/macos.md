@@ -244,7 +244,12 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   stays unfocused, has exactly the cells asked for, and can be screenshotted
   with `screencapture -x -o -l <platform_window_id from kitty @ ls>`. That is
   `biscuit_test_harness::kitty::KittyInstance`. A hidden instance's
-  screenshot is black (never drawn). Stop an instance with `kitty @ --to …
+  screenshot is black (never drawn). On 2026-10-12, Kitty 0.49.2 in hidden
+  mode also delayed OSC 10/11 and device-attribute replies until after `hug`
+  exited: the replies entered Bash's next command line and broke its begin
+  marker. A normal unfocused instance eliminated that delay. Use the normal
+  instance for text captures that run terminal-capability probes too.
+  Stop an instance with `kitty @ --to …
   action quit`; without `confirm_os_window_close=0` that opens a "Quit
   kitty?" window instead.
   An *occluded* instance's screenshot is empty too (2026-09-28): Kitty does

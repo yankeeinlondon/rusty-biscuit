@@ -234,3 +234,21 @@ fn styles_spelled_differently_by_backends_read_the_same() {
         Some(vec!["2".to_string()])
     );
 }
+
+#[test]
+fn hyperlink_labels_survive_terminal_sgr_reemission() {
+    for style in ["", "\x1b[m", "\x1b[22;2m", "\x1b[38:2:20:30:40m\x1b[2m"] {
+        let raw = format!("\x1b]8;;file:///tmp/geometry.ts#L14\x1b\\{style}geometry.ts:14:3\x1b]8;;\x1b\\");
+        assert!(crate::terminal_report::has_hyperlink(&raw, "/geometry.ts#L14", "geometry.ts:14:3"));
+        assert!(!crate::terminal_report::has_hyperlink(&raw, "/geometry.ts#L10", "geometry.ts:14:3"));
+        assert!(!crate::terminal_report::has_hyperlink(&raw, "/geometry.ts#L14", "geometry.ts:10"));
+    }
+}
+
+#[test]
+fn unlinked_text_cannot_borrow_an_earlier_destination() {
+    let raw = "\x1b]8;;file:///tmp/geometry.ts#L14\x1b\\wrong label\x1b]8;;\x1b\\geometry.ts:14:3";
+    assert!(!crate::terminal_report::has_hyperlink(raw, "/geometry.ts#L14", "geometry.ts:14:3"));
+    let broken = "\x1b]8;;file:///tmp/geometry.ts#L14\x1b\\\x1b[2Jgeometry.ts:14:3";
+    assert!(!crate::terminal_report::has_hyperlink(broken, "/geometry.ts#L14", "geometry.ts:14:3"));
+}
