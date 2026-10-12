@@ -7,8 +7,73 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/style/descriptor.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/src/style/error.rs
+    - darkmatter/lib/src/style/schema/mod.rs
+    - darkmatter/lib/src/style/coverage_tests.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/clean/style-markdown-control.md
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - darkmatter/dmls/tests/l1/workspace_formatting_settings.rs
+    - darkmatter/dmls/tests/fixtures/formatting/dmls.toml
+    - darkmatter/dmls/tests/fixtures/formatting/settings.json
+docs_updated_during_phase_2:
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_3:
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/compare.rs
+    - darkmatter/lib/src/markdown/cleanup/edits.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/structure.rs
+    - darkmatter/lib/src/markdown/cleanup/transform.rs
+    - darkmatter/lib/src/markdown/cleanup/wrap.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/body_support.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/directive_fixed_points.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/fidelity_repro.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/cli/clean.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/cleanup.md
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Implementation Log for 2026-10-11-clean-fidelity (6 phases)
@@ -449,3 +514,420 @@ changes.
 
 **Cross-OS.** No production code changed, so no cross-OS run was needed.
 Line-ending and BOM risks are recorded for Phase 3 (§4, lesson 6).
+
+## Phase 2
+
+### 1. Rule model (`cleanup/rules.rs`, `cleanup/diagnostic.rs`, style registration)
+
+- `markdown::cleanup::rules` is the single rule validator. `rules_from_json`
+  reads one level (a converted YAML mapping, TOML table, or editor JSON) into
+  `MarkdownRuleOverrides` of `Leaf<T>` (`Absent`/`Null`/`Value`), rejecting
+  unknown names, quoted numerals, wrong types and lists. `document_rules`
+  wraps it for frontmatter: passive, rejects strings that still hold `{{`/`$(`
+  syntax, and returns one `clean.invalid-rules` diagnostic per problem in
+  document coordinates, discarding the whole `style.markdown` object.
+  `resolve(cli, document, workspace)` picks each leaf independently and
+  records its `RuleSource`. `joins_soft_breaks()` applies the width
+  implication after precedence; `permits_item_padding_change()` /
+  `permits_interior_padding_change()` keep which padding rule was explicit.
+- `cleanup::diagnostic` holds `CleanStage` (`syntax`, `schema`, `rules`,
+  `fidelity`), `CleanCode` (serializes `yaml.*`/`schema.*` unchanged, plus
+  `clean.fidelity-fallback` and `clean.invalid-rules`), `FallbackReason`, and
+  `CleanDiagnostic`. **Departure from the §5 sketch:** spans (and repair spans
+  inside a diagnostic) are document coordinates, not YAML-relative, so one
+  type serves frontmatter, rules and fidelity findings. `document_rules` takes
+  a third `yaml_offset` argument for that reason.
+- **Style registration.** `descriptor.rs` gains ten `markdown.*` leaves with
+  `LeafType::MarkdownRule` and `sub_spec: 0` (never `KnownButInactive`), and
+  `markdown` is a container. `parse.rs` validates the whole `style.markdown`
+  value through `rules_from_json` and reports a new typed
+  `StyleParseError::InvalidRule { path, reason }`; rendering never reads the
+  rules, so `StyleFrontmatter` has no `markdown` field (documented on the
+  struct). Snake-case spellings are rejected there, not aliased, because the
+  rules have no aliases.
+- **Baseline schema.** `docs/schemas/darkmatter.yaml` declares
+  `style.markdown`. Probing showed Darkmatter's schema coercion accepts
+  `unwrap: "true"` against `boolean` and `default-language: 5` against
+  `string`, which the rule validator rejects. The five booleans are therefore
+  `literal(true)`/`literal(false)` unions and `default-language` is
+  `string(not-empty)` plus `literal('')`; unions of non-boolean/numberlike
+  arms are not coerced. `fixed-width` (`number|boolean`) and `indentation`
+  (literal union) were already uncoerced (`"80"`, `"4"` rejected).
+
+**Tests added (all L1):**
+
+| Test | Proves |
+| --- | --- |
+| `lib/tests/l1/clean_rules.rs::yaml_matrix_walks_every_rule_and_shape` | YAML matrix from the checked-in fixture `lib/tests/fixtures/clean/style-markdown-control.md`: control row (all ten from the document), then per column absent (F, other nine unaffected), null in both spellings (N, falls through), wrong whole type including quoted booleans/numerals (D, span on the authored value), one wrong element and every element wrong (D), empty `""`/`[]`/`{}` (D except `default-language: ""`), duplicate key and trailing garbage (I: invalid YAML; duplicate reported as `yaml.duplicate-key`) |
+| `…::semantic_invalid_values_discard_the_whole_object` | width 0/1001/80.5, executable `{{ }}`/`$( )` values, indentation 3, unknown enum values, backtick/newline/tab language |
+| `…::unknown_and_snake_case_rule_names_are_rejected_not_ignored`, `…::every_problem_is_reported_in_source_order` | unknown names; stable order |
+| `…::object_roots_cover_absent_null_wrong_and_empty_shapes` | `style`/`style.markdown` rows of the object-roots table |
+| `…::precedence_resolves_each_rule_independently`, `…::an_invalid_document_object_falls_back_to_the_other_levels` | AC 6 at the rule level |
+| `…::width_implies_unwrapping_only_after_precedence` | `true` = 120, width implies unwrap, `false` does not cancel unwrap, `--ignore-incidental-newlines` overrides a document width |
+| `…::tightness_changes_are_permitted_only_by_an_explicit_padding_value`, `…::default_and_all_body_rules_off_profiles` | provenance and both profiles |
+| `…::rules_do_not_depend_on_the_baseline_or_a_document_schema` | baseline disabled; a document schema cannot authorize `indentation: 3` |
+| `lib/tests/l1/base_schema_end_to_end.rs::base_style_markdown_schema_agrees_with_the_rule_validator` | baseline schema and runtime validator agree on 30 shapes, including the coercion traps |
+| `…::base_style_markdown_defaults_match_the_runtime_defaults` | every baseline `default(...)` equals `ResolvedMarkdownRules::defaults()` |
+| `lib/src/style/parse.rs::tests::valid_markdown_rules_produce_no_warnings_and_pass_strict`, `…::invalid_markdown_rules_return_the_rule_validators_reason` | parser registration and strict mode |
+| `cli/tests/l1/layout_style_frontmatter.rs::style_strict_style_accepts_markdown_cleanup_rules`, `…::style_invalid_markdown_rule_fails_with_its_path` | end to end through `md --strict-style --output html` on the shipped fixture |
+| existing `style::coverage_tests` (count 129 → 139, per-rule samples) and `base_style_schema_matches_runtime_descriptor` | descriptor and baseline in lockstep |
+
+### 2. Repair pipeline moved into the library (`cleanup/frontmatter.rs`)
+
+- `darkmatter::markdown::cleanup::frontmatter::repair_frontmatter(source,
+  document_path, schema)` runs on raw text before any `Markdown` exists. Pass
+  order, repair proofs and diagnostic spellings are unchanged (syntax pass,
+  gated rescan, schema tier). `AuthoredCoordinateMap`/`EditProjectionPass`
+  moved unchanged as `pub(crate)`.
+- **Departure from the §5 sketch (`CleanRequest.schema: CleanSchemaConfig`):**
+  the schema configuration is supplied by a lazy `FnOnce() ->
+  Result<CleanSchemaConfig, E>`, invoked at most once and only when the
+  schema tier runs. Building a document context does repository discovery,
+  and the CLI's existing contract
+  (`clean_schema.rs::test_absent_and_empty_frontmatter_perform_no_schema_work`)
+  forbids that work for absent or empty frontmatter. The library never
+  captures CWD, home or repository itself. Errors are typed:
+  `FrontmatterRepairError::{Extraction, Schema(SchemaError), Context(E)}`.
+- `FrontmatterRepair { source, frontmatter_span, repaired, diagnostics,
+  applied }`: diagnostics and `applied` are document coordinates. Phase 4 uses
+  `discard_repairs(original)` (for `frontmatter: false` or a fidelity refusal:
+  original bytes, `applied: []`, diagnostics kept) and `settings_yaml(original)`
+  (the authored YAML when it parses, else the repaired candidate with
+  `from_candidate: true` and `authored_span()` projecting candidate offsets
+  back to authored document coordinates).
+- CLI: `cli/src/commands/clean/frontmatter_repair.rs` is deleted. `clean.rs`
+  keeps flags, the context-building closure (`schema_config`), terminal
+  reporting; `clean/json.rs` holds the version-1 envelope, which now copies
+  document spans directly. JSON output is unchanged (all existing
+  `cli/tests/l1/clean*.rs` pass unmodified).
+
+**Tests added:** `lib/tests/l1/clean_frontmatter_repair.rs` (10 tests):
+repair before `Markdown` exists plus a repeated repair/read fixed point;
+`discard_repairs` byte-identical with BOM, CRLF, comment and padded
+delimiters; BOM repair at `0..3` with later spans shifted; absent and empty
+frontmatter never invoke the schema closure (counting closure, and an `Err`
+closure still succeeds); parseable frontmatter invokes it exactly once;
+closure failure is `Context`; a missing `--schema`-style override on stdin
+input is a typed `Schema` error naming the file; unrepairable duplicate-key
+YAML is returned unchanged with its `yaml.duplicate-key` diagnostic and no
+settings YAML; `settings_yaml` authored and candidate cases with projection.
+
+### 3. DMLS workspace settings (`dmls/src/config/mod.rs`)
+
+- `formatting.markdown` replaces `formatting.cleanup`/`formatting.fixed_width`.
+  `DmlsConfig.formatting.markdown: MarkdownRuleOverrides` is `#[serde(skip)]`:
+  each authored source (`.dmls.toml`, the editor overlay) is validated by
+  `rules_from_json` and normalized on its own, then merged leaf by leaf (an
+  editor value wins; editor `null`/absent releases to the file leaf). The
+  other sections keep their deep merge, with `formatting` removed from the
+  overlay first, so serialized defaults never manufacture legacy keys.
+- Legacy keys translate per source with one migration warning each per load
+  (`compact` → `list-item-padding: none`, `loose` → `one`, `default`/`null` →
+  no override, `fixed_width` 1..=1000 → `fixed-width`); unsupported values are
+  rejected, never coerced. A legacy key next to `formatting.markdown` (even
+  `{}`, even a `null` legacy value) in one source rejects that source's
+  formatting. Unknown `formatting`/`formatting.markdown` keys are rejected;
+  other sections are not made stricter.
+- Visible diagnostics: `ConfigState::diagnostics() -> &[ConfigDiagnostic]`
+  (`severity`, `source` = file path or "editor settings", `key`, `message`),
+  replaced on every load/reload/`apply_client_settings`. A malformed,
+  duplicate-key or unreadable TOML file is now an `Error` record, not only a
+  log line. Phase 4 routes these through `window/showMessage`; today they are
+  also logged.
+- `load_file`/`discover` return `LoadedConfig { config, diagnostics }`;
+  `CleanupVariant` is removed. `providers/formatting.rs` has a minimal
+  adapter (`list-item-padding` none/one → compact/loose cleanup; a width →
+  `reflow_to_width`) until Phase 4 replaces it.
+- Interpretations recorded: the overlay's `formatting` still applies when its
+  other sections fail to deserialize (and vice versa); a migrated legacy key
+  keeps its warning even if its source is rejected for another key; TOML
+  dates and non-finite floats are rejected by name before validation.
+
+**Tests added (L1):** `dmls/tests/l1/workspace_formatting_settings.rs`
+walks the TOML and JSON matrices from checked-in fixtures
+(`dmls/tests/fixtures/formatting/dmls.toml`, `settings.json`, read through
+`manifest_dir!()`): `toml_formatting_matrix` (control row with every rule from
+`RuleSource::Workspace`; per rule absent, wrong type, one/every element wrong,
+empty shapes, duplicate key, trailing garbage; object roots; legacy
+translation and unsupported values; mixed shape; unknown keys; semantic
+invalids; `[wiki]` unknown keys still accepted; the file's other settings
+survive each rejection) and `json_formatting_matrix` (the same walk plus an
+explicit `null` per leaf that releases to the file value and is never read
+as `false`/`preserve`/`""`; `formatting: null`, `markdown: null`, legacy
+`null` with a warning; mixed with a `null` legacy key; bare section without
+the `dmls` wrapper). Plus `file_legacy_keys_merge_with_editor_rules`,
+`migration_warnings_are_recomputed_not_accumulated`,
+`null_settings_clear_the_editor_overlay`,
+`rejected_file_formatting_leaves_editor_rules_usable`,
+`non_object_settings_keep_the_previous_overlay`,
+`duplicate_json_member_names_are_resolved_before_the_loader` (ruling 7 cell
+"X: Value").
+
+The malformed-JSON transport cell is
+`dmls/tests/l1/stdio_subprocess.rs::malformed_settings_json_is_rejected_by_the_transport`,
+run against the compiled binary over real pipes. `lsp-server` rejects the
+payload (`malformed LSP payload`) and stops reading, so the following valid
+request is never answered and the server exits non-zero. The loader never
+sees malformed JSON, so a malformed message cannot leave rules half-applied.
+This pins existing transport behavior; ruling 7 keeps it out of scope.
+
+### 4. Wave 3 foundation parity
+
+- **Exports.** `markdown::cleanup::{rules, diagnostic, frontmatter}` are
+  public modules; `style::StyleParseError::InvalidRule` is new. Downstream
+  users of the changed types: `rg StyleParseError|dmls::config|CleanupVariant`
+  outside the area found none (Claudine uses only `cleanup_content`, whose
+  behavior is unchanged in this phase).
+- **Shipped-schema corpus and descriptors.** Ran the `meta_schema*`,
+  `schema_phase_validation`, `inline_document_text`, `schemas_*` and
+  `base_schema*` L1 groups (188 tests), and the guards and layout tests
+  (`*guard*`, `test_layout`, `clean*`; 198 tests): all pass.
+- **DMLS agreement.**
+  `dmls/tests/l1/style_markdown_parity.rs::style_markdown_completion_and_validation_agree_with_the_rules`
+  runs through the LSP protocol: the shipped control document has no
+  frontmatter diagnostics; key completion under `style.markdown` offers every
+  rule not yet written; value completion offers the
+  `list-interior-padding` members; for twelve values, DMLS flags the line
+  exactly when the runtime validator rejects the value (including `"4"`,
+  `"true"`, `"80"` and `5`).
+- **Checkpoint.**
+  - Precedence and malformed-config behavior are observable: section 1
+    tests and the DMLS matrices.
+  - Raw repairs run before `Markdown` construction:
+    `clean_frontmatter_repair::unparseable_frontmatter_is_repaired_before_markdown_exists_and_is_a_fixed_point`.
+  - No new environment capture or execution sites: the context-construction,
+    path-lookup and spawn-site guards pass, and the rule reader is passive.
+- **Docs.** `dmls/docs/editors/README.md` replaced its `formatting.cleanup`
+  example with `formatting.markdown`, plus a migration note. Editor display
+  of config findings is marked **planned**. The full `style.markdown` topic
+  page and the `docs/cli/clean.md` and `docs/lsp/features.md` updates remain
+  Phase 5 (AC 14).
+- **Skill.** `.claude/skills/darkmatter/cleanup.md` (new) records the rule
+  validator and library repair entry point; `SKILL.md` links it (199 lines).
+
+### Verification
+
+**Requirement-to-test mapping (Phase 2):**
+
+| Requirement | Test(s) |
+| --- | --- |
+| Typed rule leaves, absent ≠ null, precedence, width implication, provenance | `lib/tests/l1/clean_rules.rs` (section 1 table) |
+| YAML robustness matrix, every column × row, plus semantic invalids and object roots | `clean_rules::yaml_matrix_walks_every_rule_and_shape`, `…::semantic_invalid_values_discard_the_whole_object`, `…::object_roots_cover_absent_null_wrong_and_empty_shapes` |
+| Baseline disabled; document schema cannot authorize unsupported values | `clean_rules::rules_do_not_depend_on_the_baseline_or_a_document_schema` |
+| Baseline and runtime agree; defaults match without coercing quoted values | `base_schema_end_to_end::base_style_markdown_schema_agrees_with_the_rule_validator`, `…::base_style_markdown_defaults_match_the_runtime_defaults` |
+| Style parser registration; strict rendering accepts valid rules | `style::parse::tests::*markdown_rules*`, `cli/tests/l1/layout_style_frontmatter.rs::style_strict_style_accepts_markdown_cleanup_rules`, `…::style_invalid_markdown_rule_fails_with_its_path` |
+| Library raw-source repair, disabled-repair preservation, lazy schema, typed errors | `lib/tests/l1/clean_frontmatter_repair.rs` (section 2) |
+| `md clean` behavior unchanged after the move | existing `cli/tests/l1/clean*.rs` (125 with guards), unmodified |
+| TOML/JSON matrices, migration, mixed shape, unknown keys, visible diagnostics | `dmls/tests/l1/workspace_formatting_settings.rs` (section 3) |
+| Malformed JSON at the transport; duplicate JSON names | `stdio_subprocess::malformed_settings_json_is_rejected_by_the_transport`, `workspace_formatting_settings::duplicate_json_member_names_are_resolved_before_the_loader` |
+| DMLS completion and validation agree with the library | `dmls/tests/l1/style_markdown_parity.rs` |
+
+**Gates (macOS):**
+
+- `just test` (darkmatter area, `--no-fail-fast`): 9020 run, 9015 passed,
+  5 failed, 12 skipped. The 5 failures are the pre-existing ones recorded in
+  Phase 1, all from the unparseable `prompts/_reviews/feature-review.md`:
+  `dasherized_identifier_corpus::shipped_corpus_expressions_all_parse`,
+  `…::corpus_walk_reaches_every_present_surface` and three
+  `feature_review_incident::*`.
+- `just lint`: passed, including the zed-dmls wasm32 check.
+
+**Cross-OS.** The OS-sensitive changes are in DMLS: config diagnostics that
+carry file paths, temp-dir config loading, and a subprocess exit-status
+assertion. `just cross-check dmls --os windows` ran 807 tests: 806 passed and
+1 failed. The failure, `lsp_session::frontmatter_union_value_completion`, is
+an existing file-path completion test that this phase does not touch. It
+passed when rerun alone on Windows (`just cross-check dmls --os windows
+lsp_session::frontmatter_union`: 3/3), so it was a one-off under full-suite
+load, not a regression. It is recorded here and not in the `os` skill,
+because a single observation does not establish an OS-specific pattern. Test
+fixtures are LF on every OS (`.gitattributes` `* text=auto eol=lf`). Linux
+runs in pull-request CI.
+
+## Phase 3
+
+Phase 3 ran in two sessions. The first built Wave 4 and most of Wave 5 and
+then stopped before logging; its work was still uncommitted in the tree. The
+second session (this entry) audited that work against the plan, filled the
+gaps, removed its scratch tooling, and ran the gates. Everything below
+describes the tree as it stands at the end of the phase.
+
+### 1. Protection (`cleanup/protect.rs`)
+
+- `Protection::scan` reuses compose's own recognizers, so directive-looking
+  text inside code stays code. Protected material comes in two kinds:
+  - Whole lines: every `scan_darkmatter_directives` line, every quoted
+    `::shell` line, and the full span of every `scan_block_pairs` `Shell` pair
+    (the opaque bodies).
+  - Inline spans: every `ExpressionFinder` expression, literal and token.
+- A malformed region is a typed `MalformedRegion` that becomes a `Declined`
+  outcome with reason `malformed-region`. Malformed regions are unpaired
+  page/shell blocks, trailing content, and malformed disclosures. The old
+  silent source fallback is gone.
+- `ParseView` is the body with protected lines **removed**, plus a segment map
+  back to source offsets. This is the Phase 1 spike's representation.
+  Following Phase 1 lessons 2 and 3, the map's `start_to_source` and
+  `end_to_source` treat a segment boundary as crossing protection.
+- `Lines` keeps each line's own terminator (LF, CRLF, or a lone CR). Edits
+  reuse the neighboring terminator, and `clean_body` strips and restores a
+  BOM.
+
+### 2. Comparison (`cleanup/compare.rs`)
+
+- `Snapshot` is built the same way from the input and the candidate: same
+  protection, same `cleanup_parser_options()` (no smart punctuation, no
+  definition lists), same normalization.
+- What a snapshot holds:
+  - The coalesced structural and inline token sequence.
+  - The exact protected lines, with neighbor-blank state, event anchor and
+    container placement.
+  - Expression spellings and every reference definition, unused ones included.
+  - Ordered-list numbers, code-block bytes and terminators, and fence info.
+- The allowances come only from the resolved rules:
+  - a soft break becomes a separator under `joins_soft_breaks()`;
+  - an unlabeled fence gains exactly the `default-language`;
+  - ordered numbers after the first become sequential under `ordered-lists`;
+  - tight/loose may change only for lists that
+    `tightness_exempt_lists(model, rules)` reaches through an explicitly
+    selected padding rule.
+- `Divergence` gives the first input offset that differs. `Fallback::diagnostic`
+  turns it into a `clean.fidelity-fallback` finding: whole-document span,
+  `NonDeterministicFind`, `repairs: []`, and a message naming the 1-based line
+  and byte column. An output-only block is located at the end of the input.
+- Test-only seam: `cleanup::test_hooks::install_broken_pass` (type
+  `BrokenPass`) corrupts the candidate after every rule has run. It is
+  compiled under `cfg(test)` or the new `cleanup-test-hooks` feature in
+  `lib/Cargo.toml`, which is off by default and will be used by the Phase 4
+  CLI and DMLS suites.
+
+### 3. Body transforms (`cleanup/{body,structure,transform,wrap,edits}.rs`)
+
+- `clean_body(body, &ResolvedMarkdownRules) -> BodyCleanup { text, outcome,
+  diagnostics, fallback }` is the guarded engine. It never re-serializes:
+  - `structure::Model` records containers, lists, items, inline runs, tables
+    and fences in source coordinates.
+  - `transform::plan` proposes `SourceEdit`s for nine body rules.
+  - `wrap::plan` is the fixed-width second stage.
+  - `edits::apply` refuses overlapping edits and any edit that touches a
+    protected line; a conflict becomes `Declined` with reason
+    `serialization-failure`, never a silent string fallback.
+- Rule ownership follows the spec. `list-padding` never pads next to a
+  directive line, at a container edge, or at a nested list's boundary (that
+  boundary belongs to `list-interior-padding`). Required separators survive
+  `none`. Indentation clamps to the band the marker width allows and pads the
+  parent marker when the target is out of reach (`1.   top` for 8). Every
+  child line of the moved item moves with it: fences, quotes and their bare
+  `>` lines, and indented code.
+- `wrap` counts container prefixes in display width (`UnicodeWidthStr`),
+  breaks only at single ASCII spaces outside code, HTML, math, link
+  destinations and expressions, and never starts a line with a block marker.
+- Counted parses for `clean_body`:
+  - 1 for an unchanged body;
+  - 2 for a changed body (the planning parse is also the input side of the
+    comparison);
+  - at most 3 when a width re-wraps an already edited stage.
+  `parse_count::guarded_body` pins these counts. Scanner parses are not yet
+  counted separately (see the handoff below).
+- **Phase 3 removed ambient `PREFER_ITALICS` restyling** from the library.
+  `get_preferred_emphasis_style`, the restyle branch in
+  `preserve_original_emphasis`, the flanking helpers, the public
+  `EmphasisStyle` enum (no users anywhere in the workspace), and the
+  restyle-only unit test are deleted. Two places followed:
+  - The `context_construction_guard` allowlist entry for `cleanup/emphasis.rs`
+    is removed. Any new environment read there now fails that guard, which is
+    the regression test for the removal.
+  - `docs/cli/clean.md` drops the `PREFER_ITALICS` bullet.
+
+  The CLI test fixtures still scrub `PREFER_ITALICS` from child environments
+  (`cli/tests/common/{fixture,protected_env}.rs`). That scrubbing is harmless
+  and was kept.
+- **Phase 3 deliberately left one thing alone.** The legacy `cleanup_content*`
+  wrappers, `cleanup_to_fixed_width`, `Markdown::cleanup*`, and their callers
+  (`md clean`, DMLS formatting, compose, Claudine) still run the old
+  serializer pipeline. Wave 6 (Phase 4) owns rerouting them to `clean_body`
+  and deleting that pipeline. Unconditional blank-line and final-newline
+  normalization therefore still exists in the legacy path only. `clean_body`
+  has none, as `final_newline_presence_is_kept` and
+  `every_body_rule_off_returns_every_document_byte_for_byte` prove.
+
+### 4. Corpus probe (evidence, not a test)
+
+Before deleting the first session's `tests/scratch_probe.rs`, I ran it once.
+It cleans every `git ls-files '*.md'` body (5434 files) under all 18 profiles
+in `body_support::profiles()` (defaults, all-off, and every non-default value)
+and re-cleans each changed result.
+
+- Results: **0 panics, 0 non-idempotent results, and 1 declined file** under
+  every profile.
+- The declined file is `biscuit-tui/docs/style-guide/_style-guide.md`, and
+  the refusal is correct. Its body opens with `::block when="state.name ==
+  "Design Language"` (broken quoting) and closes that block with the typo
+  `::endblock`, so the region is genuinely unpaired. Phase 5 records it under
+  AC 11 as an intentionally malformed example, not a regression.
+- Defaults changed 3464 of the 5434 files and left 1969 unchanged.
+- The probe and the test-only `Snapshot::token_divergence` helper it used were
+  deleted; neither is a CI gate.
+
+### 5. Gaps closed in this session
+
+- AC 1's exact-text matrix:
+  `fidelity_repro::e1_c1_d1_produce_exact_text_under_every_named_rule_value`
+  covers 30 cases (E1, C1 and D1, each under 10 values: indentation
+  2/8/preserve, `unwrap: true`, `fixed-width: 80`, `list-item-padding`
+  none/one, and `list-interior-padding` none/except-nested-lists/all). Each
+  expected output was reviewed by hand before it was pinned. It replaces the
+  earlier 12-case `e1_c1_d1_list_rules_produce_the_documented_text`.
+- Clippy (`len_zero`, `type_complexity`) is fixed. `test_hooks::BrokenPass` is
+  the alias the guard tests use.
+
+### Verification
+
+**Requirement-to-test mapping (Phase 3, all L1 in the `darkmatter` lib unit target):**
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC 1: E1–F1 exact under defaults (D1 gains `text` at column 8) and all-off | `fidelity_repro::defaults_leave_every_reproduction_byte_identical_except_d1_gains_a_language`, `…::d1_language_is_added_at_column_eight`, `…::every_body_rule_off_returns_every_reproduction_exactly` |
+| AC 1: E1/C1/D1 under indentation 2/8/preserve, unwrap, width 80, every padding value (exact text and structure) | `fidelity_repro::e1_c1_d1_produce_exact_text_under_every_named_rule_value`, `…::reproductions_keep_their_structure_under_every_rule_value` (independent HTML oracle, all 18 profiles) |
+| AC 1: multi-digit markers, code children with a clamped indent, B1 reindent across directives | `fidelity_repro::multi_digit_markers_set_the_minimum_continuation_indent`, `…::code_children_move_with_their_item_when_the_requested_indent_is_clamped`, `…::b1_directive_lines_stay_fixed_while_the_list_spanning_them_is_reindented` |
+| AC 3: directive fixed points after a quote paragraph, ordered/unordered lists nested two levels, and a table, under every rule | `directive_fixed_points::directive_lines_are_unchanged_under_every_rule_in_every_context` (+ `the_contexts_are_really_formatted_by_the_defaults` control), quoted shell, disclosures, directive-like code, CRLF directive, unpaired blocks |
+| AC 4: each rule's default and every value; list-spacing examples exact; required separators; width true→120 and implication; empty language; ordered `1,1,1`/`3,3,3`/`3,4,5`/`1,3,8`/`2,2,5` | `tests/rules.rs` (all tests), including `list_item_padding_none_and_one_match_the_documented_example`, `list_interior_padding_matches_the_documented_example_from_every_starting_point`, `required_separators_survive_none_under_both_padding_rules`, `fixed_width_true_means_one_hundred_twenty_and_implies_unwrap`, `default_language_custom_and_empty_values`, `ordered_lists_*`, plus `corpus_regressions*` |
+| AC 7 (library part): mutations of link target/title, emphasis, hard break, HTML, task state, table alignment, reference definitions (used and unused), expressions, code, info strings, joined soft break; tight/loose; explicit padding scope; ordered numbers; reflow-introduced corruption; output-only block location | `tests/guard.rs` (all tests) |
+| AC 9: idempotence | `body_support::clean_accepted` asserts a second run is `Unchanged` in every AC 1–4 test; `source_fidelity::every_profile_is_idempotent_on_the_corpus` |
+| AC 13 (library part): CRLF, mixed, lone CR, BOM, final newline, empty bodies, unused references, malformed region location, no trailing whitespace | `tests/source_fidelity.rs` (all tests) |
+| AC 12 (body part): parse counts | `parse_count::guarded_body::*` |
+| `PREFER_ITALICS` removed | `lib/tests/l1/context_construction_guard.rs` (allowlist entry removed; guard rejects any env read in `cleanup/emphasis.rs`) |
+
+**Gates (macOS):**
+
+- `just lint` (darkmatter area): **passed**, including the zed-dmls wasm32
+  check, after fixing three clippy findings in the first session's code.
+- `just test --no-fail-fast`: 9103 run, 9095 passed, 5 failed, 3 timed out,
+  12 skipped.
+  - The **5 failures** are the pre-existing ones from Phases 1 and 2, all from
+    the unparseable `prompts/_reviews/feature-review.md`:
+    `dasherized_identifier_corpus::{shipped_corpus_expressions_all_parse,
+    corpus_walk_reaches_every_present_surface}` and the three
+    `feature_review_incident::*` tests.
+  - The **3 timeouts** hit the 30s limit under full-suite load. All three
+    pass when rerun alone:
+    - `compose::type_tests::test_compose_context_capture` in 1.9s;
+    - `serialized_code_neighbors::serialized_neighbors_render_in_every_table_cell_position`
+      in 2.5s;
+    - `entry_point_parity::darkmatter_entry_points_agree_on_every_reference`
+      in 4.8s (already recorded in Phase 1).
+
+    None of them touches cleanup.
+  - Every cleanup test passes, including the new exact matrix.
+- No test name or module segment uses a tier marker. Every new test is an L1
+  unit test in the lib target, declared through `cleanup/tests/mod.rs`. The
+  run above confirms `just test` selected and passed them.
+
+**Cross-OS.** No cross-check was run, and I judge the risk low. Phase 3's
+production changes are pure in-memory text transforms, with no paths,
+filesystem, processes, or environment reads; one environment read was
+removed. The OS-sensitive concern is line terminators, and that is handled
+in code and tested with string literals: `Lines` keeps LF, CRLF and lone-CR
+terminators per line, and `source_fidelity::{crlf_*, mixed_*,
+a_lone_carriage_return_*}` cover them. These tests read no checked-out
+files, so `core.autocrlf` cannot change their inputs. Linux and macOS are
+proven by pull-request CI; Windows by the push to `main`.

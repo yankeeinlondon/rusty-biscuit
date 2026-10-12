@@ -36,21 +36,35 @@ related:
 human_review: false
 implemented: false
 message_to_agent: |-
-    Phase 1 changed no production source. Read implementation-log.md "## Phase 1" sections 3-6 before starting.
-    - Decision: cleanup becomes bounded source edits on the authored text plus one final semantic comparison; the
-      pulldown-cmark-to-cmark serializer and every artifact-repair pass are removed in Phase 3 (pass table in section 3).
-    - Frozen module ownership and type names are in section 5: everything lives under `markdown::cleanup`
-      (rules.rs, diagnostic.rs, frontmatter.rs in Phase 2; protect.rs, compare.rs, edits.rs in Phase 3; document.rs in Phase 4).
-      `cleanup::rules` is the single validator; the style parser's `style.markdown` registration delegates to it.
-    - Read rules into `Leaf<T>` (Absent / Null / Value) from raw values; do not reuse `StyleFrontmatter`'s
-      `#[serde(default)]` Options for rules.
-    - DMLS config: `recompute` serializes the file config, defaults included, before merging. That would make new configs look
-      "mixed" with legacy `cleanup`. Normalize each authored source to MarkdownRuleOverrides first, then merge leaf by leaf.
-      DMLS has no client notification channel today (no showMessage or logMessage), so config warnings need a stored
-      record that Phase 4 routes through router.rs.
-    - New test files under lib/tests, cli/tests and dmls/tests must be declared in the consolidated l1 `main.rs` (autotests = false).
-    - The archived spike in spike/ is reference only, not compiled. Its "lessons" list covers container-prefix segments,
-      marker columns from source bytes, segment-boundary mapping, and scanner parse sharing.
+    Phase 3 is done; read implementation-log.md "## Phase 3" before starting. What Phase 4 builds on:
+    - Engine: `markdown::cleanup::clean_body(body, &ResolvedMarkdownRules) -> BodyCleanup { text, outcome,
+      diagnostics, fallback }`. Body only (no frontmatter); strips and restores a BOM itself; never returns
+      `Invalid`. On `Declined`, `fallback: Some(Fallback)`; re-anchor into a whole document with
+      `fallback.diagnostic(document, body_offset)` (whole-document span, message names line and column).
+    - Test seam: `cleanup::test_hooks::{install_broken_pass, BrokenPass}` under `cfg(test)` or the new
+      `cleanup-test-hooks` lib feature (off by default). CLI/DMLS suites must enable that feature as a
+      dev-dependency feature, and confirm it is in their `[package.metadata.ci.tests] features` so CI compiles it.
+      The pass is process-global (a Mutex), so tests that install it must not run concurrently in one process
+      with other cleanup tests that expect normal output; nextest's process-per-test model makes this safe.
+    - NOT done yet (Wave 6 owns it): every `cleanup_content*`, `cleanup_to_fixed_width`, `Markdown::cleanup*`,
+      `md clean`, DMLS formatting, compose `ComposeOperation::Cleanup`, `cli/src/commands/render.rs`, and
+      Claudine still run the old serializer pipeline (`lists`, `emphasis`, `brackets`, `blockquote`, `tables`,
+      `opaque`, `perf_profile`). Reroute them to `clean_body` and delete that pipeline and its tests together;
+      many old tests in `cleanup/tests/{mod,lists,emphasis,reflow,blockquote,brackets,tables,escapes}.rs` assert
+      old serializer behavior (blank line after headings, forced final newline, `1,1,1` renumbering) and must
+      be rewritten or deleted per the Phase 1 pass-disposition table (log section 3).
+    - Scanner parses are not yet counted separately (AC 12). `Protection::scan` calls `scan_block_pairs`,
+      `scan_disclosures`, `scan_darkmatter_directives`, `quoted_shell_lines`, and `ExpressionFinder`, each of
+      which may reach the uncounted `find_code_regions`. Compute code regions once per text and add a separate
+      scanner count, as Phase 1 lesson 5 planned. Counted cleanup parses for `clean_body` are already pinned at
+      1 (unchanged) / 2 (changed) / at most 3 (width re-wrap after edits) by `parse_count::guarded_body`.
+    - `PREFER_ITALICS` restyling and the public `EmphasisStyle` enum are removed; the context-construction
+      guard no longer allowlists an env read in `cleanup/emphasis.rs`.
+    - Corpus probe (all tracked *.md bodies, 18 profiles): 0 panics, 0 non-idempotent, 1 decline
+      (`biscuit-tui/docs/style-guide/_style-guide.md`, genuinely unpaired `::block`/`::endblock`).
+    - Pre-existing failures, not caused by this fix: 5 L1 tests (`dasherized_identifier_corpus::*` x2,
+      `feature_review_incident::*` x3) fail because `prompts/_reviews/feature-review.md` has unparseable
+      frontmatter.
 ---
 
 # Clean Fidelity and Formatting Rules

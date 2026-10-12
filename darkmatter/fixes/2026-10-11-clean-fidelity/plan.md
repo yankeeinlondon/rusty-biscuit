@@ -3,15 +3,80 @@ area: darkmatter
 fix: 2026-10-11-clean-fidelity
 total_phases: 6
 created: 2026-10-11
-phase: 1
+phase: 3
 agent: "codex/gpt-6.1-sol"
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/style/descriptor.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/src/style/error.rs
+    - darkmatter/lib/src/style/schema/mod.rs
+    - darkmatter/lib/src/style/coverage_tests.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/tests/l1/clean_rules.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/clean/style-markdown-control.md
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/style_markdown_parity.rs
+    - darkmatter/dmls/tests/l1/workspace_formatting_settings.rs
+    - darkmatter/dmls/tests/fixtures/formatting/dmls.toml
+    - darkmatter/dmls/tests/fixtures/formatting/settings.json
+docs_updated_during_phase_2:
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_3:
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/compare.rs
+    - darkmatter/lib/src/markdown/cleanup/edits.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/structure.rs
+    - darkmatter/lib/src/markdown/cleanup/transform.rs
+    - darkmatter/lib/src/markdown/cleanup/wrap.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/body_support.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/directive_fixed_points.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/fidelity_repro.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/cli/clean.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/cleanup.md
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Clean Fidelity Implementation Plan
@@ -286,7 +351,7 @@ module owners; one integrator owns exports and shared module declarations.
 
 ### Wave 2 — Parallel foundation modules
 
-- [ ] **Implement rule model**
+- [x] **Implement rule model**
   - Add typed optional rule inputs, resolved defaults, source provenance, leaf
     validation, and precedence resolution. Normalize width implication only
     after precedence; false width does not cancel an independent true unwrap.
@@ -297,7 +362,7 @@ module owners; one integrator owns exports and shared module declarations.
   - Add YAML matrix and rule-resolution tests, including baseline disabled/
     replaced, document-schema restrictions, all-default and all-off profiles.
 
-- [ ] **Extract repair pipeline**
+- [x] **Extract repair pipeline**
   - Move raw frontmatter orchestration, authored coordinate projection, and
     clean result/diagnostic data from the CLI into library-owned modules.
     Keep terminal reporting and JSON source/output adaptation in the CLI.
@@ -307,7 +372,7 @@ module owners; one integrator owns exports and shared module declarations.
   - Preserve existing deterministic repair proofs and diagnostic spellings.
     Add direct raw-source repair tests and disabled-repair preservation cases.
 
-- [ ] **Migrate workspace settings**
+- [x] **Migrate workspace settings**
   - Implement `formatting.markdown` in `dmls/src/config/mod.rs` using shared
     rule validation, source-preserving normalization, mixed-shape rejection,
     and migration warnings for compact/loose/default and legacy width.
@@ -320,7 +385,7 @@ module owners; one integrator owns exports and shared module declarations.
 
 ### Wave 3 — Sequential foundation integration
 
-- [ ] **Verify foundation parity**
+- [x] **Verify foundation parity**
   - Integrate exports and shared types; test shipped-schema corpus validation,
     runtime descriptors, strict-style acceptance, and DMLS completion/validation
     agreement. Defaults must match without schema coercion of quoted numerals.
@@ -335,7 +400,7 @@ Wave 5 integrates them before one owner changes the interacting body passes.
 
 ### Wave 4 — Parallel protection and comparison
 
-- [ ] **Protect authored regions**
+- [x] **Protect authored regions**
   - Implement the spike's source representation using existing scanners and
     shared input events/ranges. Preserve directive lines/terminators, quoted
     shell regions, opaque bodies, expression spellings, neighboring blank
@@ -347,7 +412,7 @@ Wave 5 integrates them before one owner changes the interacting body passes.
     exact directive bytes and no added neighboring blank line; ensure
     directive-like code stays unprotected code.
 
-- [ ] **Compare semantic meaning**
+- [x] **Compare semantic meaning**
   - Build a normalized event comparison using identical cleanup parser options
     without smart punctuation/definition lists. Compare containers, nesting,
     list start and tightness, headings, tables, footnotes, extension blocks,
@@ -361,7 +426,7 @@ Wave 5 integrates them before one owner changes the interacting body passes.
 
 ### Wave 5 — Sequential transform integration
 
-- [ ] **Repair body transforms**
+- [x] **Repair body transforms**
   - Integrate the source model and comparator. Repair prefixes for every child
     block in list items, marker-width minimum continuation indentation, and
     blockquote/fence/nested-list placement; eliminate introduced whitespace.
@@ -376,7 +441,7 @@ Wave 5 integrates them before one owner changes the interacting body passes.
     and preserve hard breaks, expressions, code, and HTML. Propagate serialization
     failures as declined results rather than silent string fallbacks.
 
-- [ ] **Verify rule fidelity**
+- [x] **Verify rule fidelity**
   - Add E1–F1 exact output assertions: defaults are byte-identical except D1's
     `text` info addition at column 8; all-off is exact. Exercise E1/C1/D1 under
     indentation 2/8/preserve, unwrap, width 80, and every padding value, including
