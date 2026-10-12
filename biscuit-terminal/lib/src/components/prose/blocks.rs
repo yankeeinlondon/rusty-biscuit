@@ -2,16 +2,17 @@
 //! splitter, and the two entry points that feed [`super::tokens`].
 //!
 //! Parsing runs in a fixed order: opaque regions (fenced blocks, code spans,
-//! HTML comments, `<code-block>` bodies, quoted attributes) are recognized in the whole
-//! input ([`lift_opaque`](super::markdown::lift_opaque)), the remaining text
+//! HTML comments, `<code-block>` bodies, quoted attributes, Markdown link
+//! destinations) are recognized in the whole input
+//! ([`lift_opaque`](super::markdown::lift_opaque)), the remaining text
 //! is split into paragraphs on blank lines ([`split_blocks`], `Prose` only),
 //! and each paragraph's inline content is parsed on its own.
 //!
 //! A bracketed style or explicit `<a>` tag that spans a blank line keeps its
 //! scope: the splitter closes it at the end of one paragraph and reopens the
 //! same declaration at the start of the next, so a paragraph never sits
-//! inside a phrasing wrapper. Code spans, quoted tag attributes, and
-//! `<code-block>` bodies are opaque to the splitter.
+//! inside a phrasing wrapper. Code spans, quoted tag attributes, link
+//! destinations, and `<code-block>` bodies are opaque to the splitter.
 
 use renderable::tree::{NodeKind, RenderNode};
 
@@ -226,7 +227,7 @@ pub(super) fn split_blocks(text: &str, lifted: &[Lifted]) -> Vec<Block> {
 /// A `<code-block>` tag or a fenced block nested in a style or link lands as a
 /// sibling block: the paragraph is split around it.
 pub(super) fn parse_blocks(content: &str, line_breaks: LineBreaks) -> Vec<RenderNode> {
-    let (text, lifted) = lift_opaque(content);
+    let (text, lifted) = lift_opaque(content, true);
     let opts = InlineOptions {
         line_breaks,
         inline_only: false,
@@ -244,7 +245,7 @@ pub(super) fn parse_blocks(content: &str, line_breaks: LineBreaks) -> Vec<Render
                 }
             }
             Block::Paragraph(paragraph) => {
-                let pre = preprocess_inline(&paragraph);
+                let pre = preprocess_inline(&paragraph, &lifted);
                 let nodes = parse_render_nodes(&pre, &lifted, opts);
                 split_around_blocks(nodes, &mut out, RenderNode::paragraph);
             }
@@ -274,8 +275,8 @@ fn trim_edges_at_code(blocks: &mut Vec<RenderNode>) {
 /// Parse `InlineProse` content into phrasing nodes. Fenced blocks become
 /// `InlineCode`; blank lines are ordinary breaks.
 pub(super) fn parse_inline(content: &str, line_breaks: LineBreaks) -> Vec<RenderNode> {
-    let (text, lifted) = lift_opaque(content);
-    let pre = preprocess_inline(&text);
+    let (text, lifted) = lift_opaque(content, false);
+    let pre = preprocess_inline(&text, &lifted);
     parse_render_nodes(
         &pre,
         &lifted,
@@ -291,7 +292,7 @@ mod tests {
     use super::*;
 
     fn split(input: &str) -> Vec<Block> {
-        let (text, lifted) = lift_opaque(input);
+        let (text, lifted) = lift_opaque(input, true);
         split_blocks(&text, &lifted)
     }
 

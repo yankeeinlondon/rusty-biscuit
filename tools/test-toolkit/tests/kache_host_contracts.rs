@@ -131,12 +131,10 @@ fn qualify_prints_a_stable_verdict_line_that_matches_its_exit_code() {
 }
 
 /// The env-passthrough probe must fail against a wrapper that strips
-/// `DYLD_*`. The fake wrapper is a plain `exec "$@"` bash script: bash
-/// expunges `DYLD_*` from its own environment at startup (measured
-/// 2026-09-23), which is the same observable behavior the hardened kache
-/// has — the compiler it launches never receives the variable — while
-/// non-`DYLD` variables pass through, so the probe's control line still
-/// separates "stripped" from "never ran".
+/// `DYLD_*`. The fake explicitly removes the probed variable so the contract
+/// does not depend on whether the host's Bash strips it at startup. The
+/// control variable still reaches the compiler, distinguishing stripping
+/// from a wrapper that never ran it.
 #[cfg(target_os = "macos")]
 #[test]
 fn probe_passthrough_fails_when_the_wrapper_strips_dyld() {
@@ -145,7 +143,7 @@ fn probe_passthrough_fails_when_the_wrapper_strips_dyld() {
     let wrapper = dir.join("kache");
     fs::write(
         &wrapper,
-        "#!/usr/bin/env bash\nexec \"$@\"\n",
+        "#!/usr/bin/env bash\nunset DYLD_FALLBACK_LIBRARY_PATH\nexec \"$@\"\n",
     )
     .expect("write fake wrapper");
     use std::os::unix::fs::PermissionsExt;

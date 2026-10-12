@@ -64,12 +64,12 @@ pub(crate) use summary::{apply_early_termination_to_summary, early_termination_g
 
 #[cfg(unix)]
 pub(crate) use unix::{
-    wait_with_signal_and_early_termination, wait_with_signal_early_termination_and_completion,
-    wait_with_signal_handling,
+    ChildInterrupts, wait_with_signal_and_early_termination,
+    wait_with_signal_early_termination_and_completion, wait_with_signal_handling,
 };
 #[cfg(windows)]
 pub(crate) use windows::{
-    ComposeInterruptHandlerGuard, register_compose_interrupt_handler,
+    ChildInterrupts, ComposeInterruptHandlerGuard, register_compose_interrupt_handler,
     register_sequence_interrupt_flag, wait_with_signal_and_early_termination,
     wait_with_signal_early_termination_and_completion, wait_with_signal_handling,
 };

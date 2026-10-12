@@ -271,6 +271,23 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
   send error now carries tmux's own message and the live session list. If
   it recurs, read that list before blaming the test.
+- **WezTerm L2 tests time out at `attach/spawn WezTerm` or `initial capture`
+  with `command timed out after 10s`/`15s`, or fail `WezTerm not available`,
+  different tests each run.** Too many concurrent `wezterm cli` clients for
+  the process behind `WEZTERM_UNIX_SOCKET`; from inside WezTerm that is the
+  GUI (`gui-sock-<pid>`), not a `wezterm-mux-server`. The GUI serves every
+  client on its main thread and pushes each connected client the render
+  changes of every busy pane, so the cost is clients × busy panes, and a
+  slow answer keeps clients connected longer. `sample <gui-pid> 5` during a
+  stall shows the main thread in `GetPaneRenderChangesResponse` encoding,
+  and an unrelated `wezterm cli list` stalls too. On 2026-10-08 claudine-cli
+  at 14 workers failed three then four different WezTerm tests; on
+  2026-10-10, 16 concurrent clients took 13–40 s each. The harness now lets
+  only two clients per mux run at once across all processes (see the
+  `biscuit-test-harness` skill), and biscuit-terminal-cli's 653-test L2 run
+  passed at 14 workers. `_test_l2_threads` still gives parallel L2 half the
+  host's cores (8 here). If it recurs, look for something driving
+  `wezterm cli` outside the harness before blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` spawns `defaults read
   com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,
@@ -352,6 +369,13 @@ the same `-p` selection the recipe uses, or feature unification names a
 different artifact.
 
 ## CI shell and runtime inspection (2026-09-15)
+
+Kache passthrough fixtures must explicitly unset `DYLD_FALLBACK_LIBRARY_PATH`
+when modeling a stripping wrapper. A Bash script that merely executes its
+arguments can preserve it on hosted macOS, so relying on shell startup to
+strip it makes the negative probe pass and skips the expected re-sign step.
+The shared fake's `strip` mode and the standalone negative probe both remove
+the variable explicitly; `forward` mode supplies the probe's sentinel.
 
 `/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
 empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
