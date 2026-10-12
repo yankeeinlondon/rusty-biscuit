@@ -686,6 +686,112 @@ fn scala_export_through_an_imported_name_links_the_import() {
 }
 
 #[test]
+fn scala_export_through_a_name_a_member_definition_hides_does_not_link_the_import() {
+    let control = include_str!(
+        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-import-then-export.scala"
+    );
+    assert_indexed_marks(&snippet("a.scala", control), &["O", "Thing"]);
+
+    // The first export moves into an object whose own `val Thing` is the
+    // nearer binding; the import stays at file level.
+    let hidden =
+        control.replacen("export Thing.{a, b}\n", "object Holder:\n  val Thing = new Impl\n  export Thing.{a, b}\n", 1);
+    let snip = snippet("a.scala", &hidden);
+    let report = snip.report();
+    assert_complete(&report);
+    assert_eq!(report.entries.len(), 3, "{:?}", report.entries);
+    assert_entry(
+        &snip,
+        &report.entries[0],
+        ReexportForm::Named,
+        Want {
+            exported: Some("a"),
+            original: Some("a"),
+            source: Some("Thing"),
+            scope: Some("Holder"),
+            span: "a",
+            statement: "export Thing.{a, b}",
+            ..Want::default()
+        },
+    );
+    assert_entry(
+        &snip,
+        &report.entries[2],
+        ReexportForm::Named,
+        Want {
+            exported: Some("x"),
+            original: Some("x"),
+            local: Some("O"),
+            source: Some("O"),
+            span: "x",
+            statement: "export O.x",
+            linked_import: true,
+            ..Want::default()
+        },
+    );
+    assert_indexed_marks(&snip, &["O"]);
+
+    let wildcard = snippet("a.scala", "import lib.Thing\nobject Holder:\n  val Thing = new Impl\n  export Thing.*\n");
+    let report = wildcard.report();
+    assert_complete(&report);
+    assert_entry(
+        &wildcard,
+        &report.entries[0],
+        ReexportForm::Wildcard,
+        Want { source: Some("Thing"), scope: Some("Holder"), span: "*", statement: "export Thing.*", ..Want::default() },
+    );
+    assert_indexed_marks(&wildcard, &[]);
+
+    // A class parameter is a nearer binding too.
+    let parameter = snippet("a.scala", "import lib.Thing\nclass C(Thing: Impl):\n  export Thing.x\n");
+    assert!(parameter.report().entries[0].import_span.is_none());
+    assert_indexed_marks(&parameter, &[]);
+}
+
+#[test]
+fn scala_export_links_only_an_import_in_the_same_or_an_enclosing_scope() {
+    let other_object = snippet("a.scala", "object A:\n  import lib.Thing\nobject B:\n  export Thing.x\n");
+    let report = other_object.report();
+    assert_complete(&report);
+    assert_entry(
+        &other_object,
+        &report.entries[0],
+        ReexportForm::Named,
+        Want {
+            exported: Some("x"),
+            original: Some("x"),
+            source: Some("Thing"),
+            scope: Some("B"),
+            span: "x",
+            statement: "export Thing.x",
+            ..Want::default()
+        },
+    );
+    assert_indexed_marks(&other_object, &[]);
+
+    // An import after the export does not scope over it.
+    let after = snippet("a.scala", "export Thing.x\nimport lib.Thing\n");
+    assert!(after.report().entries[0].import_span.is_none());
+    assert_indexed_marks(&after, &[]);
+
+    // Control: an import in an enclosing object is in scope.
+    let enclosing = snippet("a.scala", "object A:\n  import lib.Thing\n  object B:\n    export Thing.x\n");
+    let report = enclosing.report();
+    assert_eq!(report.entries[0].local_name.as_deref(), Some("Thing"));
+    assert_indexed_marks(&enclosing, &["Thing"]);
+
+    // The nearest import of the name is the one linked.
+    let nearest = snippet("a.scala", "import far.Thing\nobject B:\n  import near.Thing\n  export Thing.x\n");
+    let report = nearest.report();
+    let linked = report.entries[0].import_span.as_ref().expect("linked");
+    let index = nearest.indexed();
+    let record = index.imports.iter().find(|import| &import.span == linked).expect("record");
+    assert_eq!(record.source.as_deref(), Some("near.Thing"));
+    let marked: Vec<_> = index.imports.iter().map(|import| (import.source.as_deref(), import.reexported)).collect();
+    assert!(marked.contains(&(Some("far.Thing"), false)), "{marked:?}");
+}
+
+#[test]
 fn scala_imports_and_local_definitions_are_complete_negatives() {
     for source in [
         include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/neg-import-only.scala"),

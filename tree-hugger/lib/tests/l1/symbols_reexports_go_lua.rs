@@ -639,8 +639,6 @@ fn lua_local_function_member_has_no_require_provenance() {
 fn lua_negative_samples_report_nothing_and_stay_complete() {
     let samples = [
         ("neg-call-result.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-call-result.lua")),
-        ("neg-computed-key.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-computed-key.lua")),
-        ("neg-field-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-field-in-function.lua")),
         ("neg-global-assign.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-global-assign.lua")),
         ("neg-method-wrap.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-method-wrap.lua")),
         ("neg-no-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-no-return.lua")),
@@ -682,6 +680,136 @@ fn lua_rebinding_an_unrelated_name_does_not_limit() {
     assert_eq!(report.entries.len(), 1);
 }
 
+/// A function whose own `local m` is written: a separate binding from the
+/// chunk-level `m`.
+const UNRELATED_LOCAL_WRITE: &str = "local function unrelated() local m; m = {} end\n";
+
+/// `sample` with [`UNRELATED_LOCAL_WRITE`] inserted after its first line.
+fn with_unrelated_local_write(sample: &str) -> String {
+    let (first, rest) = sample.split_once('\n').expect("multi-line sample");
+    format!("{first}\n{UNRELATED_LOCAL_WRITE}{rest}")
+}
+
+/// The report is complete, and the planner path reports the same.
+fn assert_complete_on_both_paths(s: &Snippet) -> ReexportReport {
+    let report = s.report();
+    assert_complete(&report);
+    assert_eq!(s.indexed().reexports.as_ref(), Some(&report), "query path agrees");
+    report
+}
+
+#[test]
+fn lua_write_to_a_function_local_keeps_the_returned_module() {
+    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-return.lua"));
+    let s = snippet("pos-local-return.lua", &source);
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    assert_entry(&s, &report.entries[0], &lua_module("m", Some("m"), "m", "return m"));
+}
+
+#[test]
+fn lua_write_to_a_function_local_keeps_the_returned_constructor() {
+    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua"));
+    let s = snippet("pos-table-ctor.lua", &source);
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    assert_entry(&s, &report.entries[0], &lua_named("x", "x", Some("m"), "m", "x = m.x", "return { x = m.x }"));
+}
+
+#[test]
+fn lua_write_to_a_function_local_keeps_the_assembled_table() {
+    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua"));
+    let s = snippet("pos-table-field-local.lua", &source);
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    let line = "M.foo = m.foo";
+    assert_entry(&s, &report.entries[0], &lua_named("foo", "foo", Some("m"), "m", line, line));
+}
+
+#[test]
+fn lua_writes_to_nearer_bindings_of_the_same_name_do_not_limit() {
+    for (name, write) in [
+        ("parameter", "local function f(m) m = {} end\n"),
+        ("numeric-for", "for m = 1, 2 do m = 3 end\n"),
+        ("generic-for", "for _, m in ipairs({}) do m = 1 end\n"),
+        ("do-block", "do local m; m = {} end\n"),
+        ("nested-local-function", "local function f() local function m() end; m = 1 end\n"),
+        ("repeat-until", "repeat local m = 1; m = 2 until m\n"),
+        ("anonymous-function", "local f = function(...) local m = 1; m = 2 end\n"),
+    ] {
+        let s = snippet("nearer.lua", &format!("local m = require(\"m\")\n{write}return m\n"));
+        let report = s.report();
+        assert_complete(&report);
+        assert_eq!(report.entries.len(), 1, "{name}");
+        assert_eq!(report.entries[0].source.as_deref(), Some("m"), "{name}");
+    }
+}
+
+#[test]
+fn lua_function_body_write_to_the_chunk_local_still_limits() {
+    for (name, write, limit_text) in [
+        ("assignment", "local function f() m = {} end\n", "m = {}"),
+        ("before-a-later-local", "local function f() m = {}; local m end\n", "m = {}"),
+        ("function-statement", "function m() end\n", "function m() end"),
+    ] {
+        let s = snippet("rebound.lua", &format!("local m = require(\"m\")\n{write}return m\n"));
+        let report = s.report();
+        assert!(report.entries.is_empty(), "{name}: {:?}", report.entries);
+        assert_limited(&report, &[ReexportLimitReason::ReboundBinding]);
+        assert_eq!(s.text(&report.coverage.limits[0].span), limit_text, "{name}");
+    }
+}
+
+#[test]
+fn lua_later_chunk_declaration_hides_the_required_local() {
+    for (name, declaration) in [("local-function", "local function m() end\n"), ("multi-name", "local m, n\n")] {
+        let s = snippet("hidden.lua", &format!("local m = require(\"m\")\n{declaration}return m\n"));
+        let report = s.report();
+        assert!(report.entries.is_empty(), "{name}: {:?}", report.entries);
+        assert_complete(&report);
+    }
+}
+
+#[test]
+fn lua_shadowed_name_at_a_dynamic_use_site_is_not_the_import() {
+    for (name, block) in [
+        ("metatable", "do local m = {}; setmetatable(U, { __index = m }) end\n"),
+        ("copy-loop", "do local m = {}; for k, v in pairs(m) do U[k] = v end end\n"),
+        ("loop-variable", "for _, m in ipairs({}) do setmetatable(U, { __index = m }) end\n"),
+        ("nested-require", "do local require = function() return {} end; setmetatable(U, { __index = require(\"m\") }) end\n"),
+    ] {
+        // `U` is not returned, so only the dynamic-forwarding check sees it.
+        let s = snippet("dynamic.lua", &format!("local m = require(\"m\")\nlocal U = {{}}\n{block}return {{}}\n"));
+        let report = s.report();
+        assert!(report.entries.is_empty(), "{name}: {:?}", report.entries);
+        assert_complete(&report);
+    }
+
+    let unshadowed = snippet(
+        "dynamic.lua",
+        "local m = require(\"m\")\nlocal M = {}\ndo setmetatable(M, { __index = m }) end\nreturn M\n",
+    );
+    assert_limited(&unshadowed.report(), &[ReexportLimitReason::DynamicForwarding]);
+}
+
+#[test]
+fn lua_require_shadowed_only_inside_a_function_stays_the_loader() {
+    let nested = snippet(
+        "nested.lua",
+        "local function f() local require = print; require = print end\nreturn require(\"m\")\n",
+    );
+    let report = nested.report();
+    assert_complete(&report);
+    assert_eq!(report.entries.len(), 1);
+    assert_entry(&nested, &report.entries[0], &lua_module("m", None, "require(\"m\")", "return require(\"m\")"));
+
+    let global = snippet("global.lua", "local function f() require = print end\nreturn require(\"m\")\n");
+    let report = global.report();
+    assert!(report.entries.is_empty());
+    assert_limited(&report, &[ReexportLimitReason::ShadowedGlobal]);
+    assert_eq!(global.text(&report.coverage.limits[0].span), "require = print");
+}
+
 #[test]
 fn lua_shadowed_require_limits_and_derives_nothing() {
     let s = snippet("neg-shadowed-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-shadowed-require.lua"));
@@ -718,8 +846,10 @@ fn lua_dynamic_forwarding_samples_are_limited() {
     let copy = snippet("amb-copy-loop.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-copy-loop.lua"));
     let report = copy.report();
     assert!(report.entries.is_empty());
-    assert_limited(&report, &[ReexportLimitReason::DynamicForwarding]);
+    // The loop forwards dynamically, and its `M[k]` write may replace any field.
+    assert_limited(&report, &[ReexportLimitReason::DynamicForwarding, ReexportLimitReason::ReboundBinding]);
     assert!(copy.text(&report.coverage.limits[0].span).starts_with("for k, v in pairs(m)"));
+    assert_eq!(copy.text(&report.coverage.limits[1].span), "M[k] = v");
 
     let meta = snippet("amb-setmetatable-index.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-setmetatable-index.lua"));
     let report = meta.report();
@@ -876,6 +1006,490 @@ fn lua_corpus_runs_every_sample_without_breaking_report_invariants() {
         assert!(report.entries.iter().all(|e| e.import_span.is_none()), "{name}: Lua has no import records");
         if name.starts_with("amb-") || name.starts_with("legacy-") {
             assert_eq!(report.coverage.state, ReexportCoverageState::Limited, "{name}");
+        }
+    }
+}
+
+// ------------------------------------------- Lua: uses of the returned table
+
+/// `pos-table-field-local.lua` with `inserted` placed before its final
+/// `return M`.
+fn field_local_with(inserted: &str) -> Snippet {
+    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua");
+    let (body, last) = sample.trim_end().rsplit_once('\n').expect("multi-line sample");
+    assert_eq!(last, "return M");
+    snippet("pos-table-field-local.lua", &format!("{body}\n{inserted}\n{last}\n"))
+}
+
+/// The report is limited by exactly `reason` at `site`, and the planner path
+/// reports the same.
+fn assert_limited_on_both_paths(s: &Snippet, reason: ReexportLimitReason, site: &str) -> ReexportReport {
+    let report = s.report();
+    assert_limited(&report, &[reason]);
+    assert_eq!(s.text(&report.coverage.limits[0].span), site);
+    assert_eq!(s.indexed().reexports.as_ref(), Some(&report), "query path agrees");
+    report
+}
+
+#[test]
+fn lua_conditional_field_write_withholds_the_field() {
+    for inserted in [
+        "if enabled then M.foo = 1 end",
+        "do M.foo = 1 end",
+        "while enabled do M.foo = 1 end",
+        "for i = 1, 2 do M.foo = 1 end",
+        "repeat M.foo = 1 until enabled",
+        "if enabled then M[\"foo\"] = 1 end",
+    ] {
+        let s = field_local_with(inserted);
+        let site = inserted.split_once(" M").map(|(_, rest)| format!("M{rest}")).expect("write");
+        let site = site.split(" end").next().and_then(|t| t.split(" until").next()).expect("site");
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_conditional_write_keeps_the_fields_it_does_not_name() {
+    let s = field_local_with("M.bar = m.bar\nif enabled then M.foo = 1 end");
+    let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, "M.foo = 1");
+    assert_eq!(report.entries.len(), 1);
+    let line = "M.bar = m.bar";
+    assert_entry(&s, &report.entries[0], &lua_named("bar", "bar", Some("m"), "m", line, line));
+}
+
+#[test]
+fn lua_field_write_in_a_function_body_withholds_the_field() {
+    for (inserted, site) in [
+        ("local function replace() M.foo = 1 end\nreplace()", "M.foo = 1"),
+        ("local function replace() M.foo = 1 end", "M.foo = 1"),
+        ("local replace = function() M.foo = 1 end", "M.foo = 1"),
+        ("function M.reset() M.foo = 1 end", "M.foo = 1"),
+        ("do function M.foo() end end", "function M.foo() end"),
+    ] {
+        let s = field_local_with(inserted);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_returned_table_passed_to_a_call_is_limited() {
+    for (inserted, site) in [
+        ("configure(M)", "configure(M)"),
+        ("f(x, M)", "f(x, M)"),
+        ("obj:f(M)", "obj:f(M)"),
+        ("M:init()", "M:init()"),
+        ("rawset(M, \"x\", 1)", "rawset(M, \"x\", 1)"),
+        ("table.insert(M, 1)", "table.insert(M, 1)"),
+        ("setmetatable(M, {})", "setmetatable(M, {})"),
+        ("configure((M))", "configure((M))"),
+        ("if enabled then configure(M) end", "configure(M)"),
+    ] {
+        let s = field_local_with(inserted);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::DynamicForwarding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_constructor_initialized_table_passed_to_a_call_is_limited() {
+    let control = snippet("ctor.lua", "local m = require(\"m\")\nlocal M = {read = m.read}\nreturn M\n");
+    let report = assert_complete_on_both_paths(&control);
+    assert_eq!(report.entries.len(), 1);
+    assert_entry(&control, &report.entries[0], &lua_named("read", "read", Some("m"), "m", "read = m.read", "local M = {read = m.read}"));
+
+    let escaped = snippet("ctor.lua", "local m = require(\"m\")\nlocal M = {read = m.read}\nconfigure(M)\nreturn M\n");
+    let report = assert_limited_on_both_paths(&escaped, ReexportLimitReason::DynamicForwarding, "configure(M)");
+    assert!(report.entries.is_empty(), "{:?}", report.entries);
+}
+
+#[test]
+fn lua_unknown_key_write_withholds_every_field() {
+    for (inserted, site) in [("M[key] = 1", "M[key] = 1"), ("if enabled then M[key] = 1 end", "M[key] = 1")] {
+        let s = field_local_with(&format!("M.bar = m.bar\n{inserted}"));
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+    let sample = snippet("neg-computed-key.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-computed-key.lua"));
+    assert_limited_on_both_paths(&sample, ReexportLimitReason::ReboundBinding, "M[key] = m.x");
+    let in_function = snippet("neg-field-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-field-in-function.lua"));
+    let report = assert_limited_on_both_paths(&in_function, ReexportLimitReason::ReboundBinding, "M.foo = require(\"m\").foo");
+    assert!(report.entries.is_empty());
+}
+
+#[test]
+fn lua_returned_table_stored_elsewhere_is_limited() {
+    for (inserted, site) in [
+        ("local alias = M", "M"),
+        ("other.t = M", "M"),
+        ("local list = {M}", "M"),
+        ("local holder = {t = M}", "M"),
+        ("local fallback = M or {}", "M or {}"),
+        ("local function get() return M end", "M"),
+        ("local keyed = {[M] = true}", "M"),
+    ] {
+        let s = field_local_with(inserted);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::DynamicForwarding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_reads_of_the_returned_table_keep_its_fields() {
+    for inserted in [
+        "print(M.foo)",
+        "local x = M.foo",
+        "if M.foo then end",
+        "if M then end",
+        "local n = #M",
+        "local same = M == other",
+        "M.foo.bar = 1",
+        "local t = {M = 1}",
+        "local function f(M) M.foo = 1 end",
+        "do local M = {}; configure(M) end",
+        "M.foo = m.foo",
+    ] {
+        let s = field_local_with(inserted);
+        let report = assert_complete_on_both_paths(&s);
+        assert_eq!(report.entries.len(), 1, "{inserted}");
+        assert_eq!(report.entries[0].exported_name.as_deref(), Some("foo"), "{inserted}");
+        assert_eq!(report.entries[0].source.as_deref(), Some("m"), "{inserted}");
+    }
+}
+
+#[test]
+fn lua_definite_chunk_level_overwrite_stays_complete() {
+    for inserted in ["M.foo = 1", "M[\"foo\"] = 1"] {
+        let s = field_local_with(inserted);
+        let report = assert_complete_on_both_paths(&s);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_reassigned_table_and_import_metatable_keep_their_reasons() {
+    let rebound = field_local_with("M = {}");
+    let report = assert_limited_on_both_paths(&rebound, ReexportLimitReason::ReboundBinding, "M = {}");
+    assert!(report.entries.is_empty());
+
+    let meta = field_local_with("setmetatable(M, {__index = m})");
+    let report = assert_limited_on_both_paths(&meta, ReexportLimitReason::DynamicForwarding, "setmetatable(M, {__index = m})");
+    assert!(report.entries.is_empty());
+
+    let direct = snippet("direct.lua", "local m = require(\"m\")\nreturn {read = m.read}\n");
+    let report = assert_complete_on_both_paths(&direct);
+    assert_entry(&direct, &report.entries[0], &lua_named("read", "read", Some("m"), "m", "read = m.read", "return {read = m.read}"));
+}
+
+// ------------------------------------------------------- Lua: table keys
+
+/// `sample` with its one occurrence of `from` replaced by `to`.
+fn edited(sample: &str, from: &str, to: &str) -> String {
+    assert_eq!(sample.matches(from).count(), 1, "`{from}` occurs once in the sample");
+    sample.replacen(from, to, 1)
+}
+
+#[test]
+fn lua_string_literal_constructor_key_names_the_field() {
+    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    for key in ["[\"x\"]", "['x']", "[ [[x]] ]", "[ [==[x]==] ]"] {
+        let field = format!("{key} = m.x");
+        let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", &field));
+        let report = assert_complete_on_both_paths(&s);
+        assert_eq!(report.entries.len(), 1, "{key}");
+        assert_entry(&s, &report.entries[0], &lua_named("x", "x", Some("m"), "m", &field, &format!("return {{ {field} }}")));
+    }
+}
+
+#[test]
+fn lua_string_literal_key_in_a_local_table_constructor_names_the_field() {
+    let s = snippet("ctor.lua", "local m = require(\"m\")\nlocal M = {[\"read\"] = m.read}\nreturn M\n");
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    assert_entry(&s, &report.entries[0], &lua_named("read", "read", Some("m"), "m", "[\"read\"] = m.read", "local M = {[\"read\"] = m.read}"));
+}
+
+#[test]
+fn lua_computed_constructor_key_withholds_every_field() {
+    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", "[key] = m.x"));
+    let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, "[key] = m.x");
+    assert!(report.entries.is_empty(), "{:?}", report.entries);
+
+    for (source, site) in [
+        ("local m = require(\"m\")\nlocal M = {[key] = m.read}\nreturn M\n", "[key] = m.read"),
+        ("local m = require(\"m\")\nreturn {read = m.read, [key] = 1}\n", "[key] = 1"),
+        ("local m = require(\"m\")\nlocal M = {read = m.read, [k .. \"x\"] = 1}\nreturn M\n", "[k .. \"x\"] = 1"),
+        ("local m = require(\"m\")\nlocal M = {[key] = 1}\nM.read = m.read\nreturn M\n", "[key] = 1"),
+    ] {
+        let s = snippet("computed.lua", source);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{source}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_computed_key_in_an_unreturned_table_does_not_limit() {
+    let s = snippet("unreturned.lua", "local m = require(\"m\")\nlocal lookup = {[key] = 1}\nreturn {read = m.read}\n");
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].exported_name.as_deref(), Some("read"));
+}
+
+#[test]
+fn lua_equal_constructor_keys_share_one_field() {
+    // Lua leaves constructor assignment order undefined for a repeated key, so
+    // a repeat involving an import-derived value states no field at all.
+    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    for (fields, site) in [
+        ("x = m.x, [\"x\"] = 1", "[\"x\"] = 1"),
+        ("[\"x\"] = m.x, x = 1", "x = 1"),
+        ("x = m.x, ['x'] = 1", "['x'] = 1"),
+        ("x = 1, [\"x\"] = m.x", "[\"x\"] = m.x"),
+    ] {
+        let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", fields));
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{fields}: {:?}", report.entries);
+    }
+
+    // A repeat of a key whose values are all local leaves the other fields.
+    let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", "y = 1, [\"y\"] = 2, x = m.x"));
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].exported_name.as_deref(), Some("x"));
+    assert_eq!(report.entries[0].original_name.as_deref(), Some("x"));
+}
+
+#[test]
+fn lua_number_and_boolean_keys_name_no_field() {
+    for field in ["[1] = m.read", "[1.5] = m.read", "[true] = m.read"] {
+        let s = snippet("keys.lua", &format!("local m = require(\"m\")\nreturn {{{field}}}\n"));
+        let report = assert_complete_on_both_paths(&s);
+        assert!(report.entries.is_empty(), "{field}: {:?}", report.entries);
+    }
+
+    // A number key cannot replace a string-named field, in a constructor or
+    // an assignment, before or after it.
+    for source in [
+        "local m = require(\"m\")\nreturn {read = m.read, [1] = 1}\n",
+        "local m = require(\"m\")\nlocal M = {[1] = 1, read = m.read}\nreturn M\n",
+        "local m = require(\"m\")\nlocal M = {read = m.read}\nM[1] = 1\nreturn M\n",
+        "local m = require(\"m\")\nlocal M = {read = m.read}\nif c then M[1] = 1 end\nreturn M\n",
+    ] {
+        let s = snippet("keys.lua", source);
+        let report = assert_complete_on_both_paths(&s);
+        assert_eq!(report.entries.len(), 1, "{source}");
+        assert_eq!(report.entries[0].exported_name.as_deref(), Some("read"), "{source}");
+        assert_eq!(report.entries[0].original_name.as_deref(), Some("read"), "{source}");
+    }
+}
+
+#[test]
+fn lua_string_keys_this_scan_does_not_decode_are_unknown() {
+    for (field, site) in [
+        ("[\"re\\x61d\"] = m.read", "[\"re\\x61d\"] = m.read"),
+        ("[\"a\\\"b\"] = m.read", "[\"a\\\"b\"] = m.read"),
+        ("[ [[\nread]] ] = m.read", "[ [[\nread]] ] = m.read"),
+        ("[\"\"] = m.read", "[\"\"] = m.read"),
+    ] {
+        let s = snippet("escaped.lua", &format!("local m = require(\"m\")\nreturn {{{field}}}\n"));
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert!(report.entries.is_empty(), "{field}: {:?}", report.entries);
+    }
+
+    let assigned = field_local_with("M[\"f\\111o\"] = 1");
+    let report = assert_limited_on_both_paths(&assigned, ReexportLimitReason::ReboundBinding, "M[\"f\\111o\"] = 1");
+    assert!(report.entries.is_empty(), "{:?}", report.entries);
+}
+
+#[test]
+fn lua_assignment_keys_share_one_field_however_spelled() {
+    for (source, expect_forward) in [
+        ("M.read = m.read\nM[\"read\"] = 1", false),
+        ("M[\"read\"] = m.read\nM.read = 1", false),
+        ("M['read'] = m.read\nfunction M:read() end", false),
+        ("M.read = 1\nM[ [[read]] ] = m.read", true),
+    ] {
+        let s = snippet("assign.lua", &format!("local m = require(\"m\")\nlocal M = {{}}\n{source}\nreturn M\n"));
+        let report = assert_complete_on_both_paths(&s);
+        let names: Vec<_> = report.entries.iter().map(|e| e.exported_name.as_deref()).collect();
+        let expected: Vec<Option<&str>> = if expect_forward { vec![Some("read")] } else { vec![] };
+        assert_eq!(names, expected, "{source}");
+    }
+}
+
+#[test]
+fn lua_assignment_replaces_a_string_literal_constructor_field() {
+    for later in ["M.read = 1", "function M.read() end", "function M:read() end"] {
+        let s = snippet("ctor.lua", &format!("local m = require(\"m\")\nlocal M = {{[\"read\"] = m.read}}\n{later}\nreturn M\n"));
+        let report = assert_complete_on_both_paths(&s);
+        assert!(report.entries.is_empty(), "{later}: {:?}", report.entries);
+    }
+}
+
+#[test]
+fn lua_bracketed_member_read_uses_the_same_key_rules() {
+    let s = snippet("member.lua", "local m = require(\"m\")\nreturn {a = m['x'], b = m[ [[y]] ], c = m[\"\\122\"], d = m[1]}\n");
+    let report = assert_complete_on_both_paths(&s);
+    let found: Vec<_> =
+        report.entries.iter().map(|e| (e.exported_name.as_deref(), e.original_name.as_deref())).collect();
+    assert_eq!(found, vec![(Some("a"), Some("x")), (Some("b"), Some("y"))]);
+}
+
+#[test]
+fn lua_nested_constructor_keys_are_not_an_interface() {
+    let s = snippet("nested.lua", "local m = require(\"m\")\nreturn {sub = {[\"read\"] = m.read, [key] = 1}}\n");
+    assert_negative(&s);
+}
+
+#[test]
+fn lua_metatable_index_key_is_recognized_however_spelled() {
+    for (inserted, site) in [
+        ("setmetatable(M, {[\"__index\"] = m})", "setmetatable(M, {[\"__index\"] = m})"),
+        ("setmetatable(M, {[key] = m})", "setmetatable(M, {[key] = m})"),
+    ] {
+        let s = field_local_with(inserted);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::DynamicForwarding, site);
+        assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
+    }
+}
+
+// ------------------------------------------- Lua: parenthesized spellings
+
+/// The exported names of a report, in order.
+fn exported_names(report: &ReexportReport) -> Vec<&str> {
+    report.entries.iter().filter_map(|e| e.exported_name.as_deref()).collect()
+}
+
+/// A chunk-level write through `(M)` is a write to `M`: it replaces the field
+/// as definitely as `M.foo = 1` does, so the report stays complete without
+/// `foo` and keeps `bar`. (Lua needs the `;` before a line opening with `(`.)
+#[test]
+fn lua_parenthesized_chunk_level_write_replaces_the_field() {
+    for target in ["(M).foo", "(M)[\"foo\"]", "((M)).foo", "M.foo"] {
+        let assembled = field_local_with(&format!("M.bar = m.bar;\n{target} = 1;"));
+        let report = assert_complete_on_both_paths(&assembled);
+        assert_eq!(exported_names(&report), ["bar"], "assembled, {target}");
+
+        let constructed = snippet(
+            "ctor.lua",
+            &format!("local m = require(\"m\")\nlocal M = {{foo = m.foo, bar = m.bar}};\n{target} = 1;\nreturn M\n"),
+        );
+        let report = assert_complete_on_both_paths(&constructed);
+        assert_eq!(exported_names(&report), ["bar"], "constructor, {target}");
+    }
+}
+
+#[test]
+fn lua_parenthesized_chunk_level_write_of_an_import_forwards_the_field() {
+    let s = snippet("paren.lua", "local m = require(\"m\")\nlocal M = {};\n(M).foo = (m).foo;\nreturn (M)\n");
+    let report = assert_complete_on_both_paths(&s);
+    assert_eq!(report.entries.len(), 1);
+    let line = "(M).foo = (m).foo";
+    assert_entry(&s, &report.entries[0], &lua_named("foo", "foo", Some("m"), "m", line, line));
+}
+
+#[test]
+fn lua_parenthesized_nested_write_still_withholds_the_field() {
+    for inserted in ["if enabled then (M).foo = 1 end", "local function reset() (M)[\"foo\"] = 1 end"] {
+        let s = field_local_with(&format!("M.bar = m.bar;\n{inserted}"));
+        let site = if inserted.contains('[') { "(M)[\"foo\"] = 1" } else { "(M).foo = 1" };
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
+        assert_eq!(exported_names(&report), ["bar"], "{inserted}");
+    }
+}
+
+/// `M or t` and `t and M` may or may not evaluate to `M`, so a write through
+/// one is not folded: the field it names is withheld.
+#[test]
+fn lua_write_through_an_and_or_expression_withholds_the_field() {
+    for target in ["(M or {}).foo", "(other or M).foo", "(M and other)[\"foo\"]"] {
+        let s = field_local_with(&format!("M.bar = m.bar;\n{target} = 1;"));
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, &format!("{target} = 1"));
+        assert_eq!(exported_names(&report), ["bar"], "{target}");
+    }
+}
+
+#[test]
+fn lua_parenthesized_requires_and_constructors_forward() {
+    for source in [
+        "local m = (require)(\"m\")\nreturn {foo = m.foo}\n",
+        "local m = require((\"m\"))\nreturn {foo = m.foo}\n",
+        "local m = require(\"m\")\nlocal M = ({foo = m.foo})\nreturn M\n",
+        "local m = require(\"m\")\nlocal M = {}\nM.foo = (m)[\"foo\"]\nreturn M\n",
+    ] {
+        let s = snippet("paren.lua", source);
+        let report = assert_complete_on_both_paths(&s);
+        assert_eq!(exported_names(&report), ["foo"], "{source}");
+        assert_eq!(report.entries[0].source.as_deref(), Some("m"), "{source}");
+    }
+}
+
+#[test]
+fn lua_parenthesized_dynamic_forms_still_limit() {
+    for (source, site) in [
+        ("local m = require(\"m\")\nreturn setmetatable({}, ({__index = m}))\n", "setmetatable({}, ({__index = m}))"),
+        ("local m = require(\"m\")\nreturn (setmetatable)({}, {__index = m})\n", "(setmetatable)({}, {__index = m})"),
+        ("local ok, m = pcall((require), \"m\")\nreturn m\n", "pcall((require), \"m\")"),
+        ("local ok, m = (pcall)(require, \"m\")\nreturn m\n", "(pcall)(require, \"m\")"),
+        ("(module)(\"x\")\nreturn {}\n", "(module)(\"x\")"),
+    ] {
+        let s = snippet("paren.lua", source);
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::DynamicForwarding, site);
+        assert!(report.entries.is_empty(), "{source}: {:?}", report.entries);
+    }
+}
+
+/// Lua leaves the order of one statement's assignments undefined, so a field
+/// written twice in it holds either value.
+#[test]
+fn lua_field_written_twice_in_one_statement_is_withheld() {
+    for targets in ["M.foo, M.foo", "M.foo, (M)[\"foo\"]"] {
+        let s = field_local_with(&format!("M.bar = m.bar\n{targets} = m.foo, 1"));
+        let site = format!("{targets} = m.foo, 1");
+        let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, &site);
+        assert_eq!(exported_names(&report), ["bar"], "{targets}");
+    }
+
+    // A later definite write decides the field; plain values and a table
+    // that is not returned leave nothing to withhold.
+    let settled = field_local_with("M.foo, M.foo = m.foo, 1\nM.foo = m.foo");
+    assert_eq!(exported_names(&assert_complete_on_both_paths(&settled)), ["foo"]);
+    let plain = field_local_with("M.foo, M.foo = 1, 2");
+    assert!(assert_complete_on_both_paths(&plain).entries.is_empty());
+    let unreturned =
+        snippet("other.lua", "local m = require(\"m\")\nlocal T = {}\nT.foo, T.foo = m.foo, 1\nreturn {bar = m.bar}\n");
+    assert_eq!(exported_names(&assert_complete_on_both_paths(&unreturned)), ["bar"]);
+}
+
+/// The parenthesized spellings report the same through the persistent cache:
+/// cold, hit, and narrowed from a complete-index entry.
+#[test]
+fn lua_parenthesized_spellings_survive_the_cache() {
+    use tree_hugger::cache::{CacheLookup, PersistentCache, SymbolCache};
+    use tree_hugger::{Capability, SourceFile, SymbolQuery};
+
+    let reexports = SymbolQuery::new().capabilities([Capability::Reexports]);
+    for (name, source) in [
+        ("assembled.lua", "local m = require(\"m\")\nlocal M = {}\nM.foo = m.foo\nM.bar = m.bar;\n(M).foo = 1;\nreturn M\n"),
+        ("ctor.lua", "local m = require(\"m\")\nlocal M = {foo = m.foo, bar = m.bar};\n(M)[\"foo\"] = 1;\nreturn M\n"),
+        ("or.lua", "local m = require(\"m\")\nlocal M = {foo = m.foo, bar = m.bar};\n(M or {}).foo = 1;\nreturn M\n"),
+    ] {
+        let dir = tempfile::TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write");
+        let uncached = SourceFile::read(&path).unwrap().query(&reexports).unwrap().index.reexports;
+        assert_eq!(uncached.as_ref().map(exported_names), Some(vec!["bar"]), "{name}");
+
+        let cache = SymbolCache::new(PersistentCache::open(dir.path().join("cache"), true));
+        let cold = cache.query(SourceFile::read(&path).unwrap(), &reexports).unwrap();
+        let hit = cache.query(SourceFile::read(&path).unwrap(), &reexports).unwrap();
+        assert!(matches!(hit.lookup, CacheLookup::Hit), "{name}: {:?}", hit.lookup);
+        let wide = cache.query(SourceFile::read(&path).unwrap(), &SymbolQuery::complete_index()).unwrap();
+        let narrowed = cache.query(SourceFile::read(&path).unwrap(), &reexports).unwrap();
+        for (label, outcome) in [("cold", &cold), ("hit", &hit), ("wide", &wide), ("narrowed", &narrowed)] {
+            assert_eq!(outcome.result.index.reexports, uncached, "{name} {label}");
         }
     }
 }

@@ -85,6 +85,39 @@ fn only_declared_or_syntax_evidence_exempts_a_python_import() {
 }
 
 #[test]
+fn a_replaced_python_import_keeps_its_unused_import_warning() {
+    let snippet = snippet("mod.py", "from old import read\nfrom new import read\n__all__ = [\"read\"]\n");
+    let imports = snippet.file.imported_symbols().expect("imports");
+    let forwarded: Vec<_> = imports.iter().map(|import| (import.source.as_deref(), import.is_reexport)).collect();
+    assert_eq!(forwarded, [(Some("old"), false), (Some("new"), true)]);
+    assert_eq!(marked(&snippet), ["read"]);
+
+    let diagnostics: Vec<_> = snippet
+        .file
+        .lint_diagnostics()
+        .into_iter()
+        .filter(|diagnostic| diagnostic.rule.as_deref() == Some("unused-import"))
+        .collect();
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let range = |r: &tree_hugger::CodeRange| (r.start_byte, r.end_byte);
+    assert_eq!(range(&diagnostics[0].range), range(&imports[0].range), "the warning is on the replaced import");
+}
+
+#[test]
+fn a_conditional_all_append_does_not_exempt_the_import() {
+    let guarded = snippet("mod.py", "from m import read\n__all__ = []\nif enabled:\n    __all__.append(\"read\")\n");
+    assert_eq!(flagged(&guarded), Vec::<String>::new());
+    assert_eq!(marked(&guarded), flagged(&guarded));
+    let messages = unused(&guarded);
+    assert!(messages.iter().any(|m| m.contains("read")), "a guessed listing keeps the warning: {messages:?}");
+
+    let unguarded = snippet("mod.py", "from m import read\n__all__ = []\n__all__.append(\"read\")\n");
+    assert_eq!(flagged(&unguarded), ["read"]);
+    assert_eq!(marked(&unguarded), flagged(&unguarded));
+    assert!(unused(&unguarded).is_empty(), "{:?}", unused(&unguarded));
+}
+
+#[test]
 fn a_python_import_with_no_all_is_exposed_but_not_exempt() {
     let snippet = snippet("mod.py", "from m import plain\n");
     let report = snippet.report();
@@ -110,4 +143,17 @@ fn a_query_without_reexports_marks_no_import() {
     let index = snippet.file.query(&SymbolQuery::new()).expect("query").index;
     assert!(index.reexports.is_none());
     assert!(index.imports.iter().all(|import| !import.reexported), "not computed is not marked");
+}
+
+#[test]
+fn an_ecma_import_forwarded_through_a_replaced_commonjs_member_is_not_flagged() {
+    let replaced = snippet("mod.js", "import { a } from \"m\";\nexports.x = a;\nexports.x = 1;\n");
+    assert_eq!(flagged(&replaced), Vec::<String>::new());
+    assert_eq!(marked(&replaced), flagged(&replaced));
+    // `exports.x = a` still reads `a`, so the import is used either way.
+    assert!(unused(&replaced).is_empty(), "{:?}", unused(&replaced));
+
+    let kept = snippet("mod.js", "import { a } from \"m\";\nexports.x = a;\nexports.y = 1;\n");
+    assert_eq!(flagged(&kept), ["a"]);
+    assert_eq!(marked(&kept), flagged(&kept));
 }

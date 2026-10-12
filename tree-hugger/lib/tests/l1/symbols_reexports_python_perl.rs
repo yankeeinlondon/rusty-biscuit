@@ -453,6 +453,110 @@ fn python_bindings_that_do_not_rebind_the_import_keep_it_reported() {
 }
 
 #[test]
+fn python_a_later_named_import_of_the_same_name_replaces_the_earlier_one() {
+    // Control: the unmodified sample forwards its one import.
+    let control = sample!("python", "pos-all-list.py");
+    let (snip, report) = run("m.py", control);
+    complete(&report);
+    check_all(&snip, &report, &[py_named(Ev::Declared, "a", "a", "m", "a", "from m import a")]);
+    assert_eq!(markers(&snip), [("a".to_owned(), true)]);
+
+    // One inserted import of the same name: only the final binding is
+    // forwarded, and the replaced import is not marked.
+    let replaced = control.replacen("from m import a\n", "from m import a\nfrom n import a\n", 1);
+    let (snip, report) = run("m.py", &replaced);
+    complete(&report);
+    check_all(&snip, &report, &[py_named(Ev::Declared, "a", "a", "n", "a", "from n import a")]);
+    assert_eq!(markers(&snip), [("a".to_owned(), false), ("a".to_owned(), true)]);
+}
+
+#[test]
+fn python_sequential_namespace_aliases_forward_only_the_final_module() {
+    let (snip, report) = run("m.py", "import first as m\nimport second as m\n");
+    complete(&report);
+    check_all(&snip, &report, &[py_module(Ev::Exposed, "m", "second", "second as m", "import second as m")]);
+
+    let (snip, report) = run("m.py", "import first as m\nimport second as m\n__all__ = [\"m\"]\n");
+    complete(&report);
+    check_all(&snip, &report, &[py_module(Ev::Declared, "m", "second", "second as m", "import second as m")]);
+    assert_eq!(markers(&snip), [("m".to_owned(), false), ("m".to_owned(), true)]);
+
+    // Two unaliased imports of one package bind the same module object.
+    let (_, report) = run("m.py", "import pkg.a\nimport pkg.b\n__all__ = [\"pkg\"]\n");
+    complete(&report);
+    let sources: Vec<_> = report.entries.iter().map(|entry| entry.source.as_deref()).collect();
+    assert_eq!(sources, [Some("pkg.a"), Some("pkg.b")]);
+}
+
+#[test]
+fn python_fallback_imports_in_exclusive_branches_both_stay_conditional() {
+    let source = "try:\n    from old import read\nexcept ImportError:\n    from new import read\n__all__ = [\"read\"]\n";
+    let (snip, report) = run("m.py", source);
+    complete(&report);
+    check_all(
+        &snip,
+        &report,
+        &[
+            py_named(Ev::Declared, "read", "read", "old", "read", "from old import read").conditional(),
+            py_named(Ev::Declared, "read", "read", "new", "read", "from new import read").conditional(),
+        ],
+    );
+    assert_eq!(markers(&snip), [("read".to_owned(), true), ("read".to_owned(), true)]);
+
+    let branches = "if fast:\n    from a import read\nelif slow:\n    from b import read\nelse:\n    from c import read\n";
+    let (_, report) = run("m.py", branches);
+    complete(&report);
+    let sources: Vec<_> = report.entries.iter().map(|entry| entry.source.as_deref()).collect();
+    assert_eq!(sources, [Some("a"), Some("b"), Some("c")]);
+
+    // An unconditional import after the alternatives replaces both.
+    let (snip, report) = run("m.py", &format!("{source}from final import read\n"));
+    complete(&report);
+    check_all(&snip, &report, &[py_named(Ev::Declared, "read", "read", "final", "read", "from final import read")]);
+    assert_eq!(
+        markers(&snip),
+        [("read".to_owned(), false), ("read".to_owned(), false), ("read".to_owned(), true)]
+    );
+}
+
+#[test]
+fn python_a_conditional_later_import_makes_the_earlier_one_a_rebound_limit() {
+    let (snip, report) = run("m.py", "from old import read\nif fast:\n    from new import read\n__all__ = [\"read\"]\n");
+    assert_eq!(limits(&snip, &report), [(Why::ReboundBinding, "read".to_owned())]);
+    assert_eq!(report.coverage.limits[0].span.start_byte, 16, "the limit is on the earlier import");
+    check_all(
+        &snip,
+        &report,
+        &[py_named(Ev::Declared, "read", "read", "new", "read", "from new import read").conditional()],
+    );
+    assert_eq!(markers(&snip), [("read".to_owned(), false), ("read".to_owned(), true)]);
+
+    // A try body followed by its `else` is sequential, not an alternative.
+    let source = "try:\n    from old import read\nexcept ImportError:\n    pass\nelse:\n    from new import read\n";
+    let (snip, report) = run("m.py", source);
+    assert_eq!(limits(&snip, &report), [(Why::ReboundBinding, "read".to_owned())]);
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].source.as_deref(), Some("new"));
+
+    // `finally` always runs after the body, so it replaces outright.
+    let (_, report) = run("m.py", "try:\n    from old import read\nfinally:\n    from new import read\n");
+    complete(&report);
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].source.as_deref(), Some("new"));
+}
+
+#[test]
+fn python_star_import_then_a_named_import_keeps_both_forwards() {
+    let (snip, report) = run("m.py", "from a import *\nfrom b import x\n");
+    complete(&report);
+    check_all(
+        &snip,
+        &report,
+        &[py_star("a", "from a import *"), py_named(Ev::Exposed, "x", "x", "b", "x", "from b import x")],
+    );
+}
+
+#[test]
 fn python_computed_all_limits_coverage_and_yields_no_all_derived_entries() {
     let computed = samples!("python":
         "neg-all-call.py", "neg-all-computed.py", "neg-all-dunder-del.py", "neg-all-nonstring.py",
@@ -478,6 +582,43 @@ fn python_all_set_under_a_condition_is_computed() {
         ]
     );
     assert!(report.entries.is_empty());
+}
+
+#[test]
+fn python_all_edited_under_a_condition_is_computed_whatever_the_edit() {
+    let guarded = [
+        ("if append", "__all__ = []\nif enabled:\n    __all__.append(\"read\")\n", "__all__.append(\"read\")"),
+        ("try append", "__all__ = []\ntry:\n    __all__.append(\"read\")\nexcept E:\n    pass\n", "__all__.append(\"read\")"),
+        ("if extend", "__all__ = []\nif enabled:\n    __all__.extend([\"read\"])\n", "__all__.extend([\"read\"])"),
+        ("if +=", "__all__ = []\nif enabled:\n    __all__ += [\"read\"]\n", "__all__ += [\"read\"]"),
+        ("if assign", "__all__ = []\nif enabled:\n    __all__ = [\"read\"]\n", "__all__ = [\"read\"]"),
+        ("if concat", "__all__ = []\nif enabled:\n    __all__ = [] + [\"read\"]\n", "__all__ = [] + [\"read\"]"),
+        ("if remove", "__all__ = [\"read\"]\nif enabled:\n    __all__.remove(\"read\")\n", "__all__.remove(\"read\")"),
+        ("and append", "__all__ = []\nenabled and __all__.append(\"read\")\n", "__all__.append(\"read\")"),
+        ("def append", "__all__ = []\ndef f():\n    __all__.append(\"read\")\nf()\n", "__all__.append(\"read\")"),
+        ("def global", "__all__ = []\ndef f():\n    global __all__\n    __all__ = [\"read\"]\n", "global __all__"),
+        ("lambda", "__all__ = []\ng = lambda: __all__.append(\"read\")\n", "__all__.append(\"read\")"),
+        ("comprehension", "__all__ = []\nx = [__all__.append(\"read\") for _ in y]\n", "__all__.append(\"read\")"),
+    ];
+    for (shape, list, edit) in guarded {
+        let (snip, report) = run("m.py", &format!("from m import read\n{list}"));
+        assert_eq!(limits(&snip, &report), [(Why::ComputedExportList, edit.to_owned())], "{shape}");
+        assert!(report.entries.is_empty(), "{shape}: no list-derived forward");
+        assert_eq!(markers(&snip), [("read".to_owned(), false)], "{shape}");
+    }
+}
+
+#[test]
+fn python_unguarded_append_and_remove_are_definite() {
+    let (snip, report) = run("m.py", "from m import read\n__all__ = []\n__all__.append(\"read\")\n");
+    complete(&report);
+    check_all(&snip, &report, &[py_named(Ev::Declared, "read", "read", "m", "read", "from m import read")]);
+    assert_eq!(markers(&snip), [("read".to_owned(), true)]);
+
+    let (snip, report) = run("m.py", "from m import read\n__all__ = [\"read\"]\n__all__.remove(\"read\")\n");
+    complete(&report);
+    assert!(report.entries.is_empty());
+    assert_eq!(markers(&snip), [("read".to_owned(), false)]);
 }
 
 #[test]
@@ -674,6 +815,21 @@ fn perl_statement_modifiers_and_blocks_make_an_export_conditional() {
     let source = "package P;\nuse parent 'Exporter';\nuse Q qw(a);\nour @EXPORT = qw(a) unless $x;\n";
     let (snip, report) = run("P.pm", source);
     check_all(&snip, &report, &[pl("a", "Q", Some("P"), "a", "our @EXPORT = qw(a)").conditional()]);
+}
+
+#[test]
+fn perl_guarded_push_unshift_and_tags_stay_conditional() {
+    let guarded = [
+        ("if ($x) { push @EXPORT_OK, 'a'; }\n", "'a'", "push @EXPORT_OK, 'a'"),
+        ("push @EXPORT_OK, 'a' if $x;\n", "'a'", "push @EXPORT_OK, 'a'"),
+        ("if ($x) { unshift @EXPORT, 'a'; }\n", "'a'", "unshift @EXPORT, 'a'"),
+        ("if ($x) { our %EXPORT_TAGS = (all => [qw(a)]); }\n", "a", "our %EXPORT_TAGS = (all => [qw(a)])"),
+    ];
+    for (edit, span, statement) in guarded {
+        let (snip, report) = run("P.pm", &format!("package P;\nuse parent 'Exporter';\nuse Q qw(a);\n{edit}"));
+        complete(&report);
+        check_all(&snip, &report, &[pl("a", "Q", Some("P"), span, statement).conditional()]);
+    }
 }
 
 #[test]

@@ -360,19 +360,28 @@ fn cjs_property_assignments_are_named_or_namespace_forwards() {
 
 #[test]
 fn cjs_destructured_and_object_literal_forms_resolve_through_require_bindings() {
+    // The sample's second `module.exports = ..` replaces the first object and
+    // detaches `exports`, so only its own members are the interface.
     let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-destructure.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
         [
-            want("Named/Declared", "a", "a", "a", "m", "-", "a", "module.exports = { a };"),
             want("Namespace/Declared", "b", "-", "b", "n", "-", "b", "module.exports = { b, c: b.c };"),
             want("Named/Declared", "c", "c", "b", "n", "-", "c: b.c", "module.exports = { b, c: b.c };"),
-            want("Named/Declared", "d", "a", "a", "m", "-", "exports.d = a", "exports.d = a;"),
         ]
     );
     assert_complete(&snip.report());
     assert!(marked_imports(&snip).is_empty());
+    let destructured = snippet("a.js", "const { a } = require(\"m\");\nmodule.exports = { a };\nmodule.exports.d = a;\n");
+    assert_eq!(
+        digests(&destructured),
+        [
+            want("Named/Declared", "a", "a", "a", "m", "-", "a", "module.exports = { a };"),
+            want("Named/Declared", "d", "a", "a", "m", "-", "module.exports.d = a", "module.exports.d = a;"),
+        ]
+    );
+    assert_complete(&destructured.report());
 }
 
 #[test]
@@ -404,10 +413,12 @@ fn cjs_local_objects_and_the_bare_require_function_are_not_forwards() {
 
 #[test]
 fn cjs_conditional_dynamic_and_merge_forms_are_limited_and_the_guarded_one_is_conditional() {
+    // The sample's later unguarded `module.exports = ..` lines replace the
+    // guarded forward on its first line, so that one is checked alone.
     let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-cjs-conditional.js");
-    let snip = snippet("a.js", source);
+    let guarded = snippet("a.js", source.lines().next().expect("first line"));
     assert_eq!(
-        digests(&snip),
+        digests(&guarded),
         [conditional(direct(
             "Module/Declared",
             "-",
@@ -417,6 +428,9 @@ fn cjs_conditional_dynamic_and_merge_forms_are_limited_and_the_guarded_one_is_co
             r#"module.exports = require("m");"#
         ))]
     );
+    assert_complete(&guarded.report());
+    let snip = snippet("a.js", source);
+    assert!(digests(&snip).is_empty());
     assert_limited(
         &snip,
         &[
@@ -490,6 +504,341 @@ fn js_mixed_destructured_binding_with_computed_key_is_dynamic() {
         &snip,
         &[(ReexportLimitReason::DynamicForwarding, "[key]: m"), (ReexportLimitReason::DynamicForwarding, "...m")],
     );
+}
+
+// ------------------------------------------- CommonJS binding scope and globals
+
+/// `source` reported as JavaScript and as TypeScript.
+fn both_extensions(source: &str) -> [(&'static str, Snippet); 2] {
+    [("js", snippet("a.js", source)), ("ts", snippet("a.ts", source))]
+}
+
+/// No entry, and exactly the `expected` limits, in each extension.
+fn assert_withheld(source: &str, expected: &[(ReexportLimitReason, &str)]) {
+    for (extension, snip) in both_extensions(source) {
+        assert!(digests(&snip).is_empty(), "{extension}: {source}");
+        let expected: Vec<_> = expected.iter().map(|(reason, text)| (*reason, (*text).to_owned())).collect();
+        assert_eq!(limits(&snip, &snip.report()), expected, "{extension}: {source}");
+    }
+}
+
+#[test]
+fn cjs_whole_module_binding_hidden_by_a_block_local_is_not_forwarded() {
+    assert_withheld(
+        "const m = require(\"m\");\n{ const m = {}; module.exports = m; }\n",
+        &[(ReexportLimitReason::ShadowedGlobal, "module.exports = m")],
+    );
+    let forwarded = want("Module/Declared", "-", "-", "m", "m", "-", "module.exports = m", "module.exports = m;");
+    for (extension, snip) in
+        both_extensions("const m = require(\"m\");\nfunction other() { const m = {}; m.x = 1; }\nmodule.exports = m;\n")
+    {
+        assert_eq!(digests(&snip), std::slice::from_ref(&forwarded), "{extension}");
+        assert_complete(&snip.report());
+    }
+    assert_withheld(
+        "let m = require(\"m\");\nm = {};\nmodule.exports = m;\n",
+        &[(ReexportLimitReason::ReboundBinding, "module.exports = m")],
+    );
+}
+
+#[test]
+fn cjs_property_forward_of_a_binding_hidden_by_a_nearer_declaration_is_not_forwarded() {
+    let prelude = "const m = require(\"m\");\nconst { read } = require(\"m\");\n";
+    let shadowing = [
+        ("{ const m = other; module.exports.read = m.read; }", "module.exports.read = m.read"),
+        ("{ let read = 1; exports.read = read; }", "exports.read = read"),
+        ("try { run(); } catch (m) { module.exports.read = m.read; }", "module.exports.read = m.read"),
+        ("for (const m of list) { module.exports.read = m.read; }", "module.exports.read = m.read"),
+        ("for (let read = 0; read < 1; read++) { exports.read = read; }", "exports.read = read"),
+        ("{ function read() {} exports.read = read; }", "exports.read = read"),
+    ];
+    for (body, site) in shadowing {
+        assert_withheld(&format!("{prelude}{body}\n"), &[(ReexportLimitReason::ShadowedGlobal, site)]);
+    }
+    assert_withheld(
+        &format!("{prelude}function f(m) {{ module.exports.read = m.read; }}\n"),
+        &[(ReexportLimitReason::DynamicForwarding, "module.exports.read = m.read")],
+    );
+    let unrelated = format!("{prelude}{{ const other = 1; module.exports.read = m.read; }}\nexports.r = read;\n");
+    for (extension, snip) in both_extensions(&unrelated) {
+        assert_eq!(
+            digests(&snip),
+            [
+                want("Named/Declared", "read", "read", "m", "m", "-", "module.exports.read = m.read", "module.exports.read = m.read;"),
+                want("Named/Declared", "r", "read", "read", "m", "-", "exports.r = read", "exports.r = read;"),
+            ],
+            "{extension}"
+        );
+        assert_complete(&snip.report());
+    }
+}
+
+#[test]
+fn cjs_object_literal_member_hidden_by_a_block_local_is_withheld_and_other_sites_stay() {
+    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-destructure.js")
+        .replacen("module.exports = { a };", "{ const a = 1; module.exports = { a }; }", 1)
+        .replacen("module.exports = { b, c: b.c };", "{ const b = {}; module.exports = { b, c: b.c }; }", 1)
+        // `exports` is detached once `module.exports` is replaced.
+        .replacen("exports.d = a;", "module.exports.d = a;", 1);
+    for (extension, snip) in both_extensions(&source) {
+        assert_eq!(
+            digests(&snip),
+            [want("Named/Declared", "d", "a", "a", "m", "-", "module.exports.d = a", "module.exports.d = a;")],
+            "{extension}"
+        );
+        assert_limited(
+            &snip,
+            &[
+                (ReexportLimitReason::ShadowedGlobal, "a"),
+                (ReexportLimitReason::ShadowedGlobal, "b"),
+                (ReexportLimitReason::ShadowedGlobal, "c: b.c"),
+            ],
+        );
+    }
+}
+
+#[test]
+fn cjs_consumer_of_an_es_import_hidden_by_a_block_local_leaves_the_import_unmarked() {
+    let source = "import { read } from \"m\";\n{ const read = 1; exports.read = read; }\n";
+    assert_withheld(source, &[(ReexportLimitReason::ShadowedGlobal, "exports.read = read")]);
+    for (extension, snip) in both_extensions(source) {
+        assert_eq!(marked_imports(&snip), [("read".to_owned(), false)], "{extension}");
+        let imports = snip.file.imported_symbols().expect("imports");
+        let markers: Vec<_> = imports.iter().map(|import| (import.name.as_str(), import.is_reexport)).collect();
+        assert_eq!(markers, [("read", false)], "{extension}");
+    }
+}
+
+#[test]
+fn cjs_reassigned_loader_and_interface_globals_are_not_proven() {
+    let fixture = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-module-exports.js");
+    let site = r#"module.exports = require("m")"#;
+    for source in [format!("require = replacement;\n{fixture}"), format!("{fixture}require = replacement;\n")] {
+        assert_withheld(&source, &[(ReexportLimitReason::ShadowedGlobal, site)]);
+    }
+    assert_withheld(
+        "const m = require(\"m\");\nrequire = replacement;\nmodule.exports = m;\n",
+        &[(ReexportLimitReason::ShadowedGlobal, "module.exports = m")],
+    );
+    assert_withheld(&format!("{fixture}module = other;\n"), &[(ReexportLimitReason::ShadowedGlobal, site)]);
+    let exports_replaced = "exports = other;\nexports.read = require(\"m\").read;\nmodule.exports.x = require(\"m\").x;\n";
+    for (extension, snip) in both_extensions(exports_replaced) {
+        assert_eq!(
+            digests(&snip),
+            [direct("Named/Declared", "x", "x", "m", r#"module.exports.x = require("m").x"#, r#"module.exports.x = require("m").x;"#)],
+            "{extension}"
+        );
+        assert_limited(&snip, &[(ReexportLimitReason::ShadowedGlobal, r#"exports.read = require("m").read"#)]);
+    }
+    for (extension, snip) in both_extensions(&format!("function f(require) {{ require = 1; }}\n{fixture}")) {
+        assert_eq!(
+            digests(&snip),
+            [direct("Module/Declared", "-", "-", "m", site, r#"module.exports = require("m");"#)],
+            "{extension}"
+        );
+        assert_complete(&snip.report());
+    }
+}
+
+#[test]
+fn ts_export_equals_after_require_is_reassigned_is_not_proven() {
+    let fixture = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-require.ts");
+    let snip = snippet("a.ts", &format!("require = replacement;\n{fixture}"));
+    assert!(digests(&snip).is_empty());
+    assert_limited(&snip, &[(ReexportLimitReason::ShadowedGlobal, r#"require("m")"#)]);
+    let import_require = snippet("a.ts", "import x = require(\"m\");\nrequire = replacement;\nexport = x;\n");
+    assert!(digests(&import_require).is_empty());
+    assert_limited(&import_require, &[(ReexportLimitReason::ShadowedGlobal, "x")]);
+    assert_eq!(marked_imports(&import_require), [("x".to_owned(), false)]);
+}
+
+#[test]
+fn cjs_var_redeclaration_and_for_of_targets_rebind_and_function_vars_do_not() {
+    assert_withheld(
+        "var m = require(\"m\");\n{ var m = {}; }\nmodule.exports = m;\n",
+        &[(ReexportLimitReason::ReboundBinding, "module.exports = m")],
+    );
+    assert_withheld(
+        "var m = require(\"m\");\nvar m = {};\nmodule.exports = m;\n",
+        &[(ReexportLimitReason::ReboundBinding, "module.exports = m")],
+    );
+    assert_withheld(
+        "let m = require(\"m\");\nfor (m of list) {}\nmodule.exports = m;\n",
+        &[(ReexportLimitReason::ReboundBinding, "module.exports = m")],
+    );
+    let forwarded = want("Module/Declared", "-", "-", "m", "m", "-", "module.exports = m", "module.exports = m;");
+    let unrelated = "var m = require(\"m\");\nfunction f() { if (x) { var m = 1; } m = 2; }\nmodule.exports = m;\n";
+    for (extension, snip) in both_extensions(unrelated) {
+        assert_eq!(digests(&snip), std::slice::from_ref(&forwarded), "{extension}");
+        assert_complete(&snip.report());
+    }
+}
+
+/// Each `(source, entries)` is complete with exactly `entries` in each extension.
+fn assert_forwarded(cases: &[(String, Vec<String>)]) {
+    for (source, expected) in cases {
+        for (extension, snip) in both_extensions(source) {
+            assert_eq!(&digests(&snip), expected, "{extension}: {source}");
+            assert_complete(&snip.report());
+        }
+    }
+}
+
+#[test]
+fn cjs_bare_var_redeclaration_assigns_nothing_and_keeps_the_forward() {
+    let module = "var m = require(\"m\");\nvar m;\n";
+    let destructured = "var { read } = require(\"m\");\nvar read;\n";
+    let read = |site: &str, local: &str| want("Named/Declared", "read", "read", local, "m", "-", site, &format!("{site};"));
+    assert_forwarded(&[
+        (
+            format!("{module}module.exports = m;\n"),
+            vec![want("Module/Declared", "-", "-", "m", "m", "-", "module.exports = m", "module.exports = m;")],
+        ),
+        (format!("{module}exports.read = m.read;\n"), vec![read("exports.read = m.read", "m")]),
+        (
+            format!("{module}module.exports = {{ m }};\n"),
+            vec![want("Namespace/Declared", "m", "-", "m", "m", "-", "m", "module.exports = { m };")],
+        ),
+        (format!("{destructured}exports.read = read;\n"), vec![read("exports.read = read", "read")]),
+        (
+            format!("{destructured}module.exports = {{ read }};\n"),
+            vec![want("Named/Declared", "read", "read", "read", "m", "-", "read", "module.exports = { read };")],
+        ),
+        (
+            "var m;\nvar m = require(\"m\");\nmodule.exports = m;\n".to_owned(),
+            vec![want("Module/Declared", "-", "-", "m", "m", "-", "module.exports = m", "module.exports = m;")],
+        ),
+    ]);
+}
+
+#[test]
+fn cjs_nested_bare_var_and_top_level_function_of_the_same_name_keep_the_forward() {
+    let forwarded = vec![want("Module/Declared", "-", "-", "m", "m", "-", "module.exports = m", "module.exports = m;")];
+    let cases: Vec<_> = [
+        "{ var m; }",
+        "for (var m; ;) { break; }",
+        "function f() { var m; }",
+        // Hoisted before the `var` initializer runs, so the initializer wins.
+        "function m() {}",
+        "function f() { { function m() {} } }",
+        "{ let m; { function m() {} } }",
+    ]
+    .into_iter()
+    .map(|middle| (format!("var m = require(\"m\");\n{middle}\nmodule.exports = m;\n"), forwarded.clone()))
+    .collect();
+    assert_forwarded(&cases);
+}
+
+#[test]
+fn cjs_initialized_var_redeclaration_and_block_function_rebind() {
+    for middle in ["var m = {};", "{ function m() {} }", "for (var m in other) {}"] {
+        assert_withheld(
+            &format!("var m = require(\"m\");\n{middle}\nmodule.exports = m;\n"),
+            &[(ReexportLimitReason::ReboundBinding, "module.exports = m")],
+        );
+    }
+    let es_module = "import a from \"m\";\n{ function a() {} }\nexport { a };\n";
+    for (extension, snip) in both_extensions(es_module) {
+        assert_eq!(digests(&snip), [want("Named/Syntax", "a", "default", "a", "m", "a", "a", "export { a };")], "{extension}");
+        assert_complete(&snip.report());
+    }
+}
+
+// ------------------------------------------- CommonJS later interface writes
+
+#[test]
+fn cjs_later_definite_write_replaces_the_earlier_forward() {
+    for source in [
+        "exports.x = require(\"a\").x;\nexports.x = 1;\n",
+        "module.exports.x = require(\"a\").x;\nexports.x = 1;\n",
+        "exports.x = require(\"a\").x;\nmodule.exports.x = 1;\n",
+        "exports.x = require(\"a\").x;\ndelete exports.x;\n",
+        "module.exports = require(\"a\");\nmodule.exports = {};\n",
+        "exports.x = require(\"a\").x;\nmodule.exports = { y: 1 };\n",
+        "module.exports.x = require(\"a\").x;\nmodule.exports = { y: 1 };\n",
+        "module.exports = { a: require(\"a\") };\nmodule.exports.a = 1;\n",
+        // `exports` no longer is the interface once `module.exports` is replaced.
+        "module.exports = {};\nexports.x = require(\"a\").x;\n",
+    ] {
+        assert_forwarded(&[(source.to_owned(), Vec::new())]);
+    }
+}
+
+#[test]
+fn cjs_later_write_that_may_replace_or_mutates_the_forward_withholds_it() {
+    let member = "exports.x = require(\"a\").x";
+    let cases = [
+        (format!("{member};\nif (c) exports.x = 1;\n"), member),
+        (format!("{member};\nfunction f() {{ exports.x = 1; }}\n"), member),
+        (format!("function f() {{ exports.x = 1; }}\n{member};\n"), member),
+        (format!("{member};\nexports[k] = 1;\n"), member),
+        (format!("{member};\nObject.assign(exports, other);\n"), member),
+        (format!("{member};\nexports.x += 1;\n"), member),
+        (format!("if (c) module.exports = {{}};\n{member};\n"), member),
+        ("module.exports = require(\"a\");\nmodule.exports.y = 1;\n".to_owned(), r#"module.exports = require("a")"#),
+        ("module.exports = require(\"a\");\nif (c) module.exports = {};\n".to_owned(), r#"module.exports = require("a")"#),
+    ];
+    for (source, site) in &cases {
+        assert_withheld(source, &[(ReexportLimitReason::ReboundBinding, site)]);
+    }
+}
+
+#[test]
+fn cjs_later_write_of_another_member_or_through_detached_exports_keeps_the_forward() {
+    let x = direct("Named/Declared", "x", "x", "a", r#"exports.x = require("a").x"#, r#"exports.x = require("a").x;"#);
+    let module = direct("Module/Declared", "-", "-", "a", r#"module.exports = require("a")"#, r#"module.exports = require("a");"#);
+    assert_forwarded(&[
+        ("exports.x = require(\"a\").x;\nexports.y = 1;\n".to_owned(), vec![x.clone()]),
+        ("exports.x = 1;\nexports.x = require(\"a\").x;\n".to_owned(), vec![x]),
+        ("module.exports = require(\"a\");\nexports.y = 1;\n".to_owned(), vec![module.clone()]),
+        ("module.exports = require(\"a\");\nexports.x = require(\"b\").x;\n".to_owned(), vec![module]),
+        (
+            "module.exports = { a: require(\"a\") };\nmodule.exports.b = 1;\n".to_owned(),
+            vec![direct("Namespace/Declared", "a", "-", "a", r#"a: require("a")"#, r#"module.exports = { a: require("a") };"#)],
+        ),
+        (
+            "module.exports = require(\"a\");\nmodule.exports = require(\"b\");\n".to_owned(),
+            vec![direct("Module/Declared", "-", "-", "b", r#"module.exports = require("b")"#, r#"module.exports = require("b");"#)],
+        ),
+        (
+            "const x = 1;\nexports.x = x;\nconst { y } = require(\"a\");\nexports.x = y;\n".to_owned(),
+            vec![want("Named/Declared", "x", "y", "y", "a", "-", "exports.x = y", "exports.x = y;")],
+        ),
+    ]);
+}
+
+#[test]
+fn ts_export_equals_and_module_exports_replace_each_other() {
+    let snip = snippet("a.ts", "export = require(\"a\");\nmodule.exports = {};\n");
+    assert!(digests(&snip).is_empty());
+    assert_complete(&snip.report());
+    let snip = snippet("a.ts", "module.exports = require(\"b\");\nexport = require(\"a\");\n");
+    assert_eq!(digests(&snip), [direct("Module/Declared", "-", "-", "a", r#"require("a")"#, r#"export = require("a");"#)]);
+    assert_complete(&snip.report());
+    let snip = snippet("a.ts", "import x = require(\"a\");\nexport = x;\nmodule.exports.y = 1;\n");
+    assert!(digests(&snip).is_empty());
+    assert_limited(&snip, &[(ReexportLimitReason::ReboundBinding, "x")]);
+    assert_eq!(marked_imports(&snip), [("x".to_owned(), false)]);
+}
+
+#[test]
+fn cjs_es_import_forwarded_then_replaced_leaves_the_import_unmarked() {
+    for (extension, snip) in both_extensions("import { a } from \"m\";\nexports.x = a;\nexports.x = 1;\n") {
+        assert!(digests(&snip).is_empty(), "{extension}");
+        assert_complete(&snip.report());
+        assert_eq!(marked_imports(&snip), [("a".to_owned(), false)], "{extension}");
+    }
+}
+
+#[test]
+fn ts_outer_namespace_local_hides_the_import_from_an_inner_namespace_export() {
+    let snip = snippet(
+        "a.ts",
+        "import { a } from \"m\";\nnamespace A { const a = 1; namespace B { export { a }; export import x = a.b; } }\n",
+    );
+    assert!(digests(&snip).is_empty());
+    assert_complete(&snip.report());
+    assert_eq!(marked_imports(&snip), [("a".to_owned(), false), ("x".to_owned(), false)]);
 }
 
 // ---------------------------------------------------------------- TypeScript
@@ -854,5 +1203,26 @@ fn ts_corpus_satisfies_the_report_invariants() {
     ];
     for (name, source) in files {
         assert_report_invariants(&snippet(name, source), name);
+    }
+}
+
+#[test]
+fn cjs_string_literal_property_key_is_the_unquoted_name() {
+    for name in ["a.js", "a.ts"] {
+        for statement in [
+            "module.exports = {\"read\": require(\"m\").read};",
+            "module.exports = {'read': require(\"m\").read};",
+        ] {
+            let snip = snippet(name, &format!("{statement}\n"));
+            let span = statement.trim_start_matches("module.exports = {").trim_end_matches("};");
+            assert_eq!(
+                digests(&snip),
+                vec![direct("Named/Declared", "read", "read", "m", span, statement)],
+                "{name}: {statement}"
+            );
+            let report = snip.report();
+            assert_complete(&report);
+            assert_eq!(snip.indexed().reexports.as_ref(), Some(&report), "{name}: query path agrees");
+        }
     }
 }
