@@ -14,10 +14,14 @@ The design follows a **trait-based provider abstraction** so that consumer code 
 
 | Provider | API Client | Auth Env Vars |
 |----------|-----------|---------------|
-| GitHub | `schematic_schema::GitHub` | `GITHUB_TOKEN` (Bearer) |
-| GitLab | `schematic_schema::GitLab` | `GITLAB_TOKEN` (Bearer via `PRIVATE-TOKEN` header) |
-| Gitea | `schematic_schema::Gitea` | `GITEA_TOKEN` (ApiKey `Authorization` header) |
-| Bitbucket | `schematic_schema::Bitbucket` | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` (Basic) |
+| GitHub | `schematic_schema::github::GitHubClient` | `GITHUB_TOKEN`, then `GH_TOKEN` (`Authorization: Bearer`) |
+| GitLab | `schematic_schema::gitlab::GitLabClient` | `GITLAB_TOKEN`, then `GITLAB_PRIVATE_TOKEN` (`PRIVATE-TOKEN` header) |
+| Gitea | `schematic_schema::gitea::GiteaClient` | `GITEA_TOKEN` (`Authorization: token …`); Codeberg reads `CODEBERG_TOKEN` first |
+| Bitbucket | `schematic_schema::bitbucket::BitbucketClient` | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` (Basic) |
+
+The client reads these variables on every request and uses the first
+non-empty one. When none is set, the request is sent anonymously; there is no
+"missing credentials" refusal before the request.
 
 ### Stage 2 (future)
 
@@ -507,29 +511,43 @@ Each provider module follows the same structure:
 ```rust
 // sniff/lib/src/remote/github.rs (pattern representative of all providers)
 
-use schematic_schema::GitHub;
-use super::{RemoteRepoProvider, types::*};
+use schematic_schema::github::*;
+use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
 
-/// GitHub remote repository provider.
-///
-/// Uses the schematic-generated `GitHub` API client for all requests.
+const REPLIES: Replies = Replies::new("GitHub", Unauthorized::Rejected);
+
 pub struct GitHubRemote {
-    client: GitHub,
-    owner: String,
-    repo: String,
+    client: GitHubClient,
 }
 
 impl GitHubRemote {
-    /// Create a new GitHub remote handle.
-    ///
-    /// The client reads `GITHUB_TOKEN` from the environment for authentication.
-    /// Unauthenticated requests are supported but subject to lower rate limits.
-    pub fn new(owner: String, repo: String) -> Result<Self, SniffError> {
-        let client = GitHub::new().map_err(|e| SniffError::RemoteInit(e.to_string()))?;
-        Ok(Self { client, owner, repo })
+    pub fn new() -> Result<Self, SniffError> {
+        Self::build(GitHub::builder())
+    }
+
+    pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
+        Self::build(GitHub::builder().base_url(base_url))
+    }
+
+    fn build(builder: ClientBuilder<GitHub>) -> Result<Self, SniffError> {
+        // A client that cannot be built is `SniffError::RemoteInit`.
+        let client = builder.build().map_err(|error| REPLIES.init(&error))?;
+        Ok(Self { client })
     }
 }
+
+// Every request: send, then classify the reply.
+let info = REPLIES.value(
+    self.client
+        .send(GetRepositoryRequest::new(owner, repo), &CallOptions::default())
+        .await,
+)?;
 ```
+
+`send` returns `Ok` with a response envelope for any HTTP status, and
+`Err(TransportError)` only when no response arrived. `Replies` (in
+`remote/envelope.rs`) turns either into a `SniffError` the same way for all
+four providers; see [Error classification](#error-classification).
 
 ### Provider-Specific Mapping Notes
 
@@ -570,7 +588,7 @@ impl GitHubRemote {
 - `has_wiki()` → Read from `GetRepository` response (Gitea `RepositoryInfo` includes `has_wiki`)
 - `list_ci_cd()` → Not currently covered; return empty vec
 - `key_urls()` → Construct from `html_url` pattern
-- **Base URL consideration**: Gitea instances are self-hosted, so the client must be configured with `variant()` to set the correct base URL.
+- **Base URL consideration**: Gitea instances are self-hosted, so the client is built with `Gitea::builder().base_url(..)` to set the correct base URL.
 
 #### Bitbucket
 
@@ -792,11 +810,57 @@ pub enum SniffError {
 
 All remote operations should degrade gracefully:
 
-1. **Missing credentials**: Return `Err(MissingCredentials { .. })` — the CLI can display which env vars to set.
+1. **Missing credentials**: The request is sent anonymously. When the provider answers 401, return `Err(MissingCredentials { .. })` (GitHub: `InvalidCredentials`) — the CLI can display which env vars to set.
 2. **Rate limiting**: Return `Err(RateLimited { .. })` — the CLI can suggest waiting.
 3. **404 Not Found**: Map to `Err(RemoteApi("repository not found or private"))` — could be auth or genuinely missing.
-4. **Network failure**: Map to `Err(RemoteApi(...))` with the underlying error message.
+4. **Network failure**: Map to `Err(RemoteApi { status: 0, .. })` with the runtime's redacted description of the failure.
 5. **Partial data in `--deep` mode**: When `--deep` is used on the `repo` subcommand (not `--remote`), remote failures should log a warning and continue with local-only data. The `remote` field in `SniffResult` stays `None`.
+
+### Error classification
+
+Every provider classifies a failed reply the same way; only a 401 differs.
+
+| Reply | `SniffError` |
+|-------|--------------|
+| 401 | GitHub: `InvalidCredentials` with the JSON body's `message` (else "bad credentials"). GitLab, Gitea, Bitbucket: `MissingCredentials` naming the provider's variables and quoting the body |
+| 403 with `x-ratelimit-remaining: 0`, or a body containing "rate limit" | `RateLimited` |
+| any other 403 | `RemoteApi { status: 403, message: <body> }` |
+| 429 | `RateLimited` |
+| 404 | `RemoteApi { status: 404, message: "Not found" }` |
+| any other error status | `RemoteApi { status, message: <body> }` |
+| a 2xx body that does not decode | `RemoteApi { status: 0 }`, message "success response body could not be decoded (N body bytes)" |
+| a 2xx body cut off before it ended | `RemoteApi { status: 0 }`, message "response body was interrupted (N body bytes)" |
+| no response (connect, TLS, timeout) | `RemoteApi { status: 0 }`, message from the runtime's redacted `TransportError` text |
+
+`RateLimited.retry_after` is the `Retry-After` header in seconds
+(`Retry-After: 30` gives `Some(30)`); an absent header or the HTTP-date form
+gives `None`.
+
+Messages never contain a header map, an HTTP library error, or an unredacted
+request URL, so a credential sent with the request cannot appear in them. A
+provider body is quoted as received.
+
+### Anonymous requests and the one retry
+
+Because a missing credential sends the request anonymously, the provider
+methods make one request each and never retry. The single exception is
+GitHub `list_workflow_runs`: when a request that carried a credential gets a
+401 or 403, it is sent once more with `CallOptions::anonymous()`, which sends
+no credential from any source. A 401 or 403 to an anonymous request is
+final.
+
+```rust
+let first = self.client.send(request.clone(), &CallOptions::default()).await?;
+let retry = matches!(first.meta.status.as_u16(), 401 | 403)
+    && first.meta.request.auth != AuthMethod::Anonymous;
+```
+
+Some failures read as absence rather than errors:
+
+- Bitbucket `list_issues`: a 404 (tracker disabled) is an empty list.
+- Bitbucket downloads: any failure is an empty release list.
+- GitHub and Gitea truncated-tree continuations: a prefix whose request fails is skipped.
+- `snapshot`: a tree failure leaves the tree unavailable while the metadata stands.
 
 ---
 
@@ -804,18 +868,17 @@ All remote operations should degrade gracefully:
 
 ### Parallel Provider Queries
 
-Within a single provider, multiple independent API calls are executed concurrently:
+Requests run one after another, except where independence was worth the
+code: Bitbucket lists `docs/` and `doc/` concurrently once the root listing
+shows they exist.
 
 ```rust
-// Example: GitHub repo_metadata + list_pull_requests + list_issues
-let (metadata_res, prs_res, issues_res, tags_res, releases_res) = tokio::join!(
-    self.client.request::<RepositoryInfo>(GetRepositoryRequest { owner, repo }),
-    self.client.request::<Vec<PullRequestSummary>>(ListPullRequestsRequest { owner, repo }),
-    self.client.request::<Vec<IssueSummary>>(ListIssuesRequest { owner, repo }),
-    self.client.request::<Vec<RepoTag>>(ListTagsRequest { owner, repo }),
-    self.client.request::<Vec<Release>>(ListReleasesRequest { owner, repo }),
-);
+// sniff/lib/src/remote/bitbucket.rs, fetch_tree
+let (docs, doc) = tokio::join!(listing("docs"), listing("doc"));
 ```
+
+`GitHubClient` and the other clients are cheap to share across concurrent
+sends; each `send` takes `&self`.
 
 ### Rate Limit Awareness
 
@@ -838,13 +901,16 @@ Gitea (and Forgejo) instances are self-hosted, so the base URL cannot be hardcod
 
 ```rust
 impl GiteaRemote {
-    pub fn new(owner: String, repo: String, base_url: String) -> Result<Self, SniffError> {
-        let client = Gitea::new()
-            .map_err(|e| SniffError::RemoteInit(e.to_string()))?
-            .variant()
-            .base_url(&base_url)
-            .build();
-        Ok(Self { client, owner, repo })
+    pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
+        let normalized_url = normalize_base_url(base_url); // appends `/api/v1`
+        Self::build(Gitea::builder().base_url(&normalized_url), normalized_url)
+    }
+
+    pub fn codeberg() -> Result<Self, SniffError> {
+        let builder = Gitea::builder()
+            .base_url("https://codeberg.org/api/v1")
+            .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]);
+        Self::build(builder, "https://codeberg.org/api/v1".to_string())
     }
 }
 ```
@@ -880,7 +946,7 @@ Bitbucket's paginated responses differ from other providers. The implementation 
 ///
 /// Follows the `next` URL until no more pages are available.
 async fn fetch_all_pages<T: DeserializeOwned>(
-    client: &Bitbucket,
+    client: &BitbucketClient,
     initial_response: PaginatedResponse<T>,
 ) -> Result<Vec<T>, SniffError> {
     let mut all_values = initial_response.values;
@@ -979,7 +1045,7 @@ mod tests {
 }
 ```
 
-Each provider needs a `with_base_url()` constructor (or use schematic's `variant()`) to point at the mock server.
+Each provider has a `with_base_url()` constructor, built on the generated client's `builder().base_url(..)`, to point at the mock server.
 
 ### Test Fixtures
 

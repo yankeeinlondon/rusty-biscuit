@@ -13,10 +13,11 @@
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use schematic_schema::gitlab::*;
-use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
+use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
 
 use super::{
     count_api_request,
+    envelope::{Replies, Unauthorized},
     provider::RemoteRepoProvider,
     snapshot::{RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree},
     types::{
@@ -26,17 +27,24 @@ use super::{
 };
 use crate::error::SniffError;
 
+const REPLIES: Replies = Replies::new(
+    "GitLab",
+    Unauthorized::Missing("GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN"),
+);
+
 /// GitLab remote repository provider.
 ///
 /// Uses the schematic-generated GitLab API client for all HTTP operations.
-/// Authentication is via the `GITLAB_TOKEN` or `GITLAB_PRIVATE_TOKEN`
-/// environment variable.
+/// Each request sends the first non-empty `GITLAB_TOKEN` or
+/// `GITLAB_PRIVATE_TOKEN` in the `PRIVATE-TOKEN` header, and is sent
+/// anonymously when neither is set.
 ///
 /// ## Project ID Encoding
 ///
 /// GitLab requires project paths to be URL-encoded. For example, `owner/repo`
 /// becomes `owner%2Frepo`. Nested groups like `group/subgroup/repo` become
-/// `group%2Fsubgroup%2Frepo`. This encoding is handled automatically.
+/// `group%2Fsubgroup%2Frepo`. The generated client encodes each path
+/// parameter once, so callers pass the plain `owner/repo` path.
 ///
 /// ## Examples
 ///
@@ -48,21 +56,18 @@ use crate::error::SniffError;
 /// println!("Stars: {:?}", metadata.stars);
 /// ```
 pub struct GitLabRemote {
-    client: GitLab,
+    client: GitLabClient,
     base_url: String,
 }
 
 impl GitLabRemote {
-    /// Create a new GitLab provider for gitlab.com using GITLAB_TOKEN from environment.
+    /// Create a new GitLab provider for gitlab.com.
     ///
     /// ## Errors
     ///
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
     pub fn new() -> Result<Self, SniffError> {
-        Ok(Self {
-            client: GitLab::new(),
-            base_url: "https://gitlab.com".to_string(),
-        })
+        Self::build(GitLab::builder(), "https://gitlab.com")
     }
 
     /// Create a GitLab provider for a self-hosted instance.
@@ -78,63 +83,42 @@ impl GitLabRemote {
     ///
     /// ## Errors
     ///
-    /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
+    /// Returns `SniffError::RemoteInit` if the client cannot be initialized,
+    /// including when `base_url` is not an HTTP(S) URL with a host.
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
-        // Strip trailing slash if present
         let clean_url = base_url.trim_end_matches('/');
         let api_url = format!("{}/api/v4", clean_url);
+        Self::build(GitLab::builder().base_url(api_url), clean_url)
+    }
 
+    fn build(builder: ClientBuilder<GitLab>, base_url: &str) -> Result<Self, SniffError> {
+        let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self {
-            client: GitLab::with_base_url(&api_url),
-            base_url: clean_url.to_string(),
+            client,
+            base_url: base_url.to_string(),
         })
     }
 }
 
 impl Default for GitLabRemote {
+    /// ## Panics
+    ///
+    /// Panics if the HTTP client cannot be initialized; use
+    /// [`GitLabRemote::new`] to handle that as an error.
     fn default() -> Self {
-        Self {
-            client: GitLab::new(),
-            base_url: "https://gitlab.com".to_string(),
-        }
+        Self::new().expect("the GitLab client builds from its default definition")
     }
 }
 
 impl GitLabRemote {
-    /// Build a GitLab API client variant that performs no authentication.
-    ///
-    /// The client is constructed by overriding both the env-fallback list
-    /// (so no credentials can be picked up from `GITLAB_TOKEN`,
-    /// `GITLAB_PRIVATE_TOKEN`, etc.) **and** the auth strategy itself (so
-    /// the schematic runtime does not pre-flight-reject the request for
-    /// missing credentials). The combination produces a truly anonymous
-    /// client whose request passes through to the wire and is judged by
-    /// the API alone.
-    ///
-    /// This supports the "attempt unauthenticated" fallback: when an
-    /// authenticated request fails because no credentials are configured,
-    /// we retry once with this anonymous client before surfacing a
-    /// `MissingCredentials` error to the user.
-    fn unauthenticated_client(&self) -> GitLab {
-        self.client
-            .variant()
-            .env_auth(Vec::new())
-            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
-            .build()
-    }
-
     /// Fetches the root tree listing.
     ///
     /// Counted as `tree`, not `metadata`: absent `GetProject`, the metadata path
     /// pays for a full tree fetch, and the counter names the work done.
     async fn fetch_tree_items(&self, owner: &str, repo: &str) -> Result<Vec<TreeItem>, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        let request = ListRepositoryTreeRequest::new(&project_id);
+        let request = ListRepositoryTreeRequest::new(project_path(owner, repo));
         count_api_request("tree");
-        self.client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)
+        REPLIES.value(self.client.send(request, &CallOptions::default()).await)
     }
 
     /// Builds the minimal metadata GitLab can report without `GetProject`.
@@ -183,97 +167,12 @@ fn blobs_of(items: Vec<TreeItem>) -> Vec<RemoteTreeFile> {
         .collect()
 }
 
-/// Encode a project path for GitLab API.
+/// The project path GitLab accepts as a project ID.
 ///
-/// GitLab requires project paths to be URL-encoded in API requests.
-/// For example: `owner/repo` -> `owner%2Frepo`
-fn encode_project_id(owner: &str, repo: &str) -> String {
-    let path = format!("{}/{}", owner, repo);
-    urlencoding::encode(&path).to_string()
-}
-
-/// Map a [`SchematicError`] to a [`SniffError`].
-///
-/// Handles special cases:
-/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
-/// - 401 -> `MissingCredentials` (anonymous request rejected)
-/// - 403 with rate limit info -> `RateLimited`
-/// - 404 -> `RemoteApi` with "Not found"
-/// - Other HTTP errors -> `RemoteApi`
-///
-/// ## Notes
-///
-/// `MissingCredentials` is only emitted *after* the anonymous retry has
-/// failed (see [`GitLabRemote::unauthenticated_client`]) or when the API
-/// explicitly demands credentials for a private resource (a real 401
-/// response). Call sites that want the "attempt unauthenticated"
-/// behaviour must wrap the initial request in a
-/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
-/// the first failure directly through this function.
-fn map_schematic_error(err: SchematicError) -> SniffError {
-    match err {
-        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
-            provider: "GitLab".to_string(),
-            env_var: env_vars.join(" or "),
-        },
-        SchematicError::AuthenticationRequired {
-            env_fallback_vars, ..
-        } => SniffError::MissingCredentials {
-            provider: "GitLab".to_string(),
-            env_var: env_fallback_vars.join(" or "),
-        },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
-            provider: "GitLab".to_string(),
-            env_var: format!(
-                "GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN (API returned 401: {})",
-                body
-            ),
-        },
-        SchematicError::ApiError { status: 403, body } => {
-            // Check if this is a rate limit error
-            if body.to_lowercase().contains("rate limit") {
-                SniffError::RateLimited {
-                    provider: "GitLab".to_string(),
-                    retry_after: None,
-                }
-            } else {
-                SniffError::RemoteApi {
-                    provider: "GitLab".to_string(),
-                    status: 403,
-                    message: body,
-                }
-            }
-        }
-        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
-            provider: "GitLab".to_string(),
-            retry_after: None,
-        },
-        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
-            provider: "GitLab".to_string(),
-            status: 404,
-            message: "Not found".to_string(),
-        },
-        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
-            provider: "GitLab".to_string(),
-            status,
-            message: body,
-        },
-        SchematicError::Http(e) => SniffError::RemoteApi {
-            provider: "GitLab".to_string(),
-            status: 0,
-            message: e.to_string(),
-        },
-        SchematicError::Json(e) => SniffError::RemoteApi {
-            provider: "GitLab".to_string(),
-            status: 0,
-            message: format!("JSON parse error: {}", e),
-        },
-        other => SniffError::RemoteApi {
-            provider: "GitLab".to_string(),
-            status: 0,
-            message: other.to_string(),
-        },
-    }
+/// It is not encoded here: the generated client percent-encodes every path
+/// parameter, so `owner/repo` reaches the wire as `owner%2Frepo`.
+fn project_path(owner: &str, repo: &str) -> String {
+    format!("{owner}/{repo}")
 }
 
 #[async_trait]
@@ -339,17 +238,10 @@ impl RemoteRepoProvider for GitLabRemote {
         repo: &str,
         path: &str,
     ) -> Result<String, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        // URL-encode the file path for nested paths
-        let encoded_path = urlencoding::encode(path);
-        // Use "HEAD" as default ref (GitLab API accepts this for default branch)
-        let request = GetRepositoryFileRequest::new(&project_id, &*encoded_path, "HEAD");
+        // "HEAD" is the default branch; GitLab accepts it as a ref.
+        let request = GetRepositoryFileRequest::new(project_path(owner, repo), path, "HEAD");
         count_api_request("contents");
-        let file: FileContent = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let file = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
 
         // GitLab returns Base64-encoded content
         let decoded = BASE64
@@ -373,8 +265,7 @@ impl RemoteRepoProvider for GitLabRemote {
         repo: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        let mut request = ListMergeRequestsRequest::new(&project_id);
+        let mut request = ListMergeRequestsRequest::new(project_path(owner, repo));
 
         // Map PullRequestState to GitLab API state parameter
         match state {
@@ -392,23 +283,8 @@ impl RemoteRepoProvider for GitLabRemote {
             }
         }
 
-        // Attempt the request with the configured client first. If it fails
-        // because no credentials are available, retry once with an explicitly
-        // unauthenticated client. Only after the anonymous retry also fails
-        // (or on a real 401/403) do we surface a credentials error.
         count_api_request("pulls");
-        let mrs: Vec<MergeRequest> = match self.client.request(request.clone()).await {
-            Ok(mrs) => mrs,
-            Err(SchematicError::MissingCredential { .. })
-            | Err(SchematicError::AuthenticationRequired { .. }) => {
-                count_api_request("pulls");
-                self.unauthenticated_client()
-                    .request(request)
-                    .await
-                    .map_err(map_schematic_error)?
-            }
-            Err(err) => return Err(map_schematic_error(err)),
-        };
+        let mrs = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
 
         let mut mrs: Vec<PullRequestInfo> = mrs
             .into_iter()
@@ -450,14 +326,9 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        let request = ListIssuesRequest::new(&project_id);
+        let request = ListIssuesRequest::new(project_path(owner, repo));
         count_api_request("issues");
-        let issues: Vec<Issue> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let issues = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
 
         // GitLab issues API doesn't include merge requests (unlike GitHub)
         Ok(issues
@@ -482,25 +353,25 @@ impl RemoteRepoProvider for GitLabRemote {
         owner: &str,
         repo: &str,
     ) -> Result<TagsAndReleases, SniffError> {
-        let project_id = encode_project_id(owner, repo);
+        let project_id = project_path(owner, repo);
 
         // Fetch tags
         let tags_request = ListTagsRequest::new(&project_id);
         count_api_request("tags");
-        let tags: Vec<Tag> = self
-            .client
-            .request(tags_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tags = REPLIES.value(
+            self.client
+                .send(tags_request, &CallOptions::default())
+                .await,
+        )?;
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(&project_id);
         count_api_request("releases");
-        let releases: Vec<Release> = self
-            .client
-            .request(releases_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let releases = REPLIES.value(
+            self.client
+                .send(releases_request, &CallOptions::default())
+                .await,
+        )?;
 
         // Convert tags - GitLab provides message for annotated tags
         let tag_infos: Vec<TagInfo> = tags
@@ -596,15 +467,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_encode_project_id() {
-        assert_eq!(encode_project_id("owner", "repo"), "owner%2Frepo");
-        assert_eq!(
-            encode_project_id("group", "subgroup/repo"),
-            "group%2Fsubgroup%2Frepo"
-        );
-    }
-
-    #[test]
     fn test_build_key_urls() {
         let provider = GitLabRemote::default();
         let urls = provider.build_key_urls("gitlab-org", "gitlab");
@@ -634,56 +496,5 @@ mod tests {
             urls.issues,
             Some("https://gitlab.example.com/team/project/-/issues".to_string())
         );
-    }
-
-    #[test]
-    fn test_map_schematic_error_missing_credentials() {
-        let err = SchematicError::MissingCredential {
-            env_vars: vec![
-                "GITLAB_TOKEN".to_string(),
-                "GITLAB_PRIVATE_TOKEN".to_string(),
-            ],
-        };
-        match map_schematic_error(err) {
-            SniffError::MissingCredentials { provider, env_var } => {
-                assert_eq!(provider, "GitLab");
-                assert!(env_var.contains("GITLAB_TOKEN"));
-            }
-            _ => panic!("Expected MissingCredentials error"),
-        }
-    }
-
-    #[test]
-    fn test_map_schematic_error_rate_limited() {
-        let err = SchematicError::ApiError {
-            status: 403,
-            body: "Rate limit exceeded".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RateLimited { provider, .. } => {
-                assert_eq!(provider, "GitLab");
-            }
-            _ => panic!("Expected RateLimited error"),
-        }
-    }
-
-    #[test]
-    fn test_map_schematic_error_not_found() {
-        let err = SchematicError::ApiError {
-            status: 404,
-            body: "Not Found".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RemoteApi {
-                provider,
-                status,
-                message,
-            } => {
-                assert_eq!(provider, "GitLab");
-                assert_eq!(status, 404);
-                assert_eq!(message, "Not found");
-            }
-            _ => panic!("Expected RemoteApi error"),
-        }
     }
 }

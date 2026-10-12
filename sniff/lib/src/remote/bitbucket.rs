@@ -5,10 +5,11 @@
 
 use async_trait::async_trait;
 use schematic_schema::bitbucket::*;
-use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
+use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
 
 use super::{
     count_api_request,
+    envelope::{Replies, Unauthorized},
     provider::RemoteRepoProvider,
     snapshot::{RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree},
     types::{
@@ -18,11 +19,17 @@ use super::{
 };
 use crate::error::SniffError;
 
+const REPLIES: Replies = Replies::new(
+    "Bitbucket",
+    Unauthorized::Missing("BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD"),
+);
+
 /// Bitbucket remote repository provider.
 ///
 /// Uses the schematic-generated Bitbucket API client for all HTTP operations.
-/// Authentication uses Basic auth via `BITBUCKET_USERNAME` and `BITBUCKET_APP_PASSWORD`
-/// environment variables.
+/// Each request sends Basic auth from `BITBUCKET_USERNAME` and
+/// `BITBUCKET_APP_PASSWORD` when both are set, and is sent anonymously
+/// otherwise; public Bitbucket Cloud repositories can be read anonymously.
 ///
 /// ## Bitbucket-Specific Terminology
 ///
@@ -41,7 +48,7 @@ use crate::error::SniffError;
 /// println!("Stars: {:?}", metadata.stars);
 /// ```
 pub struct BitbucketRemote {
-    client: Bitbucket,
+    client: BitbucketClient,
 }
 
 impl BitbucketRemote {
@@ -55,9 +62,7 @@ impl BitbucketRemote {
     ///
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
     pub fn new() -> Result<Self, SniffError> {
-        Ok(Self {
-            client: Bitbucket::new(),
-        })
+        Self::build(Bitbucket::builder())
     }
 
     /// Create with a custom base URL (for Bitbucket Server/Data Center).
@@ -68,11 +73,15 @@ impl BitbucketRemote {
     ///
     /// ## Errors
     ///
-    /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
+    /// Returns `SniffError::RemoteInit` if the client cannot be initialized,
+    /// including when `base_url` is not an HTTP(S) URL with a host.
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
-        Ok(Self {
-            client: Bitbucket::with_base_url(base_url),
-        })
+        Self::build(Bitbucket::builder().base_url(base_url))
+    }
+
+    fn build(builder: ClientBuilder<Bitbucket>) -> Result<Self, SniffError> {
+        let client = builder.build().map_err(|error| REPLIES.init(&error))?;
+        Ok(Self { client })
     }
 
     /// Builds the report's tree from the root listing plus any doc directories.
@@ -122,118 +131,12 @@ impl BitbucketRemote {
 }
 
 impl Default for BitbucketRemote {
+    /// ## Panics
+    ///
+    /// Panics if the HTTP client cannot be initialized; use
+    /// [`BitbucketRemote::new`] to handle that as an error.
     fn default() -> Self {
-        Self {
-            client: Bitbucket::new(),
-        }
-    }
-}
-
-impl BitbucketRemote {
-    /// Build a Bitbucket API client variant that performs no authentication.
-    ///
-    /// The client is constructed by overriding both the env-fallback list
-    /// (so no credentials can be picked up from `BITBUCKET_USERNAME`,
-    /// `BITBUCKET_APP_PASSWORD`) **and** the auth strategy itself (so the
-    /// schematic runtime does not pre-flight-reject the request for
-    /// missing credentials). The combination produces a truly anonymous
-    /// client whose request passes through to the wire and is judged by
-    /// the API alone.
-    ///
-    /// This supports the "attempt unauthenticated" fallback: when an
-    /// authenticated request fails because no credentials are configured,
-    /// we retry once with this anonymous client before surfacing a
-    /// `MissingCredentials` error to the user. Public Bitbucket Cloud
-    /// repositories can be read anonymously.
-    fn unauthenticated_client(&self) -> Bitbucket {
-        self.client
-            .variant()
-            .env_auth(Vec::new())
-            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
-            .build()
-    }
-}
-
-/// Map a [`SchematicError`] to a [`SniffError`].
-///
-/// Handles special cases:
-/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
-/// - 401 -> `MissingCredentials` (anonymous request rejected)
-/// - 403/429 -> `RateLimited`
-/// - 404 -> `RemoteApi` with "Not found"
-/// - Other HTTP errors -> `RemoteApi`
-///
-/// ## Notes
-///
-/// `MissingCredentials` is only emitted *after* the anonymous retry has
-/// failed (see [`BitbucketRemote::unauthenticated_client`]) or when the
-/// API explicitly demands credentials for a private resource (a real 401
-/// response). Call sites that want the "attempt unauthenticated"
-/// behaviour must wrap the initial request in a
-/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
-/// the first failure directly through this function.
-fn map_schematic_error(err: SchematicError) -> SniffError {
-    match err {
-        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
-            provider: "Bitbucket".to_string(),
-            env_var: env_vars.join(" or "),
-        },
-        SchematicError::AuthenticationRequired {
-            env_fallback_vars, ..
-        } => SniffError::MissingCredentials {
-            provider: "Bitbucket".to_string(),
-            env_var: env_fallback_vars.join(" or "),
-        },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
-            provider: "Bitbucket".to_string(),
-            env_var: format!(
-                "BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD (API returned 401: {})",
-                body
-            ),
-        },
-        SchematicError::ApiError { status: 403, body } => {
-            if body.to_lowercase().contains("rate limit") {
-                SniffError::RateLimited {
-                    provider: "Bitbucket".to_string(),
-                    retry_after: None,
-                }
-            } else {
-                SniffError::RemoteApi {
-                    provider: "Bitbucket".to_string(),
-                    status: 403,
-                    message: body,
-                }
-            }
-        }
-        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
-            provider: "Bitbucket".to_string(),
-            retry_after: None,
-        },
-        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
-            provider: "Bitbucket".to_string(),
-            status: 404,
-            message: "Not found".to_string(),
-        },
-        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
-            provider: "Bitbucket".to_string(),
-            status,
-            message: body,
-        },
-        SchematicError::Http(e) => SniffError::RemoteApi {
-            provider: "Bitbucket".to_string(),
-            status: 0,
-            message: e.to_string(),
-        },
-        SchematicError::Json(e) => SniffError::RemoteApi {
-            provider: "Bitbucket".to_string(),
-            status: 0,
-            message: format!("JSON parse error: {}", e),
-        },
-        other => SniffError::RemoteApi {
-            provider: "Bitbucket".to_string(),
-            status: 0,
-            message: other.to_string(),
-        },
+        Self::new().expect("the Bitbucket client builds from its default definition")
     }
 }
 
@@ -260,7 +163,7 @@ const MAX_LISTING_PAGES: i64 = 10;
 /// truncated any directory past one page — the same defect as an ignored GitHub
 /// `truncated` flag, just spelled differently (R11.5).
 async fn collect_directory_entries(
-    client: &Bitbucket,
+    client: &BitbucketClient,
     workspace: &str,
     repo_slug: &str,
     commit: &str,
@@ -281,10 +184,7 @@ async fn collect_directory_entries(
             count_api_request("tree");
         }
 
-        let body = client
-            .get_source(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let body = REPLIES.value(client.send(request, &CallOptions::default()).await)?;
         let response = decode_directory_listing(&body)?;
         entries.extend(response.values);
 
@@ -304,7 +204,11 @@ async fn collect_directory_entries(
 /// directory: reading it as empty would report "no docs, no CI" with full
 /// confidence.
 fn decode_directory_listing(body: &[u8]) -> Result<PaginatedResponse<SourceEntry>, SniffError> {
-    serde_json::from_slice(body).map_err(|e| map_schematic_error(SchematicError::Json(e)))
+    serde_json::from_slice(body).map_err(|error| SniffError::RemoteApi {
+        provider: "Bitbucket".to_string(),
+        status: 0,
+        message: format!("JSON parse error: {error}"),
+    })
 }
 
 /// Decodes a `GetSource` body for a file path as text.
@@ -351,11 +255,7 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<RepoMetadata, SniffError> {
         let request = GetRepositoryRequest::new(workspace, repo_slug);
         count_api_request("metadata");
-        let info: Repository = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
 
         // Extract values before moving info fields
         let html_url = info
@@ -451,21 +351,17 @@ impl RemoteRepoProvider for BitbucketRemote {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
         count_api_request("metadata");
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info = REPLIES.value(
+            self.client
+                .send(repo_request, &CallOptions::default())
+                .await,
+        )?;
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
         let request = GetSourceRequest::new(workspace, repo_slug, &commit, path);
         count_api_request("contents");
-        let body = self
-            .client
-            .get_source(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let body = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
         Ok(decode_file_text(&body))
     }
 
@@ -491,24 +387,8 @@ impl RemoteRepoProvider for BitbucketRemote {
             }
         }
 
-        // Attempt the request with the configured client first. If it fails
-        // because no credentials are available, retry once with an explicitly
-        // unauthenticated client. Only after the anonymous retry also fails
-        // (or on a real 401/403) do we surface a credentials error.
         count_api_request("pulls");
-        let response: PaginatedResponse<PullRequest> =
-            match self.client.request(request.clone()).await {
-                Ok(resp) => resp,
-                Err(SchematicError::MissingCredential { .. })
-                | Err(SchematicError::AuthenticationRequired { .. }) => {
-                    count_api_request("pulls");
-                    self.unauthenticated_client()
-                        .request(request)
-                        .await
-                        .map_err(map_schematic_error)?
-                }
-                Err(err) => return Err(map_schematic_error(err)),
-            };
+        let response = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
 
         // Extract .values from paginated response (first page only for MVP)
         let mut prs: Vec<PullRequestInfo> = response
@@ -617,14 +497,16 @@ impl RemoteRepoProvider for BitbucketRemote {
 
         // Bitbucket issues may be disabled - handle 404 gracefully
         count_api_request("issues");
-        let response: PaginatedResponse<Issue> = match self.client.request(request).await {
-            Ok(resp) => resp,
-            Err(SchematicError::ApiError { status: 404, .. }) => {
-                // Issue tracker is disabled on this repo
-                return Ok(Vec::new());
-            }
-            Err(e) => return Err(map_schematic_error(e)),
-        };
+        let reply = self
+            .client
+            .send(request, &CallOptions::default())
+            .await
+            .map_err(|error| REPLIES.transport(&error))?;
+        if reply.meta.status.as_u16() == 404 {
+            // Issue tracker is disabled on this repo
+            return Ok(Vec::new());
+        }
+        let response = REPLIES.value(Ok(reply))?;
 
         // Extract .values from paginated response (first page only for MVP)
         Ok(response
@@ -684,11 +566,11 @@ impl RemoteRepoProvider for BitbucketRemote {
         // Fetch tags
         let tags_request = ListTagsRequest::new(workspace, repo_slug);
         count_api_request("tags");
-        let tags_response: PaginatedResponse<Tag> = self
-            .client
-            .request(tags_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tags_response = REPLIES.value(
+            self.client
+                .send(tags_request, &CallOptions::default())
+                .await,
+        )?;
 
         // Convert tags (first page only for MVP)
         let tag_infos: Vec<TagInfo> = tags_response
@@ -719,11 +601,14 @@ impl RemoteRepoProvider for BitbucketRemote {
         // Fetch downloads (Bitbucket's equivalent of releases)
         let downloads_request = ListDownloadsRequest::new(workspace, repo_slug);
         count_api_request("releases");
-        let downloads_response: PaginatedResponse<Download> = self
+        // Any failure, transport or status, reads as "no downloads".
+        let downloads_response = self
             .client
-            .request(downloads_request)
+            .send(downloads_request, &CallOptions::default())
             .await
-            .unwrap_or_else(|_| PaginatedResponse {
+            .ok()
+            .and_then(|reply| reply.into_result().ok())
+            .unwrap_or_else(|| PaginatedResponse {
                 values: Vec::new(),
                 next: None,
                 previous: None,
@@ -882,57 +767,6 @@ mod tests {
             urls.releases,
             Some("https://bitbucket.org/atlassian/python-bitbucket/downloads".to_string())
         );
-    }
-
-    #[test]
-    fn test_map_schematic_error_missing_credentials() {
-        let err = SchematicError::MissingCredential {
-            env_vars: vec![
-                "BITBUCKET_USERNAME".to_string(),
-                "BITBUCKET_APP_PASSWORD".to_string(),
-            ],
-        };
-        match map_schematic_error(err) {
-            SniffError::MissingCredentials { provider, env_var } => {
-                assert_eq!(provider, "Bitbucket");
-                assert!(env_var.contains("BITBUCKET_USERNAME"));
-            }
-            _ => panic!("Expected MissingCredentials error"),
-        }
-    }
-
-    #[test]
-    fn test_map_schematic_error_rate_limited() {
-        let err = SchematicError::ApiError {
-            status: 403,
-            body: "API rate limit exceeded".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RateLimited { provider, .. } => {
-                assert_eq!(provider, "Bitbucket");
-            }
-            _ => panic!("Expected RateLimited error"),
-        }
-    }
-
-    #[test]
-    fn test_map_schematic_error_not_found() {
-        let err = SchematicError::ApiError {
-            status: 404,
-            body: "Not Found".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RemoteApi {
-                provider,
-                status,
-                message,
-            } => {
-                assert_eq!(provider, "Bitbucket");
-                assert_eq!(status, 404);
-                assert_eq!(message, "Not found");
-            }
-            _ => panic!("Expected RemoteApi error"),
-        }
     }
 
     #[test]

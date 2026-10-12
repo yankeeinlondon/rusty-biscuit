@@ -107,6 +107,26 @@ than refetching the same evidence.
 concluded. Truncated provider trees must continue through provider-specific
 bounds; continuation work uses its own counter.
 
+The provider modules (`github.rs`, `gitlab.rs`, `gitea.rs`, `bitbucket.rs`)
+send through the generated `{Api}Client` with `client.send(req,
+&CallOptions::default())`. `send` is `Ok` for any HTTP status; classify every
+reply through the module's `REPLIES` (`remote/envelope.rs`), never by hand:
+
+- 401 is per provider; 403 with `x-ratelimit-remaining: 0` or a "rate limit"
+  body, and 429, are `RateLimited` with `retry_after` from `Retry-After`
+  seconds; 404 is `RemoteApi { 404, "Not found" }`.
+- An undecodable 2xx, an interrupted body, and a transport failure are
+  status 0 with distinct runtime `Display` text. Never format a header map,
+  a raw reqwest error, or a request URL into a message.
+- A missing credential sends anonymously, so there is no anonymous retry,
+  except GitHub `list_workflow_runs`: a 401/403 to a request whose
+  `meta.request.auth` is not `Anonymous` is resent once with
+  `CallOptions::anonymous()`.
+- Constructors map `BuildError` to `RemoteInit`; `Default` panics on it.
+- Test env-dependent paths with `EnvGuard` + `#[serial]` and clear every
+  provider variable (`PROVIDER_CREDENTIAL_VARIABLES` in
+  `tests/l1/remote_providers.rs`).
+
 ## Focused providers
 
 `FocusedProviderClient` handles exact/list pull-request and CI/CD job queries.
@@ -175,8 +195,9 @@ plural `refs` prefix-matches and can answer an array; Gitea/Forgejo
   Unicode stay inside one segment. GitLab rejects a raw `/`.
 - It uses `NotFound::Error`: a 404 is `NotFoundOrNotPermitted`, never absence.
 - The SHA must be 40 or 64 lowercase hex digits, or the lookup is `Other`.
-- There is no anonymous retry on any blocking path (the schematic-backed
-  provider modules have one; the focused client does not). A rejected or
+- There is no anonymous retry on any blocking path (of the schematic-backed
+  provider modules, only GitHub `list_workflow_runs` has one; the focused
+  client has none). A rejected or
   insufficient token is reported, and the caller decides on a fallback.
 
 ### Blocking request credentials

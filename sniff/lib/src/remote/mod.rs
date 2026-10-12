@@ -44,6 +44,7 @@
 mod bitbucket;
 pub mod blocking;
 mod check_status;
+mod envelope;
 mod focused;
 mod gitea;
 mod github;
