@@ -125,16 +125,48 @@ With `--force-remote`, the branch on origin is deleted through origin's push URL
 
 ### Background programs writing into the worktree
 
-Stop file watchers or indexers for the target before removing it. A program
-that recreates files while Git deletes them can make removal fail with
-`Directory not empty`. Git may already have unregistered the worktree even
-though the directory remains; `wt` then stops and keeps the local branch.
+Before anything is deleted, `wt remove` lists the processes whose current
+directory is the worktree or a folder inside it. If it finds any, it refuses
+with exit 4, names them, and changes nothing. No flag overrides this. Close
+the programs, or move them out of the folder, and run `wt remove` again. The
+check runs before the report, so you are not asked questions only to be
+refused, and again immediately before Git deletes the folder. Your own shell
+and the programs that started `wt` are never listed.
 
-For example, a GitNexus watcher can recreate `.gitnexus/` during deletion.
-Stop that worktree's watcher using the stop command printed when it started,
-then inspect the remaining directory before deleting leftovers. Check
-`git worktree list` to see whether Git still registers the target. If it no
-longer does, another `wt remove` cannot resolve it by its worktree name.
+```text
+Error: Nothing was removed: the folder /code/wts/repo/feat-x is in use by other programs:
+rust-analyzer (pids 39871, 40846). Close them, or move them out of it, and run wt remove again.
+```
+
+Only current directories are visible. On macOS and Linux, a program that
+holds an open file in the folder without standing in it is not detected. A
+program run by another user is not detected either, because the OS hides its
+current directory.
+
+A program like that can still recreate files while Git deletes them. Git
+stops at the first entry it cannot delete, yet unregisters the worktree anyway.
+When Git fails, `wt remove` asks Git whether the worktree is still registered:
+
+| After Git fails | What `wt remove` does |
+|---|---|
+| Still registered | Git refused before deleting (for example, a locked worktree); reports Git's error and exits 1 |
+| Unregistered, folder gone | Treats the removal as done and continues with the branch and origin |
+| Unregistered, folder still there | Deletes the rest itself, trying up to three times 200 ms apart; on success it continues with the branch and origin |
+
+If the folder survives every attempt, `wt remove` exits 1 and leaves the
+branch and origin alone, because the removal did not finish:
+
+```text
+Error: git unregistered worktree /code/wts/repo/feat-x but could not delete all of its
+folder (Directory not empty). Nothing else was removed. Delete what is
+left with: rm -rf "/code/wts/repo/feat-x"
+```
+
+On Windows the command shown is `Remove-Item -Recurse -Force "<path>"`. Stop
+whatever is writing into the folder (a GitNexus watcher recreating
+`.gitnexus/`, for example), then inspect what is left before deleting it. The
+worktree is no longer registered, so another `wt remove` cannot find it by
+name; the next `wt list` drops its copy record.
 
 ### Standing in the worktree you remove
 
@@ -147,7 +179,7 @@ With the wrapper, removal happens in two runs:
 
 The second run deletes nothing when anything approved has changed in between: protected files, the include rules, the copy record, the branch tip, the worktree's `.git` link (where it leads, or whether Git can still read it), the worktree's path (a link now standing [in its place](#a-link-in-place-of-the-worktree)), or the branch on origin. It also refuses when the handoff is more than a minute old. A changed state is exit 3; a file it can't read, a shell still inside the worktree, or an expired or unknown handoff is exit 4. The second run never repairs anything. It asks the network only for what the approvals still need: a branch approved because a PR or an `origin/*` copy held its commits is checked live again.
 
-On Windows a worktree folder another program holds (a terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4.
+A worktree folder another program stands in is refused with exit 4 on every OS (see [Background programs writing into the worktree](#background-programs-writing-into-the-worktree)). On Windows, a folder holding a file another program has open is also detected before anything is deleted and refused with exit 4; that refusal names no program.
 
 ## Worktrees Git can't read
 
@@ -283,6 +315,6 @@ The path is checked before anything else, again after a [repair](#the-directory-
 | 1 | Something failed. Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). When a later step fails, the message says what was already removed (`removed worktree X, but could not delete branch B`) |
 | 2 | Invalid arguments |
 | 3 | Refused, to avoid losing work. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
-| 4 | Blocked by the environment (no shell wrapper, a folder in use on Windows, an expired handoff); nothing was removed, and no flag helps |
+| 4 | Blocked by the environment (no shell wrapper, another program working in the folder or, on Windows, holding a file open in it, an expired handoff); nothing was removed, and no flag helps |
 
 Exit 3 means "nothing removed", not "nothing changed": `wt remove` never prints "nothing was changed" after a repair attempt.
