@@ -306,6 +306,38 @@ Measured 2026-10-11 with `notify` 8.2 (`ReadDirectoryChangesWatcher`) on
 - **Delivery is FIFO per handle.** A marker file written after a burst of
   2,000 creates arrived after all of them (40–80 ms).
 
+Measured 2026-10-12 with `wt remove`'s own adapter
+(`worktree/lib/src/remove/observation/read_directory_changes.rs`) on NTFS
+`C:` and the ReFS Dev Drive `B:` of `build-win-native`:
+
+- **An open watch handle does not leave a deleted directory
+  delete-pending.** With a `FILE_SHARE_DELETE` watch open on it, a directory
+  deleted by `RemoveDirectoryW` lost its name at once and the same name could
+  be created again, on both volumes. The watch's pending read then completes
+  with an error. Closing the handle first (`wt`'s `release_admin`) is still
+  the rule, so nothing depends on this.
+- **The action does not say which change it was.** `FILE_ACTION_MODIFIED`
+  covers content, attributes, and timestamps. A move between two directories
+  of a recursive watch is `FILE_ACTION_REMOVED` plus `FILE_ACTION_ADDED`; only
+  a rename within one directory is `RENAMED_OLD_NAME`/`RENAMED_NEW_NAME`.
+- **ReFS differs from NTFS in two ways.** A rename onto an existing file
+  (`std::fs::rename`, Git's `index.lock` → `index`) is reported as the
+  source's `REMOVED` and the target's `MODIFIED`. A directory deleted with
+  POSIX semantics (`std::fs::remove_dir_all`, `FileDispositionInfoEx`) raises
+  **no notification at all**, empty or not; files deleted the same way, and
+  directories deleted by `RemoveDirectoryW`, are reported. Do not infer that
+  a directory still exists because no removal arrived. Pinned by
+  `on_refs_a_directory_removed_with_posix_semantics_is_not_reported`, which
+  runs only where the package itself sits on ReFS (it skips on the NTFS
+  `windows-latest` runners and on `build-win-native`'s `C:` temp directory).
+- **Temp is NTFS, checkouts are ReFS on `build-win-native`.** `tempfile`
+  fixtures land on `C:`; to exercise `B:`, put the fixture under
+  `env!("CARGO_MANIFEST_DIR")`. A test suite green on `C:` said nothing about
+  either ReFS difference above.
+- **Overlapped reads belong to the thread that issued them.** Windows cancels
+  a thread's outstanding I/O when that thread exits, so issue each read on
+  the thread that waits for it.
+
 ## The `windows-latest` leg
 
 - **Malformed bytes with an audio extension still reach host playback.**

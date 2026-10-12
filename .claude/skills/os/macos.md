@@ -184,8 +184,29 @@ Measured 2026-10-11 with `notify` 8.2 (FSEvents backend; latency 0,
 - **Delivery is not ordered against a marker.** In 1 of 9 rounds, 8 files
   written *before* a marker file were reported *after* the marker's event.
   At 2,000 files the marker event was itself lost twice. So "write a
-  marker, wait for its event" is not a drain on macOS. The native drain is
-  `FSEventStreamFlushSync` (exposed by `fsevent-sys`, not by `notify`).
+  marker, wait for its event" is not a drain on macOS by itself.
+- **`FSEventStreamFlushSync` is not a drain by itself either** (measured
+  2026-10-12, `fsevent-sys` 4.1, latency 0.1 s, file events). It delivers
+  only what fseventsd has already read from the kernel, which takes about
+  10 ms: 1 of 50 write-then-flush rounds missed the write. A marker *plus*
+  flushing until the marker's event arrives is a drain, because fseventsd
+  reads the kernel's events in order, across volumes (a checkout on
+  `/Volumes/coding` behind a marker in the system temp dir held for 25 of 25
+  rounds). Each such drain costs about 11 ms idle and up to ~650 ms under a
+  full test-suite load. `wt remove` does exactly this
+  (`worktree/lib/src/remove/observation/fsevents.rs`).
+- **`FSEventStreamStart` returns before events are routed to the stream.** A
+  file written right after it was never reported. Confirm with one marker
+  before relying on the stream.
+- **A directory's removal or rename replaces pending child events.** Write
+  `d/f` then rename (or delete) `d` within one delivery batch: only `d`'s
+  event arrives, even at latency 0 (0 of 5 at no wait; 5 of 5 once the
+  write had been delivered first). Drain between changing a directory's
+  children and renaming or removing it.
+- **Stream registration is serialized by fseventsd.** Alone it takes about
+  20 ms; with ~15 test processes starting streams together under suite load
+  it took up to 5 s each. Run FSEvents tests in a nextest test group with
+  `max-threads = 1` (the repo's `fsevents-l1`).
 - **Events lag by 100–600 ms under load**, crossing any fixed wait window.
 - **History flags are cumulative.** A file created and later deleted can be
   reported, at deletion time, as `Create` plus `Remove` plus a data change,
