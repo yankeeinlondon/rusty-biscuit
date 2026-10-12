@@ -1,9 +1,35 @@
 # Cleanup rules and frontmatter repair
 
-Cleanup (`md clean`, `md FILE --save`, DMLS `textDocument/formatting`) is
-being rebuilt so it never changes a document's meaning. These surfaces are in
-place; the user-facing record is the area's `docs/` tree.
+Cleanup (`md clean`, `md FILE --save`, DMLS `textDocument/formatting`,
+compose's cleanup step, `md` rendering) never changes a document's meaning.
+The user-facing record is the area's `docs/` tree.
 
+- `markdown::cleanup::clean_document(&CleanRequest, schema_closure)` is the
+  raw-source transaction both `md clean` and DMLS call: frontmatter repair,
+  one passive read of `style.markdown` (authored YAML, or the repair
+  candidate when that is the only parseable form), one `resolve`, guarded
+  body cleanup, reassembly from the emitted frontmatter bytes. Outcomes:
+  `Changed` (text plus `applied` repairs), `Unchanged`, `Declined` (source
+  returned, `applied: []`, last diagnostic `clean.fidelity-fallback` whose
+  `fallback` carries reason, document offset and detail;
+  `Fallback::message(line, column)` restates it in a caller's coordinates),
+  `Invalid` (the frontmatter to emit does not parse, including
+  `frontmatter: false` over YAML only the candidate could read; source
+  returned, nothing cleaned). Empty frontmatter blocks and BOMs without
+  frontmatter are kept; a BOM before frontmatter is an applied repair.
+- String wrappers: `cleanup_content` (defaults) and
+  `cleanup_content_with(&MarkdownRuleOverrides)` (overrides at CLI level),
+  plus `Markdown::cleanup`/`cleanup_with`. They return the input on refusal.
+  Compose maps its options (`IncidentalNewlineMode`, `with_list_spacing`
+  taking `ListItemPadding`, `with_indentation`, `with_fixed_width`) to explicit
+  overrides; a document's own `style.markdown` is not consulted there.
+  `strip_incidental_newlines` and `reflow_to_width` stay as standalone,
+  unguarded helpers (they normalize CRLF); nothing in cleanup calls them.
+- Parse budget: cleanup parses go through `cleanup_parser`; directive and
+  expression scanners derive code regions from one
+  `compose::parse_utils::scan_code_regions` per text (`Protection::scan`
+  passes them to each `*_with_code_regions` scanner), counted separately by
+  `scanner_parse_count`. `tests/parse_count.rs` pins both.
 - `markdown::cleanup::rules` is the single validator for `style.markdown`
   (document), DMLS `formatting.markdown` (workspace), and the style parser's
   registration. Read values into `Leaf<T>` (absent, null, value); never
@@ -36,13 +62,10 @@ place; the user-facing record is the area's `docs/` tree.
   inside a code span still splits a table cell. A rule that cannot apply
   safely leaves the structure as written; the guard is the backstop, and a
   refusal on valid syntax is a rule bug to fix, not an acceptable outcome.
-- The `cleanup_content*` wrappers, `cleanup_to_fixed_width`, and
-  `Markdown::cleanup*` still run the older unguarded serializer pipeline
-  (`lists`, `emphasis`, `brackets`, `blockquote`, `tables`), and `md clean`
-  and DMLS still call them; do not extend that pipeline, route callers to
-  `clean_body`. Ambient `PREFER_ITALICS` restyling is gone from both;
-  `context_construction_guard` no longer allowlists an environment read in
-  `cleanup/emphasis.rs`.
+- The old serializer pipeline (`lists`, `emphasis`, `brackets`,
+  `blockquote`, `tables`) is deleted; do not reintroduce pulldown-cmark-to-cmark
+  re-serialization into cleanup. Ambient `PREFER_ITALICS` restyling is gone;
+  `context_construction_guard` no longer allowlists an environment read for it.
 - Comparison keys never use `Debug` of pulldown's `CowStr` (its storage
   variant differs for equal values); `compare::tag_key`/`event_key` spell
   fields out.
