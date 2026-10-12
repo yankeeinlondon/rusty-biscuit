@@ -40,10 +40,22 @@ libc = "0.2"
 # tokio stream).
 inotify = { version = "0.11", default-features = false }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# `wt remove`'s activity observer on macOS: FSEvents, including
+# `FSEventStreamFlushSync`, which the drain barrier needs.
+fsevent-sys = "4.1"
+
 [target.'cfg(windows)'.dependencies]
 # The quarantine move's no-replacement rename (`SetFileInformationByHandle`)
-# and its `FileIdInfo` directory identity.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+# and its `FileIdInfo` directory identity; `wt remove`'s activity observer
+# (`ReadDirectoryChangesW` with overlapped reads and events).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+] }
 
 [features]
 count-git = []

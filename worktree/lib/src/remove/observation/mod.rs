@@ -13,6 +13,10 @@
 //!
 //! - [`Observation::drain`] is a barrier: every event caused before the call
 //!   is in the returned [`Drain`];
+//! - a directory's removal or rename may be reported in place of changes
+//!   below it that were not yet delivered (FSEvents coalesces them), so a
+//!   caller that must see those changes drains before removing or renaming
+//!   the directory;
 //! - coverage loss (a kernel overflow, a full queue, a watch lost to anything
 //!   but the operation's own deletion) is a typed [`CoverageLost`] that stays
 //!   set for the rest of the session, never a silent downgrade;
@@ -28,10 +32,14 @@
 //! verdicts: deciding which are the operation's own deletions is the deletion
 //! engine's job.
 
+#[cfg(target_os = "macos")]
+mod fsevents;
 #[cfg(test)]
 pub(crate) mod injected;
 #[cfg(target_os = "linux")]
 mod inotify;
+#[cfg(windows)]
+mod read_directory_changes;
 
 #[cfg(test)]
 mod tests;
@@ -204,6 +212,10 @@ pub enum CoverageLost {
     WatchLost { root: Root },
     #[error("reading events failed: {message}")]
     ReadFailed { message: String },
+    /// The platform did not confirm, within `waited`, that every earlier
+    /// change had been delivered.
+    #[error("the platform did not confirm delivery within {waited:?}")]
+    DrainTimedOut { waited: std::time::Duration },
 }
 
 /// What one [`Observation::drain`] returned.
@@ -278,7 +290,7 @@ impl Observation {
     /// Starts watching with this platform's native adapter. The tree must
     /// still be at the original path.
     pub fn start(targets: Targets, options: ObserverOptions) -> Result<Self, ObservationError> {
-        let backend = native_backend(&targets)?;
+        let backend = native_backend(&targets, options)?;
         Ok(Self::with_backend(targets, options, backend))
     }
 
@@ -332,12 +344,22 @@ impl Observation {
 }
 
 #[cfg(target_os = "linux")]
-fn native_backend(targets: &Targets) -> Result<Box<dyn Backend>, ObservationError> {
+fn native_backend(targets: &Targets, _options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
     Ok(Box::new(inotify::Inotify::start(targets)?))
 }
 
-#[cfg(not(target_os = "linux"))]
-fn native_backend(_targets: &Targets) -> Result<Box<dyn Backend>, ObservationError> {
+#[cfg(target_os = "macos")]
+fn native_backend(targets: &Targets, options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
+    Ok(Box::new(fsevents::FsEvents::start(targets, options)?))
+}
+
+#[cfg(windows)]
+fn native_backend(targets: &Targets, options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
+    Ok(Box::new(read_directory_changes::ReadDirectoryChanges::start(targets, options)?))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn native_backend(_targets: &Targets, _options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
     Err(ObservationError::Unsupported { reason: "no native adapter exists for this platform yet" })
 }
 
@@ -361,7 +383,7 @@ impl Sink<'_> {
     /// Past the capacity, coverage is lost and nothing more is kept.
     #[cfg_attr(
         not(target_os = "linux"),
-        expect(dead_code, reason = "only native adapters push raw events, and this platform has none yet")
+        expect(dead_code, reason = "only an adapter without a delivery thread pushes raw events into the sink")
     )]
     pub fn push(&mut self, raw: RawEvent) {
         if let Some(event) = self.targets.classify(raw) {
@@ -396,7 +418,10 @@ fn split_first(path: &Path) -> Option<(&OsStr, PathBuf)> {
 /// [`Backend::drain`]. Pushing never waits for a reader: past the capacity
 /// the event is dropped and coverage is lost. Events outside the session's
 /// scope are dropped before they count, so busy siblings cannot fill it.
-#[cfg_attr(not(test), allow(dead_code, reason = "only adapters with a delivery thread use it"))]
+#[cfg_attr(
+    not(any(test, target_os = "macos", windows)),
+    allow(dead_code, reason = "only adapters with a delivery thread use it")
+)]
 #[derive(Debug)]
 pub(crate) struct EventQueue {
     state: Mutex<QueueState>,
@@ -410,7 +435,10 @@ struct QueueState {
     lost: Option<CoverageLost>,
 }
 
-#[cfg_attr(not(test), allow(dead_code, reason = "only adapters with a delivery thread use it"))]
+#[cfg_attr(
+    not(any(test, target_os = "macos", windows)),
+    allow(dead_code, reason = "only adapters with a delivery thread use it")
+)]
 impl EventQueue {
     pub fn new(targets: Targets, capacity: usize) -> Self {
         Self { state: Mutex::new(QueueState { targets, events: VecDeque::new(), capacity, lost: None }) }
@@ -431,6 +459,12 @@ impl EventQueue {
 
     pub fn lose(&self, loss: CoverageLost) {
         self.lock().lost.get_or_insert(loss);
+    }
+
+    /// Removes and returns the recorded loss, if any.
+    #[cfg(any(target_os = "macos", windows))]
+    pub fn take_loss(&self) -> Option<CoverageLost> {
+        self.lock().lost.take()
     }
 
     /// Moves everything queued into `sink`, then any loss.

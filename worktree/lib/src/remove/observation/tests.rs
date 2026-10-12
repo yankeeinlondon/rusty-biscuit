@@ -214,11 +214,42 @@ fn the_move_is_relabeled_and_handles_registered_and_released() {
 
 // ---- the native adapter ----
 
+const NATIVE_ADAPTER: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
+
+/// `ReadDirectoryChangesW` reports an attribute change as the same
+/// `FILE_ACTION_MODIFIED` as a write.
+const METADATA_IS_DISTINCT: bool = !cfg!(windows);
+
+/// `ReadDirectoryChangesW` reports a move between two directories of a
+/// watched subtree as a removal and a creation; only a rename within one
+/// directory is a rename.
+const MOVE_ACROSS_DIRECTORIES_IS_A_RENAME: bool = !cfg!(windows);
+
+/// FSEvents reports a directory's removal or rename in place of changes below
+/// it still waiting in the same batch, so the caller drains first.
+const COALESCES_BELOW_DIRECTORY: bool = cfg!(target_os = "macos");
+
+/// Drains where the platform coalesces, so the next directory operation does
+/// not hide earlier changes below it; keeps what it drained.
+fn settle(observation: &mut Observation, kept: &mut Drain) {
+    if COALESCES_BELOW_DIRECTORY {
+        let drain = observation.drain();
+        kept.events.extend(drain.events);
+        kept.lost = kept.lost.take().or(drain.lost);
+    }
+}
+
+fn then(mut kept: Drain, drain: Drain) -> Drain {
+    kept.events.extend(drain.events);
+    kept.lost = kept.lost.or(drain.lost);
+    kept
+}
+
 /// Starts the native adapter, or proves this platform has none yet.
 fn native(layout: &Layout, options: ObserverOptions) -> Option<Observation> {
     match Observation::start(layout.targets(), options) {
-        Ok(observation) if cfg!(target_os = "linux") => Some(observation),
-        Err(ObservationError::Unsupported { reason }) if !cfg!(target_os = "linux") => {
+        Ok(observation) if NATIVE_ADAPTER => Some(observation),
+        Err(ObservationError::Unsupported { reason }) if !NATIVE_ADAPTER => {
             eprintln!("no native adapter on this platform yet ({reason}); the contract was not exercised");
             None
         }
@@ -233,8 +264,11 @@ fn native_drain_is_a_barrier_for_every_change_kind() {
     let Some(mut observation) = native(&layout, ObserverOptions::default()) else { return };
     let sub = layout.checkout.join("sub");
 
-    // No sleep anywhere: each change must be in the very next drain.
-    for round in 0..50 {
+    // No sleep anywhere: each change must be in the very next drain. A
+    // macOS drain waits about 11 ms for fseventsd, so it runs fewer rounds;
+    // a flush without the marker already failed by round 5.
+    let rounds = if cfg!(target_os = "macos") { 25 } else { 50 };
+    for round in 0..rounds {
         let name = format!("sub/f{round}.txt");
         fs::write(layout.checkout.join(&name), b"x").unwrap();
         let drain = observation.drain();
@@ -247,12 +281,23 @@ fn native_drain_is_a_barrier_for_every_change_kind() {
     let mut permissions = fs::metadata(sub.join("file.txt")).unwrap().permissions();
     permissions.set_readonly(true);
     fs::set_permissions(sub.join("file.txt"), permissions).unwrap();
-    assert!(has(&observation.drain(), &tree("sub/file.txt"), EventKind::Metadata));
+    let metadata = if METADATA_IS_DISTINCT { EventKind::Metadata } else { EventKind::Modified };
+    assert!(has(&observation.drain(), &tree("sub/file.txt"), metadata));
 
     fs::rename(sub.join("f0.txt"), layout.checkout.join("moved.txt")).unwrap();
     let drain = observation.drain();
-    assert!(has(&drain, &tree("sub/f0.txt"), EventKind::MovedFrom), "{:?}", summary(&drain));
-    assert!(has(&drain, &tree("moved.txt"), EventKind::MovedTo), "{:?}", summary(&drain));
+    let (from, to) = if MOVE_ACROSS_DIRECTORIES_IS_A_RENAME {
+        (EventKind::MovedFrom, EventKind::MovedTo)
+    } else {
+        (EventKind::Removed, EventKind::Created)
+    };
+    assert!(has(&drain, &tree("sub/f0.txt"), from), "{:?}", summary(&drain));
+    assert!(has(&drain, &tree("moved.txt"), to), "{:?}", summary(&drain));
+
+    fs::rename(sub.join("f2.txt"), sub.join("renamed.txt")).unwrap();
+    let drain = observation.drain();
+    assert!(has(&drain, &tree("sub/f2.txt"), EventKind::MovedFrom), "{:?}", summary(&drain));
+    assert!(has(&drain, &tree("sub/renamed.txt"), EventKind::MovedTo), "{:?}", summary(&drain));
 
     fs::create_dir(sub.join("newdir")).unwrap();
     let drain = observation.drain();
@@ -270,6 +315,8 @@ fn native_coverage_follows_the_move_and_sees_recreation() {
     let layout = Layout::new();
     let Some(mut observation) = native(&layout, ObserverOptions::default()) else { return };
     fs::write(layout.checkout.join("sub").join("before.txt"), b"x").unwrap();
+    let mut kept = Drain { events: Vec::new(), lost: None };
+    settle(&mut observation, &mut kept);
 
     rename_no_replace(&layout.checkout, &layout.quarantine).unwrap();
     observation.moved_to_quarantine();
@@ -277,7 +324,7 @@ fn native_coverage_follows_the_move_and_sees_recreation() {
     fs::create_dir(&layout.checkout).unwrap();
     fs::write(layout.checkout.join("recreated.txt"), b"x").unwrap();
 
-    let drain = observation.drain();
+    let drain = then(kept, observation.drain());
     let events = summary(&drain);
     assert_eq!(drain.lost, None, "{events:?}");
     assert!(has(&drain, &tree("sub/before.txt"), EventKind::Created), "{events:?}");
@@ -308,10 +355,15 @@ fn native_siblings_are_ignored_and_admin_files_reported() {
     let events = summary(&drain);
     let scopes: Vec<&Scope> = drain.events.iter().map(|event| &event.scope).collect();
     assert!(scopes.iter().all(|scope| matches!(scope, Scope::Admin(_))), "{events:?}");
+    // ReFS reports a rename onto an existing file as the source's removal and
+    // the target's modification.
+    let replaced = |name: &str, kind: EventKind, refs_kind: EventKind| {
+        has(&drain, &Scope::Admin(name.into()), kind) || (cfg!(windows) && has(&drain, &Scope::Admin(name.into()), refs_kind))
+    };
+    assert!(replaced("index.lock", EventKind::MovedFrom, EventKind::Removed), "{events:?}");
+    assert!(replaced("index", EventKind::MovedTo, EventKind::Modified), "{events:?}");
     for (name, kind) in [
         ("index.lock", EventKind::Created),
-        ("index.lock", EventKind::MovedFrom),
-        ("index", EventKind::MovedTo),
         ("sharedindex.0123", EventKind::Created),
         ("HEAD", EventKind::Modified),
         ("gitdir", EventKind::Modified),
@@ -329,10 +381,13 @@ fn native_intentional_deletion_is_not_coverage_loss() {
     rename_no_replace(&layout.checkout, &layout.quarantine).unwrap();
     observation.moved_to_quarantine();
 
+    let mut kept = Drain { events: Vec::new(), lost: None };
     fs::remove_file(layout.quarantine.join("sub").join("file.txt")).unwrap();
+    settle(&mut observation, &mut kept);
     fs::remove_dir(layout.quarantine.join("sub")).unwrap();
+    settle(&mut observation, &mut kept);
     fs::remove_dir(&layout.quarantine).unwrap();
-    let drain = observation.drain();
+    let drain = then(kept, observation.drain());
     assert_eq!(drain.lost, None, "{:?}", summary(&drain));
     assert!(has(&drain, &tree("sub/file.txt"), EventKind::Removed));
     assert!(has(&drain, &tree("sub"), EventKind::Removed));
@@ -347,6 +402,32 @@ fn native_intentional_deletion_is_not_coverage_loss() {
     // The parent watch still works.
     fs::create_dir(&layout.checkout).unwrap();
     assert!(has(&observation.drain(), &Scope::Original(PathBuf::new()), EventKind::Created));
+}
+
+#[test]
+fn native_a_change_below_a_directory_is_reported_or_the_directory_event_stands_for_it() {
+    let layout = Layout::new();
+    let Some(mut observation) = native(&layout, ObserverOptions::default()) else { return };
+    // No drain between the change and the directory operation: on macOS the
+    // child's event may be coalesced away, but never without the
+    // directory's own.
+    fs::write(layout.checkout.join("sub").join("new.txt"), b"x").unwrap();
+    rename_no_replace(&layout.checkout, &layout.quarantine).unwrap();
+    observation.moved_to_quarantine();
+    let drain = observation.drain();
+    let events = summary(&drain);
+    assert!(has(&drain, &Scope::Original(PathBuf::new()), EventKind::MovedFrom), "{events:?}");
+    assert!(COALESCES_BELOW_DIRECTORY || has(&drain, &tree("sub/new.txt"), EventKind::Created), "{events:?}");
+
+    fs::write(layout.quarantine.join("sub").join("file.txt"), b"changed").unwrap();
+    fs::remove_file(layout.quarantine.join("sub").join("file.txt")).unwrap();
+    fs::remove_file(layout.quarantine.join("sub").join("new.txt")).unwrap();
+    fs::remove_dir(layout.quarantine.join("sub")).unwrap();
+    let drain = observation.drain();
+    let events = summary(&drain);
+    assert!(has(&drain, &tree("sub"), EventKind::Removed), "{events:?}");
+    assert!(COALESCES_BELOW_DIRECTORY || has(&drain, &tree("sub/file.txt"), EventKind::Modified), "{events:?}");
+    assert_eq!(drain.lost, None, "{events:?}");
 }
 
 #[test]
