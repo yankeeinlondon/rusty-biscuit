@@ -13,13 +13,13 @@
 use std::ops::Range;
 
 use crate::markdown::MarkdownError;
-use crate::markdown::compose::block_pairs::{BlockOpenKind, BlockPairError, scan_block_pairs};
-use crate::markdown::compose::directives_api::scan_darkmatter_directives;
-use crate::markdown::compose::expression::ExpressionFinder;
-use crate::markdown::compose::parse_utils::{
-    directive_prefix_len, find_code_regions, is_in_code_region,
+use crate::markdown::compose::block_pairs::{
+    BlockOpenKind, BlockPairError, scan_block_pairs_with_code_regions,
 };
-use crate::markdown::render_tree::disclosure_scan::scan_disclosures;
+use crate::markdown::compose::directives_api::scan_darkmatter_directives_with_code_regions;
+use crate::markdown::compose::expression::ExpressionFinder;
+use crate::markdown::compose::parse_utils::{directive_prefix_len, is_in_code_region, scan_code_regions};
+use crate::markdown::render_tree::disclosure_scan::scan_disclosures_with_code_regions;
 
 /// One physical source line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,29 +113,42 @@ pub(super) struct Protection {
 impl Protection {
     /// Scans `source` with the compose recognizers.
     ///
+    /// The recognizers share one code-region scan (one scanner parse per
+    /// text), so directive-looking text in code stays code without each
+    /// scanner re-parsing the body.
+    ///
     /// ## Errors
     ///
     /// Returns the first malformed page/shell block or disclosure region, which
     /// the caller leaves unformatted.
     pub(super) fn scan(source: &str) -> Result<Self, MalformedRegion> {
-        let pairs = scan_block_pairs(source).map_err(|error| {
-            let line = match &error {
-                BlockPairError::UnmatchedEnd { line }
-                | BlockPairError::UnterminatedBlock { line, .. }
-                | BlockPairError::TrailingContent { line, .. } => *line,
+        let code = scan_code_regions(source);
+        // Messages name no line: the caller locates the region in its own
+        // (document) coordinates from `offset`, and a body-relative line
+        // number in the detail would contradict it.
+        let pairs = scan_block_pairs_with_code_regions(source, None, &code.all).map_err(|error| {
+            let (line, message) = match error {
+                BlockPairError::UnmatchedEnd { line } => {
+                    (line, "an `::end-block` has no matching opener".to_string())
+                }
+                BlockPairError::UnterminatedBlock { line, opening_text, .. } => {
+                    (line, format!("`{}` is never closed by an `::end-block`", opening_text.trim()))
+                }
+                BlockPairError::TrailingContent { line, content } => {
+                    (line, format!("unexpected content after `::end-block`: '{content}'"))
+                }
             };
-            MalformedRegion { offset: line_number_offset(source, line), message: error.to_string() }
+            MalformedRegion { offset: line_number_offset(source, line), message }
         })?;
-        scan_disclosures(source).map_err(|error| MalformedRegion {
-            offset: match &error {
-                MarkdownError::MalformedDisclosure { range, .. } => range.start,
-                _ => 0,
-            },
-            message: error.to_string(),
+        scan_disclosures_with_code_regions(source, &code.all).map_err(|error| match error {
+            MarkdownError::MalformedDisclosure { reason, range } => {
+                MalformedRegion { offset: range.start, message: reason }
+            }
+            other => MalformedRegion { offset: 0, message: other.to_string() },
         })?;
 
         let lines = Lines::new(source);
-        let mut protected: Vec<Range<usize>> = scan_darkmatter_directives(source)
+        let mut protected: Vec<Range<usize>> = scan_darkmatter_directives_with_code_regions(source, None, &code.all)
             .into_iter()
             .map(|directive| {
                 let line = lines.get(lines.index_of(directive.span.start));
@@ -148,7 +161,7 @@ impl Protection {
                 .filter(|pair| pair.kind == BlockOpenKind::Shell)
                 .map(|pair| pair.span),
         );
-        protected.extend(quoted_shell_lines(source, &lines));
+        protected.extend(quoted_shell_lines(source, &lines, &code.all));
         protected.sort_by_key(|range| (range.start, range.end));
         let mut merged: Vec<Range<usize>> = Vec::with_capacity(protected.len());
         for range in protected {
@@ -158,7 +171,7 @@ impl Protection {
             }
         }
 
-        let scan = ExpressionFinder::new(source).scan();
+        let scan = ExpressionFinder::with_code_blocks(source, code.blocks).scan();
         let mut inline: Vec<Range<usize>> = scan
             .expressions
             .iter()
@@ -209,11 +222,10 @@ fn line_number_offset(source: &str, number: usize) -> usize {
 
 /// `::shell` lines behind a block-quote prefix. The shell parser recognizes
 /// them; the generic directive scanner does not.
-fn quoted_shell_lines(source: &str, lines: &Lines) -> Vec<Range<usize>> {
+fn quoted_shell_lines(source: &str, lines: &Lines, code_regions: &[(usize, usize)]) -> Vec<Range<usize>> {
     if !source.contains("::shell") {
         return Vec::new();
     }
-    let code_regions = find_code_regions(source);
     (0..lines.len())
         .map(|index| lines.get(index))
         .filter(|line| {
@@ -221,7 +233,7 @@ fn quoted_shell_lines(source: &str, lines: &Lines) -> Vec<Range<usize>> {
             let prefix = directive_prefix_len(text);
             text[..prefix].contains('>')
                 && text[prefix..].trim_end().starts_with("::shell ")
-                && !is_in_code_region(line.start, &code_regions)
+                && !is_in_code_region(line.start, code_regions)
         })
         .map(|line| line.start..line.next)
         .collect()

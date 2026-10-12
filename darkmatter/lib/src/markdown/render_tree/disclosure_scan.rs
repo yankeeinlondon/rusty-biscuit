@@ -104,7 +104,15 @@ fn matches_keyword(trimmed: &str, keyword: &str) -> bool {
 /// Returns [`MarkdownError::MalformedDisclosure`] for an `::end-disclosure`
 /// without a matching opener, or an opener that reaches end-of-file unclosed.
 pub fn scan_disclosures(source: &str) -> Result<Vec<DisclosureParse>, MarkdownError> {
-    let code_regions = find_code_regions(source);
+    scan_disclosures_with_code_regions(source, &find_code_regions(source))
+}
+
+/// [`scan_disclosures`] with `code_regions` (every inline code span and code
+/// block of `source`) already computed by the caller.
+pub(crate) fn scan_disclosures_with_code_regions(
+    source: &str,
+    code_regions: &[(usize, usize)],
+) -> Result<Vec<DisclosureParse>, MarkdownError> {
     let bytes = source.as_bytes();
 
     let mut stack: Vec<OpenFrame> = Vec::new();
@@ -129,7 +137,7 @@ pub fn scan_disclosures(source: &str) -> Result<Vec<DisclosureParse>, MarkdownEr
         let trimmed_start = line_start + (line.len() - line.trim_start().len());
         let trimmed_end = trimmed_start + trimmed.len();
 
-        if !trimmed.is_empty() && !is_in_code_region(trimmed_start, &code_regions) {
+        if !trimmed.is_empty() && !is_in_code_region(trimmed_start, code_regions) {
             if matches_keyword(trimmed, DISCLOSURE_OPENER) {
                 stack.push(open_frame(
                     line_start,
