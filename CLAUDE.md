@@ -37,9 +37,9 @@
   run instead of repeating it. Windows and WSL2 failures are found after merge
   and fixed forward; they never gate a merge. The `ci:all-os` label opts a
   pull request back into every environment, and `workflow_dispatch` runs all
-  four. **Planned:** resumable workspace seeding of Windows and WSL2 evidence
-  on the test rigs, with the nightly reusing it per cell; until then a nightly
-  executes every Windows and WSL2 cell in its scope on hosted runners.
+  four. `just ci-seed` proves the nightly's Windows and WSL2 cells on the test
+  rigs ahead of it; the nightly reuses that proof per cell and runs only what
+  no verified observation covers.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,

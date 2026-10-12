@@ -283,11 +283,30 @@ The first `#[test]` (or `#[tokio::test]`, `rstest`, `proptest!`, a file under `t
 its tests normally, and the plan reports `tests_found: true` so the marker can be deleted. Only
 declaring packages are scanned. The field reference is in `.github/ci/README.md`.
 
-**Planned:** a resumable workspace seeding command will gather Windows and WSL2 evidence on
-configured rigs. Scheduled evidence consumption, rig cross-check publication for both WSL2 and
-native Windows, and hosted-cell observation publication are implemented (next section); until a rig
-or a hosted nightly publishes proof for a cell, a nightly executes it. An optional Windows-risk
-workflow will reuse this infrastructure before pushing.
+**Seeding the nightly from the rigs.** The nightly reuses any verified observation for a cell, so
+the test rigs can prove the Windows and WSL2 cells ahead of it instead of the nightly running them on
+hosted runners. `just ci-seed` does that for the whole workspace at one pinned `main` revision:
+
+```sh
+git switch --detach origin/main      # the checkout must be the pinned revision, clean
+just ci-seed --plan                  # preview: every cell, reused or still owed, and its rig
+just ci-seed                         # prove what is owed on BUILD_WIN and BUILD_WSL
+just ci-seed --os wsl --package ui   # narrow a pass to one environment or package
+```
+
+It resolves the full-workspace nightly plan, asks the nightly's own verifier which cells are already
+proved (by an earlier seed, the pre-push hook, or another host), and runs `just cross-check <package>
+--os windows|wsl` for each package still owing a cell. Every finished leg publishes its observation
+at once, so stopping a pass loses only the leg in flight; running the command again continues where
+it stopped, because what is owed is always re-derived from published proof, never from the progress
+file (`<evidence dir>/seed/<seed id>/state.json`), which only records attempts and their logs.
+
+A busy rig (another run holds its clone), an unreachable one, an unset `BUILD_WIN`/`BUILD_WSL`, a
+failed run, and a run that published nothing are reported apart, and each leaves its cells owed; the
+command exits nonzero until every requested cell is proved or a governed gap. A pass pinned to an
+older revision keeps its value: the nightly reuses its proof wherever the cell's inputs are unchanged.
+
+An optional Windows-risk workflow, running selected Windows cells before a push, is **planned**.
 
 ### Hosted cell observations
 
@@ -355,7 +374,7 @@ hosted run.
 
 **Partial-run recovery:** failed or canceled nightlies leave the last
 successful baseline unchanged. Hosted cells that finished keep their proof
-(previous section); rig-published proof is planned. Retries verify and reuse
+(previous section), and so do rig legs (`just cross-check`, `just ci-seed`). Retries verify and reuse
 qualifying evidence, executing only unproven cells. A newer qualifying failure will
 prevent an older pass from hiding that cell's failure.
 

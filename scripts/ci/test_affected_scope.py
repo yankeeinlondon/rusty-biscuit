@@ -2970,6 +2970,41 @@ class EventSchedulingTests(unittest.TestCase):
             ["ubuntu-latest", "windows-latest"], [owner["environment"] for owner in owners]
         )
 
+    def test_a_fully_seeded_bootstrap_nightly_builds_and_runs_nothing(self) -> None:
+        # What `just ci-seed` exists for: rig proof for every nightly cell
+        # leaves the bootstrap with no build, no producer runner, and no test.
+        plan = self.plan(event="schedule")
+        accepted = [
+            {"package": cell["package"], "environment": cell["environment"],
+             "gate": cell["gate"], "origin": "prior-local", "outcome": "pass",
+             "evidence": {"ref": f"refs/notes/ci-local/{cell['environment']}"}}
+            for cell in plan["cells"]
+        ]
+        applied = apply_accepted_cells(plan, accepted, [])
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        self.assertTrue(applied["cells"])
+        self.assertEqual({"reuse"}, {cell["execution"] for cell in applied["cells"]})
+        self.assertEqual([], applied["builds"])
+        self.assertEqual([], [row for document in row_sets_of(applied).values()
+                              for name in schema.ROW_SET_NAMES for row in document[name]])
+
+    def test_a_partly_seeded_nightly_runs_exactly_the_rest(self) -> None:
+        plan = self.plan(event="schedule")
+        windows = [cell for cell in plan["cells"] if cell["environment"] == "windows-latest"]
+        accepted = [
+            {"package": cell["package"], "environment": cell["environment"],
+             "gate": cell["gate"], "origin": "prior-local", "outcome": "pass",
+             "evidence": {"ref": "refs/notes/ci-local/windows-latest"}}
+            for cell in windows
+        ]
+        applied = apply_accepted_cells(plan, accepted, [])
+        executing = {(cell["environment"], cell["gate"]) for cell in applied["cells"]
+                     if cell["execution"] == "execute"}
+        self.assertEqual({("wsl2-ubuntu", "L1")}, executing)
+        # No Windows producer for Windows cells already proved; Linux still
+        # builds WSL2's archive.
+        self.assertEqual(["ubuntu-latest"], [record["producer"] for record in applied["builds"]])
+
     def test_an_event_that_schedules_no_guest_brings_no_producer(self) -> None:
         for event in ("pull_request", "push"):
             with self.subTest(event=event):
@@ -3910,6 +3945,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_reuse_validation.py": "repo-deps",
         "test_runner_loss.py": "repo-deps",
         "test_schema.py": "repo-deps",
+        "test_seed.py": "repo-deps",
         "test-audit-typecheck": "test-toolkit",
         "test-audit-vitest": "test-toolkit",
     }

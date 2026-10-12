@@ -153,6 +153,13 @@ pre-push *selectors="":
 cross-check *args:
     @./scripts/cross-check.sh {{ args }}
 
+# Seed the nightly's native Windows and WSL2 evidence on the BUILD_WIN and
+# BUILD_WSL rigs at a clean, pinned `main` checkout, publishing each cell as
+# it finishes. Rerun to resume; `--plan` previews without proving anything.
+# Usage: just ci-seed [--plan] [--os windows|wsl|all] [--package <name>]...
+ci-seed *args:
+    @python3 scripts/ci/seed.py {{ args }}
+
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh

@@ -68,11 +68,14 @@ local and hosted runs. Its package policy is deliberately narrow:
   plans `push` for `main` and `pull_request` for every other branch, and
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
-- **Planned:** resumable workspace rig seeding, which needs native Windows
-  receipt publication; scheduled evidence consumption, per-environment anchors,
-  and hosted observation publication are implemented, but no rig publishes
-  Windows proof yet, so a nightly executes what no verified observation covers.
-  See `docs/topics/ci-cd.md`.
+- `just ci-seed` (`scripts/ci/seed.py`) seeds the nightly: at a clean,
+  pinned `origin/main` checkout it resolves the full-workspace schedule plan,
+  asks `verify_cells` (all-zero base) what is proved, and runs
+  `cross-check.sh <pkg> --os windows|wsl` for each package still owing a
+  cell; each leg publishes its `rig` observation as it ends. Resume is
+  re-derivation from published proof; the state file only records attempts.
+  A nightly executes what no verified observation covers. See
+  `docs/topics/ci-cd.md`.
   Risk-directed pre-push use of that infrastructure remains optional. Do not
   describe a nightly as a fixed 24-hour diff or treat old WSL2-only nightlies
   as Windows proof.
