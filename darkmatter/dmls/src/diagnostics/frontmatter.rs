@@ -1280,6 +1280,9 @@ fn zero_range() -> Range {
 mod severity_tests;
 
 #[cfg(test)]
+mod position_parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1298,15 +1301,28 @@ mod tests {
     /// Builds a real overlay-backed context for `text`, runs `diagnostics`, and
     /// hands the diagnostics to `f`.
     fn diagnostics_for<R>(text: &str, f: impl FnOnce(&[Diagnostic]) -> R) -> R {
+        diagnostics_with(text, PositionEncoding::Utf16, &DmlsConfig::default(), |diagnostics, _| {
+            f(diagnostics)
+        })
+    }
+
+    /// [`diagnostics_for`] with the client's negotiated `encoding` and an
+    /// explicit `config`; `f` also receives the context's source map, so a
+    /// caller can convert the diagnostics' positions back to byte offsets.
+    pub(super) fn diagnostics_with<R>(
+        text: &str,
+        encoding: PositionEncoding,
+        config: &DmlsConfig,
+        f: impl FnOnce(&[Diagnostic], &SourceMap) -> R,
+    ) -> R {
         let path = Path::new("/w/doc.md");
         let uri: Uri = "file:///w/doc.md".parse().unwrap();
-        let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
-        let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
-        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let overlay = state.for_document(&uri, text, path, config, &roots, &crate::context::test_support::resolution_for(path));
+        let source_map = SourceMap::new(uri.clone(), 1, encoding, Arc::from(text));
         let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
-        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), encoding);
         let ctx = DocumentContext {
             uri: &uri,
             path,
@@ -1314,12 +1330,12 @@ mod tests {
             source_map: &source_map,
             graph: &graph,
             doc_id: None,
-            config: &config,
+            config,
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
         };
-        f(&diagnostics(&ctx))
+        f(&diagnostics(&ctx), &source_map)
     }
 
     fn expression_doc(value_line: &str) -> String {
