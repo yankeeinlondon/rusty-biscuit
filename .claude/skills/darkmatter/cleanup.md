@@ -13,9 +13,13 @@ The user-facing record is the area's `docs/` tree.
   returned, `applied: []`, last diagnostic `clean.fidelity-fallback` whose
   `fallback` carries reason, document offset and detail;
   `Fallback::message(line, column)` restates it in a caller's coordinates),
-  `Invalid` (the frontmatter to emit does not parse, including
-  `frontmatter: false` over YAML only the candidate could read; source
-  returned, nothing cleaned). Empty frontmatter blocks and BOMs without
+  `Invalid` (Darkmatter's own frontmatter parser cannot load the block to
+  emit, including `frontmatter: false` over YAML only the candidate could
+  read; source returned, nothing cleaned). Strict YAML is not the acceptance
+  test: a block only `frontmatter::load_frontmatter_yaml` loads (bare
+  `{{ … }}` values, tab indentation, the fallbacks `Markdown` uses) is kept
+  as authored with no repair, its rules are read from that mapping, and the
+  body is cleaned; the strict `yaml.parse` finding stays report-only. Empty frontmatter blocks and BOMs without
   frontmatter are kept; a BOM before frontmatter is an applied repair.
 - String wrappers: `cleanup_content` (defaults) and
   `cleanup_content_with(&MarkdownRuleOverrides)` (overrides at CLI level),
@@ -69,7 +73,28 @@ The user-facing record is the area's `docs/` tree.
 - Comparison keys never use `Debug` of pulldown's `CowStr` (its storage
   variant differs for equal values); `compare::tag_key`/`event_key` spell
   fields out.
-- Tests: `cleanup/tests/{fidelity_repro,directive_fixed_points,rules,guard,source_fidelity}.rs`
-  plus `parse_count::guarded_body`. `test_hooks::install_broken_pass` (built
-  under `cfg(test)` or the `cleanup-test-hooks` feature) corrupts the candidate
-  before the guard, so consumers can prove a refusal end to end.
+- User-facing docs: `darkmatter/docs/topics/markdown-formatting.md` (every
+  rule, list spacing, precedence), `docs/cli/clean.md`, `docs/inline/cleaning.md`
+  (compose's step), and `dmls/docs/editors/README.md` (DMLS formatting and
+  `formatting.markdown`). Regenerate their examples from `md clean -` rather
+  than writing them by hand.
+- Corpus evidence: a passive `clean_document` scan over `git ls-files '*.md'`
+  is a throwaway probe, never a CI gate. Run it from a release build
+  (`cargo nextest list --cargo-profile release` builds the `l1` binary, then
+  run it directly with `--ignored --exact`) and a work queue, not static
+  chunks: the debug build takes minutes and a few large frontmatter documents
+  dominate (the schema tier, not the body engine). Real `prompts/commit.md`
+  coverage lives in `lib/tests/l1/clean_real_world_prompt.rs`.
+- Tests: `cleanup/tests/{fidelity_repro,directive_fixed_points,rules,guard,source_fidelity,parse_count}.rs`,
+  `cleanup::document::tests`, and the shared parity matrix
+  `lib/tests/common/clean_parity/mod.rs`. The library (`lib/tests/l1/clean_parity.rs`),
+  `md clean` (`cli/tests/l1/clean_parity.rs`) and DMLS formatting
+  (`dmls/tests/l1/formatting_transaction.rs`) all assert it, so add a case
+  there when a consumer-visible outcome changes. Cases are string literals
+  because `.gitattributes` would normalize a CRLF fixture file.
+  `test_hooks::install_broken_pass` (built under `cfg(test)` or the
+  `cleanup-test-hooks` feature, which the CLI and DMLS enable as a
+  dev-dependency feature) corrupts the candidate before the guard. It is
+  process-global and does not reach a spawned `md`. Use it in process (DMLS
+  sessions, `darkmatter_cli::commands::run_clean`), and prove binary routes
+  with a real decline such as an unpaired `::block`.

@@ -133,8 +133,7 @@ This results in a document which:
     - this replacement will happen not only in the `main.md` file but all child files too (unless these children redefine the `name` property)
 - In the `main.md` file's "My Favorite Things" section we use a `::file` reference which interpolates the content from the external file `favorites.md`, before this external content is brought in, however, the child document(s) will first be run through the Markdown pipeline itself. This results in:
     - The document is "cleaned up", in this particular case it will:
-        - add a **blank line** after `## Football` as all heading lines should have blank lines above and below them
-        - changed the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
+        - change the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
         - because `main.md` injects the `favorites.md` file into a section defined by an **H2** heading, the injected content will be _normalized_ to have it's headings start at **H3**
     - Were the `favorites.md` file to have it's own `::file` reference then the recursive process would continue.
 
