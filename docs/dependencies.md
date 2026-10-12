@@ -239,6 +239,14 @@
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
+  `wt remove`'s recovery store (`<common-git-dir>/wt-removal/`) reuses `fs4`
+  for its per-worktree operation lock, `getrandom` for its operation IDs, and
+  `sniff`'s `NativeString`, `FileIdentity`, and `PathUsageReport` for lossless
+  paths, native identities, and the saved discovery report. On Unix it adds a
+  direct `libc` 0.2 dependency (already in the workspace graph) for `geteuid`
+  in the store's owner check, `O_NOFOLLOW` when reading a record, and plain
+  `fsync` on Apple platforms, where std's `sync_all` issues the much slower
+  `F_FULLFSYNC`.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
   only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
   URL, the default branch, branch-name validity, `core.sshCommand`, and ref
@@ -1135,7 +1143,7 @@ This is a Rust workspace with the following modules:
 
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
-    _Raw FFI bindings to platform APIs and C standard library._
+    _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`._
 
     _Tags: ffi, bindings, system_
 
@@ -1175,7 +1183,7 @@ This is a Rust workspace with the following modules:
 
 - [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
 
-    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token._
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token and removal operation IDs._
 
     _Tags: random, csprng, system_
 

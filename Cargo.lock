@@ -16840,6 +16840,7 @@ dependencies = [
  "fs4",
  "getrandom 0.4.2",
  "gix",
+ "libc",
  "reflink-copy",
  "serde",
  "serde_json",

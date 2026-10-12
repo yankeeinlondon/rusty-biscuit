@@ -5,7 +5,8 @@
 //! ([`handoff`]). A target Git can't read is made checkable first by
 //! [`prepare`]: its worktree record is found ([`admin_entry`]), then a missing
 //! `.git` file is repaired and verified ([`repair`]) or a missing directory's
-//! surviving index is checked ([`missing`]).
+//! surviving index is checked ([`missing`]). A contention-aware removal
+//! reports a typed [`outcome`] and keeps durable [`recovery`] state.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -16,6 +17,8 @@ pub mod handoff;
 pub mod included;
 pub mod inventory;
 pub mod missing;
+pub mod outcome;
+pub mod recovery;
 pub mod remote;
 pub mod repair;
 pub mod safety;

@@ -30,6 +30,10 @@ sniff = { path = "../../sniff/lib", features = ["remote"] }
 thiserror = "2.0"
 which = "8.0"
 
+[target.'cfg(unix)'.dependencies]
+# `geteuid` for the owner check on removal recovery records.
+libc = "0.2"
+
 [features]
 count-git = []
 
