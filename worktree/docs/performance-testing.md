@@ -102,6 +102,7 @@ Starting a git process is the dominant cost of the refresh worker on Windows: ab
 - Each read opens the repository afresh, so a configuration change between two reads (an `origin` replaced while the worker runs) is still seen.
 - When `gix` cannot read the repository (an owner it does not trust, a reftable repository), that read runs the git command in the right-hand column instead.
 - Parity tests in `git_metadata.rs` compare every read with its git command, and `remote_update::tests::a_fetching_attempt_starts_only_ls_remote_and_fetch` pins a fetching attempt to exactly two git processes.
+- `refresh_worker::tests::a_fetching_worker_starts_only_the_checkout_lookup_ls_remote_and_fetch` runs the whole worker against a local `origin` ahead of its tracking ref and pins it to exactly three: the `rev-parse` that locates the checkout, `ls-remote`, and `fetch`. The worker runs its PR and head halves on their own threads, which carry the caller's count scope (`git::calls::TaskHandle`), so one scope around the worker counts both.
 
 A fetching attempt used to start 14 git processes in sequence, 12 of them these reads:
 
