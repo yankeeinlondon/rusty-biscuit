@@ -1,0 +1,15 @@
+//! Level 1 integration tests for `schematic-runtime`.
+//!
+//! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
+//! not declared below never compiles; `test_layout.rs` rejects one.
+
+mod builder;
+mod compile_fail;
+mod credential_resolution;
+mod decode_boundary;
+mod envelope;
+mod redaction;
+mod send;
+mod support;
+mod test_layout;
+mod timing;

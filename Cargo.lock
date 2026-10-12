@@ -11777,6 +11777,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "schematic-runtime"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "biscuit-test-harness",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http 1.4.0",
+ "rcgen",
+ "reqwest 0.13.2",
+ "rustls",
+ "serde",
+ "serde_json",
+ "test-toolkit",
+ "tokio",
+ "tokio-rustls",
+ "trybuild",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "schematic-schema"
 version = "0.1.0"
 dependencies = [

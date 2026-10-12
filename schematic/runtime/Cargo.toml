@@ -1,0 +1,43 @@
+[package]
+name = "schematic-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Hand-written request runtime shared by schematic-generated REST clients"
+autotests = false
+
+[dependencies]
+base64 = "0.22"
+bytes = "1"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
+http = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rustls = { version = "0.23", default-features = false }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+url = "2"
+
+[dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+futures-util = "0.3"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+serde = { version = "1", features = ["derive"] }
+test-toolkit = { path = "../../tools/test-toolkit" }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
+trybuild = "1.0"
+wiremock = "0.6"
+
+# One test binary per execution contract; `autotests = false` above, so a
+# `tests/` file reaches the binary only through `tests/l1/main.rs`.
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
+
+# Opt-out of benchmarking: request execution is dominated by network round-trips.
+[package.metadata.benchmarks]
+required = false
+reason = "HTTP request runtime; time is spent in network round-trips, not in-process hot paths."
