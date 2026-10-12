@@ -51,8 +51,18 @@ local and hosted runs. Its package policy is deliberately narrow:
   published only after the final gate and every audit passed) or, for a
   pre-certification run, by its own schedule policy plus all `coverage-audit`
   jobs succeeding. No qualifying anchor means that environment runs the full
-  gated workspace; current policy also adds cells the anchor never covered
-  (`policy_delta`) whatever the diff says. The scheduled run now verifies and
+  gated workspace; current policy also adds cells the anchor never covered,
+  or covered under a different coverage contract (backends, test features,
+  target kinds, companions), as `policy_delta` whatever the diff says. A
+  legacy anchor records no contracts, so it inherits no cell. A covered cell
+  is inherited only while published evidence agrees: the planner runs
+  `local_evidence.blocking_evidence` (the verifier's own resolution, with the
+  `--artifact-repo` probe) over the cells it would lend, and one whose newest
+  qualifying result is a failure, or an unordered pass/fail conflict, is
+  selected and listed in the anchor's `reopened_cells`. Never make the
+  overlay or the certification writer decide inheritance; the plan does. The
+  `scope` job therefore recovers earlier nightlies' observation artifacts
+  before planning. The scheduled run now verifies and
   reuses notes evidence like a push does;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
   environment for a pull request and takes effect on the next push; such a
@@ -74,6 +84,8 @@ local and hosted runs. Its package policy is deliberately narrow:
   `cross-check.sh <pkg> --os windows|wsl` for each package still owing a
   cell; each leg publishes its `rig` observation as it ends. Resume is
   re-derivation from published proof; the state file only records attempts.
+  It seeds Level 1 only (`SEED_GATES`): a pending cell of another gate is
+  `unsupported`, never run via a Level 1 leg, and keeps the exit nonzero.
   A nightly executes what no verified observation covers. See
   `docs/topics/ci-cd.md`.
   Risk-directed pre-push use of that infrastructure remains optional. Do not
@@ -425,8 +437,12 @@ Same-head retries must update that evidence cumulatively. The planner skips
 the already-passing cells, so replacing the note or clearing the retained
 report directory with only the retry's staged files silently discards exactly
 the evidence that caused those skips. Overlay the report directory and publish
-through the collection (never `git notes add -f` a receipt over the note); the
-new run's observation links to the one it replaces with `retry_of`.
+through the collection (never `git notes add -f` a receipt over the note). A
+hook observation carries no `retry_of`, so a same-head retry that disagrees
+with the earlier result is unordered and the cell executes. Retry lineage is
+established at execution, never from the order observations are published: a
+rig leg names the predecessor `retry-predecessor` reported before it ran, and a
+hosted re-run attempt names the earlier attempt of the same run.
 
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
@@ -1148,7 +1164,11 @@ recorded without one, and a cancelled, skipped, or report-less cell records
 nothing. `publish-observations` (`ci.yml`, `schedule` only, `always()`,
 `contents: write` + `actions: read`, not in `ci-gate`) validates and publishes
 them through `observation_notes.py`; a refused push fails that step red and
-prints that the proof is local. Discovery passes `hosted_observations.gh_probe`
+prints that the proof is local. A run whose publisher never ran is recovered by
+`publish --recent` (the newest `RECOVERY_RUNS` completed scheduled `ci.yml`
+runs on `main`, any conclusion): the nightly `scope` job runs it with
+`--no-push` before verifying, needing only its `actions: read`, and
+`publish-observations` runs it with a push. Discovery passes `hosted_observations.gh_probe`
 as `verify_cells`' `report_probe`, which downloads the producer run's artifact
 and credits the cell only when the cited bytes and proof digests match
 (`producer.host.label` is the environment it derives the artifact name from).

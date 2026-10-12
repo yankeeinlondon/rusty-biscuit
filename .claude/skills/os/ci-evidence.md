@@ -61,8 +61,12 @@ and a retry executes only what is unproven.
   repository's artifact retention) re-runs the cell. A completed failure is kept
   and still blocks an older pass.
 - Nothing is invented: a cancelled, skipped, or report-less cell, or a passing
-  gate with no valid completion record, records nothing. `publish
-  --run-id N` republishes a run by hand if the publisher job was lost.
+  gate with no valid completion record, records nothing.
+- A run whose publisher job was lost is recovered by the next nightly: its
+  `scope` job records the newest five completed scheduled runs' observations
+  locally before verifying (`publish --recent --no-push`), and
+  `publish-observations` pushes them (`publish --recent`). Older runs need
+  `publish --run-id N` by hand.
 - Unverified on a real run: that the ruleset lets `GITHUB_TOKEN` push
   `refs/notes/*`. If it does not, the publisher step is red and the artifacts
   are the only record. The CI/CD topic page has the flow.
@@ -110,8 +114,15 @@ proved *that* environment. A run from before certifications existed is credited
 only for environments its own `environments.json` scheduled for `schedule` at
 that run's commit, and only if every `coverage-audit` job succeeded, so the
 WSL2-only history never counts as native Windows proof (Windows stays on the full
-gated workspace). A legacy anchor proves no list of cells: the planner assumes it
-covers whatever the diff does not reselect, and cannot see a gap that expired or a
-backend that became required since. The first certified nightly ends that
-assumption. When reproducing "why did the nightly run everything", read the scope
+gated workspace). A legacy anchor records no coverage contracts, so it inherits
+no cell: every WSL2 cell current policy requires is selected, and seeded or other
+qualifying evidence decides which execute. A certified anchor inherits a cell only
+under an unchanged coverage contract, so a new backend or test feature inside an
+existing gate is selected again, and only while no later qualifying result
+contradicts it: a failing `just cross-check <pkg> --os windows|wsl` published
+after a green nightly, at its head or on a docs-only descendant, puts that one
+cell in the next nightly's `reopened_cells` (the rest stay inherited). A
+passing rig retry restores inheritance because `cross-check.sh` names the
+failure as its `retry_of`; a rerun published without that link conflicts with
+the failure and still executes. The first certified nightly ends the legacy case. When reproducing "why did the nightly run everything", read the scope
 job's summary row `coverage anchors`: it names the reason code per environment.

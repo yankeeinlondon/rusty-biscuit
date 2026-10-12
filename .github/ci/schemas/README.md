@@ -321,7 +321,7 @@ immutable:
 | Field | Meaning |
 |---|---|
 | `observation_id` | The hex identity of every other field. Republishing the same observation is a no-op; the same id with other content is corruption. |
-| `retry_of` | Optional. The id of an observation of the **same cell in the same collection** that this one replaces. Absent declares no retry; `null` is malformed. Time is never used to order runs. |
+| `retry_of` | Optional. The id of an observation of the **same cell in the same collection** that this one replaces. Absent declares no retry; `null` is malformed. Time is never used to order runs, nor is the order observations are published: a rig leg names the observation that existed when it started, and a hosted re-run attempt names the earlier attempt of the same run. |
 | `producer` | `{kind, host{os, kernel, label?, report_dir?}, workflow?, run_id?, attempt?, seed_id?}`. Kinds: `hook`, `rig`, `hosted`, `seed`. A `hosted` producer names `workflow`, `run_id`, `attempt`; a `seed` producer names `seed_id`. |
 | `base`, `scope_identity`, `completion` | As in the version-2 receipt. |
 | `cell` | A version-2 receipt cell, unchanged. |
@@ -518,14 +518,42 @@ anchors_used[], certified, cells{executing, reused, accepted_gap, inherited},
 covered_cells[], audits{required, passed}}`. `certified` requires every
 required audit to have passed; `covered_cells` is what the environment is
 proven for after the run (executed and reused cells plus the cells its anchor
-covered that the plan did not reselect), and accepted gaps cover nothing.
+covered that the plan did not reselect), and accepted gaps cover nothing. Each
+covered cell is `{package, gate, contract}`, distinct by `{package, gate}`;
+`contract` is the 64-hex coverage contract the plan recorded for that cell. A
+cell the plan records no contract for, or one narrowed by a `test_filter`, is
+never certified: the writer refuses to build the document, as it does for an
+anchor that both inherits and reopens one cell. A reopened cell is covered only
+as this run executed it. `anchors_used[]` entries are the plan's anchors
+without `required_cells`.
+
+The coverage contract (`affected_scope.coverage_contract`) is the identity of
+what one cell must prove beyond its name: target kinds, test filter, companion
+suites, compiled dependents, and, by gate, the test feature arguments, slow-test
+inclusion (`L1`), the declared and hosted backends (`L2`), and the check
+arguments (`check`). Two cells with the same name but a different contract prove
+different things. For example, adding `wezterm` beside `tmux` to a package's
+Level-2 backends changes its `L2` contract on every environment, so a nightly
+whose anchor certified the `tmux`-only cell selects it again.
 
 The resolved plan's optional `coverage_anchors[]` (a nightly only; the plan
 version does not move) holds, per environment, `{environment, mode, anchor,
-reason, source{kind, run_id, head}, policy_delta[], inherited_cells[]}`. `mode`
-is `incremental` (an `anchor` commit) or `full` (`anchor` null); `reason` is one
-of the coded values in `schema.ANCHOR_REASONS` and must agree with `mode` and
-`source.kind`. The planner reads the anchors from the document
+reason, source{kind, run_id, head}, policy_delta[], inherited_cells[],
+reopened_cells[], required_cells[]}`. `mode` is `incremental` (an `anchor` commit) or `full`
+(`anchor` null); `reason` is one of the coded values in `schema.ANCHOR_REASONS`
+and must agree with `mode` and `source.kind`. `required_cells` is
+`{package, gate, contract}` for every pending cell current policy requires of
+the environment; every `policy_delta`, `inherited_cells`, and `reopened_cells`
+entry names one of them. A cell is inherited only when the anchor's
+certification covered it with the same contract and published evidence does
+not contradict it; a cell it did not cover, or covered under another contract,
+is in `policy_delta`. A covered cell whose qualifying evidence
+(`local_evidence.blocking_evidence`: an unsuperseded failure, or a pass and a
+failure nothing orders) requires execution is in `reopened_cells`: it is a plan
+cell on that environment, never also inherited, and a full-scope fallback
+reopens nothing. A legacy anchor (`covered_cells` null) records no
+contract, so it inherits nothing and every required cell the diff does not
+reselect is in `policy_delta`. The planner reads the anchors from the document
 `reuse_validation.py nightly-anchors` prints (`schema.ANCHOR_INPUT_*`); a
 malformed anchor document stops planning with a nonzero exit instead of
 producing a reduced plan.

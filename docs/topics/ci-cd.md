@@ -94,7 +94,18 @@ lost race up to five times; a failure leaves the proof on the local ref and the 
 scheduled for CI. A retry of a cell links to the observation it replaces (`retry_of`), and the
 verifier orders results only by that link and by commit ancestry, never by time: a later failure
 beats an earlier pass, a later pass beats an earlier failure, and results nothing orders that
-disagree make the cell execute. The field contract is in
+disagree make the cell execute.
+
+The link is set by whoever ran the retry, from what it knew when the retry started, never from the
+order observations reach the note:
+
+- a `cross-check.sh` rig leg asks `observation_notes.py retry-predecessor` before it runs and names
+  the cell's one unsuperseded observation, if there is exactly one;
+- a hosted re-run attempt names the earlier attempt of the same workflow run and cell;
+- a hook receipt names nothing.
+
+So a pass that ran first but was published after a newer failure is stored unlinked, the two
+disagree, and the cell executes. The field contract is in
 [`.github/ci/schemas/README.md`](../../.github/ci/schemas/README.md#observation-collection).
 
 A **complete** run is evidence whether it passed or failed; `strict` and `warn` both publish one.
@@ -244,8 +255,9 @@ flowchart LR
     Anchor -->|certified| Inc[diff since that run]
     Anchor -->|legacy WSL2-only run| Inc
     Anchor -->|none| Full[full gated workspace + coded reason]
-    Inc --> Delta[+ cells current policy requires<br/>that the anchor never covered]
-    Delta --> Plan[one resolved plan]
+    Inc --> Delta[+ cells current policy requires<br/>that the anchor never covered<br/>under the same contract]
+    Delta --> Reopen[+ covered cells that a later<br/>published failure contradicts]
+    Reopen --> Plan[one resolved plan]
     Full --> Plan
     Plan --> Verify[verified evidence reused]
     Verify --> Run[execute the rest, audit, certify]
@@ -254,12 +266,48 @@ flowchart LR
 The plan records each environment's anchor and reason in `coverage_anchors` (reasons:
 `bootstrap-no-run`, `api-failure`, `search-exhausted`, `policy-uncertified`,
 `no-qualifying-ancestor`, `certified-ancestor`, `legacy-wsl2-ancestor`), so a first nightly, an API
-outage, or an exhausted search is visible rather than inferred from silence. `policy_delta` lists
-cells that current policy requires (an expired accepted gap, a newly declared gate or backend) that
-the anchor's certification never covered: they are selected whatever the source diff says.
-`inherited_cells` are cells the anchor still covers, which keeps coverage transitive across nightlies
-that execute nothing. A legacy anchor proves no cell list, so it is taken to cover whatever the diff
-does not reselect and adds no delta; the first certified nightly replaces that assumption. A failed,
+outage, or an exhausted search is visible rather than inferred from silence.
+
+A certification records, for every cell it covers, a **coverage contract**: a digest of what that
+cell must prove beyond its name, such as its Level-2 backends, its test features, its target kinds,
+and its companion suites. The next nightly computes the same digest for every cell current policy
+requires (the plan's `required_cells`) and compares the two:
+
+| The anchor's certification... | The cell is... |
+|---|---|
+| covered it with the same contract | inherited (`inherited_cells`) unless the diff reselects it, or later evidence reopens it (below) |
+| covered it with a different contract (a new backend or test feature) | selected (`policy_delta`) |
+| did not cover it (an expired accepted gap, a newly declared gate) | selected (`policy_delta`) |
+| is a legacy run, which recorded no contracts | selected (`policy_delta`) |
+
+For example, a package that adds `wezterm` beside `tmux` to its Level-2 backends changes only its
+manifest, which selects no package by itself; the changed contract is what puts its `L2` cell back
+in the nightly. A selected cell still goes through evidence verification, so a cell already proved
+on a rig (`just ci-seed`) does not execute. `inherited_cells` keep coverage transitive across
+nightlies that execute nothing.
+
+**A later failure reopens an inherited cell.** A certification proves the anchor, not every commit
+since, so before the planner lends a covered cell to the new nightly it asks the evidence verifier
+about it, with the same rules a selected cell gets: a result counts when it describes this head's
+tree or one with the same gate inputs, and a passing retry that names the failure in `retry_of`, or a
+pass on a descendant commit, supersedes it. When the newest qualifying result is a failure, or a pass
+and a failure that nothing orders, the cell is selected and listed in `reopened_cells`, its
+selection reason names the evidence, and it builds, dispatches, and executes like any selected
+cell. The anchor and every other inherited cell stand.
+
+```sh
+just cross-check alpha --os windows   # after a green nightly; the rig run fails and is published
+# next nightly, with nothing changed in alpha (or only docs changed):
+#   windows-latest  reopened_cells: [alpha/L1]   inherited_cells: [beta/L1, ...]
+#   wsl2-ubuntu     reopened_cells: []           inherited_cells: [alpha/L1, beta/L1, ...]
+```
+
+If the reopened cell fails, the gate is red and no certification is written, so the failure stays
+visible to the following nightly too; if it passes, the certification covers it as this run's own
+result. A later passing rig retry (`cross-check.sh` names its predecessor before it runs) restores
+inheritance without a hosted run. The nightly records earlier runs' unpublished hosted observations
+before it plans, so a failure only an artifact holds is seen as well. A legacy anchor therefore selects the whole WSL2 workspace once, and
+seeded evidence decides what actually runs; the first certified nightly ends that. A failed,
 canceled, incomplete, foreign, or non-ancestor run never becomes or moves an anchor. The nightly now
 runs the same evidence verifier as pushes, so notes published from a rig satisfy Windows and WSL2
 cells there. Windows and WSL2 failures are found after merge and fixed forward; they never block a
@@ -306,6 +354,18 @@ failed run, and a run that published nothing are reported apart, and each leaves
 command exits nonzero until every requested cell is proved or a governed gap. A pass pinned to an
 older revision keeps its value: the nightly reuses its proof wherever the cell's inputs are unchanged.
 
+The seed proves **Level 1 cells only**, because `just cross-check` runs a package's Level 1 suite and
+nothing else. A pending cell of any other gate (Level 2, browser, and so on) is listed as
+`unsupported`, no leg runs for it (a Level 1 run would not prove it), and the command exits nonzero
+while it remains; the nightly runs that cell on its hosted runner. Today every higher tier on these
+two environments is a governed gap, so a full-workspace pass has no such cell until a higher tier is
+enabled there:
+
+```text
+  reused      alpha/windows-latest/L1   build-win  already proved; not run again
+  unsupported alpha/windows-latest/L2   build-win  the seed runs Level 1 only; this L2 cell stays for the nightly
+```
+
 An optional Windows-risk workflow, running selected Windows cells before a push, is **planned**.
 
 ### Hosted cell observations
@@ -326,6 +386,8 @@ flowchart LR
     emit --> obs[upload observation-pkg-gate-env]
     obs --> pub["publish-observations (schedule only, contents: write)"]
     pub --> notes["refs/notes/ci-local/ENV"]
+    obs -. "publisher never ran" .-> recover["next nightly: publish --recent"]
+    recover --> notes
     notes --> verify["verify_cells + gh_probe"]
     verify -->|"artifact bytes match"| reuse[cell reused]
     verify -->|"expired, altered, or API down"| run[cell executes]
@@ -346,11 +408,24 @@ What each stage records, and what it refuses:
 - **Cancellation.** A job cancelled before its `emit` step publishes nothing. One cancelled after
   its observation upload keeps the artifact, and `publish-observations` still runs (`always()`), so a
   cell that finished is not lost to an unrelated failure or a cancelled sibling.
+- **A run whose publisher never ran** (force-cancelled, a lost runner, the publisher's own time
+  limit) is recovered by the next nightly. Before it verifies evidence, the nightly's `scope` job
+  runs `hosted_observations.py publish --recent --no-push`: it lists the newest five completed
+  scheduled `ci.yml` runs on `main` (whatever their conclusion), collects their `observation-*`
+  artifacts, validates them exactly as the publisher does, and records them in its own checkout's
+  notes, so the verifier discovers them in the same pass. That needs only the `actions: read` the
+  job already holds. `publish-observations` then runs the same command with a push, so the recovery
+  outlives the run. A run of another event, workflow, branch, or repository, or one still in
+  progress, is never collected; republishing an observation a note already holds changes nothing.
+  A run older than the window, or an observation whose artifact expired, is not recovered and its
+  cell executes; `publish --run-id N` still republishes one run by hand.
 - **Names are conventions, not stored.** The report lives in `junit-<package>-<gate>-<environment>`
   of the producer run; the observation's `producer.host.label` is the environment, which is how the
   probe recomputes that name. The observation itself records `workflow`, `run_id`, and `attempt` and
   is never rewritten: a retry at a new head is verified, not copied, and a re-run attempt is a new
-  observation linked with `retry_of`.
+  observation linked with `retry_of` to the earlier attempt of the same run and cell. An attempt
+  published before its predecessor stays unlinked, because a stored observation is never
+  re-identified, and the cell executes.
 
 Discovery fetches the artifact. `local_evidence.py verify --artifact-repo OWNER/REPO` (what `ci.yml` passes) builds
 `hosted_observations.gh_probe` and hands it to `verify_cells` as its `report_probe`; the probe
@@ -363,7 +438,8 @@ The report artifacts keep the repository's default artifact retention, so hosted
 for that long and no longer; an expired artifact makes the cell run again rather than fail.
 
 `publish-observations` runs only on `schedule`, holds `contents: write` and `actions: read`, and
-runs default-branch code from the tested checkout. It writes notes refs only. A push the remote
+runs default-branch code from the tested checkout (full history, so an earlier run's head can carry
+its note). It writes notes refs only. A push the remote
 refuses leaves the proof local and prints "hosted observations are local to this runner; remote reuse
 unavailable"; the step then fails red, but the job is not part of `ci-gate`.
 

@@ -119,6 +119,8 @@ anchor reasons are in the
 | Version | Change | Source |
 |---|---|---|
 | 1 | Introduced. `COVERAGE_POLICY_VERSION` (1) is the certification contract's own policy version; a certification below it earns no credit. | `2026-10-08-windows-to-nightly` |
+| 1 (amended) | Each `covered_cells` entry gains a required `contract`, the cell's coverage contract digest, so a later nightly inherits a cell only while what it must prove is unchanged; `anchors_used` entries omit the plan's new `required_cells`. The plan's optional `coverage_anchors` entries gain `required_cells`, and the planner's anchor input carries the contracts on `covered_cells`. No bump, because no certification had been published yet: the document had no reader outside the change that defined it. A document of the earlier shape is refused as malformed, which costs one full-scope nightly for that environment. | `2026-10-08-windows-to-nightly` |
+| 1 (amended again) | `anchors_used` entries, like the plan's optional `coverage_anchors` entries, gain a required `reopened_cells`: the cells the anchor covers that the plan selects anyway because published evidence (a later qualifying failure, or results nothing orders) requires them to execute. A reopened cell is a plan cell and never also inherited, and the writer refuses an anchor that both inherits and reopens one cell. No bump, for the same reason: still nothing published. | `2026-10-08-windows-to-nightly` |
 
 ## Scope receipt
 

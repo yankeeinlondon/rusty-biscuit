@@ -87,7 +87,9 @@ environment's cell and how to record an execution ban.
 - The Windows and WSL2 Level 2 CI cells are a **temporary policy gap**
   (`.github/ci/environments.json`, owner and expiry recorded there). Do not
   amend an acceptance criterion to exclude them; record the criterion as unmet
-  with provisioning as the required change.
+  with provisioning as the required change. When a gap is lifted, `just
+  ci-seed` still proves Level 1 only: it reports those cells `unsupported`
+  and the nightly runs them on hosted runners.
 - A cross-compile is compile evidence, never behavioral evidence. Say which
   one you have.
 - CI legs are compared within one environment only, on matched test

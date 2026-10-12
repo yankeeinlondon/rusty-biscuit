@@ -327,8 +327,13 @@ outside `ci-gate`'s fold) downloads the run's `observation-*` artifacts, drops a
 `hosted`; `producer.host.label` is the environment, from which the discovery probe derives the
 conventional `junit-<package>-<gate>-<environment>` artifact name. `hosted_observations.gh_probe`
 is the `report_probe` for `verify_cells`: it downloads the producer run's artifact and credits the
-cell only when the cited bytes and proof digests match. `hosted_observations.py publish --run-id N`
-republishes a run by hand. **Unverified:** that the repository ruleset lets `GITHUB_TOKEN` push
+cell only when the cited bytes and proof digests match. A run whose publisher never ran is recovered
+automatically: the nightly's `scope` job runs `hosted_observations.py publish --recent --no-push`
+before it plans and verifies (the newest `RECOVERY_RUNS` = 5 completed scheduled `ci.yml` runs on `main`, any
+conclusion; recorded in its own checkout only, with its existing `actions: read`), and
+`publish-observations` runs `publish --recent` with a push from a full-history checkout. Expired
+artifacts and runs outside the window are not recovered; their cells execute.
+`hosted_observations.py publish --run-id N` republishes one run by hand. **Unverified:** that the repository ruleset lets `GITHUB_TOKEN` push
 `refs/notes/*` (a refusal fails the publisher step red and leaves the artifacts the only record),
 and behavior on a real cancellation or re-run attempt.
 
@@ -422,7 +427,11 @@ only. So a pull request and a push to `main` prove Linux and macOS, and the
 nightly `schedule` (08:00 UTC, `ci.yml`) runs native Windows and WSL2 — each
 over the packages that changed since the newest successful nightly that proved
 *that* environment (`reuse_validation.py nightly-anchors`; the full gated
-workspace, with a coded reason, when there is none), with Linux compiling WSL2's
+workspace, with a coded reason, when there is none), plus every cell current
+policy requires that the anchor did not certify under the same coverage
+contract, plus every certified cell that later published evidence contradicts
+(an unsuperseded qualifying failure, or an unordered pass and failure; the
+anchor's `reopened_cells`, `.github/ci/schemas/README.md`), with Linux compiling WSL2's
 archives and hosting nothing else. The `ci:all-os` label plans every environment for a pull request; it is
 read from the event payload, so it takes effect on the next push.
 
