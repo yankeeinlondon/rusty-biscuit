@@ -8,6 +8,10 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+// Shared with the darkmatter lib and DMLS suites; declared in `Cargo.toml`
+// `source-inputs`, and each test that uses it spells it with `include_str!`.
+#[path = "../../../lib/tests/union_fixtures/mod.rs"]
+mod union_fixtures;
 
 mod clean;
 mod clean_frontmatter;
@@ -65,6 +69,9 @@ mod rm;
 mod schema_about;
 mod schema_detect;
 mod schema_triggers;
+mod schema_union_matrix;
+mod schema_union_matrix_cells;
+mod schema_union_pipeline;
 mod schema_validate;
 mod schema_validate_baseline;
 mod schema_validate_phase;
