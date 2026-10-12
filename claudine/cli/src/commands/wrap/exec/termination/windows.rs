@@ -306,6 +306,23 @@ pub(crate) fn register_compose_interrupt_handler() -> ComposeInterruptHandlerGua
     }
 }
 
+/// Windows counterpart of the Unix `ChildInterrupts`, which counts presses
+/// from before the child is spawned.
+///
+/// Here press counting already lives in the process-scoped console handler,
+/// so this only carries how the child was spawned to the wait loop.
+pub(crate) struct ChildInterrupts {
+    child_in_own_pgroup: bool,
+}
+
+impl ChildInterrupts {
+    /// `child_in_own_pgroup` must match how the child is spawned (see the
+    /// wait loop's interactive-TUI passthrough case).
+    pub(crate) fn install(child_in_own_pgroup: bool) -> Result<Self> {
+        Ok(Self { child_in_own_pgroup })
+    }
+}
+
 /// Wait for the child, tracking console interrupts for correct termination
 /// labeling (Windows counterpart of the Unix `wait_with_signal_handling`).
 ///
@@ -318,14 +335,14 @@ pub(crate) fn register_compose_interrupt_handler() -> ComposeInterruptHandlerGua
 /// not reach it incidentally.
 pub(crate) fn wait_with_signal_handling(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     // No channel can fire on this path, so no grace deadline is ever armed and
     // the value is inert.
     let (_tx, early_rx) = std::sync::mpsc::channel();
     let (code, termination, _) = windows_wait_loop(
         child,
-        child_in_own_pgroup,
+        interrupts.child_in_own_pgroup,
         early_rx,
         None,
         None,
@@ -337,7 +354,7 @@ pub(crate) fn wait_with_signal_handling(
 
 pub(crate) fn wait_with_signal_and_early_termination(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
     early_rx: Receiver<EarlyTermination>,
     mut watchdog_rx: Option<Receiver<WatchdogTermination>>,
     kill_grace: Duration,
@@ -349,7 +366,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 )> {
     wait_with_signal_early_termination_and_completion(
         child,
-        child_in_own_pgroup,
+        interrupts,
         early_rx,
         watchdog_rx.take(),
         None,
@@ -360,7 +377,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 
 pub(crate) fn wait_with_signal_early_termination_and_completion(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
     early_rx: Receiver<EarlyTermination>,
     mut watchdog_rx: Option<Receiver<WatchdogTermination>>,
     completion_rx: Option<Receiver<CompletionTermination>>,
@@ -373,7 +390,7 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
 )> {
     windows_wait_loop(
         child,
-        child_in_own_pgroup,
+        interrupts.child_in_own_pgroup,
         early_rx,
         watchdog_rx.take(),
         completion_rx,
@@ -879,7 +896,7 @@ fn main() {
         let _assignment_signal = JobAssignmentSignalGuard::register(child.id(), go);
 
         let (_code, _termination) =
-            wait_with_signal_handling(&mut child, true).expect("wait for parent");
+            wait_with_signal_handling(&mut child, ChildInterrupts::install(true).unwrap()).expect("wait for parent");
 
         let (released, bytes) = wait_for_marker_release(&marker, Duration::from_secs(15));
         assert!(
@@ -902,7 +919,7 @@ fn main() {
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
                 .spawn()
                 .expect("spawn cmd.exe");
-            wait_with_signal_handling(&mut child, true).expect("wait");
+            wait_with_signal_handling(&mut child, ChildInterrupts::install(true).unwrap()).expect("wait");
         }
 
         let before = process_handle_count();
@@ -913,7 +930,7 @@ fn main() {
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
                 .spawn()
                 .expect("spawn cmd.exe");
-            wait_with_signal_handling(&mut child, true).expect("wait");
+            wait_with_signal_handling(&mut child, ChildInterrupts::install(true).unwrap()).expect("wait");
         }
         let after = process_handle_count();
 

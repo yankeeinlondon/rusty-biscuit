@@ -566,7 +566,8 @@ would silently exempt a package and miss its first test.
 | `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
-| `runner-tools` | string[] | `[]` | closed vocabulary of RUNTIME facilities the consumer provisions: `ai-provider-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
+| `runner-tools` | string[] | `[]` | closed vocabulary of RUNTIME facilities the consumer provisions: `ai-provider-stubs`, `node-22`, `pnpm-10`, `l2-serial`, `neovim`, `zed-extension` |
+| `l2-serial-reason` | string | — | why the L2 tier must run serially; required with the `l2-serial` runner tool and rejected without it |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
 | `archive-includes` | string[] | `[]` | build outputs the producer must add to this package's archive, relative to the profile output directory |
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
@@ -681,14 +682,13 @@ command surface:
   provider discovery (claudine-cli).
 - **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
   under (homelab-frontend, owned by homelab-server).
-- **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel
-  self-spawn mode for suites dominated by self-isolating tests (claudine-cli).
-  The default worker count is `max(1, logical_cores - 2)` locally. CI uses all
-  logical cores when there are four or fewer, otherwise `logical_cores - 2`.
-  This preserves capacity on developer and larger shared hosts without
-  crippling small CI runners. It sets test concurrency, not CPU affinity or a
-  guaranteed reservation. An explicit `BISCUIT_L2_THREADS` takes precedence;
-  shared-resource L2 suites retain one worker.
+- **`l2-serial`** — run the L2 tier on `_test_l2`'s shared-pane serial path
+  (`-j 1`) instead of the default parallel self-spawn mode. Requires
+  `l2-serial-reason` naming the resource the tests contend for. Every other
+  L2 suite runs `_test_l2_threads` workers: `max(1, floor(logical_cores / 2))`
+  on every host (2 on `ubuntu-latest`, 1 on `macos-latest`), because every
+  worker drives a real terminal through one tmux server or WezTerm mux.
+  An explicit `BISCUIT_L2_THREADS` takes precedence.
 - **`neovim`** — provisions Neovim for packages whose L2 contract exercises
   the editor backend.
 - **`zed-extension`** — provisions the digest-verified official Zed extension

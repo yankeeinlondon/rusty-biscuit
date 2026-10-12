@@ -177,15 +177,14 @@ case "${{1:-}}" in
             *) exit 64 ;;
         esac ;;
     # `kache rustc ARGS` runs the `rustc` on PATH — the passthrough probe's
-    # stub compiler. dyld strips DYLD_* before a
-    # bash script starts, so no bash fake can forward one: `forward` answers
-    # with the value scripts/kache-host.sh's probe exports, as a kache that
-    # forwards it would; `strip` behaves like a hardened-runtime kache.
+    # stub compiler. Model both modes explicitly: the host's Bash may strip
+    # DYLD_* at startup or preserve it, depending on the executable.
     rustc)
         if [[ "${{2:-}}" == DYLD_FALLBACK_LIBRARY_PATH && "$(cat "$state/passthrough")" == forward ]]; then
             echo ".kache-host-dyld-survivor"
             exit 0
         fi
+        unset DYLD_FALLBACK_LIBRARY_PATH
         exec "$@" ;;
     *) echo "fake kache: unsupported invocation: $*" >&2; exit 64 ;;
 esac

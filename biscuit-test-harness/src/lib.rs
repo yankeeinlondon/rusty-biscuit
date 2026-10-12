@@ -184,7 +184,8 @@ pub trait TerminalHarness {
     /// pairs.
     ///
     /// Equivalent to typing `KEY1='v1' KEY2='v2' cmd\n` into the shell
-    /// and waiting for the harness to settle.
+    /// and sleeping one [`settle`](Self::settle) interval. To capture the
+    /// command's output, [`send_command_settled`] waits on the pane instead.
     ///
     /// ## Examples
     ///
@@ -199,17 +200,7 @@ pub trait TerminalHarness {
     ///
     /// Propagates whatever error [`send_text`](Self::send_text) returns.
     fn send_command_with_env(&mut self, cmd: &str, env: &[(&str, &str)]) -> io::Result<()> {
-        use std::fmt::Write as _;
-        let mut line = String::new();
-        for (k, v) in env {
-            // POSIX single-quote escape: replace each `'` with `'\''`.
-            let escaped = v.replace('\'', "'\\''");
-            // Writing into a String never fails; ignore the Result.
-            let _ = write!(line, "{k}='{escaped}' ");
-        }
-        line.push_str(cmd);
-        line.push('\n');
-        self.send_text(line.as_bytes())?;
+        self.send_text(command_line_with_env(cmd, env).as_bytes())?;
         self.settle();
         Ok(())
     }
@@ -611,23 +602,26 @@ pub fn frame_shows_prompt(plain: &str) -> bool {
         .is_some_and(looks_like_prompt)
 }
 
+/// Interval between the captures of [`wait_for_prompt`] and
+/// [`capture_settled`].
+const CAPTURE_POLL: Duration = Duration::from_millis(40);
+
 /// Waits for a shell prompt to appear in the harness output.
 ///
-/// Polls [`TerminalHarness::capture`] every 100 ms until
-/// [`frame_shows_prompt`] holds. Times out after 5 seconds and returns
-/// silently so that callers don't hang.
+/// Captures at once, then every 40 ms, until [`frame_shows_prompt`] holds.
+/// Times out after 5 seconds and returns silently so that callers don't hang.
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
-    for _ in 0..50 {
-        std::thread::sleep(Duration::from_millis(100));
-        let frame = match harness.capture() {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        if frame_shows_prompt(&frame.plain) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if harness
+            .capture()
+            .is_ok_and(|frame| frame_shows_prompt(&frame.plain))
+            || Instant::now() >= deadline
+        {
             return Ok(());
         }
+        std::thread::sleep(CAPTURE_POLL);
     }
-    Ok(())
 }
 
 /// Captures the pane repeatedly until its rendered output has *settled* —
@@ -642,12 +636,14 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
 ///
 /// ## Notes
 ///
-/// Callers reach here through [`TerminalHarness::send_command_with_env`], which
-/// already spent a [`TerminalHarness::settle`] interval after pressing Enter.
-/// Without that head start the pre-command prompt would still be the
+/// The caller must already know the command has reached the pane. Called
+/// straight after the Enter, the pre-command prompt would still be the
 /// bottom-most line and a stable pair could settle before the command ran.
+/// [`send_command_settled`] waits for that evidence;
+/// [`TerminalHarness::send_command_with_env`] only sleeps a
+/// [`TerminalHarness::settle`] interval.
 pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<CapturedFrame> {
-    const POLL: Duration = Duration::from_millis(40);
+    const POLL: Duration = CAPTURE_POLL;
     const MAX: Duration = Duration::from_secs(20);
     let deadline = Instant::now() + MAX;
     let mut prev: Option<String> = None;
@@ -662,6 +658,62 @@ pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<Capture
         prev = Some(frame.raw.clone());
         std::thread::sleep(POLL);
     }
+}
+
+/// How long [`send_command_settled`] waits for the pane to show a sent line
+/// before settling anyway.
+///
+/// Reached only when the frame never changes. That happens when the echo is
+/// slower than this on a starved host, or when the finished command leaves a
+/// frame byte-identical to the one before it, such as the same command on a
+/// pane already scrolled full of its output. In the second case any frame
+/// that settles is that same frame, so the wait costs time but not
+/// correctness. The budget is sized for the first case.
+const SEND_REACTION_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Types `cmd` with `env` scoped to it, exactly as
+/// [`TerminalHarness::send_command_with_env`] does, and returns the
+/// [`capture_settled`] frame once the command has run.
+///
+/// It waits for evidence rather than for a fixed
+/// [`settle`](TerminalHarness::settle) head start: the frame changes as soon
+/// as the shell echoes the line, and from then on the pre-command prompt is no
+/// longer the bottom-most line that [`capture_settled`] could settle on. Prefer
+/// this to `send_command_with_env` followed by `capture_settled`, which pays
+/// the whole settle interval on every command.
+///
+/// ## Errors
+///
+/// Propagates [`TerminalHarness::capture`] and
+/// [`TerminalHarness::send_text`] failures.
+pub fn send_command_settled(
+    harness: &mut impl TerminalHarness,
+    cmd: &str,
+    env: &[(&str, &str)],
+) -> io::Result<CapturedFrame> {
+    let before = harness.capture()?.raw;
+    harness.send_text(command_line_with_env(cmd, env).as_bytes())?;
+    let deadline = Instant::now() + SEND_REACTION_TIMEOUT;
+    while Instant::now() < deadline && harness.capture()?.raw == before {
+        std::thread::sleep(CAPTURE_POLL);
+    }
+    capture_settled(harness)
+}
+
+/// The line [`TerminalHarness::send_command_with_env`] types: `KEY='value'`
+/// prefixes, `cmd`, and the Enter.
+fn command_line_with_env(cmd: &str, env: &[(&str, &str)]) -> String {
+    use std::fmt::Write as _;
+    let mut line = String::new();
+    for (k, v) in env {
+        // POSIX single-quote escape: replace each `'` with `'\''`.
+        let escaped = v.replace('\'', "'\\''");
+        // Writing into a String never fails; ignore the Result.
+        let _ = write!(line, "{k}='{escaped}' ");
+    }
+    line.push_str(cmd);
+    line.push('\n');
+    line
 }
 
 /// Best-effort cleanup for stale resources owned by the real-terminal
@@ -709,13 +761,26 @@ pub(crate) fn process_is_alive(pid: u32) -> bool {
     if pid == current_process_id() {
         return true;
     }
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    // The same question `kill -0 <pid>` answers, asked in-process: each
+    // spawn's stale-resource sweep asks it once per tagged pane or session,
+    // and a child process per pid was a visible share of every L2 test's
+    // startup.
+    #[cfg(unix)]
+    {
+        // SAFETY: signal 0 delivers nothing; `kill` only reports whether the
+        // process exists and may be signalled.
+        libc::pid_t::try_from(pid).is_ok_and(|pid| unsafe { libc::kill(pid, 0) } == 0)
+    }
+    #[cfg(not(unix))]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
 }
 
 pub(crate) fn pid_from_tag(tag: &str, prefix: &str) -> Option<u32> {
@@ -752,8 +817,8 @@ pub const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Runs `cmd` with a wall-clock timeout.
 ///
 /// Internally polls [`Child::try_wait`](std::process::Child::try_wait)
-/// every 50 ms. If the timeout is reached before the child exits, the
-/// child is killed and a [`TimedOut`](io::ErrorKind::TimedOut) error
+/// with a backoff from 1 ms to 50 ms. If the timeout is reached before the child
+/// exits, the child is killed and a [`TimedOut`](io::ErrorKind::TimedOut) error
 /// is returned.
 ///
 /// ## Stderr / stdout
@@ -786,35 +851,7 @@ pub fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<std:
         })
     });
 
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait()? {
-            Some(status) => {
-                let stdout = stdout_handle
-                    .map(|h| h.join().unwrap_or_default())
-                    .unwrap_or_default();
-                let stderr = stderr_handle
-                    .map(|h| h.join().unwrap_or_default())
-                    .unwrap_or_default();
-                return Ok(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            }
-            None => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("command timed out after {:?}", timeout),
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
+    wait_with_timeout(child, stdout_handle, stderr_handle, timeout)
 }
 
 /// Spawns `cmd`, writes `stdin_bytes` to its stdin, then waits for the
@@ -855,34 +892,53 @@ pub fn run_with_stdin_timeout(
         })
     });
 
-    let deadline = std::time::Instant::now() + timeout;
+    wait_with_timeout(child, stdout_handle, stderr_handle, timeout)
+}
+
+/// Longest sleep between two [`Child::try_wait`](std::process::Child::try_wait)
+/// polls in [`wait_with_timeout`].
+const MAX_EXIT_POLL: Duration = Duration::from_millis(50);
+
+/// Reaps `child` within `timeout`, joining its drained output.
+///
+/// The sleep between polls starts at 1 ms and grows by 1 ms per poll up to
+/// [`MAX_EXIT_POLL`]. A flat 50 ms poll made every terminal-CLI round trip
+/// (`wezterm cli get-text` exits in ~10 ms) cost at least 50 ms, and a Level-2
+/// test makes dozens of them; a doubling backoff still reaped a 10 ms child at
+/// 15 ms. A long-running child settles at one poll per 50 ms, and the deadline
+/// is unchanged.
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    stdout_handle: Option<std::thread::JoinHandle<Vec<u8>>>,
+    stderr_handle: Option<std::thread::JoinHandle<Vec<u8>>>,
+    timeout: Duration,
+) -> io::Result<std::process::Output> {
+    let deadline = Instant::now() + timeout;
+    let mut poll = Duration::from_millis(1);
     loop {
-        match child.try_wait()? {
-            Some(status) => {
-                let stdout = stdout_handle
-                    .map(|h| h.join().unwrap_or_default())
-                    .unwrap_or_default();
-                let stderr = stderr_handle
-                    .map(|h| h.join().unwrap_or_default())
-                    .unwrap_or_default();
-                return Ok(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            }
-            None => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("command timed out after {:?}", timeout),
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
+        if let Some(status) = child.try_wait()? {
+            let stdout = stdout_handle
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
+            let stderr = stderr_handle
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
+            return Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            });
         }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("command timed out after {:?}", timeout),
+            ));
+        }
+        std::thread::sleep(poll);
+        poll = (poll + Duration::from_millis(1)).min(MAX_EXIT_POLL);
     }
 }
 
@@ -1001,6 +1057,90 @@ mod tests {
         // POSIX trick: a single quote inside single-quoted string is
         // closed, escaped, and reopened: `'\''`.
         assert_eq!(h.sent_string(), "MSG='it'\\''s fine' echo hi\n");
+    }
+
+    /// Replays a scripted pane: every capture returns the next frame, and the
+    /// last frame repeats.
+    struct ScriptedPane {
+        frames: Vec<&'static str>,
+        captures: usize,
+        sent: Vec<u8>,
+    }
+
+    impl TerminalHarness for ScriptedPane {
+        fn spawn_shell(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
+            self.sent.extend_from_slice(bytes);
+            Ok(())
+        }
+        fn capture(&mut self) -> io::Result<CapturedFrame> {
+            let frame = self.frames[self.captures.min(self.frames.len() - 1)];
+            self.captures += 1;
+            Ok(CapturedFrame::from_raw(frame.to_string()))
+        }
+    }
+
+    /// The pre-command prompt is already a settled frame. Settling must wait
+    /// until the pane shows the sent line, then for the output and the
+    /// prompt after it.
+    #[test]
+    fn send_command_settled_does_not_settle_on_the_pre_command_prompt() {
+        let mut pane = ScriptedPane {
+            frames: vec![
+                "bash$ ",
+                "bash$ ",
+                "bash$ ",
+                "bash$ bt x",
+                "bash$ bt x\nout\nbash$ ",
+            ],
+            captures: 0,
+            sent: Vec::new(),
+        };
+        let start = Instant::now();
+        let frame = send_command_settled(&mut pane, "bt x", &[("K", "v")]).expect("settle");
+        assert_eq!(frame.plain, "bash$ bt x\nout\nbash$ ");
+        assert_eq!(pane.sent, b"K='v' bt x\n");
+        assert!(
+            start.elapsed() < SEND_REACTION_TIMEOUT,
+            "the echo, not the reaction timeout, ended the wait: {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A frame that never changes ends the wait at the reaction timeout and
+    /// still settles.
+    #[test]
+    fn send_command_settled_settles_an_unchanged_pane_after_the_reaction_timeout() {
+        let mut pane = ScriptedPane {
+            frames: vec!["bash$ "],
+            captures: 0,
+            sent: Vec::new(),
+        };
+        let start = Instant::now();
+        let frame = send_command_settled(&mut pane, "true", &[]).expect("settle");
+        assert_eq!(frame.plain, "bash$ ");
+        assert!(
+            start.elapsed() >= SEND_REACTION_TIMEOUT,
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_is_alive_reports_a_live_and_a_reaped_child() {
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .expect("spawn a child");
+        let pid = child.id();
+        let alive = process_is_alive(pid);
+        child.kill().expect("kill the child");
+        child.wait().expect("reap the child");
+        assert!(alive, "a running child is alive");
+        assert!(!process_is_alive(pid), "a reaped child is not alive");
     }
 
     #[test]

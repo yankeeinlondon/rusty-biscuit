@@ -8,7 +8,7 @@
 
 use std::process::Child;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -63,79 +63,139 @@ pub(super) fn escalation_signal(interactive: bool, count: u8) -> i32 {
     }
 }
 
+/// Ctrl+C presses aimed at one wrapped child, counted from before it exists.
+///
+/// Install it immediately before `Command::spawn`, and hand it to the wait
+/// loop. The child can start, and the user can press Ctrl+C, before the wait
+/// loop runs; a handler registered by the wait loop would leave that press to
+/// handlers that never signal the child. Here it is counted, and
+/// [`ChildInterrupts::arm`] forwards it to the child and the wait loop
+/// announces it.
+pub(crate) struct ChildInterrupts {
+    ladder: Arc<Ladder>,
+}
+
+/// State shared with the SIGINT handler: atomics only, so the handler stays
+/// async-signal-safe.
+struct Ladder {
+    presses: AtomicU8,
+    /// Highest press already delivered to the child, so a press the handler
+    /// and [`ChildInterrupts::arm`] both see is sent once.
+    forwarded: AtomicU8,
+    /// `0` until the wait loop arms the ladder.
+    child_pid: AtomicU32,
+    interactive: AtomicBool,
+    /// Set once the child is reaped, so a late press never signals a PID the
+    /// kernel may have recycled.
+    child_exited: AtomicBool,
+    child_in_own_pgroup: bool,
+}
+
+impl Ladder {
+    fn forward(&self, press: u8) {
+        if !self.child_in_own_pgroup {
+            // The child shares our process group, so the terminal already
+            // delivered SIGINT to it; the press is only counted.
+            return;
+        }
+        let child_pid = self.child_pid.load(Ordering::SeqCst);
+        if child_pid == 0 || self.forwarded.fetch_max(press, Ordering::SeqCst) >= press {
+            return;
+        }
+        let signal = escalation_signal(self.interactive.load(Ordering::SeqCst), press);
+        unsafe {
+            libc::kill(-(child_pid as i32), signal);
+        }
+    }
+}
+
+impl ChildInterrupts {
+    /// Register the SIGINT handler that counts presses for the next child.
+    ///
+    /// `child_in_own_pgroup` must match how the child is spawned: when `true`
+    /// it leads its own process group and presses are forwarded to `-pid`.
+    pub(crate) fn install(child_in_own_pgroup: bool) -> Result<Self> {
+        let ladder = Arc::new(Ladder {
+            presses: AtomicU8::new(0),
+            forwarded: AtomicU8::new(0),
+            child_pid: AtomicU32::new(0),
+            interactive: AtomicBool::new(true),
+            child_exited: AtomicBool::new(false),
+            child_in_own_pgroup,
+        });
+        let handler = Arc::clone(&ladder);
+        unsafe {
+            signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+                if handler.child_exited.load(Ordering::SeqCst) {
+                    return;
+                }
+                let press = handler.presses.fetch_add(1, Ordering::SeqCst) + 1;
+                handler.forward(press);
+            })
+        }?;
+        Ok(Self { ladder })
+    }
+
+    /// Point the ladder at the spawned child and deliver any press that
+    /// arrived before it was known.
+    ///
+    /// Called by the wait loop, which is where the ladder (`interactive`) is
+    /// chosen. Storing the PID before reading the count, while the handler
+    /// counts before reading the PID, means one of the two always sees a
+    /// press and `forwarded` stops both from sending it.
+    fn arm(&self, child_pid: u32, interactive: bool) {
+        self.ladder.interactive.store(interactive, Ordering::SeqCst);
+        self.ladder.child_pid.store(child_pid, Ordering::SeqCst);
+        let presses = self.ladder.presses.load(Ordering::SeqCst);
+        if presses > 0 {
+            self.ladder.forward(presses);
+        }
+    }
+
+    fn presses(&self) -> &AtomicU8 {
+        &self.ladder.presses
+    }
+
+    fn mark_child_exited(&self) {
+        self.ladder.child_exited.store(true, Ordering::SeqCst);
+    }
+
+    fn child_in_own_pgroup(&self) -> bool {
+        self.ladder.child_in_own_pgroup
+    }
+}
+
 /// Wait for the child, acknowledging and forwarding SIGINT/SIGTERM on
 /// repeated Ctrl-C.
 ///
-/// When `child_in_own_pgroup` is true, the child was spawned with
-/// `process_group(0)` and the installed SIGINT handler manually forwards
-/// signals to `-child_pid` so descendants also receive them. When it is
-/// false, the child shares the parent's process group (required for
-/// interactive TUIs that read the controlling TTY); in that case the
-/// terminal already delivers SIGINT to the child naturally, so we only
-/// track the interrupt count locally.
+/// Presses climb the full `SIGINT → SIGTERM → SIGKILL` ladder. `interrupts`
+/// decides whether they reach the child's process group or are only counted
+/// (see [`ChildInterrupts::install`]).
 ///
 /// Returns `(exit_code, termination_kind)`.
 pub(crate) fn wait_with_signal_handling(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
-    use std::sync::atomic::AtomicBool;
-
-    // This loop installs a child-targeting SIGINT handler, so the
-    // compose-scoped Ctrl+C guard must defer to it while it runs.
+    // This loop owns the child-targeting ladder, so the compose-scoped
+    // Ctrl+C guard must defer to it while it runs.
     let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
-
-    let interrupt_count = Arc::new(AtomicU8::new(0));
-    let child_exited = Arc::new(AtomicBool::new(false));
-    let child_pid = child.id();
-
-    let counter = Arc::clone(&interrupt_count);
-    let exited = Arc::clone(&child_exited);
-    let _guard = unsafe {
-        signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
-            // Never signal a PID we no longer own — the kernel may have
-            // recycled `child_pid` onto an unrelated process by now.
-            if exited.load(Ordering::SeqCst) {
-                return;
-            }
-            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            if !child_in_own_pgroup {
-                // Child shares our process group; the terminal already
-                // delivered SIGINT to it. Just track the count so the
-                // termination kind is reported correctly.
-                return;
-            }
-            match count {
-                1 => {
-                    libc::kill(-(child_pid as i32), libc::SIGINT);
-                }
-                2 => {
-                    libc::kill(-(child_pid as i32), libc::SIGTERM);
-                }
-                _ => {
-                    libc::kill(-(child_pid as i32), libc::SIGKILL);
-                }
-            }
-        })
-    }?;
+    interrupts.arm(child.id(), true);
 
     // Polled rather than a blocking `wait` so this thread can show the
     // feedback for each press the handler counted.
     let mut announced = 0;
     let status = loop {
-        announce_presses(&interrupt_count, &mut announced);
+        announce_presses(interrupts.presses(), &mut announced);
         if let Some(status) = child.try_wait()? {
             break status;
         }
         std::thread::sleep(FEEDBACK_POLL);
     };
-    // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
-    // in the narrow window between `wait` returning and the guard being
-    // dropped still sees an exited child and refuses to signal the PID.
-    child_exited.store(true, Ordering::SeqCst);
-    announce_presses(&interrupt_count, &mut announced);
+    interrupts.mark_child_exited();
+    announce_presses(interrupts.presses(), &mut announced);
     let code = exit_code_from_status(status);
-    let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+    let was_interrupted = interrupts.presses().load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
         claudine::harness::ProcessTermination::Interrupted
     } else {
@@ -172,7 +232,7 @@ pub(crate) fn wait_with_signal_handling(
 /// (Q14) so the user knows the press registered during an output flood.
 pub(crate) fn wait_with_signal_and_early_termination(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
     early_rx: Receiver<EarlyTermination>,
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     kill_grace: Duration,
@@ -184,7 +244,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 )> {
     wait_with_signal_early_termination_and_completion(
         child,
-        child_in_own_pgroup,
+        interrupts,
         early_rx,
         watchdog_rx,
         None,
@@ -195,7 +255,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 
 pub(crate) fn wait_with_signal_early_termination_and_completion(
     child: &mut Child,
-    child_in_own_pgroup: bool,
+    interrupts: ChildInterrupts,
     early_rx: Receiver<EarlyTermination>,
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     completion_rx: Option<Receiver<CompletionTermination>>,
@@ -206,40 +266,15 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
-    use std::sync::atomic::AtomicBool;
-
     // While this loop runs, the child-targeted SIGINT→SIGTERM→SIGKILL ladder
-    // below owns escalation, so the compose-scoped Ctrl+C guard must defer to
-    // it rather than force-exiting the wrapper. Cleared on every exit path.
+    // owns escalation, so the compose-scoped Ctrl+C guard must defer to it
+    // rather than force-exiting the wrapper. Cleared on every exit path.
     let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
-
-    let interrupt_count = Arc::new(AtomicU8::new(0));
-    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
-
-    let counter = Arc::clone(&interrupt_count);
-    let exited = Arc::clone(&child_exited);
-    let _guard = unsafe {
-        signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
-            // Don't signal a PID we no longer own (it may have been
-            // recycled onto an unrelated process).
-            if exited.load(Ordering::SeqCst) {
-                return;
-            }
-            // Q14 — every counted press gets visible feedback from the poll
-            // loop below, even when the child shares our process group
-            // (interactive TUI passthrough).
-            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            if !child_in_own_pgroup {
-                // Child shares our process group; the terminal already
-                // delivered SIGINT to it. We've recorded the count for
-                // correct termination labeling — nothing more to do.
-                return;
-            }
-            let signal = escalation_signal(interactive, count);
-            libc::kill(-(child_pid as i32), signal);
-        })
-    }?;
+    let child_in_own_pgroup = interrupts.child_in_own_pgroup();
+    // Every counted press, including one from before this loop started, gets
+    // visible feedback (Q14) from the poll below.
+    interrupts.arm(child_pid, interactive);
 
     let mut early_termination: Option<EarlyTermination> = None;
     let mut grace_deadline: Option<Instant> = None;
@@ -252,18 +287,18 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
     let mut announced = 0;
 
     loop {
-        announce_presses(&interrupt_count, &mut announced);
+        announce_presses(interrupts.presses(), &mut announced);
         if let Some(status) = child.try_wait()? {
-            // Mark the PID as reaped before the grace window's signal guard
-            // can drop so we never signal a recycled PID.
-            child_exited.store(true, Ordering::SeqCst);
-            announce_presses(&interrupt_count, &mut announced);
+            // Mark the PID as reaped so a later press never signals a
+            // recycled PID.
+            interrupts.mark_child_exited();
+            announce_presses(interrupts.presses(), &mut announced);
             let code = if completion_requested {
                 0
             } else {
                 exit_code_from_status(status)
             };
-            let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+            let was_interrupted = interrupts.presses().load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
             } else if completion_requested {
@@ -279,7 +314,7 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
         if let Some(deadline) = reap_deadline
             && Instant::now() >= deadline
         {
-            child_exited.store(true, Ordering::SeqCst);
+            interrupts.mark_child_exited();
             tracing::error!(
                 child_pid,
                 "child did not reap after SIGKILL; giving up to avoid hanging the wrapper"
