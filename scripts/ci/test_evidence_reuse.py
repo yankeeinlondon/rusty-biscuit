@@ -2544,15 +2544,61 @@ class PublicationTests(ObservationFixture):
         self.publish_from([observation])
         self.assertEqual(tip, self.git("rev-parse", self.ref))
 
-    def test_a_second_run_of_a_cell_is_linked_as_a_retry(self) -> None:
-        failed = self.observation("alpha", outcome="fail")
-        self.publish_from([failed])
-        self.assertEqual([], self.accepted_keys())
-        self.publish_from([self.observation("alpha", duration_s=33)])
-        collection = json.loads(self.git("notes", "--ref", self.ref, "show", self.head))
-        retried = [o for o in collection["observations"] if "retry_of" in o]
-        self.assertEqual([failed["observation_id"]], [o["retry_of"] for o in retried])
-        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+    def kind_observation(self, kind: str, **options) -> dict:
+        observation = self.observation("alpha", kind=kind, **options)
+        if kind == "seed":
+            producer = {**observation["producer"], "seed_id": "seed-1"}
+            observation = observation_notes.with_identity({**observation, "producer": producer})
+        return observation
+
+    def forget_notes(self) -> None:
+        subprocess.run(["git", "update-ref", "-d", self.ref], check=True)
+        subprocess.run(["git", "--git-dir", str(self.remote), "update-ref", "-d", self.ref], check=True)
+
+    def test_a_delayed_pass_published_after_a_newer_failure_is_not_its_retry(self) -> None:
+        for kind in ("hook", "rig", "seed"):
+            with self.subTest(kind):
+                self.forget_notes()
+                # The pass ran first; its publication was delayed past the failure's.
+                passed = self.kind_observation(kind)
+                failed = self.kind_observation(kind, outcome="fail", duration_s=33)
+                self.publish_from([failed])
+                self.publish_from([passed])
+                collection = json.loads(self.git("notes", "--ref", self.ref, "show", self.head))
+                self.assertEqual(
+                    sorted([passed["observation_id"], failed["observation_id"]]),
+                    sorted(o["observation_id"] for o in collection["observations"]),
+                    "both are stored exactly as their producers wrote them",
+                )
+                self.assertEqual([], self.accepted_keys())
+                _, rejections = self.verify()
+                self.assertTrue(
+                    [r for r in rejections if r.startswith("conflicting-evidence")], rejections
+                )
+
+    def test_a_retry_naming_its_predecessor_supersedes_it(self) -> None:
+        for kind in ("hook", "rig", "seed"):
+            with self.subTest(kind):
+                self.forget_notes()
+                failed = self.kind_observation(kind, outcome="fail")
+                self.publish_from([failed])
+                self.assertEqual([], self.accepted_keys())
+                self.publish_from([self.kind_observation(
+                    kind, duration_s=33, retry_of=failed["observation_id"])])
+                self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_the_predecessor_is_the_cells_one_unsuperseded_observation_at_retry_start(self) -> None:
+        predecessor = lambda: observation_notes.retry_predecessor(  # noqa: E731
+            "macos-latest", self.head, "alpha", "L1")
+        self.assertIsNone(predecessor(), "nothing to retry")
+        first = self.observation("alpha", outcome="fail")
+        self.publish_from([first, self.observation("beta")])
+        self.assertEqual(first["observation_id"], predecessor())
+        second = self.observation("alpha", duration_s=33, retry_of=first["observation_id"])
+        self.publish_from([second])
+        self.assertEqual(second["observation_id"], predecessor(), "the chain's head")
+        self.publish_from([self.observation("alpha", outcome="fail", duration_s=34)])
+        self.assertIsNone(predecessor(), "two unordered observations: neither is named")
 
     def test_a_second_host_unions_with_what_the_remote_already_holds(self) -> None:
         alpha, beta = self.observation("alpha"), self.observation("beta")
@@ -2811,6 +2857,43 @@ def write_rig_reports(
     return directory
 
 
+class BlockingEvidenceTests(ObservationFixture):
+    """`blocking_evidence` is `verify_cells`' decision read the other way round:
+    the cells an unsuperseded failure, or an unordered conflict, keeps
+    scheduled."""
+
+    def blocked(self) -> dict:
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        return local_evidence.blocking_evidence(plan, self.head)
+
+    def test_failure_conflict_retry_and_pass_decide_as_the_verifier_does(self) -> None:
+        failed = self.observation("alpha", outcome="fail")
+        retried = self.observation("alpha", retry_of=failed["observation_id"])
+        cases = {
+            "unsuperseded failure": ([failed], "later qualifying failure"),
+            "unordered pass and failure": ([self.observation("alpha"), failed], "nothing orders"),
+            "passing retry": ([failed, retried], None),
+            "pass": ([self.observation("alpha")], None),
+        }
+        for label, (observations, reason) in cases.items():
+            with self.subTest(label):
+                self.add_note("macos-latest", self.collection(observations))
+                blocked = self.blocked()
+                accepted = self.accepted_keys()
+                if reason is None:
+                    self.assertEqual({}, blocked)
+                    self.assertEqual(["alpha/macos-latest/L1"], accepted)
+                else:
+                    self.assertEqual([("alpha", "macos-latest", "L1")], list(blocked))
+                    self.assertIn(reason, blocked[("alpha", "macos-latest", "L1")])
+                    self.assertEqual([], accepted)
+
+    def test_a_head_that_does_not_resolve_stops_rather_than_credits(self) -> None:
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        with self.assertRaises(RuntimeError):
+            local_evidence.blocking_evidence(plan, "f" * 40)
+
+
 class RigCellFixture(ObservationFixture):
     """A fetched rig staging directory published through the real command.
 
@@ -2857,6 +2940,7 @@ class RigCellFixture(ObservationFixture):
         run_id: str = "run-1",
         push: bool = True,
         cwd: Path | None = None,
+        retry_of: str | None = None,
     ) -> subprocess.CompletedProcess:
         command = [
             sys.executable, str(OBSERVATION_NOTES), "publish-receipt", "--kind", "rig",
@@ -2872,6 +2956,8 @@ class RigCellFixture(ObservationFixture):
             command.append("--remote-dirty")
         if filters:
             command += ["--run-filters", filters]
+        if retry_of:
+            command += ["--retry-of", retry_of]
         command += ["--remote", "origin"] if push else ["--no-push"]
         return subprocess.run(
             command, cwd=cwd or self.root, capture_output=True, text=True, timeout=120
@@ -2992,12 +3078,52 @@ class RigFailureAndIncompleteTests(RigCellFixture):
             (retained / "alpha-L1.completion.json").exists(), "a failure has no completion record"
         )
 
+    def retry_predecessor(self, environment: str) -> str:
+        return subprocess.run(
+            [sys.executable, str(OBSERVATION_NOTES), "retry-predecessor", "--head", self.head,
+             "--environment", environment, "--package", "alpha"],
+            cwd=self.root, capture_output=True, text=True, check=True, timeout=60,
+        ).stdout.strip()
+
     def test_a_later_passing_retry_restores_reuse(self) -> None:
-        failing = self.fetched("alpha", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"})
-        self.publish_rig("windows-latest", failing, exit_code=100, run_id="fail")
+        failing = self.fetched(
+            "alpha", "windows-latest", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"}
+        )
+        completed = self.publish_rig("windows-latest", failing, exit_code=100, run_id="fail")
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertEqual([], self.accepted_keys())
-        self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"), run_id="pass")
+        # The retry learns its predecessor when it starts, as `cross-check.sh` does.
+        predecessor = self.retry_predecessor("windows-latest")
+        self.assertTrue(predecessor)
+        completed = self.publish_rig(
+            "windows-latest", self.fetched("alpha", "windows-latest"), run_id="pass",
+            retry_of=predecessor,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertEqual(["alpha/windows-latest/L1"], self.accepted_keys())
+
+    def test_a_delayed_pass_does_not_retry_a_failure_published_while_it_ran(self) -> None:
+        # The passing leg started when the cell had no observation to retry.
+        predecessor = self.retry_predecessor("wsl2-ubuntu")
+        self.assertEqual("", predecessor)
+        failing = self.fetched("alpha", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"})
+        completed = self.publish_rig("wsl2-ubuntu", failing, exit_code=100, run_id="fail")
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="pass")
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertEqual([], [o for o in self.observations("wsl2-ubuntu") if "retry_of" in o])
+        accepted, rejections = self.verify()
+        self.assertEqual([], self.keys(accepted))
+        self.assertTrue([r for r in rejections if r.startswith("conflicting-evidence")], rejections)
+
+    def test_a_hook_receipt_cannot_name_a_predecessor(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(OBSERVATION_NOTES), "publish-receipt", "--receipt", "r.json",
+             "--head", self.head, "--environment", "macos-latest", "--retry-of", "ab" * 32],
+            cwd=self.root, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("a hook receipt retries nothing", completed.stderr)
 
     def test_a_failure_without_a_manifest_is_published_without_proof(self) -> None:
         failing = self.fetched(

@@ -1541,6 +1541,8 @@ struct CoverageAnchor {
     policy_delta: Vec<serde_json::Value>,
     #[serde(default)]
     inherited_cells: Vec<serde_json::Value>,
+    #[serde(default)]
+    reopened_cells: Vec<serde_json::Value>,
 }
 
 /// A package the plan selected. Only the name is read here: the area travels on
@@ -5293,12 +5295,12 @@ fn render_change_report(plan: &ResolvedPlan) -> String {
     if !plan.coverage_anchors.is_empty() {
         out.push_str(
             "## Coverage anchors\n\n\
-             | environment | mode | reason | anchor | policy delta | inherited |\n\
-             | --- | --- | --- | --- | --- | --- |\n",
+             | environment | mode | reason | anchor | policy delta | inherited | reopened |\n\
+             | --- | --- | --- | --- | --- | --- | --- |\n",
         );
         for anchor in &plan.coverage_anchors {
             out.push_str(&format!(
-                "| {} | {} | {} | {} | {} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} | {} |\n",
                 anchor.environment,
                 anchor.mode,
                 anchor.reason,
@@ -5308,6 +5310,7 @@ fn render_change_report(plan: &ResolvedPlan) -> String {
                     .map_or_else(|| "none".to_owned(), |sha| format!("`{}`", &sha[..sha.len().min(7)])),
                 anchor.policy_delta.len(),
                 anchor.inherited_cells.len(),
+                anchor.reopened_cells.len(),
             ));
         }
         out.push('\n');

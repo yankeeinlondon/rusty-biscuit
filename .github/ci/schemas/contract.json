@@ -166,7 +166,9 @@
       "reason": true,
       "source": true,
       "policy_delta": true,
-      "inherited_cells": true
+      "inherited_cells": true,
+      "reopened_cells": true,
+      "required_cells": true
     },
     "coverage_source": {
       "kind": true,

@@ -433,7 +433,6 @@ def verify_cells(
     claim by the host that wrote it; both trees are present locally, so the
     comparison can be made rather than believed.
     """
-    rejections: list[str] = []
     try:
         plan = load_plan(plan_path)
     except (OSError, ValueError) as error:
@@ -444,13 +443,66 @@ def verify_cells(
         return [], [f"malformed-receipt: the resolved plan is invalid: {problems[0]}"]
 
     try:
+        accepted, rejections, _ = _resolve(plan, base, head, report_probe)
+    except _Unresolvable:
+        return [], ["missing-receipt: the base/head pair does not resolve in this repository"]
+    return accepted, rejections
+
+
+def blocking_evidence(
+    plan: dict[str, Any],
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
+) -> dict[tuple[str, str, str], str]:
+    """The cells of `plan` whose qualifying evidence requires them to execute.
+
+    The same resolution [`verify_cells`] makes, over every annotated ancestor
+    of `head`, asked the other way round: which `{package, environment, gate}`
+    cells are decided by an unsuperseded failure, or by passing and failing
+    results nothing orders. Each maps to a sentence naming that evidence. A
+    cell with passing evidence, or none, is absent.
+
+    The planner asks this of the cells a nightly would inherit from its
+    anchor, which no later step verifies; `plan` need only carry the `cells`,
+    `packages`, and `builds` qualification reads.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when `head` does not resolve here: a caller that
+    cannot read the evidence must not credit coverage it may contradict.
+    """
+    try:
+        return _resolve(plan, ZERO_REVISION, head, report_probe)[2]
+    except _Unresolvable:
+        raise RuntimeError(
+            f"the head {head[:9]} does not resolve here, so no evidence about its "
+            "inherited cells can be read"
+        ) from None
+
+
+class _Unresolvable(Exception):
+    """The base/head pair names no commit in this repository."""
+
+
+def _resolve(
+    plan: dict[str, Any],
+    base: str,
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> tuple[list[dict[str, Any]], list[str], dict[tuple[str, str, str], str]]:
+    """`(accepted, rejections, blocked)` for `plan`'s cells; see [`verify_cells`].
+
+    `blocked` maps each cell its qualifying evidence keeps scheduled to why.
+    """
+    rejections: list[str] = []
+    try:
         head_sha = revision(head)
         boundary = (
             ZERO_REVISION if base == ZERO_REVISION else git("merge-base", base, head_sha)
         )
         head_tree = revision(f"{head_sha}^{{tree}}")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return [], ["missing-receipt: the base/head pair does not resolve in this repository"]
+        raise _Unresolvable from None
 
     wanted = {
         (cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]
@@ -479,6 +531,7 @@ def verify_cells(
             by_plan_key.setdefault(key, []).append((candidate, origin, refusal))
 
     accepted: list[dict[str, Any]] = []
+    blocked: dict[tuple[str, str, str], str] = {}
     ancestry: dict[tuple[str, str], bool] = {}
     for key in sorted(by_plan_key):
         entries = sorted(by_plan_key[key], key=lambda entry: (entry[0].order, entry[0].identifier))
@@ -503,13 +556,19 @@ def verify_cells(
                 f"conflicting-evidence: {'/'.join(key)} has both passing and failing "
                 "evidence for the same inputs and nothing orders them; it executes"
             )
+            blocked[key] = "passing and failing results for its inputs that nothing orders"
             continue
         if outcomes == {"fail"}:
+            failure = survivors[0][0]
+            blocked[key] = (
+                f"a later qualifying failure on {failure.commit[:9]} "
+                f"({failure.identifier[:12]}) that no passing retry supersedes"
+            )
             continue
         candidate, origin, _ = survivors[0]
         accepted.append(_accepted_candidate(candidate, key, origin, bool(candidate.cell.get("test_filter"))))
 
-    return accepted, rejections
+    return accepted, rejections, blocked
 
 
 def _read_note(

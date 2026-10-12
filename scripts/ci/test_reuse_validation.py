@@ -246,8 +246,17 @@ TABLE_BEFORE = [
 ]
 
 
+def contract_of(package: str, gate: str) -> str:
+    """A stand-in coverage contract digest, distinct per cell."""
+    return schema.identity(f"{package}/{gate}")
+
+
 def tiny_plan(anchors: list[dict], covered: dict[str, list[tuple[str, str]]] | None = None) -> dict:
-    """The few plan fields a certification reads, with a cell per `(package, gate)`."""
+    """The few plan fields a certification reads, with a cell per `(package, gate)`.
+
+    Each anchor that names no `required_cells` is given one per cell of its
+    environment and per inherited cell, as the planner records them.
+    """
     cells = []
     for environment, keys in (covered or {}).items():
         for package, gate in keys:
@@ -255,6 +264,16 @@ def tiny_plan(anchors: list[dict], covered: dict[str, list[tuple[str, str]]] | N
                 "package": package, "environment": environment, "gate": gate,
                 "execution": "execute", "state": "pending",
             })
+    for anchor in anchors:
+        if not anchor["required_cells"]:
+            keys = {
+                (cell["package"], cell["gate"])
+                for cell in cells if cell["environment"] == anchor["environment"]
+            } | {(cell["package"], cell["gate"]) for cell in anchor["inherited_cells"]}
+            anchor["required_cells"] = [
+                {"package": package, "gate": gate, "contract": contract_of(package, gate)}
+                for package, gate in sorted(keys)
+            ]
     return {"head": "e" * 40, "cells": cells, "coverage_anchors": anchors,
             "packages": [{"area": "a", "gates": ["L1"]}]}
 
@@ -264,7 +283,7 @@ def anchor_entry(environment: str, **overrides) -> dict:
         "environment": environment, "mode": "full", "anchor": None,
         "reason": "bootstrap-no-run",
         "source": {"kind": "none", "run_id": None, "head": None},
-        "policy_delta": [], "inherited_cells": [],
+        "policy_delta": [], "inherited_cells": [], "reopened_cells": [], "required_cells": [],
     }
     entry.update(overrides)
     return entry
@@ -373,7 +392,11 @@ class NightlyAnchorTests(unittest.TestCase):
             self.assertEqual("incremental", entry["mode"])
             self.assertEqual(self.NEWER, entry["anchor"])
             self.assertEqual("certified-ancestor", entry["reason"])
-            self.assertEqual([{"package": "pkg", "gate": "L1"}], entry["covered_cells"])
+            self.assertEqual(
+                [{"package": "pkg", "gate": "L1", "contract": contract_of("pkg", "L1")}],
+                entry["covered_cells"],
+                "the anchor hands the planner each covered cell's contract",
+            )
             self.assertEqual("nightly-certified", entry["source"]["kind"])
 
     def test_a_legacy_wsl2_only_success_anchors_wsl2_and_leaves_windows_in_full_scope(self) -> None:
@@ -462,6 +485,21 @@ class NightlyAnchorTests(unittest.TestCase):
             edits[f"{field} wrong type"] = {**control, field: {"x": 1} if not isinstance(control[field], dict) else 3}
             edits[f"{field} empty"] = {**control, field: [] if not isinstance(control[field], list) else "x"}
         edits["unknown field"] = {**control, "extra": 1}
+        cell = control["covered_cells"][0]
+        for label, value in (
+            ("absent", ...), ("null", None), ("wrong type", 3), ("empty", ""),
+            ("not a digest", "abc"), ("uppercase digest", "A" * 64),
+        ):
+            edited_cell = {k: v for k, v in cell.items() if k != "contract"}
+            if value is not ...:
+                edited_cell["contract"] = value
+            edits[f"covered cell contract {label}"] = {**control, "covered_cells": [edited_cell]}
+        edits["covered cell wrong element type"] = {**control, "covered_cells": ["pkg/L1"]}
+        edits["covered cell extra key"] = {**control, "covered_cells": [{**cell, "extra": 1}]}
+        edits["covered cell repeated"] = {
+            **control, "covered_cells": [cell, cell],
+            "cells": {**control["cells"], "executing": 2},
+        }
         edits["other run"] = {**control, "run_id": 999}
         edits["other head"] = {**control, "head": self.OLDER}
         edits["other environment"] = {**control, "environment": WINDOWS}
@@ -528,6 +566,10 @@ class CertificationTests(unittest.TestCase):
             "package": "reused", "environment": WSL2, "gate": "L1",
             "execution": "reuse", "state": "reused",
         })
+        plan["coverage_anchors"][0]["required_cells"].append(
+            {"package": "reused", "gate": "L1", "contract": contract_of("reused", "L1")}
+        )
+        plan["coverage_anchors"][0]["required_cells"].sort(key=lambda c: (c["package"], c["gate"]))
         plan["cells"].append({
             "package": "gap", "environment": WSL2, "gate": "L2",
             "execution": "omit", "state": "accepted-gap",
@@ -553,6 +595,65 @@ class CertificationTests(unittest.TestCase):
             {"executing": 1, "reused": 1, "accepted_gap": 1, "inherited": 1}, document["cells"],
         )
         self.assertTrue(document["certified"])
+
+    def test_each_covered_cell_carries_the_contract_the_plan_required(self) -> None:
+        document = self.build()
+        self.assertEqual(
+            [contract_of(c["package"], c["gate"]) for c in document["covered_cells"]],
+            [c["contract"] for c in document["covered_cells"]],
+        )
+        for entry in document["anchors_used"]:
+            self.assertNotIn("required_cells", entry, "contracts live on covered_cells alone")
+
+    def test_a_cell_without_a_whole_cell_contract_is_never_certified(self) -> None:
+        missing = self.plan()
+        missing["coverage_anchors"][0]["required_cells"] = [
+            c for c in missing["coverage_anchors"][0]["required_cells"] if c["package"] != "old"
+        ]
+        narrowed = self.plan()
+        next(c for c in narrowed["cells"] if c["package"] == "changed")["test_filter"] = "test(x)"
+        for label, plan in (("inherited without a contract", missing), ("narrowed cell", narrowed)):
+            with self.subTest(label), self.assertRaises(ValueError):
+                certification_document(
+                    plan, WSL2, run_id=21, attempt=1, head="e" * 40, tree="9" * 40,
+                    table=TABLE_NOW, audits=(2, 2), gate_passed=True,
+                )
+
+    def reopened_plan(self) -> dict:
+        """`old` was inherited, and later evidence reopened it: it now executes."""
+        plan = self.plan()
+        anchor = plan["coverage_anchors"][0]
+        anchor["inherited_cells"] = []
+        anchor["reopened_cells"] = [{"package": "old", "gate": "L1"}]
+        plan["cells"].append({
+            "package": "old", "environment": WSL2, "gate": "L1",
+            "execution": "execute", "state": "pending",
+        })
+        return plan
+
+    def test_a_reopened_cell_is_covered_only_by_this_runs_result(self) -> None:
+        arguments = dict(
+            run_id=21, attempt=1, head="e" * 40, tree="9" * 40, table=TABLE_NOW, audits=(2, 2),
+        )
+        passed = certification_document(self.reopened_plan(), WSL2, gate_passed=True, **arguments)
+        self.assertTrue(passed["certified"])
+        self.assertIn("old", [c["package"] for c in passed["covered_cells"]])
+        self.assertEqual(
+            {"executing": 2, "reused": 1, "accepted_gap": 1, "inherited": 0}, passed["cells"],
+        )
+        # The reopened cell failed: the gate is red, and nothing certifies it.
+        failed = certification_document(self.reopened_plan(), WSL2, gate_passed=False, **arguments)
+        self.assertFalse(failed["certified"])
+        self.assertEqual([], schema.validate_certification(failed))
+
+    def test_a_cell_both_inherited_and_reopened_is_refused(self) -> None:
+        plan = self.reopened_plan()
+        plan["coverage_anchors"][0]["inherited_cells"] = [{"package": "old", "gate": "L1"}]
+        with self.assertRaises(ValueError):
+            certification_document(
+                plan, WSL2, run_id=21, attempt=1, head="e" * 40, tree="9" * 40,
+                table=TABLE_NOW, audits=(2, 2), gate_passed=True,
+            )
 
     def test_a_failed_gate_or_an_unfinished_audit_never_certifies(self) -> None:
         self.assertFalse(self.build(gate_passed=False)["certified"])

@@ -456,12 +456,21 @@ def certification_document(
     `covered_cells` is what the environment is proven for after this run: the
     cells it executed or reused (the gate and every audit passed, or the
     document is not `certified`) plus the cells its anchor already covered and
-    this plan did not reselect. Accepted gaps are counted but cover nothing.
+    this plan did not reselect. Each carries the coverage contract the plan's
+    anchor records for it in `required_cells`, which is what a later nightly
+    compares with its own policy. Accepted gaps are counted but cover nothing.
+    A cell the plan reopened because later evidence contradicted its anchor
+    (`reopened_cells`) is covered only as this run executed it, so a failure
+    there leaves the document uncertified rather than inherited again.
 
     ## Errors
 
     Raises ``ValueError`` when the plan carries no anchor for `environment`,
-    since a certification states which history it was built on.
+    since a certification states which history it was built on, and when a
+    covered cell has no recorded contract or is narrowed by a `test_filter`:
+    such a cell proves less than the whole required cell, so nothing may
+    certify it as covered, and when the anchor both inherits and reopens one
+    cell.
     """
     anchors = plan.get("coverage_anchors") or []
     mine = next((a for a in anchors if a["environment"] == environment), None)
@@ -470,18 +479,35 @@ def certification_document(
     record = next((e for e in table if e["name"] == environment), None)
     if record is None:
         raise ValueError(f"environment {environment!r} is not in the table")
+    contracts = {(c["package"], c["gate"]): c["contract"] for c in mine["required_cells"]}
+
+    def contracted(package: str, gate: str, narrowed: bool = False) -> dict[str, str]:
+        contract = contracts.get((package, gate))
+        if contract is None or narrowed:
+            raise ValueError(
+                f"{package}/{gate} on {environment} has no whole-cell coverage contract "
+                "in the plan; it cannot be certified as covered"
+            )
+        return {"package": package, "gate": gate, "contract": contract}
+
     executing, reused, gaps = [], [], 0
     for cell in plan["cells"]:
         if cell["environment"] != environment:
             continue
-        key = {"package": cell["package"], "gate": cell["gate"]}
         if cell["state"] == "accepted-gap":
             gaps += 1
         elif cell["execution"] == "execute":
-            executing.append(key)
+            executing.append(contracted(cell["package"], cell["gate"], bool(cell.get("test_filter"))))
         elif cell["state"] == "reused":
-            reused.append(key)
-    covered = {(c["package"], c["gate"]): c for c in [*executing, *reused, *mine["inherited_cells"]]}
+            reused.append(contracted(cell["package"], cell["gate"], bool(cell.get("test_filter"))))
+    reopened = {(c["package"], c["gate"]) for c in mine["reopened_cells"]}
+    if any((c["package"], c["gate"]) in reopened for c in mine["inherited_cells"]):
+        raise ValueError(
+            f"the plan both inherits and reopens a cell on {environment}; a reopened "
+            "cell is covered only by this run's own result"
+        )
+    inherited = [contracted(c["package"], c["gate"]) for c in mine["inherited_cells"]]
+    covered = {(c["package"], c["gate"]): c for c in [*executing, *reused, *inherited]}
     required, passed = audits
     return {
         "schema_version": schema.CERTIFICATION_SCHEMA_VERSION,
@@ -496,7 +522,7 @@ def certification_document(
         "environments_digest": schema.policy_digest(record),
         "plan_identity": schema.identity(schema.canonical(plan)),
         "anchors_used": [
-            {key: value for key, value in a.items()}
+            {key: value for key, value in a.items() if key != "required_cells"}
             for a in sorted(anchors, key=lambda entry: entry["environment"])
         ],
         "certified": bool(gate_passed and required == passed),

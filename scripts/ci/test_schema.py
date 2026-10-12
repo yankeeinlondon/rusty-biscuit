@@ -973,6 +973,9 @@ class ArchiveGuardSharedCorpusTests(unittest.TestCase):
                 )
 
 
+CONTRACT_A, CONTRACT_B = "c" * 64, "d" * 64
+
+
 def coverage_anchor(**overrides: object) -> dict:
     document = {
         "environment": "wsl2-ubuntu", "mode": "incremental", "anchor": SHA_A,
@@ -980,9 +983,19 @@ def coverage_anchor(**overrides: object) -> dict:
         "source": {"kind": "nightly-certified", "run_id": 7, "head": SHA_A},
         "policy_delta": [{"package": "claudine", "gate": "L1"}],
         "inherited_cells": [{"package": "sniff", "gate": "L1"}],
+        "reopened_cells": [],
+        "required_cells": [
+            {"package": "claudine", "gate": "L1", "contract": CONTRACT_A},
+            {"package": "sniff", "gate": "L1", "contract": CONTRACT_B},
+        ],
     }
     document.update(overrides)
     return document
+
+
+def used_anchor(**overrides: object) -> dict:
+    """A certification's `anchors_used` entry: the plan's anchor less its contracts."""
+    return {k: v for k, v in coverage_anchor(**overrides).items() if k != "required_cells"}
 
 
 def certification(**overrides: object) -> dict:
@@ -993,10 +1006,13 @@ def certification(**overrides: object) -> dict:
         "environment": "wsl2-ubuntu",
         "coverage_policy_version": schema.COVERAGE_POLICY_VERSION,
         "environments_digest": "a" * 64, "plan_identity": "b" * 64,
-        "anchors_used": [coverage_anchor()],
+        "anchors_used": [used_anchor()],
         "certified": True,
         "cells": {"executing": 1, "reused": 0, "accepted_gap": 2, "inherited": 1},
-        "covered_cells": [{"package": "claudine", "gate": "L1"}, {"package": "sniff", "gate": "L1"}],
+        "covered_cells": [
+            {"package": "claudine", "gate": "L1", "contract": CONTRACT_A},
+            {"package": "sniff", "gate": "L1", "contract": CONTRACT_B},
+        ],
         "audits": {"required": 3, "passed": 3},
     }
     document.update(overrides)
@@ -1014,9 +1030,23 @@ class CoverageAnchorValidationTests(unittest.TestCase):
         full = coverage_anchor(
             environment="windows-latest", mode="full", anchor=None, reason="bootstrap-no-run",
             source={"kind": "none", "run_id": None, "head": None},
-            policy_delta=[], inherited_cells=[],
+            policy_delta=[], inherited_cells=[], reopened_cells=[], required_cells=[],
         )
         self.assertEqual([], schema.validate_resolved_plan(self.valid(coverage_anchor(), full)))
+
+    def test_a_reopened_cell_is_a_scheduled_cell_and_never_also_inherited(self):
+        # The plan's one cell is claudine/ubuntu-latest/L1.
+        reopened = coverage_anchor(
+            environment="ubuntu-latest", policy_delta=[],
+            reopened_cells=[{"package": "claudine", "gate": "L1"}],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(self.valid(reopened)))
+        unscheduled = coverage_anchor(reopened_cells=[{"package": "claudine", "gate": "L1"}])
+        self.assertIn(
+            "malformed-receipt: resolved plan coverage_anchors entry 'wsl2-ubuntu' reopens "
+            "a cell the plan does not schedule",
+            schema.validate_resolved_plan(self.valid(unscheduled)),
+        )
 
     def test_the_field_is_optional_and_never_empty(self):
         self.assertEqual([], schema.validate_resolved_plan(plan()))
@@ -1042,7 +1072,26 @@ class CoverageAnchorValidationTests(unittest.TestCase):
             "source missing head": {**control, "source": {"kind": "nightly-certified", "run_id": 7}},
             "delta cell unknown gate": {**control, "policy_delta": [{"package": "a", "gate": "fuzz"}]},
             "inherited cell extra key": {**control, "inherited_cells": [{"package": "a", "gate": "L1", "x": 1}]},
+            "reopened cell unknown gate": {**control, "reopened_cells": [{"package": "a", "gate": "fuzz"}]},
+            "reopened cell also inherited": {**control, "reopened_cells": [{"package": "sniff", "gate": "L1"}]},
+            "full fallback reopens": {**control, "mode": "full", "anchor": None, "reason": "bootstrap-no-run",
+                                      "source": {"kind": "none", "run_id": None, "head": None},
+                                      "policy_delta": [], "inherited_cells": [],
+                                      "reopened_cells": [{"package": "claudine", "gate": "L1"}]},
             "unknown environment": {**control, "environment": "beos"},
+            "required cell without a contract": {**control, "required_cells": [
+                {"package": "claudine", "gate": "L1"}, control["required_cells"][1],
+            ]},
+            "required cell contract not a digest": {**control, "required_cells": [
+                {"package": "claudine", "gate": "L1", "contract": "abc"}, control["required_cells"][1],
+            ]},
+            "required cell wrong element type": {**control, "required_cells": ["claudine/L1"]},
+            "required cell repeated": {**control, "required_cells": [
+                *control["required_cells"], control["required_cells"][0],
+            ]},
+            "delta names an unrequired cell": {**control, "required_cells": control["required_cells"][1:]},
+            "inherited names an unrequired cell": {**control, "required_cells": control["required_cells"][:1]},
+            "reopened names an unrequired cell": {**control, "reopened_cells": [{"package": "zeta", "gate": "L1"}]},
         })
         for label, entry in edits.items():
             with self.subTest(edit=label):
@@ -1100,14 +1149,28 @@ class CertificationValidationTests(unittest.TestCase):
             "run id bool": {**control, "run_id": True},
             "event unknown": {**control, "event": "cron"},
             "anchors empty": {**control, "anchors_used": []},
-            "anchors one wrong": {**control, "anchors_used": [coverage_anchor(), 5]},
+            "anchors one wrong": {**control, "anchors_used": [used_anchor(), 5]},
+            "anchor carries its contracts": {**control, "anchors_used": [coverage_anchor()]},
             "certified but audit short": {**control, "audits": {"required": 3, "passed": 2}},
             "covered disagrees with counts": {**control, "covered_cells": []},
             "covered repeats a cell": {**control, "covered_cells": [
-                {"package": "a", "gate": "L1"}, {"package": "a", "gate": "L1"},
+                {"package": "a", "gate": "L1", "contract": CONTRACT_A},
+                {"package": "a", "gate": "L1", "contract": CONTRACT_A},
             ], "cells": {"executing": 2, "reused": 0, "accepted_gap": 0, "inherited": 0}},
             "covered cell wrong gate": {**control, "covered_cells": [
-                {"package": "a", "gate": "fuzz"}, {"package": "b", "gate": "L1"},
+                {"package": "a", "gate": "fuzz", "contract": CONTRACT_A},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell without a contract": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1"}, {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell contract null": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1", "contract": None},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell contract short": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1", "contract": "c" * 16},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
             ]},
             "count negative": {**control, "cells": {**control["cells"], "executing": -1}},
             "count bool": {**control, "cells": {**control["cells"], "executing": True}},

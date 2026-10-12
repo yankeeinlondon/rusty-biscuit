@@ -118,6 +118,22 @@ def seed_build_inputs(root: Path) -> None:
     )
 
 
+def commit_fixture_repository(root: Path) -> str:
+    """Make `root` a Git repository holding its files in one commit; its id."""
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=root, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "CI Test")
+    git("config", "user.email", "ci@example.com")
+    git("config", "commit.gpgsign", "false")
+    git("add", "-A")
+    git("commit", "-q", "--allow-empty", "-m", "fixture")
+    return git("rev-parse", "HEAD")
+
+
 def scope_document(
     files: list[str],
     root: Path,
@@ -9842,6 +9858,305 @@ class LoadMetadataBoundaryTests(unittest.TestCase):
         self.assertTrue(any(targets for targets in graph.values()), "the real graph has edges")
 
 
+class InheritedCoverageEvidenceTests(unittest.TestCase):
+    """Coverage an anchor lends is still decided by the evidence published since.
+
+    The whole path in one real repository with a bare remote: a successful
+    certification, a later rig failure published through the shipped
+    `publish-receipt --kind rig`, the nightly planner, the verifier and its
+    overlay, and the certification writer. Each test covers native Windows and
+    WSL2.
+    """
+
+    WIN, WSL = "windows-latest", "wsl2-ubuntu"
+    ZERO = "0" * 40
+
+    def setUp(self) -> None:
+        import local_evidence
+        import reuse_validation
+        import test_evidence_reuse
+
+        self.local_evidence = local_evidence
+        self.reuse_validation = reuse_validation
+        self.rig_reports = test_evidence_reuse.write_rig_reports
+        self.observation_notes = test_evidence_reuse.OBSERVATION_NOTES
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+        self.previous_cwd = Path.cwd()
+        seed_build_inputs(self.root)
+        for name in ("alpha", "beta"):
+            source = self.root / name / "lib" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(f"pub fn {name}() {{}}\n", encoding="utf-8")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "guide.md").write_text("prose\n", encoding="utf-8")
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib"]),
+            package(self.root, "beta-core", "beta/lib/Cargo.toml", targets=["lib"]),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": None,
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        self.table = EventSchedulingTests.shipped_events()
+        self.anchor = commit_fixture_repository(self.root)
+        os.chdir(self.root)
+        self.remote = self.root.parent / f"{self.root.name}-remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True)
+        self.addCleanup(shutil.rmtree, self.remote, True)
+        self.git("remote", "add", "origin", str(self.remote))
+        self.git("push", "-q", "origin", "main")
+        # The successful nightly at the anchor: a bootstrap that executed and
+        # passed every cell, certified for both environments.
+        self.bootstrap = self.nightly(self.anchor, {
+            environment: {
+                "environment": environment, "mode": "full", "anchor": None,
+                "reason": "bootstrap-no-run",
+                "source": {"kind": "none", "run_id": None, "head": None},
+                "covered_cells": None,
+            }
+            for environment in (self.WIN, self.WSL)
+        })
+        self.rig_plan = self.root.parent / f"{self.root.name}-rig-plan.json"
+        self.addCleanup(self.rig_plan.unlink, True)
+        self.rig_plan.write_text(schema.canonical(self.bootstrap), encoding="utf-8")
+        self.anchors = {}
+        for environment in (self.WIN, self.WSL):
+            certification = self.certify(self.bootstrap, environment, self.anchor, gate_passed=True)
+            self.assertTrue(certification["certified"])
+            self.anchors[environment] = {
+                "environment": environment, "mode": "incremental", "anchor": self.anchor,
+                "reason": "certified-ancestor",
+                "source": {"kind": "nightly-certified", "run_id": 7, "head": self.anchor},
+                "covered_cells": certification["covered_cells"],
+            }
+
+    def tearDown(self) -> None:
+        os.chdir(self.previous_cwd)
+        self.temporary_directory.cleanup()
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=self.root, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def commit(self, relative: str, text: str) -> str:
+        (self.root / relative).write_text(text, encoding="utf-8")
+        self.git("commit", "-q", "-am", f"edit {relative}")
+        return self.git("rev-parse", "HEAD")
+
+    def nightly(self, head: str, anchors: dict[str, dict[str, object]]) -> dict[str, object]:
+        groups = affected_scope.coverage_anchor_groups(
+            {"schema_version": 1, "anchors": list(anchors.values())}, head, self.root,
+        )
+        plan = calculate_scope(
+            [], self.root, self.metadata, self.table, self.policy,
+            base=self.ZERO, head=head, event="schedule", coverage_groups=groups,
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def certify(
+        self, plan: dict[str, object], environment: str, head: str, *, gate_passed: bool
+    ) -> dict[str, object]:
+        areas = {entry["area"] for entry in plan["packages"] if entry["gates"]}
+        document = self.reuse_validation.certification_document(
+            plan, environment, run_id=21, attempt=1, head=head,
+            tree=self.git("rev-parse", f"{head}^{{tree}}"), table=self.table,
+            audits=(len(areas), len(areas)), gate_passed=gate_passed,
+        )
+        self.assertEqual([], schema.validate_certification(document))
+        return document
+
+    def publish_rig(
+        self, environment: str, head: str, *, fail: bool, run_id: str, retry_of: str = ""
+    ) -> None:
+        reported = {"t_one": "fail", "t_two": "pass", "t_three": "pass"} if fail else None
+        reports = self.rig_reports(
+            self.root.parent / f"{self.root.name}-{environment}-{run_id}",
+            "alpha-core", environment, reported=reported,
+        )
+        self.addCleanup(shutil.rmtree, reports, True)
+        command = [
+            sys.executable, str(self.observation_notes), "publish-receipt", "--kind", "rig",
+            "--plan", str(self.rig_plan), "--package", "alpha-core",
+            "--environment", environment, "--reports-dir", str(reports),
+            "--evidence-dir", str(self.root.parent / f"{self.root.name}-evidence"),
+            "--run-id", run_id, "--head", head, "--base", self.anchor,
+            "--tested-tree", self.git("rev-parse", f"{head}^{{tree}}"),
+            "--exit-code", "100" if fail else "0", "--duration", "61",
+            "--build-key", "0f1e2d3c4b5a6978", "--build-digest", "9a8b7c6d5e4f3021",
+            "--remote", "origin",
+        ]
+        self.addCleanup(shutil.rmtree, self.root.parent / f"{self.root.name}-evidence", True)
+        if retry_of:
+            command += ["--retry-of", retry_of]
+        completed = subprocess.run(
+            command, cwd=self.root, capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("FAILING" if fail else "a passing", completed.stdout)
+
+    def retry_predecessor(self, environment: str, head: str) -> str:
+        return subprocess.run(
+            [sys.executable, str(self.observation_notes), "retry-predecessor", "--head", head,
+             "--environment", environment, "--package", "alpha-core"],
+            cwd=self.root, capture_output=True, text=True, check=True, timeout=60,
+        ).stdout.strip()
+
+    def evidence(self, plan: dict[str, object], head: str) -> tuple[dict[str, object], list[str]]:
+        """The workflow's evidence step: verify, then overlay onto the plan."""
+        written = self.root.parent / f"{self.root.name}-plan.json"
+        self.addCleanup(written.unlink, True)
+        written.write_text(schema.canonical(plan), encoding="utf-8")
+        accepted, rejections = self.local_evidence.verify_cells(str(written), self.ZERO, head)
+        return affected_scope.apply_accepted_cells(plan, accepted, rejections), rejections
+
+    @staticmethod
+    def anchor_of(plan: dict[str, object], environment: str) -> dict[str, object]:
+        return next(a for a in plan["coverage_anchors"] if a["environment"] == environment)
+
+    @staticmethod
+    def executing(plan: dict[str, object]) -> set[tuple[str, str, str]]:
+        return {
+            (cell["package"], cell["environment"], cell["gate"])
+            for cell in plan["cells"] if cell["execution"] == "execute"
+        }
+
+    @staticmethod
+    def covered(certification: dict[str, object]) -> set[tuple[str, str]]:
+        return {(cell["package"], cell["gate"]) for cell in certification["covered_cells"]}
+
+    def assertReopensOnlyAlpha(self, environment: str, head: str) -> None:
+        other = self.WSL if environment == self.WIN else self.WIN
+        plan = self.nightly(head, self.anchors)
+        anchor = self.anchor_of(plan, environment)
+        self.assertEqual([{"package": "alpha-core", "gate": "L1"}], anchor["reopened_cells"])
+        self.assertEqual([{"package": "beta-core", "gate": "L1"}], anchor["inherited_cells"])
+        self.assertEqual(self.anchor, anchor["anchor"], "the successful anchor stands")
+        self.assertEqual([], self.anchor_of(plan, other)["reopened_cells"])
+        reason = next(
+            cell["selection_reason"] for cell in plan["cells"]
+            if (cell["package"], cell["environment"]) == ("alpha-core", environment)
+        )
+        self.assertIn("later qualifying failure", reason)
+        applied, rejections = self.evidence(plan, head)
+        self.assertEqual({("alpha-core", environment, "L1")}, self.executing(applied))
+        self.assertTrue([r for r in rejections if r.startswith("failed-cell")], rejections)
+        # Dispatch: the reopened cell has its build, its owner, and its row.
+        self.assertEqual(
+            [("alpha-core", environment, "L1")],
+            [(c["package"], c["environment"], c["gate"]) for c in applied["cells"] if c.get("build")],
+        )
+        self.assertTrue(applied["builds"], "the reopened cell demands an archive")
+        self.assertIn("alpha-core", json.dumps(applied["rows"]))
+        # A red reopened cell certifies nothing; a green one covers it as executed.
+        self.assertFalse(self.certify(applied, environment, head, gate_passed=False)["certified"])
+        passed = self.certify(applied, environment, head, gate_passed=True)
+        self.assertEqual({("alpha-core", "L1"), ("beta-core", "L1")}, self.covered(passed))
+        self.assertEqual(1, passed["cells"]["executing"])
+        self.assertEqual(1, passed["cells"]["inherited"])
+        untouched = self.certify(applied, other, head, gate_passed=True)
+        self.assertEqual(2, untouched["cells"]["inherited"], "the other environment inherits both")
+
+    def test_without_a_later_failure_everything_stays_inherited(self) -> None:
+        documentation = self.commit("docs/guide.md", "more prose\n")
+        for head in (self.anchor, documentation):
+            with self.subTest(head=head[:9]):
+                plan = self.nightly(head, self.anchors)
+                applied, _ = self.evidence(plan, head)
+                self.assertEqual(set(), self.executing(applied))
+                for environment in (self.WIN, self.WSL):
+                    anchor = self.anchor_of(applied, environment)
+                    self.assertEqual([], anchor["reopened_cells"])
+                    certification = self.certify(applied, environment, head, gate_passed=True)
+                    self.assertTrue(certification["certified"])
+                    self.assertEqual(
+                        {("alpha-core", "L1"), ("beta-core", "L1")}, self.covered(certification)
+                    )
+
+    def test_a_later_rig_failure_at_the_anchor_reopens_only_that_cell(self) -> None:
+        for environment in (self.WIN, self.WSL):
+            with self.subTest(environment=environment):
+                self.publish_rig(environment, self.anchor, fail=True, run_id=f"fail-{environment}")
+                self.assertReopensOnlyAlpha(environment, self.anchor)
+                # Restore the other environment's control for the next pass.
+                self.git("notes", "--ref", f"refs/notes/ci-local/{environment}", "remove", self.anchor)
+
+    def test_a_failure_survives_a_documentation_only_descendant(self) -> None:
+        self.publish_rig(self.WIN, self.anchor, fail=True, run_id="fail-anchor")
+        documentation = self.commit("docs/guide.md", "more prose\n")
+        self.assertReopensOnlyAlpha(self.WIN, documentation)
+        self.publish_rig(self.WSL, documentation, fail=True, run_id="fail-descendant")
+        later = self.commit("docs/guide.md", "even more prose\n")
+        plan = self.nightly(later, self.anchors)
+        for environment in (self.WIN, self.WSL):
+            self.assertEqual(
+                [{"package": "alpha-core", "gate": "L1"}],
+                self.anchor_of(plan, environment)["reopened_cells"],
+            )
+
+    def test_a_change_to_the_package_selects_it_as_before(self) -> None:
+        for environment in (self.WIN, self.WSL):
+            self.publish_rig(environment, self.anchor, fail=True, run_id=f"fail-{environment}")
+        changed = self.commit("alpha/lib/src/lib.rs", "pub fn alpha() { /* fixed */ }\n")
+        plan = self.nightly(changed, self.anchors)
+        applied, rejections = self.evidence(plan, changed)
+        self.assertEqual(
+            {("alpha-core", self.WIN, "L1"), ("alpha-core", self.WSL, "L1")}, self.executing(applied)
+        )
+        for environment in (self.WIN, self.WSL):
+            anchor = self.anchor_of(applied, environment)
+            self.assertEqual([], anchor["reopened_cells"], "the diff selected it; nothing to reopen")
+            self.assertEqual([{"package": "beta-core", "gate": "L1"}], anchor["inherited_cells"])
+        self.assertFalse([r for r in rejections if r.startswith("conflicting-evidence")], rejections)
+
+    def test_a_passing_retry_restores_inheritance(self) -> None:
+        for environment in (self.WIN, self.WSL):
+            with self.subTest(environment=environment):
+                self.publish_rig(environment, self.anchor, fail=True, run_id=f"fail-{environment}")
+                predecessor = self.retry_predecessor(environment, self.anchor)
+                self.assertTrue(predecessor)
+                self.publish_rig(
+                    environment, self.anchor, fail=False, run_id=f"pass-{environment}",
+                    retry_of=predecessor,
+                )
+        plan = self.nightly(self.anchor, self.anchors)
+        applied, _ = self.evidence(plan, self.anchor)
+        self.assertEqual(set(), self.executing(applied))
+        for environment in (self.WIN, self.WSL):
+            anchor = self.anchor_of(applied, environment)
+            self.assertEqual([], anchor["reopened_cells"])
+            self.assertEqual(
+                [{"package": "alpha-core", "gate": "L1"}, {"package": "beta-core", "gate": "L1"}],
+                anchor["inherited_cells"],
+            )
+            certification = self.certify(applied, environment, self.anchor, gate_passed=True)
+            self.assertTrue(certification["certified"])
+            self.assertIn(("alpha-core", "L1"), self.covered(certification))
+
+    def test_an_unordered_pass_beside_the_failure_still_reopens(self) -> None:
+        # A pass that names no predecessor does not retry the failure: the two
+        # conflict, and the cell executes.
+        self.publish_rig(self.WSL, self.anchor, fail=True, run_id="fail")
+        self.publish_rig(self.WSL, self.anchor, fail=False, run_id="pass")
+        plan = self.nightly(self.anchor, self.anchors)
+        self.assertEqual(
+            [{"package": "alpha-core", "gate": "L1"}], self.anchor_of(plan, self.WSL)["reopened_cells"]
+        )
+        reason = next(
+            cell["selection_reason"] for cell in plan["cells"] if cell["environment"] == self.WSL
+        )
+        self.assertIn("nothing orders", reason)
+
+
 class CoverageAnchorTests(unittest.TestCase):
     """A nightly plans each environment from its own comparison anchor.
 
@@ -9874,6 +10189,9 @@ class CoverageAnchorTests(unittest.TestCase):
             today=TODAY,
         )
         self.table = EventSchedulingTests.shipped_events()
+        # A repository: the planner reads published evidence about the cells an
+        # anchor would lend, at the plan's head.
+        self.head = commit_fixture_repository(self.root)
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -9889,10 +10207,23 @@ class CoverageAnchorTests(unittest.TestCase):
         return base
 
     def certified(self, environment: str, anchor: str, covered: list[tuple[str, str]]) -> dict[str, object]:
+        """A certified anchor covering `covered` under the policy in force NOW.
+
+        The contracts come from a bootstrap plan's `required_cells`, which is
+        what a certification copies, so a test that edits policy afterwards
+        models a certification written before the edit.
+        """
+        bootstrap = self.plan([self.entry(self.WIN), self.entry(self.WSL)], {})
+        contracts = {
+            (cell["package"], cell["gate"]): cell["contract"]
+            for cell in self.anchors(bootstrap)[environment]["required_cells"]
+        }
         return self.entry(
             environment, mode="incremental", anchor=anchor, reason="certified-ancestor",
             source={"kind": "nightly-certified", "run_id": 7, "head": anchor},
-            covered_cells=[{"package": p, "gate": g} for p, g in covered],
+            covered_cells=[
+                {"package": p, "gate": g, "contract": contracts[(p, g)]} for p, g in covered
+            ],
         )
 
     def legacy(self, environment: str, anchor: str) -> dict[str, object]:
@@ -9905,11 +10236,11 @@ class CoverageAnchorTests(unittest.TestCase):
         """Plan a nightly; `changed` maps an anchor to the paths changed since it."""
         document = {"schema_version": 1, "anchors": anchors}
         groups = affected_scope.coverage_anchor_groups(
-            document, "f" * 40, self.root, lambda anchor, head, root: (changed.get(anchor, []), [], []),
+            document, self.head, self.root, lambda anchor, head, root: (changed.get(anchor, []), [], []),
         )
         plan = calculate_scope(
             [], self.root, self.metadata, self.table, self.policy,
-            base="0" * 40, head="f" * 40, event="schedule", coverage_groups=groups,
+            base="0" * 40, head=self.head, event="schedule", coverage_groups=groups,
         )
         self.assertEqual([], schema.validate_resolved_plan(plan))
         return plan
@@ -9929,10 +10260,13 @@ class CoverageAnchorTests(unittest.TestCase):
             [self.entry(self.WIN, reason="policy-uncertified"), self.legacy(self.WSL, self.OLD)],
             {self.OLD: [self.ALPHA]},
         )
+        # A legacy anchor recorded no coverage contract, so it proves no cell:
+        # beta-core, unchanged since the anchor, is still selected on WSL2 and
+        # left to evidence verification.
         self.assertEqual(
             {
                 ("alpha-core", self.WIN, "L1"), ("beta-core", self.WIN, "L1"),
-                ("alpha-core", self.WSL, "L1"),
+                ("alpha-core", self.WSL, "L1"), ("beta-core", self.WSL, "L1"),
             },
             self.cells(plan),
         )
@@ -9941,11 +10275,13 @@ class CoverageAnchorTests(unittest.TestCase):
             anchors[self.WIN]["mode"], anchors[self.WIN]["anchor"], anchors[self.WIN]["reason"],
         ))
         self.assertEqual(("incremental", self.OLD), (anchors[self.WSL]["mode"], anchors[self.WSL]["anchor"]))
-        self.assertEqual(
-            [{"package": "beta-core", "gate": "L1"}], anchors[self.WSL]["inherited_cells"],
-            "the legacy anchor is taken to cover what the diff does not reselect",
+        self.assertEqual([], anchors[self.WSL]["inherited_cells"])
+        self.assertEqual([{"package": "beta-core", "gate": "L1"}], anchors[self.WSL]["policy_delta"])
+        reason = next(
+            cell["selection_reason"] for cell in plan["cells"]
+            if (cell["package"], cell["environment"]) == ("beta-core", self.WSL)
         )
-        self.assertEqual([], anchors[self.WSL]["policy_delta"])
+        self.assertIn("legacy anchor recorded no coverage contract", reason)
         self.assertFalse(plan["full_scope"], "a mixed plan must not relabel the incremental environment")
 
     def test_a_certified_dual_nightly_shares_one_anchor_and_one_diff(self) -> None:
@@ -10015,6 +10351,91 @@ class CoverageAnchorTests(unittest.TestCase):
         self.assertEqual(
             {("beta-core", self.WIN, "L1"), ("alpha-core", self.WSL, "L1")}, self.cells(plan)
         )
+
+    def host(self, environment: str, **capabilities: object) -> None:
+        for record in self.table:
+            if record["name"] == environment:
+                record["capabilities"].update(capabilities)
+
+    def test_every_anchor_records_the_contract_of_each_required_cell(self) -> None:
+        plan = self.plan([self.entry(self.WIN), self.certified(self.WSL, self.OLD, [])], {})
+        for entry in plan["coverage_anchors"]:
+            self.assertEqual(
+                [("alpha-core", "L1"), ("beta-core", "L1")],
+                [(cell["package"], cell["gate"]) for cell in entry["required_cells"]],
+            )
+            for cell in entry["required_cells"]:
+                self.assertRegex(cell["contract"], r"^[0-9a-f]{64}$")
+        win, wsl = (self.anchors(plan)[name]["required_cells"] for name in (self.WIN, self.WSL))
+        self.assertNotEqual(win[0]["contract"], wsl[0]["contract"], "a contract is per environment")
+
+    def test_an_existing_l2_gate_that_gains_a_required_backend_is_selected(self) -> None:
+        self.host(self.WSL, tmux=True, wezterm=True)
+        self.policy["alpha-core"]["tiers"] = ["L1", "L2"]
+        self.policy["alpha-core"]["l2_backends"] = ["tmux"]
+        covered = [("alpha-core", "L1"), ("alpha-core", "L2"), ("beta-core", "L1")]
+        anchors = [self.entry(self.WIN, reason="policy-uncertified"), self.certified(self.WSL, self.OLD, covered)]
+        # Control: the contract the anchor proved is unchanged, so nothing is selected.
+        self.assertEqual(
+            set(), {cell for cell in self.cells(self.plan(anchors, {})) if cell[1] == self.WSL}
+        )
+        self.policy["alpha-core"]["l2_backends"] = ["tmux", "wezterm"]
+        plan = self.plan(anchors, {self.OLD: ["alpha/lib/Cargo.toml"]})
+        self.assertEqual(
+            {("alpha-core", self.WSL, "L2")},
+            {cell for cell in self.cells(plan) if cell[1] == self.WSL},
+        )
+        wsl = self.anchors(plan)[self.WSL]
+        self.assertEqual([{"package": "alpha-core", "gate": "L2"}], wsl["policy_delta"])
+        self.assertNotIn({"package": "alpha-core", "gate": "L2"}, wsl["inherited_cells"])
+        cell = next(c for c in plan["cells"] if (c["environment"], c["gate"]) == (self.WSL, "L2"))
+        self.assertEqual(["tmux", "wezterm"], cell["backends"])
+        self.assertIn("changed what L2 on wsl2-ubuntu must prove", cell["selection_reason"])
+
+    def test_an_existing_l1_gate_that_gains_required_test_features_is_selected(self) -> None:
+        anchors = [
+            self.entry(self.WIN, reason="policy-uncertified"),
+            self.certified(self.WSL, self.OLD, [("alpha-core", "L1"), ("beta-core", "L1")]),
+        ]
+        self.policy["alpha-core"]["features"] = ["extra"]
+        plan = self.plan(anchors, {self.OLD: ["alpha/lib/Cargo.toml"]})
+        self.assertEqual(
+            {("alpha-core", self.WSL, "L1")},
+            {cell for cell in self.cells(plan) if cell[1] == self.WSL},
+        )
+        self.assertEqual(
+            [{"package": "alpha-core", "gate": "L1"}], self.anchors(plan)[self.WSL]["policy_delta"]
+        )
+        record = next(r for r in plan["packages"] if r["package"] == "alpha-core")
+        self.assertEqual("--features extra", record["test_args"])
+
+    def test_a_new_browser_gate_is_selected_under_a_certified_anchor(self) -> None:
+        self.host(self.WSL, headless_browser=True)
+        anchors = [
+            self.entry(self.WIN, reason="policy-uncertified"),
+            self.certified(self.WSL, self.OLD, [("alpha-core", "L1"), ("beta-core", "L1")]),
+        ]
+        self.policy["alpha-core"]["tiers"] = ["L1", "browser"]
+        plan = self.plan(anchors, {})
+        self.assertEqual(
+            {("alpha-core", self.WSL, "browser")},
+            {cell for cell in self.cells(plan) if cell[1] == self.WSL},
+        )
+        self.assertEqual(
+            [{"package": "alpha-core", "gate": "L1"}, {"package": "beta-core", "gate": "L1"}],
+            self.anchors(plan)[self.WSL]["inherited_cells"],
+        )
+
+    def test_a_new_browser_gate_is_selected_under_a_legacy_anchor(self) -> None:
+        self.host(self.WSL, headless_browser=True)
+        self.policy["alpha-core"]["tiers"] = ["L1", "browser"]
+        plan = self.plan(
+            [self.entry(self.WIN, reason="policy-uncertified"), self.legacy(self.WSL, self.OLD)], {}
+        )
+        self.assertIn(("alpha-core", self.WSL, "browser"), self.cells(plan))
+        wsl = self.anchors(plan)[self.WSL]
+        self.assertIn({"package": "alpha-core", "gate": "browser"}, wsl["policy_delta"])
+        self.assertEqual([], wsl["inherited_cells"])
 
     def test_identical_inputs_resolve_to_identical_plans(self) -> None:
         arguments = (
@@ -10092,6 +10513,10 @@ class CoverageAnchorTests(unittest.TestCase):
             ("anchor not a sha", mutate(("anchors", 0, "anchor"), "abc")),
             ("mode contradicts reason", mutate(("anchors", 0, "mode"), "full")),
             ("covered cell malformed", mutate(("anchors", 0, "covered_cells"), [{"package": "x"}])),
+            ("covered cell not an object", mutate(("anchors", 0, "covered_cells"), [5])),
+            ("covered cell repeated", mutate(
+                ("anchors", 0, "covered_cells"), good["anchors"][0]["covered_cells"] * 2,
+            )),
             ("source kind contradicts reason", mutate(("anchors", 0, "source", "kind"), "none")),
             ("full carries an anchor", mutate(("anchors", 1, "anchor"), self.OLD)),
             ("full carries covered cells", mutate(("anchors", 1, "covered_cells"), [])),
@@ -10104,6 +10529,18 @@ class CoverageAnchorTests(unittest.TestCase):
                 (f"{field} wrong type", mutate(("anchors", 0, field), 3)),
             ]
         cases.append(("unknown environment", mutate(("anchors", 0, "environment"), "beos")))
+        for value_label, value in (
+            ("absent", ...), ("null", None), ("wrong type", 3), ("empty", ""),
+            ("not a digest", "abc"), ("uppercase digest", "A" * 64),
+        ):
+            cases.append((
+                f"covered cell contract {value_label}",
+                mutate(("anchors", 0, "covered_cells", 0, "contract"), value),
+            ))
+        cases.append((
+            "covered cell extra key",
+            mutate(("anchors", 0, "covered_cells", 0, "extra"), 1),
+        ))
         for label, document in cases:
             with self.subTest(edit=label), self.assertRaises(RuntimeError):
                 affected_scope.coverage_anchor_groups(document, "f" * 40, self.root, no_diff)

@@ -7872,7 +7872,7 @@ fn the_scope_job_reads_contents_and_actions_and_writes_nothing() {
             ("actions".to_owned(), "read".to_owned()),
         ],
         job_permissions(&scope),
-        "the scope job needs `actions: read` for the anchor lookup and nothing more"
+        "the scope job needs `actions: read` for anchors and hosted artifacts, and nothing more"
     );
 }
 
@@ -8126,6 +8126,73 @@ fn the_observation_publisher_is_a_trusted_schedule_only_job_outside_the_gate() {
         vec!["publish-observations".to_owned()],
         jobs_containing("ci.yml", "contents: write"),
         "no other ci.yml job holds a write token"
+    );
+}
+
+#[test]
+fn earlier_nightlies_unpublished_observations_are_recovered_without_a_new_credential() {
+    // A run whose publisher never ran leaves its finished cells as artifacts
+    // only. The next nightly's scope job records them locally before it
+    // plans (a recovered failure reopens an anchored cell) and verifies, with
+    // the read-only token it already holds, and the trusted publisher pushes
+    // them.
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    let recovery = scope
+        .find("hosted_observations.py publish")
+        .expect("the scope job recovers earlier nightlies' observations");
+    let plan = scope
+        .find(r#"python3 scripts/ci/affected_scope.py "${scope_args[@]}""#)
+        .expect("the scope job plans");
+    let verify = scope
+        .find("local_evidence.py verify --cells")
+        .expect("the scope job verifies evidence");
+    assert!(
+        recovery < plan && plan < verify,
+        "recovery runs before the planner and the verifier that read it"
+    );
+    assert!(
+        scope.contains(r#"--anchors nightly-anchors.json --artifact-repo "$GITHUB_REPOSITORY""#),
+        "the nightly planner probes hosted artifacts when it checks inherited coverage"
+    );
+    let guard = scope[..recovery]
+        .rfind(r#"if [[ "$EVENT_NAME" == "schedule" ]]; then"#)
+        .expect("recovery is guarded by the nightly event");
+    assert!(
+        !scope[guard..recovery].lines().any(|line| line.trim() == "fi"),
+        "the schedule guard encloses the recovery"
+    );
+    let invocation = &scope[recovery..plan];
+    assert!(
+        invocation.contains("--recent --no-push") && !invocation.contains("--run-id"),
+        "the scope job recovers the bounded window and pushes nothing"
+    );
+    assert!(
+        invocation.contains("|| recovery_status=$?") && invocation.contains("::warning"),
+        "a failed recovery is visible and costs only reuse"
+    );
+
+    let publisher = named_job("ci.yml", "publish-observations");
+    let publisher_body = executable_lines(&publisher);
+    assert!(
+        publisher_body.contains("fetch-depth: 0"),
+        "an earlier run's head must be present to carry its note"
+    );
+    let publisher_steps = steps(&publisher);
+    let pushed = step_named(&publisher_steps, "Publish earlier nightlies' unpublished observations")
+        .expect("the trusted publisher pushes the recovery");
+    let pushed = executable_lines(pushed);
+    assert!(
+        pushed.contains("if: always()")
+            && pushed.contains("scripts/ci/hosted_observations.py publish")
+            && pushed.contains("--recent")
+            && !pushed.contains("--no-push")
+            && !pushed.contains("continue-on-error"),
+        "the publisher pushes earlier runs' observations and fails visibly"
+    );
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "recovery adds no write credential anywhere else"
     );
 }
 

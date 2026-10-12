@@ -536,13 +536,32 @@ COVERAGE_ANCHOR_FIELDS: dict[str, bool] = {
     "reason": True,
     "source": True,
     #: `{package, gate}` cells the current policy requires that the anchor's
-    #: certification does not cover (expired gaps, newly declared gates or
-    #: backends), selected whatever the source diff says.
+    #: certification does not cover under the same coverage contract (expired
+    #: gaps, newly declared gates, new backends or test features inside a
+    #: gate, every cell of a legacy anchor), selected whatever the diff says.
     "policy_delta": True,
     #: `{package, gate}` cells the anchor already covers and this plan does not
     #: reselect. They are what keeps coverage transitive: a nightly that
     #: executes nothing still certifies the cells its anchor proved.
     "inherited_cells": True,
+    #: `{package, gate}` cells the anchor covers that this plan selects anyway
+    #: because published evidence for them (a later qualifying failure no
+    #: passing retry supersedes, or results nothing orders) requires
+    #: execution. Each is a plan cell; none is also inherited.
+    "reopened_cells": True,
+    #: `{package, gate, contract}` for every cell current policy requires of
+    #: this environment, `contract` being the planner's `coverage_contract`.
+    #: The certification copies the contract of each cell it covers from here,
+    #: so a later nightly can tell a cell whose contract changed (a new
+    #: backend or test feature) from one its anchor proved.
+    "required_cells": True,
+}
+
+#: A certification's `anchors_used` entry: the plan's anchor without its
+#: `required_cells`, which the certification already carries as contracts on
+#: `covered_cells`.
+CERTIFICATION_ANCHOR_FIELDS: dict[str, bool] = {
+    key: value for key, value in COVERAGE_ANCHOR_FIELDS.items() if key != "required_cells"
 }
 
 COVERAGE_SOURCE_FIELDS: dict[str, bool] = {"kind": True, "run_id": True, "head": True}
@@ -581,7 +600,8 @@ ANCHOR_INPUT_ENTRY_FIELDS: dict[str, bool] = {
     "reason": True,
     "source": True,
     #: Null when the anchor proves no list of cells (a full-scope fallback or a
-    #: legacy run); a list, possibly empty, for a certified anchor.
+    #: legacy run); a list, possibly empty, of `{package, gate, contract}` for a
+    #: certified anchor.
     "covered_cells": True,
 }
 
@@ -1896,17 +1916,61 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                             f"malformed-receipt: resolved plan coverage_anchors names "
                             f"{name!r}, which is not in the plan's environment table"
                         )
+                    reopened = entry.get("reopened_cells")
+                    planned = {
+                        (cell.get("package"), cell.get("gate"))
+                        for cell in document.get("cells") or []
+                        if isinstance(cell, dict) and cell.get("environment") == name
+                    }
+                    if isinstance(reopened, list) and any(
+                        isinstance(cell, dict)
+                        and (cell.get("package"), cell.get("gate")) not in planned
+                        for cell in reopened
+                    ):
+                        problems.append(
+                            f"malformed-receipt: resolved plan coverage_anchors entry "
+                            f"{name!r} reopens a cell the plan does not schedule"
+                        )
     return problems
 
 
-def _coverage_anchor(where: str, entry: Any) -> list[str]:
+def _contract_cells(where: str, cells: Any) -> list[str]:
+    """Every reason `cells` is not a list of distinct `{package, gate, contract}` cells."""
+    if not isinstance(cells, list):
+        return [f"malformed-receipt: {where} must be a list"]
+    problems: list[str] = []
+    keys: set[tuple[Any, Any]] = set()
+    for cell in cells:
+        if (
+            not isinstance(cell, dict)
+            or set(cell) != {"package", "gate", "contract"}
+            or not isinstance(cell["package"], str)
+            or not cell["package"]
+            or cell["gate"] not in GATES
+            or not isinstance(cell["contract"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", cell["contract"])
+        ):
+            return problems + [
+                f"malformed-receipt: {where} entries are exactly "
+                "{package, gate, contract} with a known gate and a coverage contract digest"
+            ]
+        key = (cell["package"], cell["gate"])
+        if key in keys:
+            problems.append(f"malformed-receipt: {where} repeats {cell['package']}/{cell['gate']}")
+        keys.add(key)
+    return problems
+
+
+def _coverage_anchor(
+    where: str, entry: Any, fields: dict[str, bool] = COVERAGE_ANCHOR_FIELDS
+) -> list[str]:
     """Every reason `entry` is not one environment's coherent coverage anchor.
 
     Reason, mode, anchor, and source must agree: an incremental anchor names
     the commit and the run that earned it, and a full-scope fallback names
     neither, so a reader can never mistake a missing history for a short diff.
     """
-    problems = _keys(where, entry, COVERAGE_ANCHOR_FIELDS)
+    problems = _keys(where, entry, fields)
     if problems:
         return problems
     problems += _member(f"{where} environment", entry["environment"], ENVIRONMENTS, "unknown-environment")
@@ -1942,7 +2006,7 @@ def _coverage_anchor(where: str, entry: Any) -> list[str]:
                 f"malformed-receipt: {where} reason {entry['reason']!r} implies a {shape[1]!r} "
                 f"source, not {source.get('kind')!r}"
             )
-    for field in ("policy_delta", "inherited_cells"):
+    for field in ("policy_delta", "inherited_cells", "reopened_cells"):
         cells = entry[field]
         if not isinstance(cells, list):
             problems.append(f"malformed-receipt: {where} {field} must be a list")
@@ -1963,6 +2027,35 @@ def _coverage_anchor(where: str, entry: Any) -> list[str]:
         entry["inherited_cells"], list
     ):
         problems.append(f"malformed-receipt: {where} is a full-scope fallback and inherits no cells")
+    if entry["mode"] == "full" and entry["reopened_cells"] not in ([], None) and isinstance(
+        entry["reopened_cells"], list
+    ):
+        problems.append(f"malformed-receipt: {where} is a full-scope fallback and reopens no cells")
+    if isinstance(entry["inherited_cells"], list) and isinstance(entry["reopened_cells"], list):
+        inherited = {
+            (cell.get("package"), cell.get("gate"))
+            for cell in entry["inherited_cells"] if isinstance(cell, dict)
+        }
+        if any(
+            isinstance(cell, dict) and (cell.get("package"), cell.get("gate")) in inherited
+            for cell in entry["reopened_cells"]
+        ):
+            problems.append(f"malformed-receipt: {where} both inherits and reopens a cell")
+    if "required_cells" in fields:
+        required = entry["required_cells"]
+        shape = _contract_cells(f"{where} required_cells", required)
+        problems += shape
+        if not shape:
+            known = {(cell["package"], cell["gate"]) for cell in required}
+            for field in ("policy_delta", "inherited_cells", "reopened_cells"):
+                cells = entry[field]
+                if isinstance(cells, list) and any(
+                    isinstance(cell, dict) and (cell.get("package"), cell.get("gate")) not in known
+                    for cell in cells
+                ):
+                    problems.append(
+                        f"malformed-receipt: {where} {field} names a cell absent from required_cells"
+                    )
     return problems
 
 
@@ -1992,7 +2085,8 @@ def validate_anchor_input(document: Any) -> list[str]:
         shaped = {key: value for key, value in entry.items() if key != "covered_cells"}
         shaped["policy_delta"] = []
         shaped["inherited_cells"] = []
-        problems += _coverage_anchor("anchor input entry", shaped)
+        shaped["reopened_cells"] = []
+        problems += _coverage_anchor("anchor input entry", shaped, CERTIFICATION_ANCHOR_FIELDS)
         if entry["environment"] in seen:
             problems.append(f"malformed-receipt: anchor input names {entry['environment']!r} twice")
         seen.add(entry["environment"])
@@ -2004,18 +2098,9 @@ def validate_anchor_input(document: Any) -> list[str]:
                 f"{'required' if certified else 'null'} for reason {entry['reason']!r}"
             )
         elif isinstance(covered, list):
-            for cell in covered:
-                if (
-                    not isinstance(cell, dict)
-                    or set(cell) != {"package", "gate"}
-                    or not isinstance(cell["package"], str)
-                    or cell["gate"] not in GATES
-                ):
-                    problems.append(
-                        "malformed-receipt: anchor input covered_cells entries are exactly "
-                        "{package, gate} with a known gate"
-                    )
-                    break
+            problems += _contract_cells(
+                f"anchor input entry {entry['environment']!r} covered_cells", covered
+            )
     return problems
 
 
@@ -2090,7 +2175,9 @@ def validate_certification(document: Any) -> list[str]:
         problems.append("malformed-receipt: coverage certification anchors_used must be a non-empty list")
     else:
         for entry in anchors:
-            problems += _coverage_anchor("coverage certification anchors_used entry", entry)
+            problems += _coverage_anchor(
+                "coverage certification anchors_used entry", entry, CERTIFICATION_ANCHOR_FIELDS
+            )
     if not isinstance(document["certified"], bool):
         problems.append("malformed-receipt: coverage certification certified must be a boolean")
     counts = document["cells"]
@@ -2104,29 +2191,9 @@ def validate_certification(document: Any) -> list[str]:
                     f"malformed-receipt: coverage certification cells {name} must be a non-negative integer"
                 )
     covered = document["covered_cells"]
-    if not isinstance(covered, list):
-        problems.append("malformed-receipt: coverage certification covered_cells must be a list")
-    else:
-        keys: set[tuple[Any, Any]] = set()
-        for cell in covered:
-            if (
-                not isinstance(cell, dict)
-                or set(cell) != {"package", "gate"}
-                or not isinstance(cell["package"], str)
-                or cell["gate"] not in GATES
-            ):
-                problems.append(
-                    "malformed-receipt: coverage certification covered_cells entries are exactly "
-                    "{package, gate} with a known gate"
-                )
-                break
-            key = (cell["package"], cell["gate"])
-            if key in keys:
-                problems.append(
-                    f"malformed-receipt: coverage certification covered_cells repeats "
-                    f"{cell['package']}/{cell['gate']}"
-                )
-            keys.add(key)
+    shape = _contract_cells("coverage certification covered_cells", covered)
+    problems += shape
+    if not shape:
         if isinstance(counts, dict) and all(type(counts.get(n)) is int for n in CERTIFICATION_CELL_COUNTS):
             proven = counts["executing"] + counts["reused"] + counts["inherited"]
             if len(covered) != proven:

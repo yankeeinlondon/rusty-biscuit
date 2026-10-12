@@ -4735,7 +4735,10 @@ fn plan_fields_match_the_frozen_contract() {
         Some(false),
         "`coverage_anchors` is optional in the plan contract"
     );
-    for field in ["environment", "mode", "reason", "anchor", "policy_delta", "inherited_cells"] {
+    for field in [
+        "environment", "mode", "reason", "anchor", "policy_delta", "inherited_cells",
+        "reopened_cells",
+    ] {
         assert!(
             plan["coverage_anchor"].get(field).is_some(),
             "the coverage anchor contract has no `{field}`"
@@ -7725,21 +7728,22 @@ fn the_summary_lists_coverage_anchors_only_when_the_plan_has_them() {
             "inherited_cells": [
                 {"package": "a", "gate": "L1"}, {"package": "b", "gate": "L1"}
             ],
+            "reopened_cells": [{"package": "c", "gate": "L1"}],
         },
         {
             "environment": "wsl2", "mode": "full", "anchor": null,
             "reason": "bootstrap-no-run",
             "source": {"kind": "none", "run_id": null, "head": null},
-            "policy_delta": [], "inherited_cells": [],
+            "policy_delta": [], "inherited_cells": [], "reopened_cells": [],
         },
     ]);
     let with = render_report(Some(&anchored_plan_text(Some(anchors))), &[]);
     assert!(with.contains("## Coverage anchors"), "{with}");
     assert!(
-        with.contains("| windows-latest | incremental | certified-ancestor | `0123456` | 1 | 2 |"),
+        with.contains("| windows-latest | incremental | certified-ancestor | `0123456` | 1 | 2 | 1 |"),
         "{with}"
     );
-    assert!(with.contains("| wsl2 | full | bootstrap-no-run | none | 0 | 0 |"), "{with}");
+    assert!(with.contains("| wsl2 | full | bootstrap-no-run | none | 0 | 0 | 0 |"), "{with}");
 
     let without = render_report(Some(&anchored_plan_text(None)), &[]);
     assert!(!without.contains("Coverage anchors"), "{without}");

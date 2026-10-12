@@ -3964,21 +3964,118 @@ def merge_selections(selections: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def coverage_contract(cell: dict[str, Any], package: dict[str, Any]) -> str:
+    """The identity of what one pending cell must prove, beyond its name.
+
+    An anchor's certification records this per covered cell, and a later
+    nightly inherits the cell only while it is unchanged. Two cells with the
+    same `{package, environment, gate}` prove different things when the
+    backends, test features, target kinds, companion suites, test filter, or
+    slow-test inclusion differ, so each of those is part of the identity.
+    Selection reasons and execution plumbing are not: they change nothing a
+    passing run proved.
+
+    Read only from a pending cell of a full-scope selection, where `backends`
+    is still present (reuse strips it).
+    """
+    gate = cell["gate"]
+    terms: dict[str, Any] = {
+        "package": cell["package"],
+        "environment": cell["environment"],
+        "gate": gate,
+        "target_kinds": sorted(cell["target_kinds"]),
+        "test_filter": cell.get("test_filter", ""),
+        "companions": sorted(entry["name"] for entry in cell.get("companions", [])),
+        "dependents": sorted(cell.get("dependents", [])),
+    }
+    if gate in schema.BUILD_GATES:
+        terms["test_args"] = package["test_args"]
+    if gate == "L1":
+        terms["l1_include_slow"] = package["l1_include_slow"]
+    if gate == "L2":
+        # Both: the declaration, and the part of it this environment hosts.
+        terms["declared_backends"] = sorted(package["l2_backends"])
+        terms["backends"] = sorted(cell.get("backends", []))
+    if gate == "check":
+        terms["check_args"] = package["check_args"]
+    return schema.identity(schema.canonical(terms))
+
+
+def required_contracts(selection: dict[str, Any], environment: str) -> dict[tuple[str, str], str]:
+    """`{(package, gate): coverage_contract}` for every pending cell of `environment`."""
+    records = {record["package"]: record for record in selection["package_records"]}
+    return {
+        (cell["package"], cell["gate"]): coverage_contract(cell, records[cell["package"]])
+        for cell in selection["cells"]
+        if cell["environment"] == environment and cell["state"] == "pending"
+    }
+
+
+def contract_cells(contracts: dict[tuple[str, str], str]) -> list[dict[str, str]]:
+    return [
+        {"package": package, "gate": gate, "contract": contracts[(package, gate)]}
+        for package, gate in sorted(contracts)
+    ]
+
+
+def inherited_blockers(
+    cells: list[dict[str, Any]],
+    package_records: list[dict[str, Any]],
+    environments: list[dict[str, Any]],
+    root: Path,
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> dict[tuple[str, str, str], str]:
+    """The would-be inherited `cells` that published evidence requires to execute.
+
+    Asked of `local_evidence.blocking_evidence` over the plan these cells
+    would form if they were selected, builds included, so a result qualifies
+    for an inherited cell exactly as it would for a selected one: same tree or
+    gate-input equivalence, same backends and features, same supersession.
+    Notes are read from `root`'s repository.
+    """
+    if not cells:
+        return {}
+    import contextlib
+    import local_evidence  # local import: it imports this module
+
+    candidates = copy.deepcopy(cells)
+    builds = derive_build_records(candidates, package_records, environments, root, head)
+    with contextlib.chdir(root):
+        return local_evidence.blocking_evidence(
+            {"cells": candidates, "packages": package_records, "builds": builds},
+            head,
+            report_probe,
+        )
+
+
 def apply_policy_delta(
     selection: dict[str, Any],
     chosen: dict[str, Any],
     required: dict[str, Any],
     group: dict[str, Any],
     coverage_anchors: list[dict[str, Any]],
+    blockers: Callable[
+        [list[dict[str, Any]], list[dict[str, Any]]], dict[tuple[str, str, str], str]
+    ],
 ) -> None:
     """Add what current policy requires beyond the diff, and record each anchor.
 
     `required` is a full-scope selection of the group's environments evaluated
-    now, so an expired gap, a newly declared gate, or a newly required backend
-    shows up as a pending cell the anchor's certification never covered. Such
-    a cell is selected whatever the source diff says. A legacy anchor proves no
-    list of cells, so it is taken to cover everything a full selection now
-    requires that the diff does not reselect, and adds nothing.
+    now. A pending cell there is inherited from the anchor only when the
+    anchor's certification covered it under the same `coverage_contract`; an
+    expired gap, a newly declared gate, or a newly required backend or test
+    feature inside an existing gate is selected whatever the source diff says,
+    and evidence verification then decides whether it executes. A legacy
+    anchor recorded no contracts, so it establishes none and every required
+    cell the diff does not reselect is selected.
+
+    A covered cell is still not inherited when `blockers(cells, records)`
+    reports that published evidence for it (a later failure, or results
+    nothing orders) requires execution: the certification proved the anchor,
+    not every commit since, and no later step verifies an inherited cell. It
+    is selected and listed in `reopened_cells`; the anchor and every other
+    inherited cell stand.
     """
     full_records = {record["package"]: record for record in required["package_records"]}
     for name in group["environments"]:
@@ -3988,25 +4085,52 @@ def apply_policy_delta(
             for cell in required["cells"]
             if cell["environment"] == name and cell["state"] == "pending"
         }
+        contracts = required_contracts(required, name)
         selected = {
             (cell["package"], cell["gate"])
             for cell in chosen["cells"]
             if cell["environment"] == name
         }
         covered = entry["covered_cells"]
-        if covered is None:
-            delta: list[tuple[str, str]] = []
-            inherited = sorted(set(need) - selected)
-        else:
-            held = {(cell["package"], cell["gate"]) for cell in covered}
-            delta = sorted(set(need) - held - selected)
-            inherited = sorted((set(need) & held) - selected)
-        for package, gate in delta:
+        held = {
+            (cell["package"], cell["gate"]): cell["contract"] for cell in covered or []
+        }
+        proven = {key for key in need if held.get(key) == contracts[key]}
+        delta = sorted(set(need) - proven - selected)
+        blocked = blockers(
+            [need[key] for key in sorted(proven - selected)],
+            [full_records[package] for package in sorted({p for p, _ in proven - selected})],
+        )
+        reopened = sorted(key for key in proven - selected if (key[0], name, key[1]) in blocked)
+        inherited = sorted(proven - selected - set(reopened))
+        for package, gate in reopened:
             cell = copy.deepcopy(need[(package, gate)])
             cell["selection_reason"] = (
-                f"current policy requires {gate} on {name}, which the anchor's "
-                "certification does not cover"
+                f"the anchor's certification covers {gate} on {name}, but published "
+                f"evidence shows {blocked[(package, name, gate)]}"
             )
+            selection["cells"].append(cell)
+            if not any(record["package"] == package for record in selection["package_records"]):
+                record = copy.deepcopy(full_records[package])
+                record["selection_reason"] = cell["selection_reason"]
+                selection["package_records"].append(record)
+        for package, gate in delta:
+            cell = copy.deepcopy(need[(package, gate)])
+            if covered is None:
+                cell["selection_reason"] = (
+                    f"current policy requires {gate} on {name}; the legacy anchor "
+                    "recorded no coverage contract that could prove it"
+                )
+            elif (package, gate) in held:
+                cell["selection_reason"] = (
+                    f"current policy changed what {gate} on {name} must prove since "
+                    "the anchor's certification"
+                )
+            else:
+                cell["selection_reason"] = (
+                    f"current policy requires {gate} on {name}, which the anchor's "
+                    "certification does not cover"
+                )
             selection["cells"].append(cell)
             if not any(record["package"] == package for record in selection["package_records"]):
                 record = copy.deepcopy(full_records[package])
@@ -4017,6 +4141,8 @@ def apply_policy_delta(
         } | {
             "policy_delta": [{"package": p, "gate": g} for p, g in delta],
             "inherited_cells": [{"package": p, "gate": g} for p, g in inherited],
+            "reopened_cells": [{"package": p, "gate": g} for p, g in reopened],
+            "required_cells": contract_cells(contracts),
         })
     owned: dict[str, set[str]] = {}
     for cell in selection["cells"]:
@@ -4118,6 +4244,7 @@ def calculate_scope(
     renamed_from: Sequence[str] = (),
     input_reader: Callable[[str], str | None] | None = None,
     coverage_groups: Sequence[dict[str, Any]] | None = None,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -4160,9 +4287,13 @@ def calculate_scope(
     and the anchor record (`coverage_anchor_groups` builds them). Each group
     is selected on its own, the selections are unioned once per
     `{package, environment, gate}`, and the plan records every environment's
-    anchor, the cells current policy adds beyond the diff, and the cells the
-    anchor still covers. Without groups the single `files`/`force_all`
-    selection applies to every scheduled environment, exactly as before.
+    anchor, the cells current policy adds beyond the diff, the cells the
+    anchor still covers, and the covered cells published evidence reopens
+    (`apply_policy_delta`). Those notes are read from `root`'s repository at
+    `head`; `report_probe` is the verifier's artifact probe
+    (`local_evidence.verify_cells`). Without groups the single
+    `files`/`force_all` selection applies to every scheduled environment,
+    exactly as before.
     """
     packages = workspace_packages(metadata)
     graph = member_dependency_graph(metadata)
@@ -4489,12 +4620,22 @@ def calculate_scope(
                         key: value
                         for key, value in group["anchors"][name].items()
                         if key != "covered_cells"
-                    } | {"policy_delta": [], "inherited_cells": []})
+                    } | {
+                        "policy_delta": [],
+                        "inherited_cells": [],
+                        "reopened_cells": [],
+                        "required_cells": contract_cells(required_contracts(chosen, name)),
+                    })
                 continue
             required = select_group(
                 [], [], [], True, [by_name[name] for name in group["environments"]]
             )
-            apply_policy_delta(selection, chosen, required, group, coverage_anchors)
+            apply_policy_delta(
+                selection, chosen, required, group, coverage_anchors,
+                lambda cells, records: inherited_blockers(
+                    cells, records, environments, root, head, report_probe
+                ),
+            )
     package_records = selection["package_records"]
     cells = selection["cells"]
     source_ids = selection["source_ids"]
@@ -5694,6 +5835,15 @@ def parse_args() -> argparse.Namespace:
             "selections are unioned once per cell. Excludes --all and a file list"
         ),
     )
+    parser.add_argument(
+        "--artifact-repo",
+        metavar="OWNER/NAME",
+        help=(
+            "with --anchors: the repository whose workflow artifacts back hosted "
+            "observations, so a passing retry can supersede a failure on an "
+            "inherited cell (as `local_evidence.py verify --artifact-repo`)"
+        ),
+    )
     parser.add_argument("--base", default=NULL_OID, help="base revision under test")
     parser.add_argument("--head", default=NULL_OID, help="head revision under test")
     parser.add_argument(
@@ -5758,6 +5908,8 @@ def parse_args() -> argparse.Namespace:
             "--apply-to, --all, --all-environments, --proven-event, --deleted, "
             "--renamed-from, or a file list"
         )
+    if args.artifact_repo and not args.anchors:
+        parser.error("--artifact-repo probes inherited coverage and needs --anchors")
     if args.apply_to and (
         args.all or args.files or args.constraints or args.deleted or args.renamed_from
         or args.event or args.all_environments or args.proven_event
@@ -5846,12 +5998,17 @@ def main() -> None:
         validate_no_shadow_workspaces(metadata, ROOT)
         policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
         groups = None
+        probe = None
         if args.anchors:
             groups = coverage_anchor_groups(
                 schema.loads_strict(Path(args.anchors).read_text(encoding="utf-8")),
                 args.head,
                 ROOT,
             )
+            if args.artifact_repo:
+                import hosted_observations  # noqa: PLC0415  (only the nightly reaches the network)
+
+                probe = hosted_observations.gh_probe(args.artifact_repo)
         plan = calculate_scope(
             args.files,
             ROOT,
@@ -5871,6 +6028,7 @@ def main() -> None:
             deleted=args.deleted,
             renamed_from=args.renamed_from,
             coverage_groups=groups,
+            report_probe=probe,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")

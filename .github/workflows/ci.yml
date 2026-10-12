@@ -117,9 +117,12 @@ jobs:
     # while the events agree — and then every job downstream skips.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    # `actions: read` is for the nightly's anchor lookup alone (the run list,
-    # the per-environment certification artifacts, and a legacy run's jobs).
-    # Nothing here writes.
+    # `actions: read` is for reading Actions data: the nightly's anchor lookup
+    # (the run list, the per-environment certification artifacts, and a legacy
+    # run's jobs), the hosted-artifact probe behind evidence verification, and
+    # the nightly's recovery of earlier runs' observation artifacts. Nothing
+    # here writes anything remote; that recovery writes notes in this runner's
+    # own checkout only.
     permissions:
       contents: read
       actions: read
@@ -211,6 +214,26 @@ jobs:
               # `nightly-anchors` to a visible full-scope fallback, never to
               # a narrower plan.
               python3 scripts/ci/reuse_validation.py nightly-anchors > nightly-anchors.json
+              # Earlier nightlies' finished hosted cells whose run never
+              # reached `publish-observations` (force-cancelled, lost runner,
+              # timed out) exist only as `observation-*` artifacts. Record the
+              # newest scheduled runs' ones in THIS checkout's notes (no push:
+              # this job writes nothing remote) BEFORE planning: the planner
+              # reopens an anchored cell that a recovered failure contradicts,
+              # and the verifier below vouches for recovered passes like any
+              # other observation. A failure here only costs reuse, so it
+              # warns and carries on.
+              recovery_status=0
+              GIT_AUTHOR_NAME='github-actions[bot]' \
+              GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+              GIT_COMMITTER_NAME='github-actions[bot]' \
+              GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+                python3 scripts/ci/hosted_observations.py publish \
+                  --repository "$GITHUB_REPOSITORY" --recent --no-push \
+                || recovery_status=$?
+              if (( recovery_status != 0 )); then
+                echo "::warning title=CI scope::recovering earlier nightlies' hosted observations ended with exit ${recovery_status}; a cell it could not recover executes"
+              fi
               base="0000000000000000000000000000000000000000"
               head="$PUSH_HEAD"
             else
@@ -219,7 +242,9 @@ jobs:
             fi
 
             if [[ "$EVENT_NAME" == "schedule" ]]; then
-              scope_args=(--anchors nightly-anchors.json)
+              # The probe lets a hosted passing retry supersede a failure on
+              # a cell the anchor would otherwise lend this run.
+              scope_args=(--anchors nightly-anchors.json --artifact-repo "$GITHUB_REPOSITORY")
             elif [[ -z "$base" || "$base" =~ ^0+$ ]]; then
               scope_args=(--all)
             else
@@ -1026,11 +1051,15 @@ jobs:
   # fold of what blocks a merge); a failure here fails the RUN instead, so a
   # nightly whose proof could not be published is visibly red.
   #
-  # RESIDUAL RISK. On a cancelled run `always()` still schedules this job under
-  # a normal cancel, but a force-cancel, a lost runner, or the 15-minute limit
-  # leaves the observations as artifacts (90 days) with no note. Nothing is
-  # fabricated: the next nightly simply executes those cells again, and
-  # `hosted_observations.py publish --run-id N` recovers them by hand.
+  # WHEN IT DOES NOT RUN. On a cancelled run `always()` still schedules this
+  # job under a normal cancel, but a force-cancel, a lost runner, or the
+  # 15-minute limit leaves the observations as artifacts (90 days) with no
+  # note. Recovery is automatic and bounded: the next nightly's `scope` job
+  # records the newest `RECOVERY_RUNS` completed scheduled runs' observations
+  # locally before it plans, and this job's second step pushes them. A run
+  # older than that window is reached only by `publish --run-id N` by hand.
+  # Nothing is fabricated: an observation whose artifacts expired earns no
+  # credit, and its cell executes.
   #
   # UNVERIFIED. Whether the repository's rulesets let `GITHUB_TOKEN` push
   # `refs/notes/*`. If they do not, the push is refused, the step fails red
@@ -1050,9 +1079,12 @@ jobs:
       contents: write
       actions: read
     steps:
+      # Full history: an earlier run's observation names that run's head,
+      # which must be present to carry a note.
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.scope.outputs.head }}
+          fetch-depth: 0
       # `git notes` needs a committer. This is the workflow's own identity, not
       # an author's: nothing here is a commit anyone wrote.
       - name: Publish this run's observations
@@ -1068,6 +1100,23 @@ jobs:
           python3 scripts/ci/hosted_observations.py publish \
             --repository "$GITHUB_REPOSITORY" \
             --run-id "$GITHUB_RUN_ID"
+      # Pushes what the `scope` job could only record locally: earlier
+      # nightlies' observations whose own run never published them. `always()`
+      # so this run's publication failing does not also withhold theirs.
+      - name: Publish earlier nightlies' unpublished observations
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py publish \
+            --repository "$GITHUB_REPOSITORY" \
+            --recent
 
   # The run's reader-facing account of itself, in exactly three modes
   # (specification section 6): a reused whole-PR validation, a successful scope,
