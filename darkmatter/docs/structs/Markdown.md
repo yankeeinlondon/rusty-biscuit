@@ -398,20 +398,29 @@ for img in &html_images {
 
 ## Cleanup and Formatting
 
-Cleanup methods normalize whitespace and formatting. All return `&mut Self` for method chaining.
+Cleanup methods format the body under the [`style.markdown`
+rules](../topics/markdown-formatting.md) without changing its meaning. When a
+result would change the document's structure, the body is left unchanged. Both
+return `&mut Self` for method chaining.
 
 | Method | Behavior |
 |--------|----------|
-| `cleanup()` | Injects blank lines between block elements; aligns table columns |
-| `cleanup_with_indent(size)` | Cleanup + enforces consistent list indentation width |
-| `cleanup_compact()` | Cleanup with compact lists (no blank lines between items) |
-| `cleanup_loose()` | Cleanup with loose lists (blank lines between all items) |
-| `cleanup_with_indent_compact(size)` | Custom indentation + compact lists |
-| `cleanup_with_indent_loose(size)` | Custom indentation + loose lists |
+| `cleanup()` | Formats the body under the built-in default rules |
+| `cleanup_with(&overrides)` | Formats with explicit `MarkdownRuleOverrides` (indentation, list spacing, width, …) taking precedence over the defaults |
+
+These methods read neither the document's own `style.markdown` nor its
+frontmatter. To clean a whole raw document the way `md clean` does
+(frontmatter repair, document rules, an outcome and diagnostics), use
+`markdown::cleanup::clean_document`.
 
 ```rust
-let mut md = Markdown::new("- one\n- two\n## Next\ntext");
-md.cleanup();
+use darkmatter::markdown::cleanup::rules::{Leaf, ListItemPadding, MarkdownRuleOverrides};
+
+let mut md: Markdown = "- one\n\n- two\n".into();
+md.cleanup_with(&MarkdownRuleOverrides {
+    list_item_padding: Leaf::Value(ListItemPadding::None),
+    ..MarkdownRuleOverrides::default()
+});
 ```
 
 ## Section Removal

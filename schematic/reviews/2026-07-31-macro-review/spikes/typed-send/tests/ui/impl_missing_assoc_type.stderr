@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `Failure`
+ --> tests/ui/impl_missing_assoc_type.rs:5:1
+  |
+5 | impl Endpoint for Bad {
+  | ^^^^^^^^^^^^^^^^^^^^^ missing `Failure` in implementation
+  |
+  = help: implement the missing item: `type Failure = /* Type */;`

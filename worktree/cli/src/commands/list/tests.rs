@@ -414,6 +414,7 @@ mod gather {
             source_repo: Some("owner/repo".into()),
             source_branch: "feat".into(),
             target_branch: "main".into(),
+            status: worktree::pull_requests::PrCheckStatus::Unknown,
         }]
     }
 

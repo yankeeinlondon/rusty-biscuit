@@ -1,0 +1,28 @@
+[package]
+name = "typed-send-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway spike: typed send + Response<T, E> envelope (D3/D6/D7/D17/D21)"
+
+# Empty table: this crate is NOT a member of the rusty-biscuit workspace.
+[workspace]
+
+[features]
+# Synthetic 550-endpoint files used only for compile-time measurement (Q4).
+synthetic-old = []
+synthetic-new = []
+synthetic-new-calls = ["synthetic-new"]
+
+[dependencies]
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "io-util"] }
+
+[dev-dependencies]
+trybuild = "1"
+wiremock = "0.6"

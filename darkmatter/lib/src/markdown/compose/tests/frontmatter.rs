@@ -220,7 +220,8 @@ fn bare_sidecar_composes_with_one_typed_warning_in_one_validation_pass() {
         .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&document_path)))
         .unwrap();
 
-    assert_eq!(composed.content(), "Body unchanged.\n");
+    // The body is returned without its final newline; cleanup no longer adds one.
+    assert_eq!(composed.content(), "Body unchanged.");
     assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
     assert_eq!(
         report.warnings[0].code.as_deref(),
@@ -254,7 +255,8 @@ fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
         )
         .unwrap();
 
-    assert_eq!(composed.content(), "Body unchanged.\n");
+    // The body is returned without its final newline; cleanup no longer adds one.
+    assert_eq!(composed.content(), "Body unchanged.");
     assert_eq!(composed.frontmatter().as_map().get("title"), Some(&serde_json::json!("unchanged")));
     assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
     let warning = &report.warnings[0];
@@ -293,7 +295,8 @@ fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
         .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
         .unwrap();
 
-    assert_eq!(composed.content(), "Child body.\n");
+    // Cleanup no longer collapses the transclusion's trailing blank line.
+    assert_eq!(composed.content(), "Child body.\n\n");
     let warnings: Vec<_> = report
         .warnings
         .iter()

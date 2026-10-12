@@ -2197,13 +2197,15 @@ fn collect_edit_uris(edit: &Value) -> Vec<String> {
 }
 
 #[test]
-fn formatting_is_byte_equivalent_to_library_cleanup() {
+fn formatting_returns_the_library_clean_transaction_output() {
     let workspace = LspWorkspace::new();
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let doc_uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
-    let source = "# Title\nParagraph one.\n## Sub\nMore text.\n";
+    // Headings without surrounding blank lines are kept as authored; the
+    // defaults pad the list, renumber it, and label the fence.
+    let source = "# Title\nParagraph one.\n## Sub\n1. a\n3. b\n\n```\ncode\n```\n";
     open(&fixture, doc_uri.as_str(), source);
 
     let edits = fixture
@@ -2219,10 +2221,26 @@ fn formatting_is_byte_equivalent_to_library_cleanup() {
     let edits = edits.as_array().expect("formatting edits");
     assert_eq!(edits.len(), 1, "whole-document replacement expected");
 
-    // Spec criterion 8: the edit is exactly the library cleanup output.
-    let mut md: darkmatter::markdown::Markdown = source.into();
-    md.cleanup();
-    let expected = md.as_string();
+    // The edit is exactly the library transaction's output.
+    let expected = darkmatter::markdown::cleanup::clean_document(
+        &darkmatter::markdown::cleanup::CleanRequest {
+            source,
+            overrides: &Default::default(),
+            workspace: Some(&Default::default()),
+            document_path: None,
+        },
+        || {
+            Ok::<_, std::convert::Infallible>(darkmatter::markdown::schemas::CleanSchemaConfig::new(
+                biscuit_file::FileResolutionContext::new(workspace.path()),
+            ))
+        },
+    )
+    .expect("clean_document runs")
+    .text;
+    assert_eq!(
+        expected,
+        "# Title\nParagraph one.\n## Sub\n\n1. a\n2. b\n\n```text\ncode\n```\n"
+    );
     assert_eq!(edits[0]["newText"], json!(expected));
 
     fixture.shutdown();

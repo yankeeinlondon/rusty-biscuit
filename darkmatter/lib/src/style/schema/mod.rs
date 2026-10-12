@@ -24,6 +24,9 @@ use serde::Deserialize;
 
 /// Root of the `style:` frontmatter tree. Every bucket is `Option` so a
 /// sparse user document does not materialize default values across the tree.
+///
+/// `style.markdown` has no field: it holds cleanup rules, which the parser
+/// validates through `markdown::cleanup::rules` and rendering never reads.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct StyleFrontmatter {

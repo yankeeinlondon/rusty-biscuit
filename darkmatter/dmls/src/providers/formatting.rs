@@ -1,387 +1,306 @@
-//! Whole-document formatting backed by the Darkmatter cleanup pipeline
-//! (spec criterion 8).
+//! Whole-document formatting: the library clean transaction over the
+//! editor's current buffer.
 //!
-//! `textDocument/formatting` delegates to the same `Markdown::cleanup` sequence
-//! the `md clean` CLI runs, so DMLS formatting is byte-equivalent to the library
-//! for the configured options ([`FormattingConfig`](crate::config::FormattingConfig)):
-//! the cleanup variant, then an optional fixed-width reflow. Frontmatter and
-//! directive lines pass through untouched — cleanup only normalizes body prose,
-//! list, and table geometry, and the frontmatter round-trips through the same
-//! `as_string` path the CLI uses.
+//! `textDocument/formatting` runs [`clean_document`], the transaction `md
+//! clean` runs, on the exact unsaved buffer (never a disk read): frontmatter
+//! repair, one passive read of the document's `style.markdown`, rule
+//! resolution (document over the workspace `formatting.markdown` over the
+//! runtime default; DMLS has no caller-level overrides), guarded body
+//! formatting, and reassembly. Nothing is composed, executed, or fetched.
+//!
+//! The transaction either accepts the whole candidate or keeps the source, so
+//! the provider returns one whole-document edit only for
+//! [`CleanOutcome::Changed`]. A refusal (`Declined`), frontmatter Darkmatter
+//! cannot load (`Invalid`), or a repair error returns no edits and one warning
+//! for the router to show; the provider itself sends nothing. Warning positions are
+//! converted from source bytes into the client's negotiated position
+//! encoding.
 
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::cleanup::reflow_to_width;
+use darkmatter::markdown::cleanup::diagnostic::{CleanDiagnostic, CleanStage};
+use darkmatter::markdown::cleanup::rules::MarkdownRuleOverrides;
+use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
+use darkmatter::markdown::schemas::CleanSchemaConfig;
 use lsp_types::{Position, Range, TextEdit};
 
 use super::DocumentContext;
-use crate::config::{CleanupVariant, DmlsConfig};
+use crate::workspace::uri_to_file_path;
 
-/// Whole-document formatting edits for the current buffer.
+/// What a formatting request produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FormattingOutcome {
+    /// One whole-document replacement, or none.
+    pub edits: Vec<TextEdit>,
+    /// Messages the router shows at `Warning` level; at most one, and only
+    /// when formatting could not run or declined.
+    pub warnings: Vec<String>,
+}
+
+/// Formats the current buffer of `ctx`.
 ///
-/// ## Returns
-///
-/// A single full-document replacement, or an empty vec when the document is
-/// already canonical (the client applies nothing) or the end position cannot be
-/// mapped.
-pub fn formatting(ctx: &DocumentContext) -> Vec<TextEdit> {
-    let formatted = format_text(ctx.text, ctx.config);
-    if formatted == ctx.text {
-        return Vec::new();
-    }
-    let Some(range) = whole_document_range(ctx) else {
-        return Vec::new();
+/// Only a `file:` document passes its path to the transaction; an
+/// `untitled:` buffer gets no trigger-schema discovery.
+pub fn formatting(ctx: &DocumentContext) -> FormattingOutcome {
+    let document_path = uri_to_file_path(ctx.uri).is_some().then_some(ctx.path);
+    let request = CleanRequest {
+        source: ctx.text,
+        overrides: &MarkdownRuleOverrides::default(),
+        workspace: Some(&ctx.config.formatting.markdown),
+        document_path,
     };
-    vec![TextEdit {
-        range,
-        new_text: formatted,
-    }]
+    let result = clean_document(&request, || {
+        ctx.file_context()
+            .map(|context| CleanSchemaConfig::new(context.clone()))
+            .map_err(Clone::clone)
+    });
+    match result {
+        Ok(result) => outcome(ctx, result),
+        Err(error) => FormattingOutcome {
+            edits: Vec::new(),
+            warnings: vec![format!(
+                "formatting left the document unchanged: {error}"
+            )],
+        },
+    }
 }
 
-/// Runs the configured cleanup over `text`.
-///
-/// Mirrors `md clean`'s `apply_cleanup` (with no explicit indent): the variant
-/// cleanup first, then a fixed-width reflow of the body when configured. The
-/// document is reassembled through `Markdown::as_string`, exactly as the CLI
-/// does, so the output is byte-identical to the library for the same options.
-pub fn format_text(text: &str, config: &DmlsConfig) -> String {
-    let mut md: Markdown = text.into();
-    match config.formatting.cleanup {
-        CleanupVariant::Default => {
-            md.cleanup();
-        }
-        CleanupVariant::Compact => {
-            md.cleanup_compact();
-        }
-        CleanupVariant::Loose => {
-            md.cleanup_loose();
-        }
+fn outcome(ctx: &DocumentContext, result: CleanResult) -> FormattingOutcome {
+    match result.outcome {
+        CleanOutcome::Changed => FormattingOutcome {
+            edits: whole_document_edit(ctx, result.text).into_iter().collect(),
+            warnings: Vec::new(),
+        },
+        CleanOutcome::Unchanged => FormattingOutcome::default(),
+        CleanOutcome::Declined => FormattingOutcome {
+            edits: Vec::new(),
+            warnings: vec![declined_message(ctx, &result.diagnostics)],
+        },
+        CleanOutcome::Invalid => FormattingOutcome {
+            edits: Vec::new(),
+            warnings: vec![invalid_message(ctx, &result.diagnostics)],
+        },
     }
-    if let Some(width) = config.formatting.fixed_width {
-        let reflowed = reflow_to_width(md.content(), width as usize);
-        *md.content_mut() = reflowed;
-    }
-    md.as_string()
 }
 
-/// The range spanning the whole document (start through the mapped EOF).
-fn whole_document_range(ctx: &DocumentContext) -> Option<Range> {
+/// The fidelity refusal, restated at the client's 1-based line and column.
+fn declined_message(ctx: &DocumentContext, diagnostics: &[CleanDiagnostic]) -> String {
+    let Some((diagnostic, fallback)) = diagnostics
+        .iter()
+        .rev()
+        .find_map(|diagnostic| diagnostic.fallback.as_ref().map(|fallback| (diagnostic, fallback)))
+    else {
+        return "formatting left the document unchanged".to_string();
+    };
+    match display_position(ctx, fallback.offset) {
+        Some((line, column)) => fallback.message(line, column),
+        None => diagnostic.message.clone(),
+    }
+}
+
+/// The first YAML syntax finding that kept the frontmatter from parsing.
+fn invalid_message(ctx: &DocumentContext, diagnostics: &[CleanDiagnostic]) -> String {
+    let finding = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.stage == CleanStage::Syntax)
+        .or_else(|| diagnostics.first());
+    let Some(finding) = finding else {
+        return "formatting left the document unchanged: the frontmatter is not valid YAML"
+            .to_string();
+    };
+    match display_position(ctx, finding.span.start) {
+        Some((line, column)) => format!(
+            "formatting left the document unchanged: the frontmatter is not valid YAML at line \
+             {line}, column {column}: {}",
+            finding.message
+        ),
+        None => format!(
+            "formatting left the document unchanged: the frontmatter is not valid YAML: {}",
+            finding.message
+        ),
+    }
+}
+
+/// `offset` as a 1-based line and column in the negotiated encoding.
+fn display_position(ctx: &DocumentContext, offset: usize) -> Option<(usize, usize)> {
+    let position = ctx.source_map.byte_to_lsp(offset.min(ctx.text.len()))?;
+    Some((position.line as usize + 1, position.character as usize + 1))
+}
+
+fn whole_document_edit(ctx: &DocumentContext, new_text: String) -> Option<TextEdit> {
     let end = ctx.source_map.byte_to_lsp(ctx.text.len())?;
-    Some(Range::new(Position::new(0, 0), end))
+    Some(TextEdit {
+        range: Range::new(Position::new(0, 0), end),
+        new_text,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use darkmatter::markdown::cleanup::rules::{FixedWidth, Leaf, ListItemPadding};
+    use lsp_types::{InitializeParams, Uri};
+
     use super::*;
+    use crate::capabilities::ClientProfile;
     use crate::config::DmlsConfig;
+    use crate::context::test_support::resolution_in;
+    use crate::graph::WorkspaceGraph;
+    use crate::source_map::{PositionEncoding, SourceMap};
 
-    /// The provider output must equal the library cleanup sequence verbatim
-    /// (spec criterion 8): DMLS adds no formatting of its own.
-    #[test]
-    fn test_format_text_is_byte_equivalent_to_library_cleanup() {
-        let source = "# Title\nParagraph one.\n## Sub\ntext";
-        let config = DmlsConfig::default();
-
-        let mut md: Markdown = source.into();
-        md.cleanup();
-        let expected = md.as_string();
-
-        assert_eq!(format_text(source, &config), expected);
-    }
-
-    #[test]
-    fn test_format_text_honors_compact_variant() {
-        let source = "- a\n\n- b\n";
-        let mut config = DmlsConfig::default();
-        config.formatting.cleanup = CleanupVariant::Compact;
-
-        let mut md: Markdown = source.into();
-        md.cleanup_compact();
-        assert_eq!(format_text(source, &config), md.as_string());
-    }
-
-    #[test]
-    fn test_format_text_applies_fixed_width_reflow() {
-        let source = "One two three four five six seven eight nine ten eleven twelve.\n";
-        let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(20);
-
-        let mut md: Markdown = source.into();
-        md.cleanup();
-        let reflowed = reflow_to_width(md.content(), 20);
-        *md.content_mut() = reflowed;
-        assert_eq!(format_text(source, &config), md.as_string());
-    }
-
-    #[test]
-    fn test_format_text_keeps_reference_definitions_intact() {
-        let source = concat!(
-            "- Before [label][ref] alpha beta gamma delta.\n",
-            "\n",
-            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+    /// Runs the provider over `text` saved nowhere but named `doc.md` inside
+    /// a fresh directory, under `config`.
+    fn format(text: &str, config: &DmlsConfig) -> FormattingOutcome {
+        let root = tempfile::tempdir().expect("tempdir");
+        let path = root.path().join("doc.md");
+        let uri: Uri = url::Url::from_file_path(&path)
+            .expect("file url")
+            .as_str()
+            .parse()
+            .expect("uri");
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build(
+            &BTreeMap::new(),
+            1,
+            &crate::context::test_support::workspace_contexts(),
         );
+        let profile =
+            ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let resolution = resolution_in(root.path(), &path);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path: &path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config,
+            profile: &profile,
+            overlay: None,
+            resolution: &resolution,
+        };
+        formatting(&ctx)
+    }
+
+    /// The single edit's text, asserting it replaces the whole document.
+    fn formatted(text: &str, config: &DmlsConfig) -> String {
+        let outcome = format(text, config);
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+        assert_eq!(outcome.edits.len(), 1, "one whole-document edit");
+        assert_eq!(outcome.edits[0].range.start, Position::new(0, 0));
+        outcome.edits[0].new_text.clone()
+    }
+
+    fn workspace(configure: impl FnOnce(&mut DmlsConfig)) -> DmlsConfig {
         let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+        configure(&mut config);
+        config
+    }
 
-        let mut md: Markdown = source.into();
-        md.cleanup();
-        let reflowed = reflow_to_width(md.content(), 24);
-        *md.content_mut() = reflowed;
-        let expected = md.as_string();
+    #[test]
+    fn default_rules_renumber_an_ordered_list() {
+        let source = "1. a\n3. b\n8. c\n";
 
-        assert_eq!(format_text(source, &config), expected);
+        assert_eq!(formatted(source, &DmlsConfig::default()), "1. a\n2. b\n3. c\n");
+    }
+
+    #[test]
+    fn workspace_list_item_padding_none_tightens_a_list() {
+        let config = workspace(|config| {
+            config.formatting.markdown.list_item_padding = Leaf::Value(ListItemPadding::None);
+        });
+
+        assert_eq!(formatted("- a\n\n- b\n", &config), "- a\n- b\n");
+    }
+
+    #[test]
+    fn workspace_fixed_width_reflows_prose() {
+        let config = workspace(|config| {
+            config.formatting.markdown.fixed_width = Leaf::Value(FixedWidth::Columns(20));
+        });
+        let source = "One two three four five six seven eight nine ten.\n";
+
         assert_eq!(
-            expected,
+            formatted(source, &config),
+            "One two three four\nfive six seven eight\nnine ten.\n"
+        );
+    }
+
+    #[test]
+    fn document_style_markdown_beats_the_workspace() {
+        let config = workspace(|config| {
+            config.formatting.markdown.list_item_padding = Leaf::Value(ListItemPadding::None);
+        });
+        let source = "---\nstyle:\n  markdown:\n    list-item-padding: one\n---\n- a\n- b\n";
+
+        assert_eq!(
+            formatted(source, &config),
+            "---\nstyle:\n  markdown:\n    list-item-padding: one\n---\n- a\n\n- b\n"
+        );
+    }
+
+    #[test]
+    fn invalid_document_rules_are_ignored_while_workspace_rules_apply() {
+        let config = workspace(|config| {
+            config.formatting.markdown.list_item_padding = Leaf::Value(ListItemPadding::None);
+        });
+        // `indentation: 3` is not a valid value, so the whole object is
+        // ignored, including its otherwise valid `list-item-padding`.
+        let source = concat!(
+            "---\nstyle:\n  markdown:\n    list-item-padding: one\n    indentation: 3\n---\n",
+            "- a\n\n- b\n"
+        );
+
+        assert_eq!(
+            formatted(source, &config),
             concat!(
-                "- Before [label][ref]\n",
-                "  alpha beta gamma\n",
-                "  delta.\n",
-                "\n",
-                "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+                "---\nstyle:\n  markdown:\n    list-item-padding: one\n    indentation: 3\n---\n",
+                "- a\n- b\n"
             )
         );
     }
 
     #[test]
-    fn test_format_text_reflows_complete_list_paragraph_like_library_cleanup() {
-        let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
-        let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+    fn repairable_frontmatter_is_repaired_as_clean_document_repairs_it() {
+        let source = "---\ntitle: Doc   \n---\nBody.\n";
+        let expected = clean_document(
+            &CleanRequest {
+                source,
+                overrides: &MarkdownRuleOverrides::default(),
+                workspace: Some(&MarkdownRuleOverrides::default()),
+                document_path: None,
+            },
+            || Ok::<_, std::convert::Infallible>(CleanSchemaConfig::new(
+                crate::context::test_support::workspace_context(),
+            )),
+        )
+        .expect("clean");
+        assert_eq!(expected.outcome, CleanOutcome::Changed);
 
-        let mut md: Markdown = source.into();
-        md.cleanup();
-        let reflowed = reflow_to_width(md.content(), 24);
-        *md.content_mut() = reflowed;
-        let expected = md.as_string();
-
-        assert_eq!(format_text(source, &config), expected);
-        assert_eq!(
-            expected,
-            "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta.\n"
-        );
+        assert_eq!(formatted(source, &DmlsConfig::default()), expected.text);
+        assert_eq!(expected.text, "---\ntitle: Doc\n---\nBody.\n");
     }
 
     #[test]
-    fn test_format_text_preserves_nested_lists_inside_blockquotes() {
-        let fixtures = [
-            concat!(
-                "> - Parent alpha beta gamma delta epsilon.\n",
-                ">   - Child alpha beta gamma delta epsilon.\n"
-            ),
-            concat!(
-                "> 1. Parent alpha beta gamma delta epsilon.\n",
-                ">    1. Child alpha beta gamma delta epsilon.\n"
-            ),
-            concat!(
-                "> - [ ] Parent alpha beta gamma delta epsilon.\n",
-                ">   - [x] Child alpha beta gamma delta epsilon.\n"
-            ),
-        ];
-        let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
-
-        for source in fixtures {
-            let mut md: Markdown = source.into();
-            md.cleanup();
-            let reflowed = reflow_to_width(md.content(), 24);
-            *md.content_mut() = reflowed;
-
-            assert_eq!(format_text(source, &config), md.as_string());
-        }
-    }
-
-    #[test]
-    fn test_format_text_preserves_additional_paragraphs_inside_blockquoted_items() {
-        let fixtures = [
-            (
-                "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
-                CleanupVariant::Default,
-            ),
-            (
-                "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
-                CleanupVariant::Compact,
-            ),
-            (
-                "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
-                CleanupVariant::Loose,
-            ),
-        ];
-
-        for (source, cleanup) in fixtures {
-            let mut config = DmlsConfig::default();
-            config.formatting.cleanup = cleanup;
-            config.formatting.fixed_width = Some(24);
-
-            let mut direct: Markdown = source.into();
-            match cleanup {
-                CleanupVariant::Default => direct.cleanup(),
-                CleanupVariant::Compact => direct.cleanup_compact(),
-                CleanupVariant::Loose => direct.cleanup_loose(),
-            };
-            *direct.content_mut() = reflow_to_width(direct.content(), 24);
-            let expected = direct.as_string();
-
-            assert_eq!(format_text(source, &config), expected);
-            assert_eq!(format_text(&expected, &config), expected);
-        }
-    }
-
-    #[test]
-    fn test_format_text_preserves_markers_in_protected_bodies() {
-        let fixtures = [
-            (
-                concat!(
-                    "::shell-block\n",
-                    "- first literal\n",
-                    "+ second literal\n",
-                    "* third literal\n",
-                    "1. ordered literal\n",
-                    "- [ ] task literal\n",
-                    "::end-block\n",
-                    "\n",
-                    "+ Actual item long enough to wrap at width twenty four.\n"
-                ),
-                concat!(
-                    "::shell-block\n",
-                    "- first literal\n",
-                    "+ second literal\n",
-                    "* third literal\n",
-                    "1. ordered literal\n",
-                    "- [ ] task literal\n",
-                    "::end-block\n",
-                    "\n",
-                    "+ Actual item long\n",
-                    "  enough to wrap at\n",
-                    "  width twenty four.\n"
-                ),
-            ),
-            (
-                concat!(
-                    "> ::shell-block\n",
-                    "> - first literal\n",
-                    "> + second literal\n",
-                    "> * third literal\n",
-                    "> 1. ordered literal\n",
-                    "> - [ ] task literal\n",
-                    "> ::end-block\n",
-                    "> \n",
-                    "> + Actual item long enough to wrap at width twenty four.\n"
-                ),
-                concat!(
-                    "> ::shell-block\n",
-                    "> - first literal\n",
-                    "> + second literal\n",
-                    "> * third literal\n",
-                    "> 1. ordered literal\n",
-                    "> - [ ] task literal\n",
-                    "> ::end-block\n",
-                    "> \n",
-                    "> + Actual item long\n",
-                    ">   enough to wrap at\n",
-                    ">   width twenty four.\n"
-                ),
-            ),
-            (
-                concat!(
-                    "::shell-block\n",
-                    "- first literal\n",
-                    "::block condition\n",
-                    "+ second literal\n",
-                    "::end-block\n",
-                    "- third source line\n",
-                    "  continuation remains literal\n",
-                    "::end-block\n",
-                    "\n",
-                    "+ Actual item long enough to wrap at width twenty four.\n"
-                ),
-                concat!(
-                    "::shell-block\n",
-                    "- first literal\n",
-                    "::block condition\n",
-                    "+ second literal\n",
-                    "::end-block\n",
-                    "- third source line\n",
-                    "  continuation remains literal\n",
-                    "::end-block\n",
-                    "\n",
-                    "+ Actual item long\n",
-                    "  enough to wrap at\n",
-                    "  width twenty four.\n"
-                ),
-            ),
-        ];
-        let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
-
-        for (source, expected) in fixtures {
-            assert_eq!(format_text(source, &config), expected);
-            assert_eq!(format_text(expected, &config), expected);
-        }
-    }
-
-    #[test]
-    fn test_format_text_preserves_ten_digit_prose_boundary() {
+    fn frontmatter_false_leaves_the_block_byte_identical() {
         let source = concat!(
-            "123456789) nine-digit item\n",
-            "\n",
-            "- first unordered item\n",
-            "\n",
-            "1. first ordered item\n",
-            "\n",
-            "1234567890. ten-digit prose\n",
-            "\n",
-            "+ second unordered item\n",
-            "\n",
-            "2. second ordered item\n"
+            "---\ntitle: Doc   \nstyle:\n  markdown:\n    frontmatter: false\n---\n",
+            "1. a\n3. b\n"
         );
-        let mut config = DmlsConfig::default();
-        config.formatting.cleanup = CleanupVariant::Loose;
 
-        let mut direct: Markdown = source.into();
-        direct.cleanup_loose();
-        let expected = direct.as_string();
-
-        assert_eq!(format_text(source, &config), expected);
-        assert!(expected.contains("1234567890. ten-digit prose\n\n+ second unordered"));
-        assert_eq!(format_text(&expected, &config), expected);
+        assert_eq!(
+            formatted(source, &DmlsConfig::default()),
+            concat!(
+                "---\ntitle: Doc   \nstyle:\n  markdown:\n    frontmatter: false\n---\n",
+                "1. a\n2. b\n"
+            )
+        );
     }
 
     #[test]
-    fn test_format_text_preserves_quoted_marker_looking_indented_code() {
-        let fixtures = [
-            "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
-            "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
-            "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
-            "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
-        ];
-        let mut config = DmlsConfig::default();
-        config.formatting.fixed_width = Some(24);
+    fn an_unchanged_document_gets_no_edit_and_no_warning() {
+        let outcome = format("# Title\n\nParagraph.\n", &DmlsConfig::default());
 
-        for source in fixtures {
-            let mut direct: Markdown = source.into();
-            direct.cleanup();
-            *direct.content_mut() = reflow_to_width(direct.content(), 24);
-            let expected = direct.as_string();
-
-            assert_eq!(format_text(source, &config), expected);
-            assert_eq!(format_text(&expected, &config), expected);
-        }
-    }
-
-    #[test]
-    fn test_format_text_preserves_frontmatter_and_directive_lines() {
-        let source = "---\ntitle: Doc\n---\n\n# Body\n\n::file ./intro.md\n";
-        let config = DmlsConfig::default();
-        let formatted = format_text(source, &config);
-        // A round-trippable frontmatter key and a directive line both survive.
-        assert!(formatted.contains("title: Doc"));
-        assert!(formatted.contains("::file ./intro.md"));
-    }
-
-    #[test]
-    fn test_format_text_idempotent_on_canonical_document() {
-        let source = "# Title\n\nParagraph.\n";
-        let config = DmlsConfig::default();
-        let once = format_text(source, &config);
-        assert_eq!(format_text(&once, &config), once);
+        assert_eq!(outcome, FormattingOutcome::default());
     }
 }

@@ -1307,6 +1307,7 @@ mod stored_prs {
                     source_repo: Some("owner/repo".into()),
                     source_branch: "feat".into(),
                     target_branch: "main".into(),
+                    status: crate::pull_requests::PrCheckStatus::Unknown,
                 }],
                 credentials: CredentialEvidence::Anonymous,
             })

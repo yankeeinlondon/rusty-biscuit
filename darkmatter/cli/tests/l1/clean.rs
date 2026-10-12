@@ -47,21 +47,19 @@ fn test_clean_subcommand_indent() {
 }
 
 #[test]
-fn test_clean_subcommand_strips_incidental_newlines_by_default() {
+fn test_clean_subcommand_preserves_soft_breaks_by_default() {
     let fixture = CliProcessFixture::named(
-        "clean-test-clean-subcommand-strips-incidental-newlines-by-default",
+        "clean-test-clean-subcommand-preserves-soft-breaks-by-default",
     );
-    fixture.command()
+    let source = "This paragraph was wrapped by an editor at a fixed column\n\
+                  even though Markdown treats it as one paragraph.\n";
+    fixture
+        .command()
         .args(["clean", "-"])
-        .write_stdin(
-            "This paragraph was wrapped by an editor at a fixed column\n\
-             even though Markdown treats it as one paragraph.\n",
-        )
+        .write_stdin(source)
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "This paragraph was wrapped by an editor at a fixed column even though Markdown treats it as one paragraph.",
-        ));
+        .stdout(source);
 }
 
 #[test]
@@ -127,29 +125,11 @@ fn test_clean_line_width_modes_preserve_mixed_document_structure() {
     let cases = [
         (
             vec!["clean", "-"],
-            concat!(
-                "A top-level paragraph is deliberately long enough to wrap differently at forty and eighty display columns. ",
-                "It also contains an authored incidental newline.\n",
-                "\n",
-                "## H2\n",
-                "\n",
-                "1. one\n",
-                "    \n",
-                "    second paragraph\n",
-            ),
+            source,
         ),
         (
             vec!["clean", "--ignore-incidental-newlines", "-"],
-            concat!(
-                "A top-level paragraph is deliberately long enough to wrap differently at forty and eighty display columns.\n",
-                "It also contains an authored incidental newline.\n",
-                "\n",
-                "## H2\n",
-                "\n",
-                "1. one\n",
-                "    \n",
-                "    second paragraph\n",
-            ),
+            source,
         ),
         (
             vec!["clean", "--fixed-width", "40", "-"],
@@ -162,7 +142,7 @@ fn test_clean_line_width_modes_preserve_mixed_document_structure() {
                 "## H2\n",
                 "\n",
                 "1. one\n",
-                "    \n",
+                "\n",
                 "    second paragraph\n",
             ),
         ),
@@ -175,7 +155,7 @@ fn test_clean_line_width_modes_preserve_mixed_document_structure() {
                 "## H2\n",
                 "\n",
                 "1. one\n",
-                "    \n",
+                "\n",
                 "    second paragraph\n",
             ),
         ),
@@ -198,7 +178,7 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
         CliProcessFixture::named("clean-test-clean-subcommand-list-modes-match-library-contract");
     let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.\n";
 
-    let stripped = fixture
+    let default = fixture
         .command()
         .args(["clean", "-"])
         .write_stdin(source)
@@ -207,10 +187,7 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
         .get_output()
         .stdout
         .clone();
-    assert_eq!(
-        String::from_utf8(stripped).unwrap(),
-        "- Alpha beta gamma delta epsilon zeta eta theta.\n"
-    );
+    assert_eq!(String::from_utf8(default).unwrap(), source);
 
     let fixed = fixture
         .command()
@@ -259,22 +236,16 @@ fn test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph(
     );
     let expected_default = concat!(
         "- Parent first paragraph.\n",
-        "    \n",
+        "\n",
         "  Second paragraph.\n",
         "\n",
         "    - Child item.\n"
     );
-    let expected_configured = concat!(
-        "- Parent first paragraph.\n",
-        "  \n",
-        "  Second paragraph.\n",
-        "\n",
-        "  - Child item.\n"
-    );
+    let expected_configured = source;
     let expected_fixed = concat!(
         "- Parent first\n",
         "  paragraph.\n",
-        "    \n",
+        "\n",
         "  Second paragraph.\n",
         "\n",
         "    - Child item.\n"
@@ -335,7 +306,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
         (
             "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
             &["clean", "--indent", "4", "--fixed-width", "24", "-"][..],
-            "> - Parent first\n>   paragraph.\n> \n>   Second paragraph\n>   alpha beta gamma\n>   delta.\n> \n>     - Child item alpha\n>       beta.\n",
+            "> - Parent first\n>   paragraph.\n>\n>   Second paragraph\n>   alpha beta gamma\n>   delta.\n>\n>     - Child item alpha\n>       beta.\n",
         ),
         (
             "> > 1. Parent first paragraph.\n> >\n> >    Second paragraph alpha beta gamma delta.\n> >\n> >    - Child item alpha beta.\n",
@@ -348,7 +319,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
                 "24",
                 "-",
             ][..],
-            "> > 1. Parent first\n> >    paragraph.\n> > \n> >    Second paragraph\n> >    alpha beta gamma\n> >    delta.\n> > \n> >    - Child item\n> >      alpha beta.\n",
+            "> > 1. Parent first\n> >    paragraph.\n> >\n> >    Second paragraph\n> >    alpha beta gamma\n> >    delta.\n> >\n> >    - Child item\n> >      alpha beta.\n",
         ),
         (
             "> - [ ] Parent first paragraph.\n>\n>   Second café 🙂 alpha beta gamma delta.\n>\n>   1. Child item alpha beta.\n",
@@ -361,7 +332,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
                 "24",
                 "-",
             ][..],
-            "> - [ ] Parent first\n>       paragraph.\n> \n>   Second café 🙂 alpha\n>   beta gamma delta.\n> \n>     1. Child item\n>        alpha beta.\n",
+            "> - [ ] Parent first\n>       paragraph.\n>\n>   Second café 🙂 alpha\n>   beta gamma delta.\n>\n>     1. Child item\n>        alpha beta.\n",
         ),
     ];
 
@@ -619,19 +590,19 @@ fn test_clean_subcommand_preserves_quoted_marker_looking_indented_code() {
     let fixtures = [
         (
             "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
-            "> - Parent.\n> \n>       - literal code\n> \n> \n> - Later sibling.\n",
+            "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
         ),
         (
             "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
-            "> 1. Parent.\n> \n>     1. literal code\n> 2. Later sibling.\n",
+            "> 1. Parent.\n>\n>     1. literal code\n>\n> 2. Later sibling.\n",
         ),
         (
             "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
-            "> > - Parent.\n> > \n> >       - literal code\n> > \n> > \n> > - Later sibling.\n",
+            "> > - Parent.\n> >\n> >       - literal code\n> >\n> > - Later sibling.\n",
         ),
         (
             "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
-            "> > 1. Parent.\n> > \n> >     1. literal code\n> > 2. Later sibling.\n",
+            "> > 1. Parent.\n> >\n> >     1. literal code\n> >\n> > 2. Later sibling.\n",
         ),
     ];
 
@@ -677,13 +648,7 @@ fn test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft
         "- [x] Checked item\n",
         "      authored continuation.\n"
     );
-    let expected = concat!(
-        "- Alpha beta gamma\n",
-        "    delta epsilon.\n",
-        "\n",
-        "- [x] Checked item\n",
-        "      authored continuation.\n"
-    );
+    let expected = source;
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{source}").unwrap();
     tmp.flush().unwrap();
@@ -780,16 +745,9 @@ fn test_clean_subcommand_compact_preserves_ten_digit_prose_boundary() {
         "\n",
         "2) second ordered item\n"
     );
-    let expected = concat!(
-        "123456789. nine-digit item\n",
-        "- first unordered item\n",
-        "1. first ordered item\n",
-        "\n",
-        "1234567890. ten-digit prose\n",
-        "\n",
-        "+ second unordered item\n",
-        "2. second ordered item\n"
-    );
+    // Every item is its own list (marker or delimiter changes), so
+    // `--compact`, which pads siblings only, has nothing to change.
+    let expected = source;
 
     let first = fixture
         .command()
@@ -899,7 +857,7 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
     );
     let expected_cleaned = concat!(
         "-    Parent first paragraph alpha beta gamma delta.\n",
-        "        \n",
+        "\n",
         "     Second paragraph alpha beta gamma delta epsilon.\n",
         "\n",
         "        - Child item alpha beta gamma delta epsilon.\n",
@@ -913,7 +871,7 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
     let expected_fixed = concat!(
         "-    Parent first paragraph\n",
         "     alpha beta gamma delta.\n",
-        "        \n",
+        "\n",
         "     Second paragraph alpha\n",
         "     beta gamma delta epsilon.\n",
         "\n",
@@ -985,7 +943,7 @@ fn test_clean_subcommand_indent_eight_uses_exact_nested_columns() {
         ("- Parent\n  - Child\n", "-    Parent\n        - Child\n"),
         (
             "1. Parent\n   1. Child\n",
-            "1.    Parent\n        1. Child\n",
+            "1.   Parent\n        1. Child\n",
         ),
         (
             "- [ ] Parent\n  - [x] Child\n",
@@ -1103,7 +1061,7 @@ fn test_clean_subcommand_save_in_place_reports_delta() {
     let fixture =
         CliProcessFixture::named("clean-test-clean-subcommand-save-in-place-reports-delta");
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+    write!(tmp, "# Hello\n\nIntro:\n- World\n").unwrap();
 
     fixture
         .command()
@@ -1115,12 +1073,7 @@ fn test_clean_subcommand_save_in_place_reports_delta() {
         .stdout(predicate::str::contains("Whitespace changes only"));
 
     let updated = std::fs::read_to_string(tmp.path()).unwrap();
-    assert!(updated.contains("# Hello"));
-    assert!(updated.contains("World"));
-    assert!(!updated.contains("# Hello "));
-    assert!(!updated.contains("World  "));
-    assert!(updated.ends_with('\n'));
-    assert!(!updated.ends_with("\n\n"));
+    assert_eq!(updated, "# Hello\n\nIntro:\n\n- World\n");
 }
 
 #[test]
@@ -1154,7 +1107,7 @@ fn test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff() {
         "clean-test-clean-subcommand-save-verbose-after-subcommand-shows-visual-diff",
     );
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+    write!(tmp, "# Hello\n\nIntro:\n- World\n").unwrap();
 
     fixture
         .command()
@@ -1173,7 +1126,7 @@ fn test_save_shorthand_cleans_in_place_and_reports_delta() {
     let fixture =
         CliProcessFixture::named("clean-test-save-shorthand-cleans-in-place-and-reports-delta");
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+    write!(tmp, "# Hello\n\nIntro:\n- World\n").unwrap();
 
     fixture
         .command()
@@ -1184,10 +1137,7 @@ fn test_save_shorthand_cleans_in_place_and_reports_delta() {
         .stdout(predicate::str::contains("Whitespace changes only"));
 
     let updated = std::fs::read_to_string(tmp.path()).unwrap();
-    assert!(updated.contains("# Hello"));
-    assert!(updated.contains("World"));
-    assert!(!updated.contains("# Hello "));
-    assert!(!updated.contains("World  "));
+    assert_eq!(updated, "# Hello\n\nIntro:\n\n- World\n");
 }
 
 #[test]

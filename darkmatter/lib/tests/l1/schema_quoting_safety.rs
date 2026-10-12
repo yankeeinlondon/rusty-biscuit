@@ -40,7 +40,7 @@ fn effective_for(yaml_body: &str) -> EffectiveSchema {
 }
 
 /// Applies every auto-apply-eligible repair the schema tier produced,
-/// mirroring what `md clean` does in `frontmatter_repair.rs`.
+/// mirroring what `cleanup/frontmatter.rs` does for `md clean`.
 fn auto_apply(analysis: &SchemaCleanAnalysis, yaml_source: &str) -> String {
     let repairs: Vec<biscuit_file::YamlRepair> = analysis
         .diagnostics()
