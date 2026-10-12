@@ -163,17 +163,20 @@ fn file_changed_rules_outside_the_grammar_are_flagged() {
 }
 
 #[test]
-fn long_form_without_rule_is_not_flagged_by_the_schema() {
-    // The shipped schema leaves `rule` optional: the schema language accepts
-    // `short_form(required)`, but the shipped `long_form` does not declare it
-    // yet. Evaluation by the content-policy library reports the missing
-    // `rule` instead.
+fn long_form_without_rule_is_rejected_by_the_schema_and_the_parser() {
     let report = validate_entries(
         include_str!("../../../../content-policy/schemas/content-policy.yaml"),
-        &["{action: refresh}"],
+        &["{action: refresh}", "{rule: null, action: refresh}"],
     );
 
-    assert!(report.valid, "problems: {:?}", report.problems);
+    assert!(!report.valid);
+    assert_eq!(problem_paths(&report), ["/p0", "/p1/rule"]);
+    for entry in [
+        serde_json::json!([{"action": "refresh"}]),
+        serde_json::json!([{"rule": null, "action": "refresh"}]),
+    ] {
+        assert!(content_policy::Policy::from_declaration(&entry).is_err(), "parser accepted {entry}");
+    }
 }
 
 /// Problems from the shipped schema point at the authored node: a nested

@@ -5563,14 +5563,28 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
     fixture.shutdown();
 }
 
+/// Writes the shipped baseline three directories below `workspace`, as in
+/// the repository, so its `../../../content-policy/schemas/content-policy.yaml`
+/// import finds `policy`. The baseline's directory is not named `schemas`, so
+/// DMLS does not also read the buffer as a trigger-schema candidate.
+fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, policy: &str) -> std::path::PathBuf {
+    let path = workspace.path().join("darkmatter/docs/baseline/darkmatter.yaml");
+    let policy_path = workspace.path().join("content-policy/schemas/content-policy.yaml");
+    for (target, text) in [(&path, baseline), (&policy_path, policy)] {
+        std::fs::create_dir_all(target.parent().expect("parent")).unwrap();
+        std::fs::write(target, text).unwrap();
+    }
+    path
+}
+
 #[test]
 fn meta_schema_phase7_shipped_schema_provider_path() {
     let workspace = LspWorkspace::new();
     let shipped =
         biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
-    let path = workspace.path().join("darkmatter.yaml");
-    std::fs::write(&path, &text).unwrap();
+    let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let path = write_shipped_baseline_layout(&workspace, &text, policy);
 
     let schema_line = text
         .lines()
@@ -5601,8 +5615,8 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     let shipped =
         biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
-    let path = workspace.path().join("darkmatter.yaml");
-    std::fs::write(&path, &text).unwrap();
+    let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let path = write_shipped_baseline_layout(&workspace, &text, policy);
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));

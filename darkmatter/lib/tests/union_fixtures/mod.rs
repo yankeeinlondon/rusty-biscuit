@@ -29,27 +29,22 @@ fn replace_once(text: &str, from: &str, to: &str) -> String {
     text.replacen(from, to, 1)
 }
 
-/// The shipped schema with every same-file reference written bare
-/// (`short_form`, `long_form`). It resolves without this feature, so it is
-/// the control for [`content_policy_union_schema`].
+/// The shipped schema with `long_form.rule` made optional (`short_form`
+/// instead of `short_form(required)`). It resolves without `U(required)`, so
+/// it is the control for [`content_policy_union_schema`].
 pub fn content_policy_bare_schema(shipped: &str) -> String {
-    let text = replace_once(
-        shipped,
-        "    rule: \"short_form@./content-policy.yaml\"",
-        "    rule: short_form",
-    );
-    let text = replace_once(&text, "    - \"short_form@./content-policy.yaml\"", "    - short_form");
-    replace_once(&text, "    - \"long_form@./content-policy.yaml\"", "    - long_form")
+    replace_once(shipped, "    rule: \"short_form(required)\"", "    rule: short_form")
 }
 
-/// The acceptance fixture: [`content_policy_bare_schema`] with
-/// `long_form.rule` made `short_form(required)`.
+/// The acceptance fixture: the shipped schema, which writes same-file
+/// references bare and makes `long_form.rule` `short_form(required)`.
 pub fn content_policy_union_schema(shipped: &str) -> String {
-    replace_once(
-        &content_policy_bare_schema(shipped),
-        "    rule: short_form",
-        "    rule: short_form(required)",
-    )
+    assert_eq!(
+        shipped.matches("    rule: \"short_form(required)\"").count(),
+        1,
+        "the shipped content-policy schema no longer requires `long_form.rule`; update the fixture",
+    );
+    shipped.to_string()
 }
 
 /// Acceptance criterion 1 for a `content_policy: policy[](min(1))@…`

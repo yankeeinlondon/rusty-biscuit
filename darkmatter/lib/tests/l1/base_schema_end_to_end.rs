@@ -4,7 +4,7 @@ use darkmatter::markdown::{
     Markdown,
     schemas::{
         DarkmatterSchemas, PropertyDef, SchemaShape, TypeExpr, darkmatter_base_json_schema,
-        darkmatter_base_schema, parse_yaml_schema, to_json_schema,
+        darkmatter_base_schema, parse_yaml_schema, resolve::resolve_yaml_schema, to_json_schema,
     },
 };
 use biscuit_test_harness::manifest_dir;
@@ -313,16 +313,26 @@ fn schema_document_transcludes_same_file_as_library_source() {
         .expect("transclusion target must exist");
     assert_eq!(transclusion_path, schema_path);
 
-    let file_json = {
-        let raw = std::fs::read_to_string(&schema_path).expect("schema YAML must be readable");
-        let frontmatter: YamlValue = serde_yaml_ng::from_str(&raw).expect("schema YAML must parse");
-        let schema_value = frontmatter
-            .get("$schema")
-            .expect("schema YAML must contain $schema");
-        to_json_schema(&parse_yaml_schema(schema_value).expect("schema YAML must parse"))
-            .expect("schema YAML must convert")
-    };
-    assert_eq!(file_json, darkmatter_base_json_schema());
+    // The authored file imports Content Policy's editor schema; the disk
+    // resolver reads it from the checkout, the library from its embedded copy.
+    let policy_path = biscuit_file::canonicalize_simplified(
+        &manifest_dir!().join("../../content-policy/schemas/content-policy.yaml"),
+    )
+    .expect("policy schema path must exist");
+    assert_eq!(
+        include_str!("../../../../content-policy/schemas/content-policy.yaml"),
+        content_policy::EDITOR_SCHEMA
+    );
+    // A `\\?\` spelling from `canonicalize` on Windows is not a file reference.
+    let schema_file = biscuit_file::canonicalize_simplified(&schema_path).expect("schema YAML path");
+    let schema_dir = schema_file.parent().expect("schema YAML must have a parent");
+    let reference = YamlValue::String(schema_file.to_string_lossy().into_owned());
+    let from_disk =
+        resolve_yaml_schema(&reference, schema_dir, &crate::request_support::context_at(schema_dir))
+            .expect("the authored baseline resolves from disk");
+    assert_eq!(from_disk.imports, [policy_path]);
+    assert_eq!(from_disk.simplified, Some(darkmatter_base_schema()));
+    assert_eq!(from_disk.json_schema, darkmatter_base_json_schema());
 }
 
 #[test]

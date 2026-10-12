@@ -38,7 +38,7 @@ fn temp_root() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn content_policy_fixture_edits_only_the_three_reference_lines() {
+fn content_policy_fixture_edits_only_the_required_rule_line() {
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let bare = content_policy_bare_schema(shipped);
     let union = content_policy_union_schema(shipped);
@@ -54,20 +54,9 @@ fn content_policy_fixture_edits_only_the_three_reference_lines() {
     };
     assert_eq!(
         changed(&bare),
-        [
-            ("    rule: \"short_form@./content-policy.yaml\"", "    rule: short_form"),
-            ("    - \"short_form@./content-policy.yaml\"", "    - short_form"),
-            ("    - \"long_form@./content-policy.yaml\"", "    - long_form"),
-        ]
-        .map(|(before, after)| (before.to_string(), after.to_string()))
+        [("    rule: \"short_form(required)\"".to_string(), "    rule: short_form".to_string())]
     );
-    assert_eq!(
-        changed(&union)[0],
-        (
-            "    rule: \"short_form@./content-policy.yaml\"".to_string(),
-            "    rule: short_form(required)".to_string()
-        )
-    );
+    assert!(changed(&union).is_empty(), "the acceptance fixture is the shipped schema");
 }
 
 #[test]

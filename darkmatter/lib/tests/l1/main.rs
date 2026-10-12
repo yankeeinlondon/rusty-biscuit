@@ -31,6 +31,8 @@ mod request_support;
 mod position_fixtures;
 #[path = "../union_fixtures/mod.rs"]
 mod union_fixtures;
+#[path = "../content_policy_fixtures/mod.rs"]
+mod content_policy_fixtures;
 
 mod absent_property_contract;
 mod schemas_effective_presence;
@@ -50,6 +52,8 @@ mod clean_counters;
 mod code_link;
 mod compose_phase6;
 mod compose_reuse_phase5;
+mod content_policy_disk_baseline;
+mod content_policy_embedded_baseline;
 mod content_policy_editor_schema;
 mod cutover_reference;
 mod debug_test;
