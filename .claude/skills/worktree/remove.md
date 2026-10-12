@@ -162,6 +162,38 @@ Observed with Git 2.56 on macOS. These describe Git, not `wt`:
   inside it). A Git command that succeeds there does not prove the worktree is
   healthy.
 
+Checked 2026-10-11 with Git 2.47.3, 2.53.0, and 2.56.0 (spike S3 of
+`2026-10-05-graceful-file-contention`; its script is in that fix's
+`spikes/`):
+
+- **`git worktree move` replaces an existing empty directory.** It accepts
+  an empty directory as a destination (as `worktree add` does), turns a
+  directory destination into `<dir>/<name>`, and renames over it. It refuses
+  only a file or a non-empty directory. It cannot serve as a
+  no-replacement move.
+- A move rewrites exactly the admin `gitdir` and the checkout's `.git` file.
+  It writes the `.git` file in the *invoking* config's link format, so a
+  relative-link record can come out absolute.
+- With relative links (Git ≥ 2.48, `extensions.relativeWorktrees`), the
+  admin `gitdir` is relative to the admin directory itself
+  (`../../../../<checkout>/.git` from `<common>/worktrees/<id>/`), and the
+  `.git` file is relative to the checkout. After a native rename to a
+  same-depth sibling, rewriting only the admin `gitdir` restores the record.
+  An off-by-one `..` makes the record `prunable`. Git 2.47 ignores
+  `worktree.useRelativePaths`.
+- A lock survives a native rename (the `locked` file stays in the admin
+  directory). `move` and `move -f` refuse a locked worktree.
+- Worktrees containing submodules: `move` and plain `remove` refuse, but
+  `remove --force` deletes them. The submodule's git directory lives in
+  `<common>/worktrees/<id>/modules/<name>`.
+- A split index's `sharedindex.<oid>` files live in the per-worktree admin
+  directory, not the common directory.
+- A plain `git worktree remove` of a checkout holding only its `.git` file
+  **refuses**, because the deleted tracked files count as modifications. A
+  plain remove of the **absent** directory is record-only. A directory
+  recreated at the recorded path without a `.git` file is refused
+  ("validation failed").
+
 ## Preparing a target Git can't read (`remove::prepare`)
 
 `prepare(base, entry, &repair::Git)` classifies the entry afresh and returns
