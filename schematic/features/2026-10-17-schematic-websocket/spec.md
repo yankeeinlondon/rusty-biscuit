@@ -20,7 +20,10 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 status: draft-spec
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 clarified: false
 implemented: false
 human_review: false
@@ -35,21 +38,34 @@ next_spec: 2026-10-18-schematic-fidelity-polish
 
 # Schematic WebSocket
 
-This is child spec 6 of 8 under the Schematic macro review (decision D50 of
-the parent). It is a **draft**: it is refreshed from the outcomes of the
-previous spec's review 1 before its plan runs (see "Refresh notes"). The order of the eight
-specs is: 1 schematic-generation-integrity, 2 schematic-runtime-envelope,
-3 schematic-pagination, 4a schematic-definition-api, 4b
-schematic-definition-vocabulary, 5 schematic-response-model-graphql, 6 this
-spec, 7 schematic-fidelity-polish. `depends_on` lists only spec 5; specs 1, 2,
-4a and 4b are prerequisites through that chain.
+This draft is a child specification of the review identified by
+`2026-07-31-macro-review`; the `parent` frontmatter names that review.
+It covers the WebSocket stage of the eight-specification sequence. It must be
+refreshed after the preceding response-model specification's first human
+review and before implementation (see "Refresh notes"). The dependency chain
+also supplies generation validation, shared runtime services, and the REST
+definition vocabulary that this work reuses.
+
+Requirement labels such as **R5** are lookup labels in "Requirements" below.
+Decision labels such as **D11** identify settled author decisions in the parent
+review's section 15; each decision used here is described in words. Planning
+item numbers refer to "Planning-time details assigned to this spec". They are
+not substitutes for the behavior stated here.
+
+> **Reader's note from the inline review, 2026-10-11.** Reusing REST building
+> blocks is intentional; combining REST and WebSocket definitions is not.
+> This review fills in connection-state, credential-placement, parameter,
+> host-role, and migration contracts. "Open Questions" identifies the larger
+> choices that need an author decision before the affected implementation.
+> It withdraws one draft default as unsafe (declaration-order decoding);
+> its recommendations are proposals, not decisions.
 
 ## Problem
 
 Schematic generates a Rust WebSocket client and a server-side "host" for
-each of five WebSocket API definitions. The transport core is sound
-(supervisor loop, request/response correlation, backoff), but the generated
-clients are wrong or inert in six verified ways, and the definitions are
+each of five WebSocket API definitions. The transport already has a supervisor loop, request/response correlation,
+and backoff, but the generated
+clients are wrong or inert in the ways listed below, and the definitions are
 five dialects of the same vocabulary. Facts below come from the parent
 (sections 8 and 10, ledger rows 3 and 9 to 12) and were re-checked against the
 tree on 2026-10-11 where marked **verified**; everything else is the
@@ -61,17 +77,21 @@ parent's July evidence and is marked **parent**.
    (**verified** in `schematic/definitions/src/unfolded_circle/core_ws/mod.rs`,
    lines 144 and 182). The same definition's other endpoints use `/intg` and
    `/profiles` (**verified**), so they inherit the same base-URL error in a
-   different form. Whether the real device paths are `/ws/intg` and
-   `/ws/profiles` is **unverified**; the `unfolded-circle` skill and the
-   Core API documentation settle it.
+   different form. The [official Core WebSocket definition](https://raw.githubusercontent.com/unfoldedcircle/core-api/main/core-api/websocket/UCR-core-asyncapi.yaml)
+   (version `0.45.0-beta`, reviewed 2026-10-11) lists `/ws`, `/intg`, and
+   `/profiles` as separate channels. Keep those endpoint paths and make the
+   base URL the origin. Do not add `/ws` to the other two paths.
 2. **Reconnect counter never resets; lifecycle open never re-sent (row 9).**
    In the generated supervisor the attempt counter is set to zero only for the
    first stream and is incremented after a *successful* redial, so the
    supervisor gives up after N lifetime reconnects, not N consecutive
    failures (**verified** in `schematic/gen/src/ws_codegen/client.rs`, around
    lines 636 to 682). The state is set to `Ready` straight after a redial and
-   the lifecycle open message is not re-sent, so a "reconnected" stream is
-   protocol-dead while reporting `Ready` (**parent**).
+   the lifecycle open message is not re-sent, so a "reconnected" stream can be
+   protocol-dead while reporting `Ready` (**parent**). The current client
+   template exposes opening-message helpers but sends no automatic opening
+   payload on the initial connection either (**verified**); the lifecycle
+   requirement below therefore specifies initial setup as well as replay.
 3. **Dormant `E0308` in the Bearer host template (row 10).** The Bearer branch
    of the generated host's auth check ends an `else` arm with a trailing `;`
    after `Err(...)`, so the arm yields `()` against a `Result` tail
@@ -254,11 +274,13 @@ generated client to the mock and asserting the request target the server saw.
 
 **R2. The reconnect attempt counter counts consecutive failures.** The
 supervisor resets its attempt counter to zero after every successful
-connection. `max_attempts` therefore bounds consecutive failed attempts, not
+dial and required opening-message write. The initial dial is separate from
+the reconnect budget; `Some(0)` disables redials, `Some(n)` permits at most
+`n` consecutive failed redials, and `None` imposes no attempt limit. `max_attempts` therefore bounds consecutive failed attempts, not
 lifetime reconnects. With `max_attempts = 2`, a mock server that accepts a
 connection and then drops it five times in a row, and accepts each redial,
-does not stop the supervisor; a mock server that refuses three consecutive
-connections does stop it, and the connection state becomes `Closed`.
+does not stop the supervisor; a mock server that refuses two consecutive
+redials does stop it, and the connection state becomes `Closed`.
 Validated by: L1 mock-server test in `schematic-schema`
 (`schematic/schema/tests/ws_runtime.rs` or a sibling file).
 
@@ -266,8 +288,14 @@ Validated by: L1 mock-server test in `schematic-schema`
 endpoint declares a lifecycle open message, the supervisor sends it after each
 successful redial and before publishing state `Ready`. If the open message
 cannot be written, the attempt counts as a failed attempt (R2 semantics), the
-state is not `Ready`, and an error event is delivered to the caller. An
-endpoint with no open message behaves as today.
+state is not `Ready`, and an error event is delivered to the caller. The same setup runs on the initial
+connection. A schema describes a payload type, not an actual payload: the
+connect call takes the endpoint's typed opening payload when one is declared,
+retains its serialized form privately, and reuses it on redial. It never
+constructs an arbitrary default payload. Endpoints without an opening message
+need no payload. A later explicit opening-message helper does not silently
+replace the retained payload or cause an extra automatic send. Authentication
+ordering is addressed in Open Questions.
 Validated by: L1 mock-server test: the server records the first text frame
 after each of three connections and asserts it is the open message each time;
 a second case where the server closes during the open write.
@@ -295,13 +323,24 @@ rejected handshake (HTTP 401 or 403 on upgrade) is not retried with another
 credential or anonymously. The client reports the auth method used through an
 accessor returning `AuthMethod`; it never exposes the value.
 Placement follows the definition's `AuthStrategy`: Bearer and API-key to a
-header, `ApiKeyParam` to a query parameter, Basic to the `Authorization`
-header from the `EnvMapping` user and password lists.
+header, `ApiKeyParam` to its declared query **or cookie** location, Basic to the
+`Authorization` header using the shared resolver's username/password rules.
+A cookie key is merged with existing cookies without duplicating its name.
+An effective policy selecting `AuthStrategy::None` does not attach an
+environment credential.
+Use the retained REST `AuthPolicy` to select one method; do not send every
+method it lists. Resolve once per explicit connect operation and retain that
+choice for its redials; environment changes require a new explicit connect.
+A 401, 403, or refused redirect during a redial closes the supervisor without
+another attempt. Transient dial failures use the reconnect budget.
 Validated by: L1 mock-server tests in `schematic-schema` with sentinel
 tokens set at every level (the server sees exactly one credential, in the
 stated order; removing the winner makes the next level win); a 401 case
 asserting the server received exactly one upgrade request; one test per auth
-strategy asserting placement (header versus query).
+strategy asserting placement (header, query, or cookie); Basic credentials
+remain one selected username/password pair under the shared resolver; changing
+the environment after connecting does not change a redial credential; a 401
+on redial is terminal and produces only one rejected upgrade.
 
 **R6. No resolvable credential connects anonymously.** (Decided, D56; REST
 and WebSocket behave the same.) If the definition's auth strategy is not
@@ -323,11 +362,16 @@ upgrade request.
 **R7. Secrets never leak from connection setup; the handshake never leaves
 its origin.** (Never following a redirect is Decided, D56; it is
 stricter than the `same_origin` policy.) The sentinel credential value appears in no `Display` or
-error text, no logged URL, and no stored metadata of the WebSocket client,
-including for `ApiKeyParam` (query-string) placement, for a refused
-connection, and for a stalled handshake. The handshake follows no redirect: a
+error text, no logged URL, and no stored diagnostic metadata of the WebSocket client.
+Credentials and serialized opening payloads must exist privately to perform
+reconnects; that required storage is excluded from the metadata promise.
+Their `Debug` output is redacted. The promise concerns Schematic-controlled
+metadata and formatting, not arbitrary caller payloads or server text that
+happens to echo a secret. This matches the shared runtime's redaction boundary.
+It applies to query and cookie API keys, refused connections, and stalled
+handshakes. The handshake follows no redirect: a
 3xx upgrade response is an error naming the status with the `Location` header
-visible, no second request is made, and no credential reaches any other origin (the mock "other origin"
+visible through shared redaction (including secrets in its URL), no second request is made, and no credential reaches any other origin (the mock "other origin"
 records zero requests).
 Validated by: L1 mock-server tests with a sentinel in the query string:
 connection refused (closed port), handshake stall past the timeout, and 302
@@ -373,11 +417,22 @@ variant per `MessageSchema` named after `MessageSchema.name` and carrying the
 payload type that the message's `Schema` names. The generated client's primary
 surface becomes typed: `send(outbound)` and `next_event()` yielding the
 inbound enum (a decode failure yields an error event carrying the raw text;
-the connection continues). The untyped surface remains as an explicit escape
+the connection continues; see the decoding question below). The untyped surface remains as an explicit escape
 hatch (`send_value(serde_json::Value)`, `next_value_event()`). The name
 deliberately differs from REST `send_raw` (D45), which has different semantics
 (it returns status, headers and bytes); the names are a Proposed default. Lifecycle messages (open, close, keepalive) remain
-separate and are not variants.
+separate and are not variants. Enum serialization writes only the payload,
+with no generated variant wrapper or extra discriminator on the wire.
+`events()` uses the same typed decoding as `next_event()`; an explicitly named
+value-stream counterpart is retained. Typed and value receive methods consume
+one shared queue: each incoming application message is delivered once, with
+no implicit broadcast or second subscription. Empty directional message sets
+produce an uninhabited enum and still compile. Derives must respect payload
+capabilities; do not require `Eq` or `Clone` that a payload does not implement.
+JSON text and JSON binary framing remain distinct. Unsupported raw-binary or
+mixed framing must produce a named generation diagnostic under the shared
+validation rules rather than silently encode bytes as JSON. Binary decode
+errors retain bytes instead of claiming to retain text.
 Validated by: L1 generated-output assertions in `schematic-gen` (variant
 names and directions); L1 compile-fail test (trybuild or the repo's existing
 compile-fail pattern) that sending a value of the wrong type does not
@@ -389,16 +444,18 @@ frame yields the error event with raw text and does not close the connection.
 `MessageSchema` gains `responds_with: Option<String>`: on a request message
 (direction `Client` or `Bidirectional`), the name of the message, in the same
 endpoint, that answers it. The generator pairs request and response only
-through this link and the endpoint's `CorrelationHints`. No code compares a
+through this link and the endpoint's `CorrelationHints` (the current API-level runtime hints have
+no correlation field; this spec adds no API-level fallback). No code compares a
 message name to `"RequestEnvelope"` or `"ResponseEnvelope"`. The hint-less
 inference of field names `id` and `req_id` is removed; the definitions that
 relied on it declare `CorrelationHints` explicitly with the same values.
 Where correlation is active, the declared `RequestIdType` is honored: with
 `RequestIdType::String` the generated request ids are JSON strings, with
-`U64` JSON numbers. Validation (Error): `responds_with` names no message in
+`U64` JSON numbers. Validation (Error): `responds_with` is set on a server-only message, names no message in
 the endpoint, names a message whose direction cannot be received, or is set
-with no `CorrelationHints` on the endpoint or API. Validation (Warning): a
-declared `RequestIdType` or `CorrelationHints` that nothing consumes.
+with no endpoint `CorrelationHints`. Validation (Warning): a
+explicitly declared `RequestIdType` or `CorrelationHints` that nothing consumes.
+An implicit default ID type on an uncorrelated endpoint produces no Warning.
 Validated by: L1 test in `schematic-gen` that the source tree contains no
 string literal `"RequestEnvelope"`/`"ResponseEnvelope"` in the planner (a
 grep-style test over `plan.rs`, acceptable here because the property is
@@ -411,12 +468,13 @@ the envelope messages in a fixture does not change correlation.
 
 **R12. WebSocket reuses the REST parameter, auth, env-mapping and header
 types.** `schematic_define::websocket::ConnectionParam` and `ParamType` no
-longer exist in the public API. `WebSocketEndpoint.connection_params` holds
-the REST `ParamDef`. `WebSocketApi` declares authentication with the REST
+longer exist in the public API. `WebSocketEndpoint` uses
+REST `ParamDef` values in location-aware parameter containers, preserving
+parameter location and typed path parameters as specified under Design. `WebSocketApi` declares authentication with the REST
 `AuthStrategy`, `EnvMapping` (explicit field, not derived at generation time
 from `env_auth`), and the REST header type for constant handshake headers.
-It carries the REST `AuthPolicy` only if spec 4 kept it on `RestApi` (see
-Planning-time details). `env_auth` follows whatever spec 4 did to the REST
+It carries the retained REST `AuthPolicy`, as already decided by the author
+and restated in the definition-API and definition-vocabulary specifications. `env_auth` follows whatever spec 4 did to the REST
 equivalent (retirement of `env_auth[0]`-as-password).
 Validated by: L1 compile-level check in `schematic-define` (a doc-test or
 trybuild case showing the old names do not resolve through
@@ -434,17 +492,19 @@ ElevenLabs) declare: connection parameters as `ParamDef`; auth as
 `AuthFlowHints` (never as prose only); message directions that are true to
 the protocol (no `Bidirectional` used to trip a heuristic, and the test that
 asserts that contortion is removed or rewritten to assert the true
-directions); correlation with explicit `CorrelationHints` and `responds_with`
+directions); explicit endpoint roles that preserve required hosts; correlation with explicit `CorrelationHints` and `responds_with`
 where the protocol correlates, and nothing where it does not; and heartbeat
 with `HeartbeatHints` where the protocol has one. The ElevenLabs *definition* already
-uses `schematic_define::WebSocketApi`; the implementer confirms that only its
-message payload types are standalone and brings them onto the same footing if
-so.
+uses `schematic_define::WebSocketApi`. Its payload structs remain ordinary
+Serde payload types, just as the other APIs' payloads do; register or resolve
+them through the shared schema mechanism without making them definition types.
+Declaring hints is not evidence that the generated runtime honors them:
+authentication and heartbeat consumption need the choices in Open Questions.
 Validated by: L1 definition-conformance test in `schematic-definitions`
 iterating all five and asserting the rules mechanically (no prose-only auth
-flow; every `responds_with` resolves; no endpoint with both ends marked
-`Bidirectional` solely to satisfy a heuristic is detectable, so assert true
-direction against a per-definition expected table kept in the test).
+flow; every `responds_with` resolves; assert each role and message direction
+against a per-definition expected table kept in the test; do not try to infer
+author intent solely from `Bidirectional` values).
 
 **R14. The generated host carries no Unfolded Circle assumptions.** The host
 module's event hub is named from the API (`{ApiName}EventHub`, where
@@ -457,7 +517,12 @@ Validated by: L1 generated-output test in `schematic-gen` over a non-Unfolded
 fixture definition: no `UnfoldedCircle` string appears in its host module;
 L1 mock-server test: a client authenticates to a generated host whose handler
 returns a custom post-auth message and receives exactly it, and a handler that
-returns none receives no extra frame.
+returns none sends no extra frame. The hook runs once per successfully
+authenticated connection, after authentication and before application traffic;
+failed authentication never invokes it. Multi-endpoint hosts use
+endpoint-specific hook methods so their outbound types remain unambiguous. A hook write failure closes that
+connection and is reported. Host inbound messages use the client-message enum;
+host outbound messages use the server-message enum.
 
 ### Dependents, harness and documentation
 
@@ -484,7 +549,7 @@ requests (path, query, headers), script per-connection behavior (accept, drop
 after N frames, refuse, stall, redirect, send frames), count connections, and
 shut down deterministically. It is used by every mock-server requirement
 above. It binds only to `127.0.0.1`, uses no fixed port, needs no terminal and
-no network, and no test it supports takes window focus. Tests that need no
+no external network, and no test it supports takes window focus. Tests that need no
 terminal are L1; there is no L2 test in this spec unless the implementer finds
 one is required (then it follows the L2 focus rule and is logged).
 Validated by: the harness's own L1 tests (records a request, scripted drop,
@@ -499,7 +564,8 @@ and the affected `.claude/skills` entries (`schematic-define`, `homelab`,
 `unfolded-circle`, and any that describe the WebSocket surface) describe the
 new behavior; docs do not link to or name this spec.
 Validated by: `just lint-schema`; the repo's drift check
-(`artifact_drift`, via `just check-drift` in `schematic/justfile`); a manual
+(`artifact_drift`, run through nextest with the required ignored-test filter;
+do not use the existing `just check-drift` recipe while it invokes `cargo test`); a manual
 pass recorded in the log listing each doc and skill touched.
 
 ## Design
@@ -509,20 +575,20 @@ Marked **Decided** only where the parent decided it; everything else is
 
 | Symbol | Package | What it does | Status |
 |---|---|---|---|
-| `WebSocketApi` (fields) | `schematic-define` | Gains `env_mapping: Option<EnvMapping>`, constant handshake `headers` (REST header type), and `auth_policy` only if REST keeps it; `env_auth` follows REST. Keeps `auth: AuthStrategy`. Stays its own type. | Own type: Decided (D8). Field set: Proposed |
-| `WebSocketEndpoint::connection_params` | `schematic-define` | Becomes `Vec<ParamDef>` (REST type). | Decided (D8) |
-| `ConnectionParam`, `ParamType` | `schematic-define` | Removed from the public API. | Decided (D8) |
+| `WebSocketApi` (fields) | `schematic-define` | Gains `env_mapping: Option<EnvMapping>`, constant handshake `headers` (REST header type), and the retained REST `auth_policy`; `env_auth` follows REST. Keeps `auth: AuthStrategy`. Stays its own type. | Own type: Decided (D8). Field set: Proposed |
+| [`WebSocketEndpoint` parameters](../../define/src/websocket/mod.rs) | `schematic-define` | Reuse REST parameter types with location and defaults preserved; see Design. | Shared types: Decided (D8). Container shape: Proposed |
+| [`ConnectionParam`, `ParamType`](../../define/src/websocket/params.rs) | `schematic-define` | Removed from the public API. | Decided (D8) |
 | `ParamDef` serde | `schematic-define` | `ParamDef`, `QueryParamType`, `ParamStyle` derives are owned by spec 4a (they derived no serde traits when checked). This spec only asserts they exist (compile-time or unit check) because `WebSocketApi` derives `Serialize`/`Deserialize`; it does not add them. | Owned by 4a; assertion Proposed |
 | `MessageSchema::responds_with` | `schematic-define` | Optional name of the answering message (R11). | Link: Decided (D8). Name and shape: Proposed |
-| `CorrelationHints`, `RequestIdType`, `HeartbeatHints`, `AuthFlowHints` | `schematic-define` | Existing hint types, now consumed; unconsumed declarations warn. | Proposed |
+| `CorrelationHints`, `RequestIdType`, `HeartbeatHints`, `AuthFlowHints` | `schematic-define` | Existing hint types; correlation is consumed, and authentication/heartbeat behavior requires the Open Questions decisions. Unsupported declarations warn or error under the shared validation rules. | Proposed |
 | `WsDiagnostic`, `WsSeverity` | `schematic-gen` | Existing; gain an `api` field (API name) if needed, and are mapped onto the generation-integrity spec's diagnostics format. No WebSocket-specific format. | Proposed |
 | `lower_to_plan` | `schematic-gen` | Collects all diagnostics (not only the first error), returns them with the plan or the failure. | Proposed |
 | `ws_modules` assembler | `schematic-gen` | Propagates `Err`; reports diagnostics through the shared mechanism; reuses the generation-integrity spec's two-phase writer and per-output validation. | Proposed |
-| Message enum emitters | `schematic-gen` (`ws_codegen/client.rs`) | Emit `{Endpoint}ServerMessage` and `{Endpoint}ClientMessage`, serde-decoded as untagged in declaration order, with the raw frame always retained for the error path. | Proposed |
+| Message enum emitters | `schematic-gen` (`ws_codegen/client.rs`) | Emit `{Endpoint}ServerMessage` and `{Endpoint}ClientMessage`, decode according to the message-selection decision in Open Questions, with the raw frame retained for the error path. | Proposed |
 | Supervisor loop template | `schematic-gen` (`ws_codegen/client.rs`) | Reset-on-success counter, open replay before `Ready`, idle receive timeout. | Behavior: Decided (D8 defect list). Details: Proposed |
 | Handshake credential resolution | `schematic-gen` (`client.rs`) emitting calls into `schematic-runtime` | Resolve once with D11 precedence, place per `AuthStrategy`, report `AuthMethod`. | Rules: Decided (D11, D48). Reuse of runtime functions: Proposed |
 | Bearer host template | `schematic-gen` (`ws_codegen/shared.rs`) | Remove the trailing `;` defect; add a compile test. | Decided (fix); test shape Proposed |
-| Host module | `schematic-gen` (`ws_codegen/host.rs`) | Event hub named `{ApiName}EventHub`; `WsHandler` gains `on_authenticated` hook returning an optional outbound message; no fixed envelope. | Proposed |
+| Host module | `schematic-gen` (`ws_codegen/host.rs`) | Event hub named `{ApiName}EventHub`; `WsHandler` gains `on_authenticated` hook returning an optional endpoint-specific server message; no fixed envelope. | Proposed |
 | `WsClientOptions` | `schematic-schema` (generated `ws_shared`, from `ws_codegen/shared.rs`) | `receive_timeout` enforced; gains credential setters. No explicit-anonymous option unless the runtime's managed builder already has one (R6). | Proposed |
 | Runtime trait | `schematic-runtime` | The runtime trait generated clients implement is `EndpointSpec`. | Decided (D56) |
 | Mock WS server helper | `schematic-schema` tests (and `schematic-gen` tests that need it) | See R16. Built on `tokio-tungstenite`, already a dependency of `schematic-schema`. | Proposed |
@@ -538,10 +604,230 @@ Notes for the implementer:
   D44) if spec 4 extended that to `MessageSchema`; otherwise keep today's
   name-based resolution and log the gap.
 - Enum decoding has no declared discriminator today (the parent models none).
-  The default is untagged decoding in declaration order. This can misdecode
-  when two payload shapes overlap; the implementer adds a fixture test for
-  each definition and logs any ambiguity found instead of inventing a
-  discriminator field.
+  The former default of untagged decoding in declaration order is withdrawn.
+  See the message-selection question below; fixtures must assert the chosen
+  variant, not just that deserialization succeeds.
+
+### Contracts needed to make the requirements implementable
+
+These are proposed defaults within the requirements above. They do not add a
+second transport architecture.
+
+- **Host selection and directions (shared vocabulary and host requirements).**
+  In `schematic-gen`, [the current role inference](../../gen/src/ws_codegen/plan.rs)
+  emits a host only when all messages are bidirectional. Replace that heuristic
+  with an explicit endpoint role (`Client`, `Host`, or `Both`) in
+  `schematic-define`'s [WebSocket endpoint definition](../../define/src/websocket/mod.rs),
+  defaulting to `Client`. Declare the integration endpoint's actual role and
+  preserve the client/host outputs its consumers require. Message directions
+  are always from the client perspective: client messages are host input,
+  server messages are host output. Add a fixture with `Both` and accurate
+  one-way directions proving that a host is still emitted. Update the AsyncAPI
+  importer to set the role explicitly where known or retain the client default.
+- **Parameters and URL assembly (URL and shared-vocabulary requirements).**
+  `schematic-define`'s [ParamDef](../../define/src/params/param_def.rs)
+  carries no parameter location today, and neither does the old
+  connection-parameter type; the planner infers path versus query from the
+  path template's placeholders. Reuse the settled REST location containers
+  and typed path parameters, rather than put path and query parameters in one
+  location-free list; document the final shape.
+  Required values become connect arguments; optional values
+  are omitted when absent. Percent-encode substituted path values as one
+  segment and serialize query values using the shared style rules. Reject
+  missing placeholders, unsupported styles, a query embedded in an endpoint
+  path, and an endpoint that supplies another origin. Do not let a leading
+  slash erase a legitimate base-path prefix. Test a path value containing `/`,
+  spaces, and `?`, an omitted optional query, and repeated query
+  values. The Samsung `token` query parameter stays redacted (it is on the
+  built-in secret list).
+- **Correlation ownership (declared-response requirement).**
+  In `schematic-gen`, [the request generator](../../gen/src/ws_codegen/client.rs)
+  currently returns an arbitrary JSON value. Emit a typed request operation
+  for each declared request/response pair, returning the linked response
+  payload, and retain `request_value` as the explicit value escape hatch.
+  A request ID is allocated and inserted by the runtime; accept only the
+  declared response type with the matching ID. A different message with the
+  same ID remains an ordinary event and cannot complete that request. Keep
+  IDs unique across redials and never reset them for a new stream. Remove a
+  pending entry on serialization failure, send failure, timeout, cancellation,
+  and disconnect. Wake pending callers with `Disconnected` on connection loss;
+  never replay their requests, since replaying a command could execute it
+  twice. Exercise cancellation and send failure under a small pending limit,
+  so a leaked entry is observable. Correlation paths use the existing syntax;
+  this spec does not invent nested-path support silently.
+- **Reconnect and shutdown (supervisor requirements).** A manually closed or
+  dropped client never redials. Close must interrupt backoff, dial, or setup;
+  test closing during a stalled reconnect. Only the opening payload is replayed;
+  queued application commands belonging to a lost connection are discarded
+  and not written to the replacement stream. Sending while disconnected
+  returns `Disconnected`. `Ready` is cleared immediately on connection loss.
+  An exhausted reconnect budget closes the event stream after any pending
+  error event. An expired connect deadline prevents further redials under
+  that deadline; a shared deadline is not renewed by reconnect. After the
+  first `Ready`, later recovery uses the per-attempt timeout, without an
+  overall lifetime deadline.
+- **Timeouts and bounded queues (receive-timeout requirement).** Idle timing
+  begins after setup and resets on inbound frames, not on outbound activity.
+  A slow outbound write or a full inbound event queue must not prevent the
+  supervisor from noticing timeout or manual close. Preserve bounded queues;
+  do not solve this by making them unlimited. Notify waiting requests and
+  publish state changes independently of a blocked event consumer. Flush the
+  transport's automatic pong responses so periodic server pings actually
+  keep a connection alive. Tests cover a full event queue and verify pongs
+  at the server, not just that the client remains open.
+- **Headers and redaction (handshake requirements).** Resolve constant headers
+  and programmatic overrides using shared precedence, then attach the one
+  selected credential. Reject conflicting explicit credential sources instead
+  of sending both. Do not allow user headers to overwrite the WebSocket
+  upgrade headers managed by the transport. Retain rejected-handshake status
+  and redacted headers in a structured error; never retain a transport error's
+  raw formatted URL. Test a redirect whose `Location` contains a secret query
+  value and a response with `Set-Cookie`. Authentication-method reporting
+  describes the resolved source, not proof that the server accepted it.
+- **Test ownership and evidence (harness and acceptance requirements).**
+  Use the [Test Toolkit](../../../tools/test-toolkit/README.md) for environment
+  restoration and test tracing. Environment-sensitive tests must isolate all
+  resolver candidate variables; no test may read the developer's actual token.
+  Register new test modules in the existing test targets so nextest lists
+  them. Use scripted server barriers or an injectable failing writer for
+  opening-write failures; a peer closing a socket does not reliably make the
+  next local write fail. Reuse qualifying OS evidence according to repository
+  rules. An unreachable host is recorded as unverified and required evidence
+  remains outstanding; do not describe incomplete coverage as a passing matrix.
+
+
+The supervisor's intended state flow is shown below. "Setup" includes the
+opening write and any protocol authentication selected by the author; completing
+the HTTP upgrade alone does not prove the application session is ready.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Connecting
+    Connecting --> Setup: upgrade accepted
+    Setup --> Ready: required setup completes
+    Ready --> Disconnected: connection lost or idle timeout
+    Disconnected --> Connecting: reconnect permitted
+    Connecting --> Disconnected: transient attempt failure
+    Setup --> Disconnected: transient setup failure
+    Connecting --> Closed: rejected authentication or redirect
+    Setup --> Closed: rejected protocol authentication
+    Disconnected --> Closed: budget exhausted or deadline expired
+    Ready --> Closing: manual close
+    Closing --> Closed
+    Closed --> [*]
+```
+
+Manual close or dropping the client also terminates Connecting, Setup, and
+Disconnected without a redial. Transient setup failures count against the
+same consecutive-failure budget as failed dials.
+
+## Open Questions
+
+These choices change public behavior or require information the existing
+hints cannot express. Where a question states the scope that applies until
+the author rules, the implementer uses it and logs it. The message-selection
+question has no safe draft default; until it is ruled, independent work can
+proceed, but the unresolved choice remains an explicit limit on completion and
+is not permission to claim an unsupported feature works.
+
+### How should an inbound frame select its typed message?
+
+The proposed declaration-order decoder is unsafe. In `schematic-definitions`,
+[Core payloads](../../definitions/src/unfolded_circle/core_ws/types.rs) use
+broad enums for `kind` and `msg`; several specialized messages can deserialize
+as a generic envelope or as another specialized message. A successful decode
+alone does not establish its meaning. The fixture must assert the variant.
+
+1. **Declare selectors using existing wire fields — recommended.** Add optional
+   message match rules in `schematic-define` for field/value checks, with an
+   explicit generic fallback. For example a specialized pong matches
+   `kind=resp` and `msg=pong`; the generic response is the fallback for other
+   response names. Select once before decoding its payload. Pros: respects
+   the actual protocol, handles overlapping shapes, and avoids trying every
+   payload parser. Cons: adds definition vocabulary and validation, and its
+   serialization must remain usable by the later AsyncAPI exporter. Reject
+   conflicting selectors and keep unknown message names on the fallback.
+2. **Constrain payload types to disjoint shapes.** Use literal-valued
+   discriminators or custom Serde decoding in the definitions. Pros: less
+   generator vocabulary and decoding can remain untagged. Cons: changes
+   public payload types, may duplicate routing rules, and broad envelopes
+   still need explicit precedence over specialized types.
+3. **Detect multiple successful decodes and return ambiguity.** Pros: no new
+   wire selector contract and no silent wrong variant. Cons: tries multiple
+   payload parsers and rejects legitimate overlapping protocol messages.
+
+Recommend declared selectors because the existing wire tags already provide
+the missing information. Do not add a new wire tag or solve this only by
+reordering variants. The declaration-order default is withdrawn from the
+typed-message requirement and planning item 10; no replacement is decided
+until the author rules.
+
+### Who performs message-based authentication on each connection?
+
+In `schematic-gen`, [the planner](../../gen/src/ws_codegen/plan.rs) records an
+endpoint's authentication hints at API scope, but
+[the client template](../../gen/src/ws_codegen/client.rs) does not consume
+those hints. In `schematic-define`,
+[AuthFlowHints](../../define/src/websocket/hints.rs) names messages and schemas
+but has no credential field placement or precise success predicate. Merely
+adding those hints cannot make reconnects protocol-ready.
+
+1. **An endpoint-scoped typed setup callback — recommended.** Resolve
+   credentials with the shared runtime, then let a protocol adapter perform
+   the challenge exchange and opening write on each initial connection and
+   redial, before `Ready`. Bound the complete setup by the same attempt
+   timeout. Pros: supports real device flows without baking protocol field
+   names into generic templates. Cons: adds a callback API, must define its
+   ownership and cancellation, and needs shipped adapters and mock tests.
+2. **Extend declarative authentication hints.** Add credential placement,
+   exact success/failure matching, and ordering relative to the opening
+   payload. Pros: self-contained definitions and reusable generated flows.
+   Cons: larger vocabulary and validation; existing hints are insufficient
+   and the design must account for protocol-specific challenge data.
+3. **Require callers to authenticate after transport connection.** Pros: a
+   smaller transport API. Cons: moves replay and ordering onto every caller,
+   requires a separate transport-connected state instead of premature
+   `Ready`, and changes the goal of automatic protocol recovery.
+
+Recommend the callback because it can support the actual payloads while
+keeping the transport generic. Any selected design must keep flows per
+endpoint, repeat authentication on redial, and make rejection terminal with
+no alternative-key or anonymous fallback. Missing credentials still permit
+an anonymous upgrade as already decided; subsequent protocol rejection is
+reported rather than bypassed. An opening payload containing an auth field
+must not become a second independent credential source. Specify whether it
+is filled by the resolved credential or rejected on conflict. Include a
+challenge-success-redial test, a challenge-failure test, and a setup stall.
+Until the author rules, planning item 6 applies: no challenge exchange is
+automated, and `Ready` means the upgrade and any opening write completed.
+
+### Does heartbeat metadata start an automatic heartbeat?
+
+In `schematic-define`, [HeartbeatHints](../../define/src/websocket/hints.rs)
+provides intervals, but not the payload or response-matching contract for an
+application heartbeat. The client template does not consume it. An inbound
+idle timeout and protocol ping/pong support do not implement these hints.
+
+1. **Keep application heartbeat caller-managed, with diagnostics — recommended.**
+   Preserve declared metadata for later export, warn that automatic scheduling
+   is unsupported, and document how callers send their protocol heartbeat.
+   Pros: keeps this fix focused and makes the limitation visible. Cons: callers
+   own scheduling and the acceptance goal must explicitly allow this boundary.
+2. **Support automatic WebSocket control-frame pings only.** Pros: needs no
+   JSON payload and works for transport liveness. Cons: cannot represent an
+   application heartbeat; needs an explicit declaration that separates those
+   meanings and cannot silently reinterpret existing hints.
+3. **Add application-heartbeat callbacks or complete declarations.** Pros:
+   automatic scheduling and protocol response handling. Cons: expands the
+   supervisor work to timer ownership, missing-response policy, and per-device
+   payloads, contrary to the current transport scope.
+
+Recommend caller-managed application heartbeats for this specification. This
+narrows the design table's claim that every existing hint is consumed: unused
+heartbeat declarations produce a Warning rather than a false promise. The
+receive-timeout requirement still applies and control-frame pongs still work.
+The author must accept this scope boundary or choose automatic behavior before
+the normalization requirement can be declared complete.
 
 ## Suggested phases
 
@@ -553,8 +839,8 @@ phase so `just lint-schema` and the drift test pass at the phase boundary.
    its own tests. Surface `WsDiagnostic`s through the shared diagnostics
    mechanism.
    Remove the `receive_timeout` TODO diagnostic only in phase 3.
-2. **Quick defects (R1, R4).** Correct the Core URLs (verify device paths
-   first), add the base-path overlap Warning, fix the Bearer template, add the
+2. **Quick defects (R1, R4).** Correct the Core URLs using the documented
+   channel paths, add the base-path overlap Warning, fix the Bearer template, add the
    compile test. Regenerate.
 3. **Supervisor (R2, R3, R8).** Counter reset, open replay, receive timeout;
    mock-server tests; regenerate.
@@ -562,16 +848,22 @@ phase so `just lint-schema` and the drift test pass at the phase boundary.
    five definitions, the planner, the AsyncAPI importer's construction of
    `WebSocketApi`, and the README; remove `ConnectionParam`/`ParamType`. This
    is the widest compile change, so it is one phase with no behavior change
-   beyond the vocabulary. Regenerate.
+   beyond the vocabulary. Make endpoint roles explicit before correcting
+   directions so generated hosts do not disappear. Migrate every source
+   consumer of removed definition types in this phase. Regenerate.
 5. **Handshake auth (R5, R6, R7).** Credential resolution, placement, auth
-   method accessor, redaction, no-redirect behavior. Regenerate.
+   method accessor, redaction, no-redirect behavior. Apply the settled
+   authentication-setup choice and connect its ordering to lifecycle replay.
+   Regenerate.
 6. **Declared link (R11).** `responds_with`, explicit correlation hints,
    removal of the name match, request-id type honored, validations. Update
    definitions that relied on inference. Regenerate.
 7. **Typed surface and host (R10, R14).** Emit enums, typed `send`/`next_event`
-   and raw escape hatch, `{ApiName}EventHub`, `on_authenticated`. Regenerate.
-8. **Dependents (R15).** Migrate the homelab crates; build and test every
-   dependent.
+   and value escape hatch, `{ApiName}EventHub`, `on_authenticated`. Migrate
+   affected homelab consumers in this same phase before declaring it green.
+   Regenerate.
+8. **Dependents (R15).** Verify the homelab migrations already made with their
+   breaking changes; build and test every dependent.
 9. **Docs, skills, drift pass, matrix (R17).** README, topic pages, skills;
    comment-drift pass over every symbol whose behavior changed; run the full
    acceptance matrix; finish the implementation log.
@@ -588,8 +880,10 @@ the following hold and are recorded in `implementation-log.md`:
   methods); where a host cannot be reached, the log says "not verified on X"
   and why instead of pausing. CI is not triggered speculatively (repo CI
   discipline); local runs may be as wide as useful.
-- `just test` and `just lint` pass for the `schematic` area, and
-  `just lint-schema` passes.
+- `just test`, `just test-schema`, `just doctest`, and `just lint` pass for the `schematic`
+  area, and `just lint-schema` passes. The generated schema crate has its own
+  manifest and is excluded from ordinary workspace tests; `just test` alone
+  does not execute its mock-server tests.
 - `schematic-schema` was regenerated by the generator, never hand-edited, and
   the drift check is clean.
 - Every dependent builds and passes its tests: `sniff`, `biscuit-speaks`,
@@ -660,15 +954,16 @@ specifics are listed below.
 
 ## Planning-time details assigned to this spec
 
-Every item has a default; the implementer adopts it unless the author rules
-otherwise before planning, and logs the adoption.
+Routine items below have defaults adopted and logged unless the author rules
+otherwise. The message-selection choice in Open Questions has no default and
+requires an author decision before typed decoding is implemented.
 
 1. **Shape and name of the explicit response link (P10).** *Default if not
    ruled before planning:* `MessageSchema.responds_with: Option<String>` on the
    request message, naming the answering message in the same endpoint; no
    many-to-many form; one request has at most one declared response message.
 2. **Correlation without hints.** *Default:* correlation is active only when
-   `CorrelationHints` exist (endpoint-level, else API-level); `responds_with`
+   endpoint-level `CorrelationHints` exist; `responds_with`
    without hints is an Error; hints without any `responds_with` pair
    correlate nothing and Warn.
 3. **Diagnostics format and failure behavior (P10 item, parent question 14).**
@@ -686,8 +981,9 @@ otherwise before planning, and logs the adoption.
    write; `max_attempts` bounds consecutive failures.
 6. **Where the open message is replayed.** *Default:* after the dial succeeds
    and before `Ready`; replay of an `AuthFlowHints` challenge exchange after a
-   reconnect is **not** added unless the existing client already handles
-   challenges (**unverified**; check and log).
+   reconnect is **not** added, because the existing client does not handle
+   challenges (**verified** 2026-10-11). Whether to automate message-based
+   authentication is the authentication question in Open Questions.
 7. **Missing credential behavior (R6).** **Decided (D56):** when no credential
    resolves, connect proceeds anonymously and reports `Anonymous` (D11
    literally), the same as REST. There is no fail-before-dialing rule and no
@@ -703,16 +999,16 @@ otherwise before planning, and logs the adoption.
    frame; expiry is an error event then the reconnect policy.
 10. **Typed enum naming and decoding.** *Default:* `{Endpoint}ServerMessage`
     and `{Endpoint}ClientMessage`; variants named by `MessageSchema.name`;
-    `Bidirectional` messages appear in both; untagged decode in declaration
-    order; failure yields an error event with the raw text.
+    `Bidirectional` messages appear in both. Message selection is unresolved
+    pending Open Questions; declaration order is not a safe default. Decode
+    failure yields an error event retaining the original text or bytes.
 11. **Untyped surface.** *Default:* keep `send_value(Value)` and
     `next_value_event()` as explicit escape hatches; the unsuffixed names become
     typed. `send_raw` is not used because D45 gives that name to the REST
     escape hatch with different semantics (status, headers, bytes).
 12. **`WebSocketApi` field set after reuse.** *Default:* add `env_mapping` and
-    `headers`; add `auth_policy` only if spec 4 kept `RestApi::auth_policy`
-    (P12); if spec 4 removed it, WebSocket uses `AuthStrategy` plus
-    `EnvMapping`; `env_auth` follows REST.
+    `headers`; include the retained `RestApi::auth_policy`
+    vocabulary (already ruled by the author); `env_auth` follows REST.
 13. **Mapping the removed `ParamType` onto `QueryParamType`.** *Default:*
     `String`, `Integer`, `Boolean` map by name; `Float` maps to `Number`
     (**verified**: the REST type has `Number`, not `Float`). Path placeholders
@@ -736,13 +1032,14 @@ otherwise before planning, and logs the adoption.
     `responds_with` for Samsung only if the protocol notes in the repo
     (`schematic/docs/research/samsung-design.md`) show request and response
     ids; otherwise declare no correlation, and the dead `RequestIdType` then
-    triggers the "unconsumed declaration" Warning, resolved by removing it.
+    triggers the "unconsumed declaration" Warning, resolved by removing an explicit declaration or documenting the implicit default.
 18. **Test levels.** *Default:* all mock-server tests are L1 (loopback, no
     terminal); no L2 test is added.
 19. **Mock server construction.** *Default:* build the helper on
     `tokio-tungstenite`'s server side, in `schematic-schema`'s test support,
-    shared with `schematic-gen` tests by a dev-only module or small
-    dev-dependency path; no new third-party crate.
+    shared with `schematic-gen` tests through test-only source inclusion
+    where useful; a crate's integration-test module is not a library export,
+    and `schematic-gen` must not gain a cyclic dependency on generated output; no new third-party crate.
 20. **Timing under a deadline and overrides (D56-2, D56-3).** *Decided:* when a
     deadline is in force, the time allowed for one connect attempt (dial,
     handshake, and open-message write) is `min(remaining, per-request
@@ -753,21 +1050,23 @@ otherwise before planning, and logs the adoption.
     (for example a shorter timeout) follows the simple subset rule; this spec
     adds no override that loosens one.
 21. **ElevenLabs normalization scope.** *Default:* normalize what the
-    `WebSocketApi` definition declares (params, auth, env mapping) and the
-    standalone message payload types, if they do not use `schematic_define`; do not change its protocol
-    behavior.
+    `WebSocketApi` definition declares (params, auth, env mapping) and resolve
+    its payload types using the same schema-registration rules as other APIs.
+    Payload structs need not use `schematic_define`; do not change their wire
+    behavior merely because they are ordinary Serde structs.
 
 ## Risks and failure modes
 
 - **Overlapping payload shapes break untagged decoding.** A message may decode
-  as the wrong variant. Mitigation: per-definition fixture frames; log
-  ambiguities; do not invent a discriminator.
+  as the wrong variant. The message-selection choice in Open Questions must
+  be settled before typed decoding is implemented; logging ambiguity alone
+  does not satisfy correctness.
 - **Spec 4 or 5 may have moved the REST types.** `ParamDef`, `EnvMapping`,
   `AuthPolicy` names and serde support may differ from the tree today. See
   "Refresh notes".
 - **Changing generated public names breaks homelab at compile time.** Intended;
-  R15 migrates them. Order matters: regenerate and migrate in the same phase
-  boundary where practical, or keep the tree green with a temporary shim that
+  R15 migrates them. Order matters: regenerate and migrate at every
+  breaking-change phase boundary, or keep the tree green with a temporary shim that
   is removed in the same spec.
 - **Timing flakiness on Windows and WSL2.** Reconnect, timeout and stall tests
   depend on timers. Use generous tolerances, injected short backoffs, and
@@ -776,11 +1075,10 @@ otherwise before planning, and logs the adoption.
   credential is sent in clear. Not changed here (D28 does not address it);
   documented in the topic page. **Unverified** whether the author wants a
   warning.
-- **Unverified claims.** Whether device paths for `/intg` and `/profiles`
-  carry a `/ws` prefix; whether the client already replays auth-flow
-  challenges; whether `homelab/cli` consumes WebSocket modules; whether the
-  generated Samsung `wss://` connection works without an
-  accept-invalid-certificates option.
+- **Remaining verification.** Whether Samsung
+  `wss://` requires the runtime's opt-in TLS setting. The Core paths and lack
+  of auth-flow handling in the client template were checked during this review;
+  do not repeat them as unanswered facts.
 - **Silent skip of the compile test.** If the isolated compile check is slow
   and gated, R4 could pass by not running. The log records the command and
   result of the compile run.
@@ -807,9 +1105,10 @@ Because no human is available while the plan runs: this spec restates every
 decision the implementer needs (above); every remaining planning-time detail
 has a default flagged "Default if not ruled before planning", which the
 implementer adopts and logs; and the implementer records the items in the
-agenda below in `implementation-log.md` **as they occur**, not at the end. If
-something is unclear, adopt the safest reading, log it as an open question,
-and continue; do not stop to ask.
+agenda below in `implementation-log.md` **as they occur**, not at the end. For routine details, adopt the safest reading, log the choice, and continue.
+For the major choices in Open Questions, continue independent work and record
+the affected behavior as unresolved until the author settles it; do not
+silently turn a recommendation into an approved design.
 
 ## Human review agenda
 
@@ -821,11 +1120,11 @@ The implementer logs each of these in `implementation-log.md` for review 1:
    error kinds, file layout, helper placement).
 3. Every deviation from this spec or the parent's decisions, and the reason.
 4. Every open question found, with the evidence and the safest reading used.
-5. Specifically (the missing-credential rule, the redirect rule and the
-   runtime trait name are ruled by D56 and are not review items): the
-   `responds_with` shape (item 1), the untagged typed-message decoding risk (item 10; no
-   discriminator), the `send_value` / `next_value_event` naming (item 11), TLS
-   for `wss://` (item 16), the `auth_policy` outcome (item 12), the Samsung
+5. Specifically (anonymous upgrade behavior, refusal to follow redirects,
+   and the runtime trait name are already ruled and are not review items): the
+   response-link shape (planning item 1) and the message-selection,
+   authentication, and heartbeat choices described in Open Questions, the `send_value` / `next_value_event` naming (item 11), TLS
+   for `wss://` (item 16), the retained `auth_policy` integration (item 12), the Samsung
    correlation decision (item 17), the corrected device paths and their
    evidence (item 4), and the ElevenLabs finding (definition uses
    `WebSocketApi`; payload types standalone).
@@ -842,7 +1141,7 @@ before its plan runs. Things that may change it:
 
 - **From the response-model-and-GraphQL spec and the definition-API spec:**
   final names and serde support of `ParamDef`, header types, `EnvMapping`;
-  whether `AuthPolicy` survived (P12); builder shapes (the five WebSocket
+  the retained `AuthPolicy` builder shape; builder shapes (the five WebSocket
   definitions may need builders or a context parameter, D15 and D2); the
   `env_auth[0]` retirement; typed path parameters.
 - **From the runtime-and-envelope spec:** final runtime package name, whether
