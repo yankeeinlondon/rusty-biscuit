@@ -357,6 +357,50 @@ delete prints no "(N lost)" suffix.
 - The safety tiers' `origin/*` live checks still use `origin`, matching the
   fetch that made those refs.
 
+## Recovery store (`remove::recovery`) and typed outcomes (`remove::outcome`)
+
+The durable state of the contention-aware removal (`2026-10-05-graceful-file-contention`).
+The module docs of `recovery` state the crash guarantees; the facts below are
+the ones that cost time.
+
+- **Layout:** `<common-git-dir>/wt-removal/<operation-id>/` holds
+  `record.json`, `journal.jsonl`, and `report.json`; `wt-removal/locks/` holds
+  one `fs4` lock file per worktree record (key: BLAKE3 of the admin directory
+  name, 32 hex). A lock file is never deleted; only a held lock is an active
+  operation.
+- **An operation directory appears atomically.** `RecoveryStore::begin` builds
+  it as `.<id>.tmp`, flushes, and renames it. `pending()` skips any name that
+  is not an operation ID, so a staging directory a crash left is not a record.
+- **Trap (Windows): the journal is closed before that rename** and reopened for
+  appending afterwards (`JournalWriter::after_header`). Windows refuses to
+  rename a directory with an open file anywhere inside it (spike S1).
+- **Trap (macOS): std's `sync_all`/`sync_data` issue `F_FULLFSYNC`, ~25 ms a
+  call.** `storage::flush` uses plain `fsync` on Apple platforms; the store
+  claims process-crash durability, not power loss. With std's call, each
+  recovery test took 0.3–4 s; with `fsync`, ~30 ms.
+- **`begin` refuses while any record is unreadable,** not only one for the same
+  worktree: an unreadable record could describe it.
+- **Strict reading:** `record::parse` reads `record_version` through
+  `strict_json::members` first (an unknown version is `UnsupportedVersion`, not
+  `Malformed`), then the typed struct. Every field is required, with no
+  `Option` and no `serde(default)`. A detached checkout is the enum value
+  `"detached"`, not a null branch. Sniff's internally tagged `FileIdentity`
+  refuses an integer `kind` and a repeated inner key (both are matrix cells).
+- **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
+  worst-case results line for the batch would still fit, so a confirmation is
+  never lost to the size limit. An unterminated last line is a torn write and is
+  ignored. An intent without results replays its absent entries as `Uncertain`
+  and its present ones as `Planned`.
+- **Robustness matrices** for both formats are in `recovery/store/tests.rs`.
+  They edit a fixture the store itself wrote and assert through
+  `RecoveryStore::recover`. A cell rewrites its file with `fs::write`, not
+  `write_durable`, to skip the flush.
+- `OperationReport` is written, never read back by `wt`. Its lists are capped
+  (`MAX_REPORTED_ACTIVITY`, `MAX_REPORTED_RETAINED`) with exact omitted counts.
+  The journal is never truncated. The exit-code mapping is not in `outcome`;
+  the lifecycle (Phase 6) owns it, because exits 4 and cancel-0 are not
+  operation outcomes.
+
 ## Tests
 
 See [testing.md](testing.md#wt-remove).
