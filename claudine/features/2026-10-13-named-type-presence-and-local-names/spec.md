@@ -30,6 +30,28 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+    Phase 1 (investigation only) is recorded in implementation-log.md: read its
+    "Surface Inventory", "Provenance Spike", and "Engineering choices settled at
+    the checkpoint" sections before Phase 2. Key facts the plan does not state:
+    (1) import-site `min`/`max` parse as numeric `Min/Max` because imports parse
+    with `SimplifiedType::Any`; a string target then fails with "constraint `max`
+    is not valid on `string`", so bounds must be reinterpreted against the
+    resolved target (like `reinterpret_suggestion_candidates`). (2) Contradictions
+    are silent today (`minimum: 10, maximum: 5`; `minProperties: 3,
+    maxProperties: 2` from `$constraints` + postfix). (3) `load_named_types`
+    already builds a `SchemaSourceMap` via `parse_standalone_schema_document` and
+    discards it; block-scalar named-type files already fail to load, so every
+    importable declaration has spans. The chosen provenance design keeps
+    `Constraint`/`PropertyAtom` span-free and carries `SchemaConstraintOrigin`
+    addresses (source id, structural path, keyword, occurrence, optional span)
+    in the resolver and in two new `SchemaError` variants. (4) `apply_object_arity`
+    silently drops `$constraints` keys other than min/max-keys. (5) Several
+    consumers take only the first `Match` or concatenate arms' patterns
+    (completion.rs, claudine supplied.rs/classify.rs), and validate.rs assumes the
+    match error path ends in `x-darkmatter-match`. (6) A postfix on an
+    already-array target is appended to item constraints today; the log records
+    the choice to interpret it against the array container.
 pipeline_step: 3
 related:
     - 2026-10-14-union-type-constraints

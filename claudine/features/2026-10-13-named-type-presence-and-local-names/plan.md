@@ -4,6 +4,11 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Named-Type Presence and Local Names Implementation Plan
@@ -35,13 +40,13 @@ Waves are globally numbered execution steps. Tasks within a wave may be delegate
 
 ### Wave 1 — Investigate Independent Risks
 
-- [ ] **Surface Inventory**
+- [x] **Surface Inventory**
   - Inventory `darkmatter/lib/src/markdown/schemas/{resolve.rs,errors.rs,file_match.rs}` and `simplified/{types.rs,grammar.rs,source.rs,cursor.rs,query.rs,lint.rs,convert.rs,serialize.rs}`. Identify parser entry points, import fast paths, bound interpretation, object `$constraints`, description precedence, and annotation consumers.
   - Trace DMLS from `overlay/schema.rs` through frontmatter assistance, definition lookup, diagnostic publication, and dependency invalidation. Trace Claudine through `cli/src/completion/schema_completion/` and `lib/src/composition/schema/supplied.rs`; supplied-value root-union validation is a consumer too.
   - Inventory shipped `*/schemas/`, `*/docs/schemas/`, the embedded baseline, and inline schemas in shipped Markdown. List presence-stripping tests/comments, duplicate constraints, built-in collisions, and public file-match consumers. Distinguish production artifacts from intentionally invalid test fixtures.
   - Deliver a path/symbol inventory and acceptance-to-test map in the implementation log, including actual additional package areas requiring checks. Use text search and call-graph queries where useful; do not make index refresh a gate.
 
-- [ ] **Provenance Spike**
+- [x] **Provenance Spike**
   - Independently inspect the source-map path through the resolver. Today `SchemaSourceMap` records constraint spans, while most `Constraint` variants carry values alone; determine the smallest way to keep a declaration's origin associated with each surviving constraint.
   - Run one bounded fixture experiment: a required bare alias and a two-file, multi-hop alias with a lower bound in the original definition and conflicting upper bound at the use site. Include one quoted or block scalar and one block `$constraints` bound.
   - Demonstrate how the consuming reference, both original constraint spans, structural property path, inline identity, and nested typed error survive to DMLS-related locations. This can use a disposable probe; do not land a competing production pipeline.
