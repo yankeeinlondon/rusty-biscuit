@@ -27,7 +27,16 @@ review_iterations: 0
 clarified: false
 implemented: false
 human_review: false
-message_to_agent: ''
+message_to_agent: |-
+  Phase 1 is done (see implementation-log.md "## Phase 1"). Things the next phase must know:
+  - Pre-authorization items 1-8 have NO recorded author confirmation. Phase 1 read item 5 as granted by the explicit "implement phase 1" request and did not exercise item 7 (the ignored e2e tests and `just test-e2e` are untouched). Phase 3 needs item 1 to regenerate `openapi/ollama.json`; without confirmation, leave that action pending and log the boundary, as the plan says.
+  - The fresh-output guard is `just -f schematic/justfile test-fresh-output` (schematic-gen's `slow_` L1 tests, run by `just test` after L1 and by the CI build job before archiving). Every new test that invokes Cargo must be named `slow_*` in the `l1` binary: that places it in the one-at-a-time nextest group `schematic-fresh-output` (15-minute ceiling) and keeps it off toolchain-free archive consumers. Do NOT set `l1-include-slow` on schematic-gen; a contract test in tools/test-toolkit forbids it.
+  - Reuse `tests/common/fresh_output.rs` (`FreshCrate::generate`, `cargo_check`, `nextest_run`, `snapshot_tree`, `diff_summary`). Fixture APIs need `Definitions::Fixture(&[(module, rust_source)])`: a stand-in schematic-definitions 0.1.1 that re-exports the real crate. Pass the lockfile as `biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock")` inside each #[test].
+  - Generating all 18 APIs in-process takes 5-12 s in a debug build, over the 5 s L1 budget. Put any full-output assertion inside an existing `slow_` test, not a new ordinary L1 test.
+  - `fresh_output_compile::slow_query_wire_matches_pre_split_baseline` + `tests/fixtures/wire_baseline/query_request_lines.txt` is the R29 golden captured before any generator change. Phase 5 must keep it byte-identical; never regenerate the golden from new output.
+  - Live counts: 7 OpenAI `Beta*` endpoints declare an `openai-beta` header parameter (Array(Enum)). Implementing header parameters (Phase 6) changes real OpenAI output. Multipart is 16 endpoints and the total is 549, not 519.
+  - `just check-drift` now works (nextest, `artifact_drift::` plus the 18-API Rust comparison).
+  - R35's completion-record gap (producer-run tests have no completion record) is logged and left incomplete within item 9's narrow authority; do not change completion.py.
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on: []
 refresh_required: false
