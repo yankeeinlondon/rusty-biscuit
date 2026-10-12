@@ -1085,7 +1085,8 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `boolean` / `boolish`                          | boolean switch                          |
 | `number` / `numberlike`                        | text input with parse-and-retry         |
 | `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
-| `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
+| `alphanumeric` / `shell`                       | plain text input                        |
+| `object`, `unknown` (`any`), property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
 Each widget renders inline, directly below the status report, in a viewport sized to its label, rows, and help hint (choosers show at most 8 terminal rows and scroll beyond that). None switches to the alternate screen, so earlier output stays in scrollback. Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
 
