@@ -158,6 +158,33 @@ not treat an empty `lsof` or vnode-descriptor scan as proof that no process
 watches a directory. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
 and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
 
+### Receiving FSEvents reliably
+
+Measured 2026-10-11 with `notify` 8.2 (FSEvents backend; latency 0,
+`kFSEventStreamCreateFlagNoDefer`) on this host:
+
+- **Bursts drop events even when the handler never blocks.** Every
+  2,000-file burst produced several `MustScanSubDirs` events flagged "user
+  dropped". Bursts of 64–1,000 files did not.
+- **Delivery is not ordered against a marker.** In 1 of 9 rounds, 8 files
+  written *before* a marker file were reported *after* the marker's event.
+  At 2,000 files the marker event was itself lost twice. So "write a
+  marker, wait for its event" is not a drain on macOS. The native drain is
+  `FSEventStreamFlushSync` (exposed by `fsevent-sys`, not by `notify`).
+- **Events lag by 100–600 ms under load**, crossing any fixed wait window.
+- **History flags are cumulative.** A file created and later deleted can be
+  reported, at deletion time, as `Create` plus `Remove` plus a data change,
+  so event kind alone cannot tell "we deleted it" from "someone wrote it".
+- **Watches are path-based.** After a watched directory is renamed, writes
+  under the new name are unobserved until that name is watched. A recursive
+  watch on the parent covers both names.
+- `notify`'s handler runs on the stream's thread. If it blocks (for example
+  `send` on a full bounded channel whose receiver is not being read),
+  dropping the watcher **hangs forever**. Feed a bounded queue with
+  `try_send` instead.
+- Starting a stream costs about 19 ms (300 watchers in 5.6 s), and no
+  thread is left behind once they are dropped.
+
 ### Reading other processes' descriptors and cwd
 
 Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:

@@ -289,3 +289,21 @@ private target) before building the archive, and compare the expected test
 names with its actual PASS listing. Rebuilding after touching the package's
 query sources included and passed the missing test. `--extract-to` also needs
 an existing destination directory.
+
+## drvfs volumes reject `RENAME_NOREPLACE`; inotify instances are scarce
+
+Measured 2026-10-11 on the WSL guest (kernel 6.18):
+
+- **`renameat2(RENAME_NOREPLACE)` returns `EINVAL` on drvfs** (`/mnt/b`,
+  `/mnt/c`, 9p), even for a move to an absent name. It works on the guest's
+  ext4 and tmpfs. A destination that exists still returns `EEXIST`, because
+  the VFS checks it before the filesystem rejects the flag, so `EEXIST`
+  does not prove the flag is supported. A permission failure on drvfs also
+  returned `EINVAL`, not `EACCES`. Code that must move without replacing
+  has to treat `EINVAL` as "unsupported here" and refuse before changing
+  anything.
+- **`max_user_instances` is 128** (`max_user_watches` 524288,
+  `max_queued_events` 16384), against 65536 instances on `BUILD_LINUX`.
+  `notify` 8.2's 121st watcher failed at creation with `EMFILE`, surfaced as
+  an `Io` error rather than `MaxFilesWatch`. Overflow at 16384 queued events
+  arrives as one `Rescan` event.

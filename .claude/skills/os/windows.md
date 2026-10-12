@@ -262,6 +262,49 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
   `ping` itself with `current_dir` set and null stdio
   (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
   2026-09-24).
+- **A directory rename denied by use looks like a permission error.**
+  Measured 2026-10-11 on ReFS `B:` and NTFS `C:` with
+  `SetFileInformationByHandle(FileRenameInfo, ReplaceIfExists = FALSE)`.
+  - Open with `DELETE` access always succeeds.
+  - The rename call then fails with `ERROR_ACCESS_DENIED` (5), not
+    `ERROR_SHARING_VIOLATION`, for: an open file anywhere in the subtree
+    (even one opened with `FILE_SHARE_DELETE`), a handle on a subdirectory,
+    or a child process's cwd.
+  - The rename succeeds with only a handle on the directory itself, or with a
+    `ReadDirectoryChangesW` watch on it or on its parent.
+  - ACL denies of DELETE on the source, or of add-subdirectory on the
+    parent, did not stop it (the parent's delete-child right suffices). So a
+    5 from the rename call almost always means "in use", but the code alone
+    cannot prove it.
+  - Without replacement, `ERROR_ALREADY_EXISTS` (183) is returned for every
+    existing destination kind, and `ERROR_NOT_SAME_DEVICE` (17) across
+    volumes. `std::fs::rename` instead **replaces** an existing empty
+    directory or file. Evidence:
+    `worktree/fixes/2026-10-05-graceful-file-contention/spikes/`.
+- **Use `FileIdInfo` for directory identity.**
+  `GetFileInformationByHandleEx(FileIdInfo)` gives a 64-bit volume serial
+  and a 128-bit file ID. The legacy 64-bit `nFileIndex*` is not guaranteed
+  unique on ReFS.
+
+## Directory change notifications
+
+Measured 2026-10-11 with `notify` 8.2 (`ReadDirectoryChangesWatcher`) on
+`build-win-native`:
+
+- **Overflow is silent.** With the handler blocked, 40,000 creates produced
+  2 events, no rescan flag, and no error. `ReadDirectoryChangesW` signals an
+  overflow as a zero-byte completion, which `notify` parses as a zeroed
+  buffer and drops. `notify` also unwatches silently on any completion error
+  other than `ERROR_OPERATION_ABORTED`/`ERROR_ACCESS_DENIED`, so a lost
+  watch never reaches the handler. Code that must know when coverage was
+  lost needs its own `ReadDirectoryChangesW` loop that treats a zero-byte
+  completion and `ERROR_NOTIFY_ENUM_DIR` as overflow.
+- **A watch follows its directory across a rename, with stale paths.** The
+  handle stays valid, but `notify` joins each event's name onto the path it
+  was given, so events after the rename carry the old name. A recursive
+  watch on the parent reports both names correctly.
+- **Delivery is FIFO per handle.** A marker file written after a burst of
+  2,000 creates arrived after all of them (40–80 ms).
 
 ## The `windows-latest` leg
 
