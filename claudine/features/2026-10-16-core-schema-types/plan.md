@@ -1,14 +1,83 @@
 ---
 total_phases: 6
 created: 2026-10-12
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/alphanumeric.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/fixtures/detect/arrays/expected.yaml
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/cli/src/commands/context/format.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - darkmatter
+    - claudine
+    - claudine-cli
+    - darkmatter-cli
+    - dmls
 ---
 
 # Core Schema Types Implementation Plan
@@ -246,7 +315,7 @@ an unexpected key in a closed argument shape, not an optional retained field.
 
 ### Wave 3 — Typed Grammar
 
-- [ ] **Type representation**
+- [x] **Type representation**
   - Prerequisite: Phase 1 checkpoint. Extend the shared AST/keyword catalog
     for unknown/any, null, alphanumeric options, and shell. Keep internal
     `Any` naming or rename it consistently; expose `unknown` canonically.
@@ -258,7 +327,7 @@ an unexpected key in a closed argument shape, not an optional retained field.
     named definitions. Keep root null, null root arms, and `literal(null)`
     invalid. Route schema meta-types through the same rules.
 
-- [ ] **Option grammar** — sequential after Type representation, same
+- [x] **Option grammar** — sequential after Type representation, same
   integration owner because grammar/AST files overlap.
   - Implement option-before-`;` syntax, constraint-only shorthand, and
     rejection of unknown, repeated, post-separator, or mixed unseparated
@@ -279,7 +348,7 @@ the model to parallel consumers.
 
 ### Wave 4 — Effective Presence
 
-- [ ] **Presence integration**
+- [x] **Presence integration**
   - Prerequisite: Wave 3. Implement resolved whole-value null admission and
     make lowering, trigger matching/vacuity lint, optional materialization,
     completion metadata, and launch/completion projection consume it.
@@ -297,7 +366,7 @@ fixture may be left relying on the former presence meaning at final closure.
 
 ### Wave 5 — Value Semantics
 
-- [ ] **Value validation**
+- [x] **Value validation**
   - Prerequisite: Wave 4. Own converter, format, coercion, resolver default
     checks, and associated registrations. Lower null to `type: null`,
     unknown/any to `{}`, and shell to `format: darkmatter-shell`.
@@ -314,7 +383,7 @@ fixture may be left relying on the former presence meaning at final closure.
     other union arms their existing conversions. Mirror expression's shell
     coercion, literal decoding, and authored pending-value deferral.
 
-- [ ] **Subtype relation** — parallelizable with Value validation; owns a
+- [x] **Subtype relation** — parallelizable with Value validation; owns a
   separate library module and tests. The integration owner exports it.
   - Implement the passive relation over resolved typed atoms. Identical
     types with identical canonical identity return true, including identical

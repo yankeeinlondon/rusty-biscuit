@@ -31,38 +31,40 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 (inventory + regex spike) changed no source. Read the `## Phase 1`
-    section of implementation-log.md before editing; it has the code map, the
-    presence-check sites, the validator builders, and the regex construction.
-    Points that are easy to miss:
-    - `SimplifiedType::Any` is also used in grammar.rs as a "target type not yet
-      known" placeholder for inline-object and named-reference postfixes. Do
-      not let the new `unknown` presence rule (never required) apply to that
-      placeholder; give it its own representation.
-    - The trigger matcher (`triggers/matcher.rs` `is_required`), triggers lint
-      `is_gate`, phase.rs, completion.rs, DMLS `providers/frontmatter.rs`
-      `is_required`, and three Claudine sites (classify.rs, inline_prompt.rs,
-      cli schema_completion/keys.rs) each decide presence on their own. Route
-      them all through one public seam in `simplified/types.rs`, which needs
-      resolved input.
-    - Coercion: `coerce.rs::coercion_target` turns every plain string target
-      into `ToString`. An alphanumeric target must opt out, or `3` becomes `"3"`
-      and passes the pattern. `shell` needs no coercion change.
-    - Claudine has exhaustive `match` statements on `SimplifiedType`
-      (`claudine/lib/src/composition/schema/classify.rs`,
-      `claudine/cli/src/commands/context/format.rs`) that will stop compiling
-      when the variants are added.
-    - An extra `any(required)` site that the spec does not list:
-      `darkmatter/docs/schemas/claudine.yaml` `state` should become
-      `object(generated; required)`. The log records why.
-    - `claudine/docs/schemas/partials/side-effect.yaml` does NOT load today (a
-      Draft corpus exception). Its `delete_frontmatter: null` … lines and
-      `partials/lifecycle.yaml`'s `initialize: null` … lines are placeholders
-      that will start to mean the real `null` type. In Phase 4, replace each
-      with `unknown` (meaning "not yet modeled") rather than let it mean "must
-      be null", and re-pin the corpus exceptions to their precise new errors.
-    - Keep the regex sample table from the log as ordinary L1 tests against
-      the real lowering.
+    Phase 3 (presence, value semantics, subtype relation) is done. Read the
+    `## Phase 3` section of implementation-log.md first. Key points for
+    Phase 4:
+    - Presence: `PropertyDef::is_required` / `PropertyAtom::is_required` are
+      now `pub` and return EFFECTIVE presence (marker and no whole-value null
+      admission); `admits_null()` sits beside them. Every library, DMLS, and
+      Claudine presence site already calls them; do not add another check.
+    - Pulled forward from Phase 4 because the presence change broke them: the
+      three `darkmatter/tests/fixtures/schema-triggers/schemas/*.trigger.yaml`
+      files now declare `steps: unknown[](required)`, and
+      `darkmatter/docs/schemas/claudine.yaml` `state` is
+      `object(generated; required)`. Phase 4 still owns the malformed-`steps`
+      registry-decision tests (see the Phase 1 table), the side-effect partial
+      (`claudine/docs/schemas/partials/side-effect.yaml`, still a Draft corpus
+      exception), and the `lifecycle.yaml`/`side-effect.yaml` null
+      placeholders.
+    - The trigger matcher's old local `is_required` ignored `required` written
+      after `[]`; it now uses the shared calculation, so `unknown[](required)`
+      is a real gate.
+    - `is_subtype(a, b)` is exported from `darkmatter::markdown::schemas`
+      (`simplified/subtype.rs`).
+    - The `x-darkmatter-type` key is `format::DARKMATTER_TYPE_ANNOTATION`;
+      coercion reads it to keep `alphanumeric` numbers/booleans native.
+    - A non-null `null` default is now a located `SchemaError::Grammar`
+      (span over the argument); DMLS should surface it like other grammar
+      errors.
+    - `definition.md` got only a minimal fix (the `any` row is now `unknown`;
+      the trigger example uses `unknown[](required)`); the full docs pass is
+      Phase 5. `about.rs` still has no alias/options metadata fields.
+    - AC7's DMLS diagnostic for the lifecycle fixture is not yet tested; the
+      fixture shape that works is in
+      `darkmatter/cli/tests/l1/schema_validate_core_types.rs` (a tagged
+      `kind: schema` file cannot carry `$schema`, so the types live in
+      `actions.yaml` and a plain schema file imports them).
 pipeline_step: 6
 related:
     - 2026-10-13-named-type-presence-and-local-names

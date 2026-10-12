@@ -7,7 +7,76 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/alphanumeric.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/fixtures/detect/arrays/expected.yaml
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/cli/src/commands/context/format.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - darkmatter
+    - claudine
+    - claudine-cli
+    - darkmatter-cli
+    - dmls
 ---
 
 # Implementation Log for 2026-10-16-core-schema-types (6 phases)
@@ -342,3 +411,339 @@ lowering (the spike crate itself is not retained).
 Phase 1 changes no behavior, so it adds no tests. The regex samples above
 become required Phase 2 test cases (AC5, AC13). Broader gates run: see the
 baseline table. Nothing was skipped, and there were no pre-existing failures.
+
+## Phase 2
+
+Phase 2 implements the shared type model: the four types in the AST and
+keyword catalog, typed `alphanumeric` options with one canonicalizer, the
+option grammar, native YAML null at property positions, and option identity
+through named references. Paths below are relative to `darkmatter/lib/src/`
+unless stated; `S` means `markdown/schemas`.
+
+### Decisions
+
+- **`Any` is renamed `Unknown`.** `SimplifiedType::Unknown` has the keyword
+  `unknown`; `from_keyword` accepts `unknown` and `any`;
+  `SimplifiedType::aliases()` returns `["any"]` for it. Serialization emits
+  `unknown`. New variants: `Null`, `Alphanumeric`, `Shell`.
+- **The "target not yet known" placeholder is gone.** `grammar.rs` used
+  `SimplifiedType::Any` (plus a `defer_suggestion_target` flag) for the lists
+  of inline objects and named references. A private `ListOwner { Type(ty),
+  InlineObject, Reference }` now names what a constraint list belongs to, so
+  `unknown` never doubles as a placeholder. Error text for a misplaced
+  `suggest` changes from "on `any`" to "on an inline object" / "on a
+  named-type reference".
+- **Options are a positional constraint.** Following the `enum`
+  (`Constraint::Members`) and `literal` (`Constraint::LiteralValue`)
+  precedent, options ride in `Constraint::Options(Vec<AlphanumericOption>)`
+  in authored order. That keeps `SimplifiedType` `Copy`, and it lets a named
+  reference (`slug(allow-dashes; max(10))`) carry options until resolution,
+  when the target is known. `Constraint::keyword()` for options is the
+  **first authored option**, which makes `SchemaConstraintOrigin` and
+  `SchemaSourceMap::constraint_span` locate the option group with no new span
+  plumbing. `constraint_span` now also accepts `,` after the keyword, because
+  several options form one `;`-separated group.
+- **One canonicalizer** (new `S/simplified/alphanumeric.rs`):
+  `AlphanumericOption` (nine variants, table order), `AlphanumericOptions` (a
+  `Copy` `u16` bitset), and `AsciiCharSet` (a `u128` bitset). API:
+  `canonical()`, `options()`/`keywords()` (table order),
+  `allowed_characters()`, `first_characters()`, `forbids_double_period()`,
+  `accepts(&str)`, and `pattern()` (the Phase 1 spike construction).
+  `PropertyAtom::alphanumeric_options()` returns the canonical set for an
+  `alphanumeric` atom. All are re-exported from `S` for DMLS and the subtype
+  relation.
+- **Option grammar** (`parse_option_prefix`): a list owned by `alphanumeric`
+  or a reference that opens with an option keyword reads options up to `;`
+  or `)`. A list that opens with anything else is constraints only.
+  Exceptions: an unrecognized word in an `alphanumeric` list is "unknown
+  `alphanumeric` option"; a repeated option, an option with arguments, an
+  option after `;`, and a list without `;` that mixes options and
+  constraints (in either order) are grammar errors. The mixed-list message
+  shows the `alphanumeric(allow-dashes; min(1))` form. An option keyword on
+  any other type is rejected as "an `alphanumeric` option and is not valid on
+  `<type>`". `min`/`max` count characters on `alphanumeric` as on `string`.
+  `suggest` is accepted on `alphanumeric`, with string candidates.
+- **Named-reference option identity** (`S/resolve.rs::check_use_site_options`,
+  called from `apply_import_postfix` before constraint merging): use-site
+  options are removed from the constraint list. An equal canonical set is a
+  repetition and is dropped. A different set is a `ConstraintConflict` with
+  the new `SchemaConstraintConflictKind::Options`, whose origins are the
+  definition's option group (span filled for file sources) and the use site.
+  When the base type writes no options, the definition origin uses keyword
+  `alphanumeric` at the declaration path, with no span. Options on a
+  non-`alphanumeric` target are a `Convert` error. On a union target, the
+  existing `UnionReference` rejection applies. Use-site `min`/`max` on an
+  `alphanumeric` target are reinterpreted as lengths, and `suggest` on an
+  imported `alphanumeric` target is accepted.
+- **Native null at property positions** (`S/simplified/mod.rs`): `YamlValue::Null`
+  is `PropertyAtom::bare(Null)` at a property definition, a property-union
+  arm, a nested mapping property, and a named definition (named definitions
+  go through the same parser). Root `$schema`, root-union arms, and
+  `literal(null)` are untouched and still errors.
+- **Source projection of null** (`S/simplified/source.rs`): a `Null` atom
+  whose scalar is a YAML null spelling (`""`, `~`, `null`, `Null`, `NULL`)
+  records `Atom` and `TypeKeyword` spans over the whole scalar. The strict
+  locator now models an empty mapping value (`key:`) and an empty block
+  sequence item (`-`) as an empty scalar; before this phase both were
+  projection errors in strict mode, which would have made a newly legal
+  `review:` fail to load.
+- **Serializer**: `render_constraints` writes the canonical options first,
+  joined with `,`, and drops redundant ones. `alphanumeric(block-leading-slash)`
+  therefore serializes to bare `alphanumeric`. The YAML-level `"null"`
+  quoting is left to `serde_yaml_ng`, which quotes the string `null`.
+- **Meta-types**: `type-definition` values parse through
+  `parse_property_definition`, so `[string, null]` and `"null(required)"`
+  are valid definitions. A whole-value native null for a `type-definition`
+  property still means absence, because that meta-type's JSON
+  `type: [string, object, array]` excludes null. Recorded rather than
+  changed, since the spec scopes meta-type parity to parsing rules.
+
+### Landed early (Phase 3 must finish, not redo)
+
+Adding the variants forced match arms in the converter, the trigger matcher,
+the expression catalog, detection, and Claudine. These were implemented with
+real behavior rather than stubs, so that `null` loads end to end and the
+obsolete rejection tests could become acceptance tests:
+
+- `S/simplified/convert.rs`: `null` → `{"type":"null"}`, and a non-null
+  `default` is a `Convert` error naming the property (it has **no source
+  span yet**). `unknown` → `{}`. `alphanumeric` →
+  `string_fragment_with_base` with the canonical pattern first and user
+  patterns/`not-empty` as further `allOf` entries, plus `x-darkmatter-type`
+  and `x-darkmatter-options` (`[]` for the base). `shell` →
+  `{type: string, format: darkmatter-shell}`, with only the universal
+  constraints accepted.
+- `S/format.rs`: `DARKMATTER_SHELL_FORMAT` is registered in
+  `register_darkmatter_formats_with`, with literal-token decoding and
+  pending-value deferral mirroring `expression`.
+- `S/triggers/matcher.rs`: `Null` matches null, `Shell` matches non-blank
+  text, and `alphanumeric` is checked through `accepts`. `Constraint::Options`
+  is match-safe (`triggers/grammar.rs`).
+- `compose/expression/catalog/mod.rs`: `Unknown` → `DataType::Any`; the new
+  types have no function-parameter type (`None`).
+- Claudine `classify.rs`: `alphanumeric`/`shell` prompt as plain text;
+  `unknown`/`null` are not prompted. Claudine CLI `context/format.rs`:
+  colors.
+- `S/about.rs`: minimal `unknown`/`null`/`alphanumeric`/`shell` type
+  descriptors, an `<options>` constraint descriptor, and an `<options>`
+  match-safe descriptor, so the descriptor parity tests pass. The `<options>`
+  form is `alphanumeric(opt, ...)` because a longer form widened the
+  constraint table's first column and wrapped the `min`/`max` rows that
+  `schema_about_uses_readable_terminal_components` asserts on. There is still
+  no alias or option metadata field (Phase 4, catalog alignment).
+
+**Not done (by plan):** presence is unchanged. `null(required)` and
+`unknown(required)` still enter `required`, and the optional wrapper still
+wraps `null` as `anyOf[null, {type:null}]` (Wave 4). There is no
+`alphanumeric` coercion opt-out, so `3` → `"3"` still passes the base pattern
+(Wave 5). There is no `alphanumeric` default/suggest value check, no shell
+default conversion or structured-default rejection, and the catalog parser's
+`jsonschema::validator_for` still lacks the Darkmatter formats (Wave 5). The
+subtype relation is not started (Wave 5). No docs and no shipped-schema
+migration (Phases 4–5).
+
+### Requirement → test mapping (Phase 2 scope)
+
+| Requirement | Tests |
+|---|---|
+| Keywords, `any` alias, canonical `unknown` | `types.rs::any_is_an_alias_of_canonical_unknown`, `simplified_type_keyword_round_trip`; `grammar.rs::parses_each_type_keyword`, `any_parses_as_unknown_and_new_keywords_take_constraints`; L1 `schemas_core_type_grammar::any_is_unknown_and_serializes_canonically`; `schemas_detect_table` (fixture `detect/arrays/expected.yaml` now `unknown[]`) |
+| Keyword collisions need `@this`; `shell@./shell.yaml` stays an import | `grammar.rs::keyword_collisions_need_an_explicit_local_reference`; L1 `shipped_qualified_shell_import_stays_an_import` |
+| Options, canonicalizer, regex construction (Phase 1 sample table, all 512 option subsets, linear engine) | `alphanumeric.rs::{keywords_round_trip_in_table_order, canonical_order_is_table_order_regardless_of_input_order, canonical_drops_blocks_whose_character_is_not_allowed, canonical_drops_leading_blocks_under_leading_alpha, canonical_preserves_meaning, character_sets_reflect_options, regex_class_escapes_class_syntax}`; `types.rs::alphanumeric_options_are_canonical_and_only_on_alphanumeric` |
+| Option grammar: before `;`, constraint-only shorthand, unknown/repeated/post-`;`/mixed/argument errors, spans | `grammar.rs::{alphanumeric_options_precede_the_separator, alphanumeric_without_options_reads_constraints_only, alphanumeric_options_on_an_array_bind_to_items, alphanumeric_option_grammar_errors, alphanumeric_option_errors_point_at_the_option, alphanumeric_takes_string_constraints_and_suggestions, named_reference_keeps_options_for_resolution}`; L1 `option_grammar_errors_surface_through_schema_loading` |
+| Named option identity: equal spellings merge constraints only; different sets conflict with related locations; every route; non-alphanumeric/union targets | L1 `equal_option_sets_at_a_use_site_resolve`, `a_different_option_set_at_a_use_site_is_a_conflict_with_both_locations`, `a_conflict_against_a_base_type_without_options_names_its_declaration`, `every_route_to_a_different_option_set_conflicts`, `options_on_a_target_that_is_not_alphanumeric_fail` |
+| Native null spellings at property, union arm, nested, named positions; root/root-arm/`literal(null)` stay errors | L1 `every_native_null_spelling_is_the_null_type_at_a_property`, `native_null_is_a_union_arm_and_a_nested_property`, `root_null_null_root_arms_and_literal_null_stay_errors`, `schemas_source_projection::property_definition_parser_matches_schema_property_matrix` |
+| Native null spans, empty value and empty item | L1 `a_native_null_definition_keeps_its_authored_span`, `an_empty_value_and_an_empty_union_item_project_as_null` |
+| Local and imported null named types | L1 `a_null_named_type_resolves_through_local_and_imported_references` |
+| Null default | L1 `a_null_default_must_be_null` (message only; the source location is a Wave 5 gap) |
+| Meta-types use the same rules | L1 `type_definition_values_follow_the_same_null_rules` |
+| Parse/serialize/parse meaning, canonical options, `unknown`, `"null"` | L1 `serialization_writes_canonical_options_and_round_trips_meaning`; `schemas_grammar_proptest` now generates `unknown`, `null`, `shell`, and `alphanumeric` with canonical options |
+| Lowered annotations | L1 `lowering_records_the_canonical_options` |
+| Obsolete rejection expectations flipped to the null type | `schema_yaml_spellings` matrices (`title null`, new `title tilde`, `title empty value`, `status null arm`, `status empty arm`, `level null`, `level empty value`, each with a witness proving null passes and a non-null value fails); `schemas_union_schema_matrix` (`policy: null`, `content_policy: null`/empty now validate as the null type, so the control list is `Invalid`) |
+
+The input robustness matrix's YAML declaration side runs through the existing
+`schema_yaml_spellings` and `schemas_union_schema_matrix` drivers. Their null
+cells now assert the new outcome (null type) with witnesses. The duplicate
+key, trailing-content, wrong-type, and empty cells are unchanged and green.
+The full Phase 1 matrix (instance side, new-type columns) is Phase 5's
+acceptance work.
+
+Changed-reader smell audit (`S/simplified/mod.rs`, `source.rs`, `grammar.rs`,
+`resolve.rs` edits): no `#[serde(default)]`, `unwrap_or_default()` on a
+load-bearing parse, `filter_map(.. as_str())`, or `.ok()` was added.
+`YamlValue::Null` is matched explicitly and kept distinct from absence (an
+absent key is never parsed).
+
+### Gates (2026-10-12, macOS host)
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just test` | exit 0, 9547 passed, 11 skipped |
+| `darkmatter`: `just lint` | exit 0 |
+| `claudine`: `just test` | 8684 passed, 9 skipped (same as baseline) |
+| `claudine`: `just lint` | exit 0 (a pre-existing `ld` `__eh_frame` linker warning only) |
+
+Failures met and fixed during the phase: nine in the first library run
+(expected: obsolete null-rejection cells, `any[]` → `unknown[]` detection
+output, the `suggest` target message, and the strict locator's empty
+sequence item), plus one CLI `schema about` layout failure caused by the long
+`<options>` form. There were no pre-existing failures.
+
+OS: the change is pure parsing, resolution, and serialization with no paths,
+processes, or terminal I/O. New L1 tests use `TempDir` and
+`biscuit_file::canonicalize_simplified`, like their neighbors. No cross-OS
+rig run was needed; CI covers Linux and macOS on the pull request.
+
+## Phase 3
+
+Phase 3 integrates presence, value semantics, and the subtype relation. Paths
+are relative to `darkmatter/lib/src/` unless stated; `S` means
+`markdown/schemas`.
+
+### Wave 4 — Effective presence
+
+- **One calculation** in `S/simplified/types.rs`: `PropertyDef::is_required`
+  and `PropertyAtom::is_required` (both now `pub`) return *effective*
+  presence: a `required` marker (written, inherited, hoisted from a union arm,
+  or after `[]`) **and** no whole-value null admission. `admits_null()` (on
+  both types) is true for a non-array `null`/`unknown`, or a non-array union
+  (property-level or postfixed `TypeExpr::Union`) with such an arm. The raw
+  marker check is the crate-private `PropertyAtom::marks_required`. Both
+  helpers expect resolved input; an unresolved reference never admits null.
+- **Lowering** (`S/simplified/convert.rs`): `atom_to_schema` returns a
+  null-admitting atom's bare fragment (`null` → `{"type":"null"}`, `unknown` →
+  `{}`), never in `required`. `union_property_to_schema` computes the union's
+  null admission first; a null-admitting union is optional and gets no extra
+  `null` arm.
+- **Consumers routed through it**: trigger matcher (`triggers/matcher.rs`; its
+  local `is_required` used to ignore `array_constraints`, so a
+  `unknown[](required)` condition would have been a guard — now a gate), the
+  vacuous-arm lint (`triggers/lint.rs`), phase projection (`phase.rs`, via
+  `PropertyAtom::is_required`), completion keys (`completion.rs::add_keys`),
+  composition materialization (`compose/schema_validation.rs`) and directive
+  targets (`compose/directive_targets.rs`, both already on
+  `PropertyDef::is_required`), DMLS (`dmls/src/providers/frontmatter.rs::is_required`),
+  Claudine (`claudine/lib/src/composition/inline_prompt.rs::def_is_required_at_completion`,
+  `claudine/lib/src/composition/schema/classify.rs::is_required`,
+  `claudine/cli/src/completion/schema_completion/keys.rs::is_required`).
+- **Migrations pulled forward from Phase 4** because the presence change
+  broke them immediately: the three trigger fixtures
+  (`darkmatter/tests/fixtures/schema-triggers/schemas/*.trigger.yaml`) now
+  declare `steps: unknown[](required)` (Wave 1 decision; `sequence.trigger.yaml`
+  was otherwise rejected as vacuous by the corpus test), and
+  `darkmatter/docs/schemas/claudine.yaml` `state` is `object(generated; required)`
+  (Wave 1 decision; otherwise it silently became optional). Phase 4 still owns
+  the registry-decision tests for malformed `steps`, the side-effect partial,
+  and the docs.
+- Snapshot `l1__schemas_convert_snapshots__snapshot_atom_any.snap` now shows
+  optional `any` as `{}` (predicted in Phase 1).
+
+### Wave 5 — Value semantics
+
+- **`null` default location**: the grammar (`S/simplified/grammar.rs`, the
+  `default` arm of `parse_one_constraint`) rejects a non-null `default(…)` on
+  `null` as a `SchemaError::Grammar` whose span covers the argument (`1` in
+  `null(default(1))`, bytes 13..14). The converter's `null_fragment` check
+  stays as the backstop for a default written at a use site of a `null` named
+  type (`gone: nothing(default(1))`), which is only judged after resolution and
+  carries the property name but no span.
+- **`alphanumeric` defaults and suggestions** (`convert.rs::check_alphanumeric_values`):
+  every `default(…)` and `suggest(…)` value is validated against the lowered
+  fragment (option pattern plus every authored string constraint) with the
+  structural validator, without coercion; a failure is a `Convert` error naming
+  the value. A numeric `default(12)` therefore fails (write `default('12')`).
+  Other types' suggestions remain lint-only (tested).
+- **`shell` defaults** (`convert.rs::shell_fragment`): a string, boolean, or
+  number default is converted to text the way a supplied value is coerced and
+  must contain a non-whitespace character; a null, array, or object default is
+  a load error. String constraints and `suggest` were already rejected via
+  `reject_unsupported` (Phase 2).
+- **Coercion** (`S/coerce.rs::coercion_target`): a `type: string` fragment
+  annotated `x-darkmatter-type: alphanumeric` has no coercion target, so
+  numbers and booleans stay native in scalars, array items, and union arms
+  (other arms keep theirs: `[alphanumeric, string]` turns `3` into `"3"`
+  because only the `string` arm validates). The annotation key is now the
+  shared constant `format::DARKMATTER_TYPE_ANNOTATION`. `unknown` (`{}`) has no
+  coercion target, so native values, including nested nulls, are preserved.
+  `shell` needed no change (plain `ToString`, as `expression`).
+- **Validator builders**: `compose/expression/catalog/parser.rs` built its
+  catalog validator with a bare `jsonschema::validator_for`, which neither
+  registered Darkmatter formats nor asserted formats. It now uses
+  `validate::build_structural_validator` (made `pub(crate)`). Every remaining
+  builder outside tests goes through `build_validator_with`, which registers
+  `darkmatter-shell`.
+- **Subtype relation** (new `S/simplified/subtype.rs`, exported as
+  `darkmatter::markdown::schemas::is_subtype`): over resolved atoms. Identity
+  is the primitive type plus canonical `alphanumeric` options, `enum` members
+  (as a set), and the `literal` value; inline objects and resolved unions
+  compare structurally; an unresolved reference equals nothing. Arrays are
+  subtypes only when identical. `alphanumeric(X) ⊆ alphanumeric(Y)` compares
+  `allowed_characters`, `first_characters` (`AsciiCharSet::is_subset`), and
+  `forbids_double_period`. Always-text types (`string`, `date`, `datetime`,
+  `time`, `file`, `enum`, `url`, `email`, `yaml`, `json`, `expression`,
+  `alphanumeric`, `shell`, and a string-valued `literal`) are subtypes of
+  `string`; `numberlike`, `boolish`, the meta-types, `unknown`, `null`, and
+  numbers are not.
+- **Docs touched minimally** because they described behavior that no longer
+  exists: `darkmatter/docs/topics/schemas/definition.md` (the `any` row becomes
+  `unknown` with the new presence rule; the trigger example uses
+  `steps: unknown[](required)`), and the `unknown`/`null` descriptors in
+  `S/about.rs` now say `required` has no effect. The rest of the docs pass is
+  Phase 5.
+
+### Requirement → test mapping (Phase 3 scope)
+
+| Requirement | Tests |
+|---|---|
+| One effective presence calculation; arrays/children keep presence; concrete types still required | `types.rs::null_admitting_whole_values_are_never_required` |
+| Lowering: `null`/`unknown` bare, never in `required`, no double null arm, nullable union keeps arm constraints (AC2) | `convert.rs::unknown_accepts_null_and_omission_whatever_its_presence_marker`, `null_admitting_properties_lower_bare_and_never_enter_required`, `required_scalar_atoms_are_byte_for_byte_unchanged` (new `unknown(required)`/`null(required)` rows); snapshot `snapshot_atom_any` |
+| Phase A table end to end through `md schema validate`, incl. inclusive and XOR root unions, `[code, null]` with inherited `required` + `min(3)`, `[string(required), unknown]`, `null[]`/`unknown[]`/nullable child containers (AC1, AC3, AC12) | `darkmatter-cli` L1 `schema_validate_core_types::null_admitting_presence_matches_the_phase_a_table_end_to_end` (one `md` run, ~60 documents) |
+| Validation, launch, and completion agree; `eager`/`generated` cannot restore presence; inherited and postfixed `required`; raw JSON Schema keeps `required` for `{}`/`{"type":"null"}` (AC12) | L1 `schemas_effective_presence::{null_admitting_whole_values_are_optional_at_every_phase_whatever_their_markers, inherited_and_postfixed_required_is_dropped_by_a_null_arm, nullable_items_and_children_leave_their_container_required, ordinary_concrete_types_keep_their_presence_and_timing, raw_json_schema_keeps_authored_required_for_nullable_properties}` |
+| Trigger matching and vacuous-arm lint use the same presence; `unknown[](required)` is a gate that rejects null/scalar/object | L1 `schemas_effective_presence::trigger_conditions_use_the_same_presence`; `matcher.rs::presence_follows_the_shared_effective_calculation`; `lint.rs::null_admitting_required_condition_is_a_guard_but_a_required_list_is_a_gate` |
+| Composition materializes null-admitting properties as null; a required list of nulls still fails when absent | L1 `schemas_effective_presence::composition_materializes_null_admitting_properties_and_requires_containers` |
+| Claudine consumers follow the shared presence | `claudine` `inline_prompt::tests::null_admitting_whole_values_are_optional_at_completion`, `composition::schema::tests::null_admitting_whole_values_are_not_required` |
+| `alphanumeric` per-option positive/negative, empty string, `min(1)`/`not-empty`, `a..b`, `1abc`, `é`, edge newlines, tabs, Unicode whitespace, overlapping constraints (AC5, AC13) | L1 `schemas_core_type_values::{each_alphanumeric_option_has_a_positive_and_a_negative_value, alphanumeric_edges_and_overlapping_constraints}` |
+| Optional null accepted, required null rejected (AC13) | L1 `optional_alphanumeric_accepts_null_and_required_rejects_it` |
+| Exported schema (plain `jsonschema` validator, no Darkmatter registrations), Darkmatter validator, and `AlphanumericOptions::accepts` agree; canonical annotations (AC5, AC13) | L1 `exported_schema_and_typed_options_agree` |
+| No number/boolean coercion for `alphanumeric` in scalars, items, union arms; other arms keep theirs; composition rejects `3` (AC5, AC13) | L1 `alphanumeric_never_coerces_numbers_or_booleans` |
+| `alphanumeric` default/suggest must be valid; other types' suggestions stay advisory | L1 `alphanumeric_defaults_and_suggestions_must_be_valid_values` |
+| `shell`: blank/whitespace rejected (incl. Unicode), pipes and `;` accepted, no syntax check, optional null (AC7) | L1 `shell_accepts_any_non_blank_command_without_parsing_it` |
+| `shell` scalar coercion to text, items included (AC7) | L1 `shell_scalars_coerce_to_text_like_expression` |
+| `shell` constraint applicability and default rules mirror `expression` | L1 `shell_constraints_and_defaults_mirror_expression` |
+| Lifecycle-shaped schema: `shell` action rejected under `initialize`, accepted under `start`; mixed and empty action objects rejected (AC7, `md schema validate`) | `darkmatter-cli` L1 `schema_validate_core_types::a_shell_action_is_rejected_under_initialize_and_accepted_under_start` |
+| `unknown` preserves native scalar/object/array values and nested nulls; `null` never coerces (AC14) | L1 `unknown_values_keep_their_native_types`, `null_is_never_coerced` |
+| Non-null `null` default fails with a source location; reference route still fails (AC14) | L1 `schemas_core_type_grammar::a_null_default_must_be_null` (asserts `SchemaError::Grammar` and the argument span) |
+| Subtype relation: every table row, redundant options, option order, implied restrictions, constraints ignored, identical non-string types and arrays, always-text ⊆ `string`, `unknown`/numbers/arrays ⊄ `string` (AC6) | `subtype.rs` unit tests (6), doctest on `is_subtype`, L1 `subtype_relation_is_reachable_through_the_public_schema_api` |
+
+Mutation check: disabling the `alphanumeric` coercion opt-out and the
+default/suggest check each turned the corresponding L1 test red; both were
+restored before the gates.
+
+The Phase 1 instance-side input robustness matrix as one data-driven driver
+remains Phase 5's acceptance work; the cells this phase changed (`A`, `S`,
+`N`, `X`, `U`, `L` absent/null/wrong-type/empty) are covered by the tests
+above. Changed-reader smell audit (`grammar.rs` default arm): no
+`#[serde(default)]`, `unwrap_or_default()`, `filter_map(.. as_str())`, or
+`.ok()` added; null default and absent default stay distinct.
+
+### Gates (2026-10-12, macOS host)
+
+| Gate | Result |
+|---|---|
+| `darkmatter`: `just test` | exit 0, 9578 passed, 11 skipped |
+| `darkmatter`: `just lint` | exit 0, no warnings |
+| `darkmatter`: `cargo test --doc -p darkmatter is_subtype` | 1 passed |
+| `claudine`: `just test` | exit 0, 8686 passed, 9 skipped (baseline 8684 plus the two new presence tests) |
+| `claudine`: `just lint` | exit 0 (pre-existing `ld` `__eh_frame` linker warning only) |
+
+Failures met and fixed during the phase: the corpus test
+(`shipped_schema_and_trigger_corpus_parses_passively`) rejected
+`sequence.trigger.yaml` as vacuous once `any(required)` stopped being a gate
+(fixed by migrating the fixtures), and the optional-`any` snapshot. No
+pre-existing failures.
+
+OS: the changes are typed-model logic, lowering, coercion, and validation with
+no new paths, processes, or terminal I/O. New tests use `TempDir`,
+`CliProcessFixture`, and relative file names. No cross-OS rig run was needed.
+
+Unrelated working-tree changes left alone: `.claudine/memory/commits.md` and
+`.claudine/non-interactive.md` were modified by something outside this phase.
