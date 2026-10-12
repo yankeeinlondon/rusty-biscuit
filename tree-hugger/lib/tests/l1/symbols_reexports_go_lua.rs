@@ -659,13 +659,13 @@ fn lua_negative_samples_report_nothing_and_stay_complete() {
 
 #[test]
 fn lua_rebound_bindings_limit_coverage() {
-    let table = snippet("neg-rebound-M.lua", include_str!("../fixtures/reexports/lua/neg-rebound-M.lua"));
+    let table = snippet("neg-rebound-table.lua", include_str!("../fixtures/reexports/lua/neg-rebound-table.lua"));
     let report = table.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::ReboundBinding]);
     assert_eq!(table.text(&report.coverage.limits[0].span), "M = {}");
 
-    let module = snippet("neg-rebound-m.lua", include_str!("../fixtures/reexports/lua/neg-rebound-m.lua"));
+    let module = snippet("neg-rebound-module.lua", include_str!("../fixtures/reexports/lua/neg-rebound-module.lua"));
     let report = module.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::ReboundBinding]);
@@ -970,8 +970,8 @@ fn lua_corpus_runs_every_sample_without_breaking_report_invariants() {
         ("neg-global-assign.lua", include_str!("../fixtures/reexports/lua/neg-global-assign.lua")),
         ("neg-method-wrap.lua", include_str!("../fixtures/reexports/lua/neg-method-wrap.lua")),
         ("neg-no-return.lua", include_str!("../fixtures/reexports/lua/neg-no-return.lua")),
-        ("neg-rebound-M.lua", include_str!("../fixtures/reexports/lua/neg-rebound-M.lua")),
-        ("neg-rebound-m.lua", include_str!("../fixtures/reexports/lua/neg-rebound-m.lua")),
+        ("neg-rebound-table.lua", include_str!("../fixtures/reexports/lua/neg-rebound-table.lua")),
+        ("neg-rebound-module.lua", include_str!("../fixtures/reexports/lua/neg-rebound-module.lua")),
         ("neg-require-concat.lua", include_str!("../fixtures/reexports/lua/neg-require-concat.lua")),
         ("neg-require-dynamic.lua", include_str!("../fixtures/reexports/lua/neg-require-dynamic.lua")),
         ("neg-require-unreturned.lua", include_str!("../fixtures/reexports/lua/neg-require-unreturned.lua")),
