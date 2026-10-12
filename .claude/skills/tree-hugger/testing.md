@@ -153,3 +153,68 @@ only for whole-line checks (`has_logical_row`, which measures rows without
 trailing spaces: WezTerm pads a wrapped line's last piece to the pane width).
 The helpers are
 L1-tested on synthetic captures in the `symbols` binary (`terminal_scope`).
+
+## Test speed checks
+
+Treat a test at or above 5 s on the development host as a failure; measure
+isolated cases and the full tier run (`just test` or `just test-l2`).
+Aim below 2.5 s in isolation.
+`cache_robustness` schedules persisted/evidence/member columns through
+`matrix_row_tests!`, language/edit pairs for identity, geometry and summaries
+through `language_edit_tests!`, and one written-path row per language.
+`every_cache_matrix_row_has_a_generated_test` compares these generated lists
+with their source tables. Keep both in sync, and let nextest schedule the
+cases rather than creating a thread per row. Reference-report matrices,
+export formats and query compilation are scheduled separately too. The
+commented-import cache tests schedule each base row together with its
+Scala comment-insertion variants, with a guard over `for_each_import_row`.
+The generic u16 boundary test requests only function declarations so its
+65,536 parameters do not trigger unrelated complete-index passes.
+
+The generic-owner boundary matrix separates large selected-owner declarations
+(`fits_selected_owner`) from small complete-index ownership
+(`complete_owner_shadowing`); `overflows_complete` still proves the complete
+index rejects the oversized selected owner. C++ uses unnamed middle template
+parameters, with `ReviewBase` first and `Last` at the boundary; guard both
+the count of named parameters and `Last`'s position. Oversized Rust impl
+queries and pipe command variants are separate scheduled cases too.
+
+`cache_lexical` schedules each lexical corpus source with one test per consumer
+(JSON/text imports and symbols, JSON/text refs in each direction). Its
+registration guard requires all ten consumers of every source; adding a
+consumer must update the named consumer macro and `REPORT_COUNT` together.
+Other generic-boundary filler names are compact, unique four-character
+identifiers through the tested range; their count and positions remain unchanged.
+
+The library's test-only `tests/support/language_cases.rs` is compiled into
+both its unit and L1 integration binaries. It stamps exhaustive fixture and
+query audits by language and guards registration against `ProgrammingLanguage::all`.
+Its per-language corpus floors preserve the original aggregate non-vacuity
+thresholds after splitting those audits. Declaration-fact groups now isolate
+primary matrix languages and bound shared owner/path groups by language to 20 sources.
+Changed-path ownership tests schedule each command independently, and file-type
+replacement tests schedule each direction/command pair, preserving all output,
+cache, selector, and Git-state checks. Rust/C# ownership-boundary fixtures reuse
+one filler name while retaining all 65,536/65,537 positions; only `ReviewBase`
+participates in their binding assertions.
+
+The workspace Cargo test profile optimizes the `tree-sitter` dependency
+at level 2 and Tree Hugger library/test targets at level 1. Debug assertions
+and overflow checks stay enabled. Cold query
+compilation is repeated per nextest process, so use the canonical `just test`
+recipe to measure the actual test profile. C# boundary owner queries select
+Class and Interface, retaining the full generic list without serializing a Type
+record for every parameter; complete-index wiring is covered by the small
+owner case. The giant lists still exercise all 65,536/65,537 positions.
+
+`level2_declarations` stamps nine view checks through `declaration_view_tests!`
+on each backend. The adapters retain `require_level!` and `shared_or_spawn`
+with background visibility; package stats are independent of ordinary stats.
+Add a view to the one macro so all backends receive the same check.
+
+Terminal link assertions use `terminal_report::has_hyperlink` so Kitty's SGR
+re-emission between the OSC 8 destination and label does not reject a correct
+link. L1 counterexamples pin wrong destinations, wrong labels, and text outside
+the link. Style assertions still replay SGR independently. Private Kitty text
+runs use normal unfocused windows; hidden instances can delay capability replies
+and leave them in the next shell command (see the OS skill's macOS notes).
