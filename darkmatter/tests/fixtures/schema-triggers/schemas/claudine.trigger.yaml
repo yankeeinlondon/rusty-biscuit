@@ -4,5 +4,5 @@ match:
     - kind: enum(claudine; required)
     - none:
         - prompt: string(required)
-        - steps: any(required)
+        - steps: unknown[](required)
 $schema: claudine.yaml

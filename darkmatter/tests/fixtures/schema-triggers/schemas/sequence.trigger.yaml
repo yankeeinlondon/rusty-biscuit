@@ -1,7 +1,7 @@
 kind: trigger-schema
 match:
   all:
-    - steps: any(required)
+    - steps: unknown[](required)
     - none:
         - kind: enum(claudine; required)
         - prompt: string(required)

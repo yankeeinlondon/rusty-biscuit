@@ -4,5 +4,5 @@ match:
     - prompt: string(required)
     - none:
         - kind: enum(claudine; required)
-        - steps: any(required)
+        - steps: unknown[](required)
 $schema: inline-compose.yaml
