@@ -17,7 +17,7 @@ pub enum ParityOutcome {
     Unchanged,
     /// Refuse: emit the input, apply no repair, report the fallback.
     Declined,
-    /// The frontmatter that would be emitted is not valid YAML.
+    /// Darkmatter cannot load the frontmatter that would be emitted.
     Invalid,
 }
 
@@ -54,6 +54,13 @@ pub const CASES: &[ParityCase] = &[
         input: "---\ntitle: a\ntitle: b\n---\n\n```\ncode\n```\n",
         expected: "---\ntitle: a\ntitle: b\n---\n\n```\ncode\n```\n",
         outcome: ParityOutcome::Invalid,
+    },
+    ParityCase {
+        // Strict YAML rejects the bare `{{ … }}` value; Darkmatter loads it.
+        name: "bare-interpolation-frontmatter",
+        input: "---\nreview: {{ ctx.area }}/reviews/{{ ctx.today }}/review.md\n---\n\n```\ncode\n```\n",
+        expected: "---\nreview: {{ ctx.area }}/reviews/{{ ctx.today }}/review.md\n---\n\n```text\ncode\n```\n",
+        outcome: ParityOutcome::Changed,
     },
     ParityCase {
         name: "empty-frontmatter",

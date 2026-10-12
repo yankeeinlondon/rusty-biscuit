@@ -258,6 +258,36 @@ fn disabled_frontmatter_repair_keeps_the_block_and_formats_the_body() {
     );
 }
 
+/// Strict YAML rejects a bare `{{ … }}` value (as in
+/// `prompts/_reviews/cycles.md`), but Darkmatter loads it, so the document is
+/// supported: its block is kept as authored and its body is formatted.
+#[test]
+fn frontmatter_only_darkmatter_loads_is_kept_and_the_body_formatted() {
+    let fixture = CliProcessFixture::named(
+        "clean-fidelity-frontmatter-only-darkmatter-loads-is-kept-and-the-body-formatted",
+    );
+    let frontmatter =
+        "---\nreview: {{ ctx.area }}/reviews/{{ ctx.today }}-cyclometric-risk/review.md\n---\n";
+    let source = format!("{frontmatter}Intro:\n- a\n");
+    let expected = format!("{frontmatter}Intro:\n\n- a\n");
+    let path = fixture.write_file("cwd/doc.md", &source);
+
+    let printed = fixture.command().arg("clean").arg(&path).assert().success();
+    assert_eq!(String::from_utf8_lossy(&printed.get_output().stdout), expected);
+    let stderr = String::from_utf8_lossy(&printed.get_output().stderr);
+    assert!(stderr.contains("yaml.parse"), "the strict-YAML finding is reported: {stderr}");
+
+    let json = fixture.command().args(["clean", "--json"]).arg(&path).assert().success();
+    assert!(json.get_output().stderr.is_empty());
+    let report = json_report(&json.get_output().stdout);
+    assert_eq!(report["changed"], json!(true));
+    assert_eq!(report["applied"], json!([]));
+    finding(&report, "yaml.parse");
+
+    fixture.command().arg("clean").arg(&path).arg("--save").assert().success();
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+}
+
 /// Cleans `source` from stdin (stdout) and from a file (`--save`), asserting
 /// both produce exactly `expected`.
 fn assert_cleans_to(fixture: &CliProcessFixture, name: &str, source: &str, expected: &str) {

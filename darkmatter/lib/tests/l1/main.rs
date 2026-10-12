@@ -41,6 +41,7 @@ mod blockquote_list_spacing;
 mod clean_compose_equivalence;
 mod clean_counters;
 mod clean_parity;
+mod clean_real_world_prompt;
 mod clean_frontmatter_repair;
 mod clean_rules;
 mod code_link;
