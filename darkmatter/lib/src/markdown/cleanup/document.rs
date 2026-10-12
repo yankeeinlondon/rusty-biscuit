@@ -5,7 +5,8 @@
 //! 1. frontmatter repair on the raw text ([`repair_frontmatter`]), before any
 //!    `Markdown` exists;
 //! 2. one passive read of `style.markdown`, from the authored YAML or, when
-//!    that does not parse, the repaired candidate;
+//!    that does not parse, the repaired candidate, or else the mapping
+//!    Darkmatter's own frontmatter parser loads from the authored block;
 //! 3. one resolution of every rule (caller overrides, document, workspace,
 //!    default);
 //! 4. guarded body formatting ([`clean_body`]), which verifies its final
@@ -15,8 +16,13 @@
 //!
 //! The body check is independent of the frontmatter repair proof. A body
 //! refusal discards every candidate edit, frontmatter repairs included, and
-//! YAML that still does not parse is `Invalid` with nothing emitted, so a
-//! caller only ever writes the original or a fully accepted result.
+//! frontmatter that Darkmatter cannot load is `Invalid` with nothing emitted,
+//! so a caller only ever writes the original or a fully accepted result.
+//!
+//! Strict YAML is not the acceptance test. A block it rejects but
+//! Darkmatter's document parser loads (a bare `{{ … }}` value, tab
+//! indentation) is a supported document: it is emitted byte-for-byte, with
+//! no repair applied, and its body is formatted.
 
 use std::path::Path;
 
@@ -27,6 +33,7 @@ use super::diagnostic::CleanDiagnostic;
 use super::frontmatter::{FrontmatterRepair, FrontmatterRepairError, repair_frontmatter};
 use super::rules::{Leaf, MarkdownRuleOverrides, ResolvedMarkdownRules, document_rules, resolve};
 use crate::markdown::extract_frontmatter_block;
+use crate::markdown::frontmatter::load_frontmatter_yaml;
 use crate::markdown::schemas::CleanSchemaConfig;
 
 /// The inputs to one [`clean_document`] run.
@@ -79,9 +86,9 @@ pub struct CleanResult {
 /// - `Declined`: the body could not be formatted safely; `text` is the
 ///   source, `applied` is empty, and the last diagnostic is the
 ///   `clean.fidelity-fallback` finding.
-/// - `Invalid`: the frontmatter that would be emitted is not valid YAML
-///   (unrepairable, or left invalid by `frontmatter: false`); `text` is the
-///   source and `applied` is empty.
+/// - `Invalid`: Darkmatter's frontmatter parser cannot load the frontmatter
+///   that would be emitted (unrepairable, or left unloadable by
+///   `frontmatter: false`); `text` is the source and `applied` is empty.
 ///
 /// ## Errors
 ///
@@ -97,23 +104,27 @@ pub fn clean_document<E>(
     let mut diagnostics = repair.diagnostics.clone();
 
     let settings = repair.settings_yaml(source);
-    let document = match settings {
-        Some(settings) => {
+    // When strict YAML rejects the authored block, Darkmatter's own parser
+    // (the one `Markdown` and compose use) decides whether it is loadable.
+    let authored = repair.frontmatter_span.as_ref().and_then(|span| source.get(span.clone()));
+    let loaded = match (settings, authored) {
+        (Some(settings), _) if !settings.from_candidate => None,
+        (_, Some(authored)) => load_frontmatter_yaml(authored),
+        _ => None,
+    };
+    let document = match (settings, &loaded) {
+        (Some(settings), _) => {
             let value = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(settings.yaml)
                 .expect("settings_yaml only returns YAML that parses");
-            match document_rules(&value, settings.yaml, 0) {
-                Ok(Leaf::Value(rules)) => Some(rules),
-                Ok(Leaf::Absent | Leaf::Null) => None,
-                Err(found) => {
-                    diagnostics.extend(found.into_iter().map(|mut diagnostic| {
-                        diagnostic.span = settings.authored_span(diagnostic.span);
-                        diagnostic
-                    }));
-                    None
-                }
-            }
+            read_document_rules(&value, settings.yaml, |span| settings.authored_span(span), &mut diagnostics)
         }
-        None => None,
+        (None, Some(map)) => {
+            let value = serde_yaml_ng::to_value(map).expect("a loaded frontmatter map is YAML");
+            let span = repair.frontmatter_span.clone().expect("a loaded block has a span");
+            let yaml = authored.expect("a loaded block has authored text");
+            read_document_rules(&value, yaml, |found| found.start + span.start..found.end + span.start, &mut diagnostics)
+        }
+        (None, None) => None,
     };
     let rules = resolve(request.overrides, document.as_ref(), request.workspace);
 
@@ -125,19 +136,22 @@ pub fn clean_document<E>(
         applied: Vec::new(),
         rules,
     };
-    // Neither the authored YAML nor a repaired candidate parses.
-    if repair.frontmatter_span.is_some() && settings.is_none() {
+    // Neither the authored YAML nor a repaired candidate parses, and
+    // Darkmatter cannot load the authored block either.
+    if repair.frontmatter_span.is_some() && settings.is_none() && loaded.is_none() {
         return Ok(invalid(diagnostics, rules));
     }
     // `frontmatter: false` emits the authored block, which only the candidate
     // could read.
     let repair_enabled = rules.frontmatter.value;
-    if !repair_enabled && settings.is_some_and(|settings| settings.from_candidate) {
+    if !repair_enabled && settings.is_some_and(|settings| settings.from_candidate) && loaded.is_none() {
         return Ok(invalid(diagnostics, rules));
     }
 
     let frontmatter_span = repair.frontmatter_span.clone();
-    let emitted: FrontmatterRepair = if repair_enabled {
+    // Repairs are emitted only with a candidate that parses; a block only
+    // Darkmatter loads is kept as authored.
+    let emitted: FrontmatterRepair = if repair_enabled && settings.is_some() {
         repair
     } else {
         repair.discard_repairs(source)
@@ -175,6 +189,28 @@ pub fn clean_document<E>(
         diagnostics,
         rules,
     })
+}
+
+/// The document's `style.markdown` overrides from `value`, read from `yaml`.
+/// An unusable object adds its `clean.invalid-rules` findings, with spans
+/// mapped to authored coordinates by `authored`, and yields `None`.
+fn read_document_rules(
+    value: &serde_yaml_ng::Value,
+    yaml: &str,
+    authored: impl Fn(SourceSpan) -> SourceSpan,
+    diagnostics: &mut Vec<CleanDiagnostic>,
+) -> Option<MarkdownRuleOverrides> {
+    match document_rules(value, yaml, 0) {
+        Ok(Leaf::Value(rules)) => Some(rules),
+        Ok(Leaf::Absent | Leaf::Null) => None,
+        Err(found) => {
+            diagnostics.extend(found.into_iter().map(|mut diagnostic| {
+                diagnostic.span = authored(diagnostic.span);
+                diagnostic
+            }));
+            None
+        }
+    }
 }
 
 /// Where the body starts: after the frontmatter block and its closing
@@ -315,6 +351,60 @@ mod tests {
             "{:?}",
             result.diagnostics
         );
+    }
+
+    /// `prompts/_reviews/cycles.md`'s frontmatter: a bare `{{ … }}` value is
+    /// a YAML flow mapping followed by garbage, but Darkmatter loads it.
+    const BARE_INTERPOLATION: &str = "$schema:\n    review: file\nreview: {{ ctx.area }}/reviews/{{ ctx.today }}-cyclometric-risk/review.md\n";
+
+    #[test]
+    fn frontmatter_only_darkmatter_loads_is_kept_and_its_body_is_cleaned() {
+        // Tab indentation in a block scalar, as `.claude/skills/lsp/lsp.md`
+        // has it.
+        let tab_indented = "prompt: |-\n\tYour task is to research.\n\n    Answer the questions.\n";
+        for yaml in [BARE_INTERPOLATION, tab_indented] {
+            let source = document(yaml, BODY);
+            let result = clean(&source);
+
+            assert_eq!(result.outcome, CleanOutcome::Changed, "{yaml:?}: {:?}", result.diagnostics);
+            assert_eq!(result.text, document(yaml, "\n```text\ncode\n```\n"), "the block is kept byte for byte");
+            assert!(result.applied.is_empty());
+            assert!(
+                result.diagnostics.iter().any(|d| d.code == CleanCode::Yaml(YamlDiagnosticCode::Parse)),
+                "the strict-YAML finding is still reported: {:?}",
+                result.diagnostics
+            );
+            let again = clean(&result.text);
+            assert_eq!(again.outcome, CleanOutcome::Unchanged);
+        }
+    }
+
+    #[test]
+    fn rules_are_read_from_frontmatter_only_darkmatter_loads() {
+        let yaml = format!("{BARE_INTERPOLATION}style:\n    markdown:\n        default-language: sh\n");
+        let result = clean(&document(&yaml, BODY));
+        assert_eq!(result.outcome, CleanOutcome::Changed, "{:?}", result.diagnostics);
+        assert_eq!(result.rules.default_language.source, RuleSource::Document);
+        assert_eq!(result.text, document(&yaml, "\n```sh\ncode\n```\n"));
+
+        let disabled = format!("{BARE_INTERPOLATION}style:\n    markdown:\n        frontmatter: false\n");
+        let result = clean(&document(&disabled, BODY));
+        assert_eq!(result.outcome, CleanOutcome::Changed, "loadable as authored, so not invalid");
+        assert!(!result.rules.frontmatter.value);
+        assert_eq!(result.text, document(&disabled, "\n```text\ncode\n```\n"));
+
+        let invalid = format!("{BARE_INTERPOLATION}style:\n    markdown:\n        indentation: 3\n");
+        let source = document(&invalid, BODY);
+        let result = clean(&source);
+        assert_eq!(result.outcome, CleanOutcome::Changed);
+        assert_eq!(result.rules.indentation.source, RuleSource::Default);
+        let finding = result
+            .diagnostics
+            .iter()
+            .find(|d| d.code == CleanCode::InvalidRules)
+            .expect("the unusable object is reported");
+        let frontmatter = result.frontmatter_span.clone().expect("frontmatter");
+        assert!(finding.span.start >= frontmatter.start && finding.span.end <= frontmatter.end, "{finding:?}");
     }
 
     #[test]

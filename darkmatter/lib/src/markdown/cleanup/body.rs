@@ -29,7 +29,7 @@ pub enum CleanOutcome {
     Changed,
     /// Cleanup refused and returned the input unchanged.
     Declined,
-    /// The frontmatter is invalid YAML that safe repair could not resolve.
+    /// Darkmatter cannot load the frontmatter, even after safe repair.
     /// Body cleanup never returns this.
     Invalid,
 }
