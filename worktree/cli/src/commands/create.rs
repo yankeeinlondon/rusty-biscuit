@@ -481,7 +481,7 @@ mod tests {
         let (result, saved) = run_setup(&mut prompt, &[]);
 
         assert_eq!(result.unwrap(), chosen);
-        assert_eq!(saved, [chosen.clone()]);
+        assert_eq!(saved, std::slice::from_ref(&chosen));
         assert!(chosen.is_dir(), "the valid choice is created before it is saved");
         assert_eq!(prompt.rejected.len(), 1, "{:?}", prompt.rejected);
         assert!(prompt.rejected[0].contains(FOREIGN) && prompt.rejected[0].contains("the setup prompt"), "{:?}", prompt.rejected);
@@ -532,7 +532,7 @@ mod tests {
         let (result, saved) = run_setup(&mut prompt, &candidates);
 
         assert_eq!(result.unwrap(), fresh);
-        assert_eq!(saved, [fresh.clone()]);
+        assert_eq!(saved, std::slice::from_ref(&fresh));
         assert!(fresh.is_dir());
         assert_eq!(prompt.rejected.len(), 2, "{:?}", prompt.rejected);
         assert!(prompt.rejected[0].contains("is not a directory"), "{:?}", prompt.rejected);
