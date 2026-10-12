@@ -206,17 +206,18 @@ impl Default for MyApi {
 
 ## Validation
 
-Pre-generation checks:
-
-1. **Request suffix format**: Custom `request_suffix` must be alphanumeric
-2. **Naming collisions**: Body type names must not match generated `{EndpointId}Request`
+`generate` validates the whole batch once per output (Rust, OpenAPI, Postman)
+and writes only outputs with no error; one output's failure never blocks the
+others, and any failure exits 1. Diagnostics print to stderr as
+`severity=… api=… endpoint=… feature=… output=…: message`; warnings never fail.
+Full rules: `schematic/docs/generation/validation.md`.
 
 ```bash
-$ schematic-gen validate --api openai
-  [PASS] Request suffix format
-  [PASS] No naming collisions detected
-
-[OK] All validation checks passed for 'OpenAI'
+$ schematic-gen validate --api gitea
+[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: ...
+  [PASS] rust
+  [PASS] openapi
+  [PASS] postman
 ```
 
 ## Generator Modules
@@ -236,12 +237,14 @@ $ schematic-gen validate --api openai
 
 ```rust
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
-use schematic_gen::validate_api;
+use schematic_gen::validate_rust_client;
 use schematic_definitions::openai::define_openai_api;
 
-// Single API
+// Single API (generate_and_write also refuses an invalid batch on its own)
 let api = define_openai_api();
-validate_api(&api)?;
+for diagnostic in validate_rust_client(&[&api]) {
+    eprintln!("{diagnostic}");
+}
 generate_and_write(&api, Path::new("schema/src"), false)?;
 
 // Multiple APIs
@@ -255,19 +258,13 @@ generate_and_write_all(&apis, output_dir, dry_run)?;
 pub enum GeneratorError {
     ParseError(String),
     CodeGenError(String),
-    WriteError { path: PathBuf, source: std::io::Error },
-    OutputDirNotFound(PathBuf),
+    WriteError { path: String, source: std::io::Error },
+    OutputDirNotFound(String),
     ConfigError(String),
-    NamingCollision {
-        endpoint_id: String,
-        body_type: String,
-        suggestion: String,
-    },
-    InvalidRequestSuffix {
-        suffix: String,
-        reason: String,
-    },
-    OpenApiError(OpenApiError),  // For import failures
+    // An output's validator reported errors; nothing of it was written.
+    Validation { output: Output, diagnostics: Vec<ValidationDiagnostic> },
+    // A generate run where at least one requested output failed.
+    OutputsFailed { succeeded: Vec<Output>, failed: Vec<Output> },
 }
 ```
 

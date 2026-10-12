@@ -62,7 +62,7 @@ schematic-gen --api openai --output schematic/schema/src
 
 | Subcommand | Description |
 |------------|-------------|
-| `generate` | Generate API client code (runs validation first) |
+| `generate` | Generate the Rust client, OpenAPI, and Postman outputs (each validated first) |
 | `validate` | Validate API definition without generating code |
 | `import` | Import an OpenAPI 3.x spec and generate Rust client code |
 
@@ -97,20 +97,25 @@ When the output path ends with `schema/src`, OpenAPI and Postman output director
 
 ### Validation
 
-The `validate` subcommand checks for:
-
-- **Naming collisions**: Ensures body type names don't conflict with generated wrapper struct names
-- **Request suffix format**: Validates custom `request_suffix` is alphanumeric
+`generate` validates the whole batch separately for each output (Rust client,
+OpenAPI, Postman) and writes only the outputs whose validator reports no
+error; one output's failure never stops the others, and any failed output
+makes the command exit 1. `validate` runs the same three validators without
+writing anything:
 
 ```bash
-$ schematic-gen validate --api openai
-  [PASS] Request suffix format
-  [PASS] No naming collisions detected
-
-[OK] All validation checks passed for 'OpenAI'
+$ schematic-gen validate --api gitea
+[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
+[WARN] ... output=openapi: ...
+[WARN] ... output=postman: ...
+  [PASS] rust
+  [PASS] openapi
+  [PASS] postman
 ```
 
-Validation runs automatically before generation. If validation fails, generation is aborted with a descriptive error message.
+Warnings never fail a run. The diagnostic format, every check, and which
+output applies it are described in
+[`docs/generation/validation.md`](../docs/generation/validation.md).
 
 ## Library Usage
 
@@ -864,16 +869,21 @@ Generator error types (used by the generator itself):
 | `WriteError` | Failed to write output file |
 | `OutputDirNotFound` | Output directory doesn't exist |
 | `ConfigError` | Invalid configuration |
-| `NamingCollision` | Body type name conflicts with generated wrapper struct |
-| `InvalidRequestSuffix` | Custom request suffix contains invalid characters |
+| `Validation` | An output's validator reported errors; nothing of that output was written |
+| `OutputsFailed` | At least one requested output failed; names failed and succeeded outputs |
 
 ### `validation`
 
-Pre-generation validation functions:
+Per-output validators; each takes the whole batch and returns
+`Vec<ValidationDiagnostic>` (see the `diagnostics` module):
 
 | Function | Description |
 |----------|-------------|
-| `validate_api(&api)` | Validates naming collisions and request suffix format |
+| `validate_rust_client(&apis)` | Routes plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, unsent request inputs |
+| `validate_openapi(&apis)` | Routes, embedded queries, document file names |
+| `validate_openapi_registry(module, &apis, registry)` | JSON types missing from a module's schema registry |
+| `validate_postman(&apis)` | Routes, embedded queries, collection file names, unsent header/cookie parameters |
+| `endpoint_uniqueness_key(&endpoint)` | The `(method, normalized path)` identity two endpoints of one API may not share |
 
 ### `inference`
 

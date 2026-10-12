@@ -63,6 +63,8 @@ We use the `just` runner to provide the most common operations you'll need when 
 - `just test-fresh-output` - the part of `just test` that generates client crates outside the checkout and compiles them offline (all 18 APIs plus fixture APIs); CI runs it on the build job
 - `just lint {args}` - will use the clippy linter to look for non-idiomatic code
 - `just gen` - will generate the API definitions in `schematic-definitions` into API clients in `schematic-schema`
+    - generation validates the whole batch separately for the Rust client, OpenAPI, and Postman (`schematic_gen::validation`); an output with an `error` diagnostic is not written, the other outputs still are, and the run exits 1. Warnings (`query-in-path`, `duplicate-method-path`, optional header parameters) never fail. Rules: `schematic/docs/generation/validation.md`
+    - `cargo run -p schematic-gen -- validate --api <name>` prints every diagnostic without writing
 
 All packages in **Schematic** are written in Rust and use the 2024 edition.
 
