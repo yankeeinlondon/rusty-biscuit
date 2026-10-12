@@ -29,11 +29,17 @@
   `{package, environment, gate}` cell per unit of work. Every consumer reads
   that document; nothing recalculates scope.
 - **Environments are scheduled by event** (`events` in
-  `.github/ci/environments.json`, decided 2026-09-18): a pull request proves
-  Linux and macOS, a push to `main` adds Windows, the nightly schedule adds
-  WSL2, and `lint`/`check` run on Linux only. Windows and WSL2 failures are
-  found after merge and fixed forward. The `ci:all-os` label opts a pull
-  request back into every environment.
+  `.github/ci/environments.json`): a pull request and a push to `main` prove
+  Linux and macOS, the nightly schedule proves native Windows and WSL2 over
+  what changed since the last successful nightly, and `lint`/`check` run on
+  Linux only. A push whose pull request already passed on the same tree runs
+  nothing, and one merged before its pull request's CI finished waits for that
+  run instead of repeating it. Windows and WSL2 failures are found after merge
+  and fixed forward; they never gate a merge. The `ci:all-os` label opts a
+  pull request back into every environment, and `workflow_dispatch` runs all
+  four. `just ci-seed` proves the nightly's Windows and WSL2 cells on the test
+  rigs ahead of it; the nightly reuses that proof per cell and runs only what
+  no verified observation covers.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,
@@ -107,8 +113,10 @@ Two runs in the middle band took 66 and 83 min, so give the band as the
 estimate and allow up to about 1.5 h before treating a run as stuck.
 
 By event across all outcomes (same period): pull request median 34 min (p90
-83), push to `main` median 40 min (p90 78, adds Windows), nightly schedule
-about 2 h (114–140 min, adds WSL2). Pull requests before 2026-09-18, which ran
+83), push to `main` median 40 min (p90 78, measured while a push still added
+Windows; it no longer does), nightly schedule
+about 2 h (114–140 min, measured when it ran WSL2 alone over the full
+workspace on every run; it now runs native Windows too, over what changed). Pull requests before 2026-09-18, which ran
 every environment, had a median of 2.5 h (p90 4.6 h); those figures no longer
 apply. Refresh the figures with `gh run list --workflow ci.yml --status
 completed` when the schedule or runners change.

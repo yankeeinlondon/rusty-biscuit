@@ -214,8 +214,9 @@ the test does not depend on the OS.
 The remaining risk is new content that drives an OS-specific branch
 differently — say, a fixture that gains a Windows-style path. That risk is the
 same one the repository already accepts for Windows and WSL2, which are tested
-after merge: the nightly run executes every package's full L1 on Linux,
-Windows, and WSL2, so such a case surfaces within a day.
+after merge: the nightly run executes the changed packages' full L1 on native
+Windows and WSL2, so such a case surfaces within a day. Linux and macOS run the
+full L1 of every package a change selects on its pull request.
 
 A declared `source-inputs` file weakens the argument: a script can branch on
 the operating system itself, so a narrowed run on macOS does not show what the

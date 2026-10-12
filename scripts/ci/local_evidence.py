@@ -4,13 +4,14 @@
 Two generations live here on purpose.
 
 `verify_cells` is the current contract: it reads **every** note on every
-`refs/notes/ci-local/<environment>` ref between the merge base and the
-outgoing head, resolves each `{package, environment, gate}` cell from the
-newest note that qualifies for it, and returns a coded reason for every
-candidate it refused. Evidence from macOS and from a prior WSL cross-check
-therefore combine in one run, and two partial receipts on one environment
-combine across commits, which the environment-at-a-time predecessor could
-never express.
+`refs/notes/ci-local/<environment>` ref from the coverage boundary to the
+outgoing head, gathers their observations, and resolves each
+`{package, environment, gate}` cell among the candidates that qualify. It
+returns a coded reason for every candidate it refused. Evidence from macOS and
+from a prior WSL cross-check therefore combine in one run, and partial results
+on one environment combine across commits and across observations of one
+commit, which the environment-at-a-time predecessor could never express.
+`observation_notes.py` is the writer of the version-3 collections it reads.
 
 `record_scope` and `verify_scope` carry the *scope* receipt, a separate
 document on `refs/notes/ci-local/scope`: what the planner selected for one
@@ -18,22 +19,24 @@ exact `{base, head, tree}`, which CI takes as its plan on an exact match and
 otherwise recomputes.
 
 `verified_environment` and `record` preserve the predecessor's CLI contract.
-Current per-cell verification reads version-1 notes through `_accept_legacy`
+Current per-cell verification reads version-1 notes through `_read_legacy`
 without calling that legacy CLI path. Spec section 3.6 makes those notes
 exact-tree, pass-only, whole-environment, and never upgraded in place. Current
-producers use `record_cells`, which writes version 2.
+recorders use `record_cells`, which writes a version-2 receipt that
+`observation_notes.py` carries into a collection.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -239,21 +242,74 @@ def cell_input_paths(plan: dict[str, Any], package: str, gate: str) -> list[str]
 
 
 def load_plan(path: str) -> dict[str, Any]:
-    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    document = schema.loads_strict(Path(path).read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         raise ValueError("the resolved plan must be a JSON object")
     return document
 
 
-def candidate_commits(base: str, head: str) -> list[str]:
-    """Commits a receipt may be attached to, newest first.
+#: A base this many zeros long names no commit: the first run of a branch or of
+#: the nightly schedule, which has nothing to diff against.
+ZERO_REVISION = "0" * 40
 
-    The outgoing head plus everything it added over the base. A receipt older
-    than the merge base describes work that is already upstream and is never
-    consulted.
+#: The most annotated ancestors a bootstrap search considers, newest first.
+#: Discovery is bounded by the notes that exist, never by history length.
+ANCESTOR_NOTE_LIMIT = 500
+
+
+def candidate_commits(base: str, head: str) -> list[str]:
+    """Commits a note may be attached to, newest first.
+
+    The outgoing head, everything it added over `base`, and `base` itself: the
+    coverage boundary is a commit whose own proof is still valid for the head
+    when its gate inputs are unchanged. Anything older than `base` describes
+    work that is already upstream and is not consulted.
+
+    An all-zero `base` is a bootstrap: there is no boundary to diff against, so
+    the candidates are the annotated commits reachable from `head`. That search
+    asks Git about each annotated commit rather than walking every commit, and
+    keeps the newest [`ANCESTOR_NOTE_LIMIT`].
     """
+    if base == ZERO_REVISION:
+        return _annotated_ancestors(head)
     listing = git_optional("rev-list", f"{base}..{head}")
     commits = listing.splitlines() if listing else []
+    if head not in commits:
+        commits.insert(0, head)
+    if base not in commits:
+        commits.append(base)
+    return commits
+
+
+def _annotated_ancestors(head: str) -> list[str]:
+    noted: set[str] = set()
+    for environment in ENVIRONMENTS:
+        listing = git_optional("notes", "--ref", f"{NOTES_PREFIX}/{environment}", "list")
+        for line in (listing or "").splitlines():
+            fields = line.split()
+            if len(fields) == 2:
+                noted.add(fields[1])
+    reachable = [
+        commit
+        for commit in sorted(noted)
+        if commit == head or git_optional("merge-base", "--is-ancestor", commit, head) is not None
+    ]
+    if not reachable:
+        return [head]
+    # Through stdin: a hundred annotated commits per environment would
+    # otherwise overflow Windows' 32 KiB command line.
+    try:
+        ordered = subprocess.run(
+            ["git", "rev-list", "--no-walk=sorted", "--stdin"],
+            input="\n".join(reachable) + "\n",
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=20,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        ordered = ""
+    commits = (ordered.split() or reachable)[:ANCESTOR_NOTE_LIMIT]
     if head not in commits:
         commits.insert(0, head)
     return commits
@@ -285,8 +341,44 @@ def candidate_notes(environment: str, commits: list[str]) -> list[tuple[str, str
     return notes
 
 
+class _Candidate:
+    """One terminal cell result read from a note, before any plan is applied."""
+
+    def __init__(
+        self,
+        environment: str,
+        commit: str,
+        order: int,
+        document: dict[str, Any],
+        cell: dict[str, Any],
+        *,
+        observation: dict[str, Any] | None = None,
+        legacy: bool = False,
+    ) -> None:
+        self.environment = environment
+        self.commit = commit
+        self.order = order
+        self.document = document
+        self.cell = cell
+        self.observation = observation
+        self.legacy = legacy
+        self.identifier = (
+            observation["observation_id"]
+            if observation is not None
+            else f"{commit}:{environment}:{cell['package']}/{cell['gate']}/{cell.get('test_filter', '')}"
+        )
+        self.retries: set[str] = set()
+
+    @property
+    def exact_tree(self) -> str:
+        return str(self.document.get("tree"))
+
+
 def verify_cells(
-    plan_path: str, base: str, head: str
+    plan_path: str,
+    base: str,
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Every plan cell satisfied by published evidence, and why the rest were not.
 
@@ -301,37 +393,49 @@ def verify_cells(
     Missing, malformed, incompatible, stale, conflicting, and incomplete input
     all fail safe: the cell is simply not accepted, so it stays scheduled.
 
+    `report_probe(report, observation)` answers whether an `artifact` report
+    reference is still retrievable. Without one, an `artifact` reference is
+    unavailable and the observation earns no credit.
+
     ## Notes
 
-    Every note on an environment's ref between the merge base and the head is
-    a candidate, walked newest commit first, and a cell is resolved by the
-    **newest candidate whose cell for it qualifies**: complete, credited to
-    the ref it sits under, describing the commit it is attached to, and on the
-    head's exact tree or gate-input-equivalent to it. Once resolved, a cell is
-    never changed by an older candidate — an older pass never overrides a
-    newer complete failure. The failure is retained for diagnosis and forces
-    execution rather than entering the accepted set. A candidate that
-    does not qualify for a cell (malformed, incomplete, mismatched, changed
-    inputs, no declared closure) is reported with its code, naming its commit,
-    and does not stop an older candidate from resolving that cell; so a
-    rejection describes one candidate, not the cell's final outcome. A note
-    that never mentions a wanted cell contributes nothing to it and is not a
-    refusal, and a cell no candidate covers is reported nowhere: it simply
-    stays scheduled. Version-1 notes take part in the same walk under their
-    own narrower rules and claim every wanted cell of their environment, so a
-    version-1 note on the head shadows older version-2 notes and a version-2
-    note on the head shadows older version-1 notes.
+    Every note on an environment's ref reachable from the head and no older
+    than the coverage boundary (`base`'s merge base; the annotated ancestors
+    of the head when `base` is all zeros) is a candidate. Version-1 and -2
+    notes are read as one observation per cell, version-3 notes as their
+    observations. All candidates are gathered first and then resolved per
+    `{package, environment, gate}`, so the outcome never depends on which
+    environment or note was read first.
+
+    A candidate **qualifies** for a plan cell when it is complete, credited to
+    the ref it sits under, describes the commit it is attached to, and is on
+    the head's exact tree or gate-input-equivalent to it. Among the qualifying
+    candidates, one **supersedes** another when it names it in `retry_of`
+    (same note), or when its commit is a descendant of the other's commit.
+    Timestamps, fetch order, and publication order are never consulted. The
+    surviving, unsuperseded candidates decide the cell: all passing credits
+    the cell (newest first, lowest id on a tie); all failing leaves it
+    scheduled; a mix of outcomes that nothing orders is reported as
+    `conflicting-evidence` and the cell executes. So a newer complete failure
+    is never hidden by an older pass, and a later passing retry restores
+    reuse.
+
+    A candidate that does not qualify (malformed, incomplete, mismatched,
+    changed inputs, no declared closure) is reported with its code, naming its
+    commit, unless a newer qualifying candidate already resolved the cell. A
+    note that never mentions a wanted cell contributes nothing to it and is
+    not a refusal, and a cell no candidate covers is reported nowhere: it
+    simply stays scheduled. A version-1 note claims every wanted cell of its
+    environment on its exact tree, pass-only.
 
     Equivalence recomputes the identity over **both** trees rather than
     trusting the identity the receipt stored. A stored string is an unverified
     claim by the host that wrote it; both trees are present locally, so the
     comparison can be made rather than believed.
     """
-    accepted: list[dict[str, Any]] = []
-    rejections: list[str] = []
     try:
         plan = load_plan(plan_path)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         return [], [f"malformed-receipt: the resolved plan is unreadable: {error}"]
 
     problems = schema.validate_resolved_plan(plan)
@@ -339,154 +443,544 @@ def verify_cells(
         return [], [f"malformed-receipt: the resolved plan is invalid: {problems[0]}"]
 
     try:
+        accepted, rejections, _ = _resolve(plan, base, head, report_probe)
+    except _Unresolvable:
+        return [], ["missing-receipt: the base/head pair does not resolve in this repository"]
+    return accepted, rejections
+
+
+def blocking_evidence(
+    plan: dict[str, Any],
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
+) -> dict[tuple[str, str, str], str]:
+    """The cells of `plan` whose qualifying evidence requires them to execute.
+
+    The same resolution [`verify_cells`] makes, over every annotated ancestor
+    of `head`, asked the other way round: which `{package, environment, gate}`
+    cells are decided by an unsuperseded failure, or by passing and failing
+    results nothing orders. Each maps to a sentence naming that evidence. A
+    cell with passing evidence, or none, is absent.
+
+    The planner asks this of the cells a nightly would inherit from its
+    anchor, which no later step verifies; `plan` need only carry the `cells`,
+    `packages`, and `builds` qualification reads.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when `head` does not resolve here: a caller that
+    cannot read the evidence must not credit coverage it may contradict.
+    """
+    try:
+        return _resolve(plan, ZERO_REVISION, head, report_probe)[2]
+    except _Unresolvable:
+        raise RuntimeError(
+            f"the head {head[:9]} does not resolve here, so no evidence about its "
+            "inherited cells can be read"
+        ) from None
+
+
+class _Unresolvable(Exception):
+    """The base/head pair names no commit in this repository."""
+
+
+def _resolve(
+    plan: dict[str, Any],
+    base: str,
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> tuple[list[dict[str, Any]], list[str], dict[tuple[str, str, str], str]]:
+    """`(accepted, rejections, blocked)` for `plan`'s cells; see [`verify_cells`].
+
+    `blocked` maps each cell its qualifying evidence keeps scheduled to why.
+    """
+    rejections: list[str] = []
+    try:
         head_sha = revision(head)
-        merge_base = git("merge-base", base, head_sha)
+        boundary = (
+            ZERO_REVISION if base == ZERO_REVISION else git("merge-base", base, head_sha)
+        )
         head_tree = revision(f"{head_sha}^{{tree}}")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return [], ["missing-receipt: the base/head pair does not resolve in this repository"]
+        raise _Unresolvable from None
 
     wanted = {
         (cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]
     }
-    commits = candidate_commits(merge_base, head_sha)
-    resolved: set[tuple[str, str, str]] = set()
+    commits = candidate_commits(boundary, head_sha)
+    order = {commit: index for index, commit in enumerate(commits)}
 
+    candidates: list[_Candidate] = []
     for environment in ENVIRONMENTS:
         for note_commit, note_text in candidate_notes(environment, commits):
-            try:
-                document = json.loads(note_text)
-            except json.JSONDecodeError:
-                rejections.append(
-                    f"malformed-receipt: the {environment} note on {note_commit[:9]} is not JSON"
+            candidates.extend(
+                _read_note(
+                    environment, note_commit, note_text, order[note_commit], head_tree,
+                    wanted, rejections, plan, report_probe,
                 )
-                continue
-            if not isinstance(document, dict):
-                rejections.append(
-                    f"malformed-receipt: the {environment} note on {note_commit[:9]} "
-                    "is not an object"
-                )
-                continue
-
-            if document.get("schema_version") == schema.LEGACY_RECEIPT_SCHEMA_VERSION:
-                legacy_accepted, legacy_rejections = _accept_legacy(
-                    document, environment, note_commit, head_tree, wanted, resolved
-                )
-                accepted.extend(legacy_accepted)
-                rejections.extend(legacy_rejections)
-                continue
-
-            receipt_valid = not schema.validate_receipt(document)
-            cells, cell_rejections = schema.reusable_cells(document)
-            rejections.extend(
-                f"{reason} (note on {note_commit[:9]})" for reason in cell_rejections
             )
-            if not receipt_valid:
-                continue
-            terminal_cells = cells
-            if document["completion"] == "complete":
-                terminal_cells = cells + [
-                    cell
-                    for cell in document["cells"]
-                    if cell["completion"] == "complete" and cell["outcome"] == "fail"
-                ]
-            if not terminal_cells:
-                continue
 
-            mismatch = _environment_mismatch(document, environment, note_commit) or (
-                _revision_mismatch(document, note_commit)
+    by_plan_key: dict[tuple[str, str, str], list[tuple[_Candidate, str, str | None]]] = {}
+    for candidate in candidates:
+        for key, narrowed in _plan_keys(candidate, plan, wanted):
+            label = "/".join(key)
+            exact = candidate.exact_tree == head_tree
+            origin, refusal = _qualification(
+                candidate, key, narrowed, exact, plan, head_sha, label
             )
-            if mismatch:
-                rejections.append(mismatch)
-                continue
+            by_plan_key.setdefault(key, []).append((candidate, origin, refusal))
 
-            exact = document["tree"] == head_tree
-            for cell in terminal_cells:
-                if cell.get("test_filter"):
-                    _resolve_narrowed(
-                        cell, plan, environment, exact, note_commit, document,
-                        wanted, resolved, accepted, rejections,
-                    )
-                    continue
-                key = (cell["package"], environment, cell["gate"])
-                if key not in wanted or key in resolved:
-                    continue
-                label = "/".join(key)
-                if exact:
-                    origin = "local"
-                else:
-                    paths = cell_input_paths(plan, cell["package"], cell["gate"])
-                    if paths is None:
-                        rejections.append(
-                            f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
-                            "and the plan declares no build closure for it, so equivalence "
-                            "with this head cannot be established"
-                        )
-                        continue
-                    if gate_input_identity(paths, note_commit, cell["gate"]) != gate_input_identity(
-                        paths, head_sha, cell["gate"]
-                    ):
-                        rejections.append(
-                            f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
-                            "whose gate inputs differ from this head's"
-                        )
-                        continue
-                    origin = "prior-local"
-                resolved.add(key)
-                if cell["outcome"] == "fail":
-                    continue
-                accepted.append(
-                    _accepted_cell(cell, environment, origin, note_commit, document)
-                )
-
-    return accepted, rejections
-
-
-def _resolve_narrowed(
-    cell: dict[str, Any],
-    plan: dict[str, Any],
-    environment: str,
-    exact: bool,
-    note_commit: str,
-    document: dict[str, Any],
-    wanted: set[tuple[str, str, str]],
-    resolved: set[tuple[str, str, str]],
-    accepted: list[dict[str, Any]],
-    rejections: list[str],
-) -> None:
-    """Credit a narrowed test-input receipt cell to the plan cell it ran for.
-
-    The one place a receipt stands in for another environment
-    (docs/cicd/test-inputs.md). It qualifies only for a plan cell with the
-    identical package, gate, and `test_filter`, and only on the head's exact
-    tree: the changed file is not a gate input, so no equivalence rule can
-    vouch for an older run. The accepted entry is keyed by the PLAN's
-    environment, while its evidence names the host ref it came from.
-    """
-    targets = [
-        planned
-        for planned in plan["cells"]
-        if planned.get("test_filter") == cell["test_filter"]
-        and planned["package"] == cell["package"]
-        and planned["gate"] == cell["gate"]
-    ]
-    for planned in targets:
-        key = (planned["package"], planned["environment"], planned["gate"])
-        if key not in wanted or key in resolved:
+    accepted: list[dict[str, Any]] = []
+    blocked: dict[tuple[str, str, str], str] = {}
+    ancestry: dict[tuple[str, str], bool] = {}
+    for key in sorted(by_plan_key):
+        entries = sorted(by_plan_key[key], key=lambda entry: (entry[0].order, entry[0].identifier))
+        qualifying = [entry for entry in entries if entry[2] is None]
+        first_resolved = min((entry[0].order for entry in qualifying), default=None)
+        for candidate, _origin, refusal in entries:
+            if refusal is not None and (first_resolved is None or candidate.order <= first_resolved):
+                rejections.append(refusal)
+        if not qualifying:
             continue
-        label = "/".join(key)
-        if not exact:
+        survivors = [
+            entry
+            for entry in qualifying
+            if not any(
+                other is not entry and _supersedes(other[0], entry[0], ancestry)
+                for other in qualifying
+            )
+        ]
+        outcomes = {entry[0].cell["outcome"] for entry in survivors}
+        if outcomes == {"pass", "fail"}:
             rejections.append(
+                f"conflicting-evidence: {'/'.join(key)} has both passing and failing "
+                "evidence for the same inputs and nothing orders them; it executes"
+            )
+            blocked[key] = "passing and failing results for its inputs that nothing orders"
+            continue
+        if outcomes == {"fail"}:
+            failure = survivors[0][0]
+            blocked[key] = (
+                f"a later qualifying failure on {failure.commit[:9]} "
+                f"({failure.identifier[:12]}) that no passing retry supersedes"
+            )
+            continue
+        candidate, origin, _ = survivors[0]
+        accepted.append(_accepted_candidate(candidate, key, origin, bool(candidate.cell.get("test_filter"))))
+
+    return accepted, rejections, blocked
+
+
+def _read_note(
+    environment: str,
+    note_commit: str,
+    note_text: str,
+    order: int,
+    head_tree: str,
+    wanted: set[tuple[str, str, str]],
+    rejections: list[str],
+    plan: dict[str, Any],
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> list[_Candidate]:
+    """The terminal cell results of one note, or `[]` after recording why not."""
+    try:
+        document = schema.loads_strict(note_text)
+    except ValueError as error:
+        rejections.append(
+            f"malformed-receipt: the {environment} note on {note_commit[:9]} "
+            f"is not valid JSON ({error})"
+        )
+        return []
+    if not isinstance(document, dict):
+        rejections.append(
+            f"malformed-receipt: the {environment} note on {note_commit[:9]} is not an object"
+        )
+        return []
+
+    version = document.get("schema_version")
+    if schema.is_version(version, schema.LEGACY_RECEIPT_SCHEMA_VERSION):
+        return _read_legacy(document, environment, note_commit, order, head_tree, wanted, rejections)
+    if schema.is_version(version, schema.COLLECTION_SCHEMA_VERSION):
+        return _read_collection(
+            document, environment, note_commit, order, plan, rejections, report_probe
+        )
+
+    receipt_valid = not schema.validate_receipt(document)
+    cells, cell_rejections = schema.reusable_cells(document)
+    rejections.extend(f"{reason} (note on {note_commit[:9]})" for reason in cell_rejections)
+    if not receipt_valid:
+        return []
+    terminal_cells = cells
+    if document["completion"] == "complete":
+        terminal_cells = cells + [
+            cell
+            for cell in document["cells"]
+            if cell["completion"] == "complete" and cell["outcome"] == "fail"
+        ]
+    if not terminal_cells:
+        return []
+    mismatch = _environment_mismatch(document, environment, note_commit) or (
+        _revision_mismatch(document, note_commit)
+    )
+    if mismatch:
+        rejections.append(mismatch)
+        return []
+    return [_Candidate(environment, note_commit, order, document, cell) for cell in terminal_cells]
+
+
+def _read_legacy(
+    document: dict[str, Any],
+    environment: str,
+    note_commit: str,
+    order: int,
+    head_tree: str,
+    wanted: set[tuple[str, str, str]],
+    rejections: list[str],
+) -> list[_Candidate]:
+    """Read a version-1 note under the narrow rules of spec section 3.6.
+
+    Exact tree identity only, pass-only, and whole-environment — the same
+    breadth the environment-at-a-time verifier granted, so a legacy receipt
+    neither gains reach nor is silently upgraded. Its measurements render as
+    [`schema.UNRECORDED_MEASUREMENT`] because the document has none. It claims
+    every wanted cell of its environment.
+    """
+    mismatch = _environment_mismatch(document, environment, note_commit)
+    if mismatch:
+        rejections.append(mismatch)
+        return []
+    if document.get("tree") != head_tree:
+        rejections.append(
+            f"v1-not-equivalence-eligible: the {environment} version-1 receipt on "
+            f"{note_commit[:9]} tested tree {str(document.get('tree'))[:9]}, and a "
+            "version-1 receipt is reusable only on exact tree identity"
+        )
+        return []
+    return [
+        _Candidate(
+            environment,
+            note_commit,
+            order,
+            document,
+            {
+                "package": package,
+                "gate": gate,
+                "outcome": "pass",
+                "completion": "complete",
+            },
+            legacy=True,
+        )
+        for package, env, gate in sorted(wanted)
+        if env == environment
+    ]
+
+
+def _read_collection(
+    document: dict[str, Any],
+    environment: str,
+    note_commit: str,
+    order: int,
+    plan: dict[str, Any],
+    rejections: list[str],
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> list[_Candidate]:
+    """Read a version-3 collection into its terminal, credit-eligible observations.
+
+    A failure is kept even when its reports cannot be shown: hiding it would
+    let an older pass stand in for a run that went red. A passing observation
+    needs its reports.
+    """
+    problems = schema.validate_collection(document)
+    if problems:
+        rejections.append(f"{problems[0]} (note on {note_commit[:9]})")
+        return []
+    mismatch = _environment_mismatch(document, environment, note_commit) or (
+        _revision_mismatch(document, note_commit)
+    )
+    if mismatch:
+        rejections.append(mismatch)
+        return []
+    candidates = []
+    for observation in document["observations"]:
+        cell = observation["cell"]
+        label = f"{cell['package']}/{environment}/{cell['gate']}"
+        if observation["completion"] != "complete" or cell["completion"] != "complete":
+            rejections.append(
+                f"incomplete-run: {label} observation {observation['observation_id'][:12]} "
+                f"is {cell['completion'] if observation['completion'] == 'complete' else observation['completion']}"
+                f" (note on {note_commit[:9]})"
+            )
+            continue
+        if cell["outcome"] == "pass":
+            reason = _report_problem(observation, report_probe) or _proof_problem(observation)
+            if reason:
+                rejections.append(f"{reason} (note on {note_commit[:9]})")
+                continue
+        else:
+            rejections.append(
+                f"failed-cell: {label} failed; failing evidence is diagnostic only"
+            )
+        candidate = _Candidate(
+            environment, note_commit, order, document, cell, observation=observation
+        )
+        links = {o["observation_id"]: o.get("retry_of") for o in document["observations"]}
+        cursor = observation.get("retry_of")
+        while cursor is not None and cursor not in candidate.retries:
+            candidate.retries.add(cursor)
+            cursor = links.get(cursor)
+        candidates.append(candidate)
+    return candidates
+
+
+def _report_problem(
+    observation: dict[str, Any],
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> str | None:
+    """Why a passing observation's reports cannot be relied on, or `None`.
+
+    A `host-dir` reference is checked byte for byte when its directory is on
+    this host; a directory on another host cannot be checked from here and is
+    accepted with its provenance. An `artifact` reference needs `report_probe`.
+    """
+    cell = observation["cell"]
+    label = f"{cell['package']}/{cell['gate']} observation {observation['observation_id'][:12]}"
+    host = observation["producer"]["host"]
+    for report in observation["reports"]:
+        if report["store"] == "artifact":
+            if report_probe is None or not report_probe(report, observation):
+                return (
+                    f"observation-report-unavailable: {label} cites artifact "
+                    f"{report['path']!r}, which cannot be retrieved"
+                )
+            continue
+        directory = Path(host["report_dir"]).expanduser()
+        if not directory.is_dir():
+            continue
+        path = directory / report["path"]
+        try:
+            content = path.read_bytes()
+        except OSError:
+            return (
+                f"observation-report-unavailable: {label} cites {report['path']!r}, "
+                f"which {directory} no longer retains"
+            )
+        if len(content) != report["bytes"] or hashlib.sha256(content).hexdigest() != report["sha256"]:
+            return (
+                f"observation-report-unavailable: {label} cites {report['path']!r}, "
+                "whose bytes differ from the recorded digest"
+            )
+    return None
+
+
+def _proof_problem(observation: dict[str, Any]) -> str | None:
+    """Why a passing observation's proof documents do not match its digests.
+
+    Only a `rig` or `seed` observation whose `report_dir` is on this host can be
+    rechecked; another host's directory is accepted with its provenance, as a
+    `host-dir` report is. A hosted observation's proof lives in workflow
+    artifacts, which `report_probe` vouches for.
+    """
+    proof = observation.get("proof")
+    producer = observation["producer"]
+    if proof is None or producer["kind"] not in ("rig", "seed"):
+        return None
+    directory = Path(producer["host"].get("report_dir", "")).expanduser()
+    if not producer["host"].get("report_dir") or not directory.is_dir():
+        return None
+    cell = observation["cell"]
+    label = f"{cell['package']}/{cell['gate']} observation {observation['observation_id'][:12]}"
+    for field, template in (
+        ("expected_listing_digest", schema.PROOF_EXPECTED_FILE),
+        ("completion_record_digest", schema.PROOF_COMPLETION_FILE),
+    ):
+        name = template.format(package=cell["package"], gate=cell["gate"])
+        try:
+            content = (directory / name).read_bytes()
+        except OSError:
+            return (
+                f"observation-report-unavailable: {label} cites {name!r} as its "
+                f"{field}, which {directory} no longer retains"
+            )
+        if hashlib.sha256(content).hexdigest() != proof[field]:
+            return (
+                f"observation-report-unavailable: {label} cites {name!r}, whose "
+                f"bytes differ from its {field}"
+            )
+        if field == "completion_record_digest":
+            try:
+                record = schema.loads_strict(content.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                return f"observation-proof-missing: {label} {name!r} is not a JSON document"
+            if (
+                not isinstance(record, dict)
+                or record.get("complete") is not True
+                or record.get("package") != cell["package"]
+                or record.get("gate") != cell["gate"]
+            ):
+                return (
+                    f"observation-proof-missing: {label} {name!r} does not certify "
+                    "this cell as complete"
+                )
+    return None
+
+
+def _plan_keys(
+    candidate: _Candidate, plan: dict[str, Any], wanted: set[tuple[str, str, str]]
+) -> list[tuple[tuple[str, str, str], bool]]:
+    """The plan cells a candidate may stand in for, and whether it is narrowed.
+
+    A narrowed test-input cell is the one place a receipt stands in for another
+    environment (docs/cicd/test-inputs.md). It qualifies only for a plan cell
+    with the identical package, gate, and `test_filter`, and the accepted entry
+    is keyed by the PLAN's environment while its evidence names the host ref.
+    """
+    cell = candidate.cell
+    if cell.get("test_filter"):
+        return [
+            ((planned["package"], planned["environment"], planned["gate"]), True)
+            for planned in plan["cells"]
+            if planned.get("test_filter") == cell["test_filter"]
+            and planned["package"] == cell["package"]
+            and planned["gate"] == cell["gate"]
+            and (planned["package"], planned["environment"], planned["gate"]) in wanted
+        ]
+    key = (cell["package"], candidate.environment, cell["gate"])
+    return [(key, False)] if key in wanted else []
+
+
+def _qualification(
+    candidate: _Candidate,
+    key: tuple[str, str, str],
+    narrowed: bool,
+    exact: bool,
+    plan: dict[str, Any],
+    head_sha: str,
+    label: str,
+) -> tuple[str, str | None]:
+    """`(origin, refusal)` for a candidate against one plan cell."""
+    note_commit = candidate.commit
+    if narrowed:
+        if not exact:
+            return "local", (
                 f"gate-inputs-changed: {label} was narrowed to its test inputs on "
                 f"{note_commit[:9]}, and a narrowed run proves only its exact tree"
             )
-            continue
-        resolved.add(key)
-        if cell["outcome"] == "fail":
-            continue
-        entry = _accepted_cell(cell, planned["environment"], "local", note_commit, document)
-        entry["evidence"]["ref"] = f"{NOTES_PREFIX}/{environment}"
-        entry["measurements"] += f", narrowed, on {environment}"
-        accepted.append(entry)
+        origin = "local"
+    elif exact:
+        origin = "local"
+    else:
+        paths = cell_input_paths(plan, candidate.cell["package"], candidate.cell["gate"])
+        if paths is None:
+            return "prior-local", (
+                f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
+                "and the plan declares no build closure for it, so equivalence "
+                "with this head cannot be established"
+            )
+        if gate_input_identity(paths, note_commit, candidate.cell["gate"]) != gate_input_identity(
+            paths, head_sha, candidate.cell["gate"]
+        ):
+            return "prior-local", (
+                f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
+                "whose gate inputs differ from this head's"
+            )
+        origin = "prior-local"
+    if candidate.observation is not None:
+        refusal = _observation_refusal(candidate.observation, key, plan, label)
+        if refusal:
+            return origin, refusal
+    return origin, None
+
+
+def _observation_refusal(
+    observation: dict[str, Any], key: tuple[str, str, str], plan: dict[str, Any], label: str
+) -> str | None:
+    """Why an observation does not describe the work a plan cell asks for."""
+    planned = next(
+        (
+            cell
+            for cell in plan["cells"]
+            if (cell["package"], cell["environment"], cell["gate"]) == key
+        ),
+        None,
+    )
+    if planned is None:
+        return None
+    cell = observation["cell"]
+    missing = sorted(set(planned.get("backends", [])) - set(cell["backends"]))
+    if missing:
+        return (
+            f"incomplete-run: {label} observation {observation['observation_id'][:12]} "
+            f"did not prove backend(s) {missing}"
+        )
+    wanted_features = _planned_features(plan, planned)
+    if observation.get("features", "") != wanted_features:
+        return (
+            f"gate-inputs-changed: {label} observation {observation['observation_id'][:12]} "
+            f"ran with features {observation.get('features', '')!r}, the plan's cell "
+            f"uses {wanted_features!r}"
+        )
+    return None
+
+
+def _planned_features(plan: dict[str, Any], planned: dict[str, Any]) -> str:
+    """The isolated feature arguments the plan's build for `planned` was keyed on."""
+    key = planned.get("build")
+    for build in plan.get("builds", []):
+        if build["key"] == key:
+            return str(build["identity"].get("features", ""))
+    return ""
+
+
+def _supersedes(
+    newer: _Candidate, older: _Candidate, ancestry: dict[tuple[str, str], bool]
+) -> bool:
+    """Whether `newer` replaces `older` for the same cell.
+
+    Either `newer` retries `older` explicitly in the same note, or `newer`'s
+    commit is a strict descendant of `older`'s. Two results on unordered
+    commits, or on one commit with no link, supersede nothing.
+    """
+    if newer.commit == older.commit:
+        return (
+            newer.environment == older.environment
+            and older.identifier in newer.retries
+        )
+    pair = (older.commit, newer.commit)
+    if pair not in ancestry:
+        ancestry[pair] = (
+            git_optional("merge-base", "--is-ancestor", older.commit, newer.commit) is not None
+        )
+    return ancestry[pair]
+
+
+def _accepted_candidate(
+    candidate: _Candidate, key: tuple[str, str, str], origin: str, narrowed: bool
+) -> dict[str, Any]:
+    package, environment, gate = key
+    if candidate.legacy:
+        return {
+            "package": package,
+            "gate": gate,
+            "environment": environment,
+            "outcome": "pass",
+            "completion": "complete",
+            "origin": "local",
+            "measurements": schema.UNRECORDED_MEASUREMENT,
+            "evidence": {
+                "ref": f"{NOTES_PREFIX}/{candidate.environment}",
+                "schema_version": schema.LEGACY_RECEIPT_SCHEMA_VERSION,
+            },
+        }
+    document = candidate.document
+    if candidate.observation is not None:
+        document = {"host": candidate.observation["producer"]["host"]}
+    entry = _accepted_cell(candidate.cell, environment, origin, candidate.commit, document)
+    entry["evidence"]["ref"] = f"{NOTES_PREFIX}/{candidate.environment}"
+    if candidate.observation is not None:
+        entry["evidence"]["observation"] = candidate.observation["observation_id"]
+    if narrowed:
+        entry["measurements"] += f", narrowed, on {candidate.environment}"
+    return entry
 
 
 def _accepted_cell(
@@ -547,56 +1041,6 @@ def _revision_mismatch(document: dict[str, Any], note_commit: str) -> str | None
         f"{str(document.get('head'))[:9]} and tree {str(document.get('tree'))[:9]}, "
         "which is not the commit it is attached to"
     )
-
-
-def _accept_legacy(
-    document: dict[str, Any],
-    environment: str,
-    note_commit: str,
-    head_tree: str,
-    wanted: set[tuple[str, str, str]],
-    resolved: set[tuple[str, str, str]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Accept a version-1 note under the narrow rules of spec section 3.6.
-
-    Exact tree identity only, pass-only, and whole-environment — the same
-    breadth the environment-at-a-time verifier granted, so a legacy receipt
-    neither gains reach nor is silently upgraded. Its measurements render as
-    [`schema.UNRECORDED_MEASUREMENT`] because the document has none. It claims
-    only the wanted cells still unresolved by newer candidates, and adds those
-    to `resolved`, so it neither overrides a newer note nor is overridden by
-    an older one.
-    """
-    mismatch = _environment_mismatch(document, environment, note_commit)
-    if mismatch:
-        return [], [mismatch]
-    if document.get("tree") != head_tree:
-        return [], [
-            f"v1-not-equivalence-eligible: the {environment} version-1 receipt on "
-            f"{note_commit[:9]} tested tree {str(document.get('tree'))[:9]}, and a "
-            "version-1 receipt is reusable only on exact tree identity"
-        ]
-    accepted = []
-    for package, env, gate in sorted(wanted):
-        if env != environment or (package, env, gate) in resolved:
-            continue
-        resolved.add((package, env, gate))
-        accepted.append(
-            {
-                "package": package,
-                "gate": gate,
-                "environment": environment,
-                "outcome": "pass",
-                "completion": "complete",
-                "origin": "local",
-                "measurements": schema.UNRECORDED_MEASUREMENT,
-                "evidence": {
-                    "ref": f"{NOTES_PREFIX}/{environment}",
-                    "schema_version": schema.LEGACY_RECEIPT_SCHEMA_VERSION,
-                },
-            }
-        )
-    return accepted, []
 
 
 # ---------------------------------------------------------------------------
@@ -1011,9 +1455,9 @@ def merge_prior_receipt(current: dict[str, Any], prior_receipt_path: str) -> dic
     if not text:
         return current
     try:
-        prior = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise ValueError("the prior receipt is not valid JSON") from error
+        prior = schema.loads_strict(text)
+    except ValueError as error:
+        raise ValueError(f"the prior receipt is not valid JSON ({error})") from error
     if not isinstance(prior, dict):
         raise ValueError("the prior receipt is not an object")
     problems = schema.validate_receipt(prior)
@@ -1077,6 +1521,15 @@ def cross_check_rejection(
     return None
 
 
+#: The rig environments a `cross-check` run can be recorded for, with the host
+#: OS and default label each is described by. WSL2 runs Linux code paths and is
+#: never filed under `windows-latest`, nor the reverse.
+CROSS_CHECK_HOSTS = {
+    "wsl2-ubuntu": ("Linux", "WSL2 (cross-check archive mode)"),
+    "windows-latest": ("Windows", "native Windows (cross-check archive mode)"),
+}
+
+
 def record_cross_check(
     plan_path: str,
     package: str,
@@ -1095,6 +1548,11 @@ def record_cross_check(
 ) -> str:
     """The receipt for a qualifying `cross-check` run.
 
+    `environment` is the rig the run executed on: `wsl2-ubuntu` (a Linux guest)
+    or `windows-latest` (native Windows). A result is only ever recorded for
+    the environment it ran on; the plan must carry that environment's cell.
+    `report` sits inside the directory the receipt names as retaining it.
+
     `build_key` and `build_digest` are the manifest the remote consumer
     VERIFIED, not the plan's expectation of it: a receipt that named a key
     nothing checked would be a claim rather than evidence. Both or neither —
@@ -1106,6 +1564,11 @@ def record_cross_check(
     not qualify, so the caller can print it rather than silently publishing
     nothing.
     """
+    if environment not in CROSS_CHECK_HOSTS:
+        raise ValueError(
+            f"{environment} is not a rig environment; a cross-check run can only "
+            f"be recorded for {sorted(CROSS_CHECK_HOSTS)}"
+        )
     head_sha = revision(head)
     head_tree = revision(f"{head_sha}^{{tree}}")
     refusal = cross_check_rejection(tested_tree, head_tree, remote_dirty, run_filters)
@@ -1156,8 +1619,8 @@ def record_cross_check(
         "complete",
         "",
         host={
-            "os": "Linux",
-            "kernel": host_label or "WSL2 (cross-check archive mode)",
+            "os": CROSS_CHECK_HOSTS[environment][0],
+            "kernel": host_label or CROSS_CHECK_HOSTS[environment][1],
             "report_dir": str(stage),
         },
     )
@@ -1345,6 +1808,13 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="write the coded rejection reasons here",
     )
+    verifier.add_argument(
+        "--artifact-repo",
+        metavar="OWNER/REPO",
+        help="vouch for hosted `artifact` report references by fetching them from "
+        "this repository's workflow runs (needs GH_TOKEN); without it a hosted "
+        "observation earns no credit",
+    )
     return parser.parse_args()
 
 
@@ -1410,7 +1880,14 @@ def main() -> None:
     if args.cells:
         if not args.plan:
             raise SystemExit("verify --cells requires --plan")
-        accepted, rejections = verify_cells(args.plan, args.base, args.head)
+        probe = None
+        if args.artifact_repo:
+            import hosted_observations  # noqa: PLC0415  (only the nightly reaches the network)
+
+            probe = hosted_observations.gh_probe(args.artifact_repo)
+        accepted, rejections = verify_cells(
+            args.plan, args.base, args.head, report_probe=probe
+        )
         if args.rejections:
             Path(args.rejections).write_text(
                 json.dumps(rejections, indent=0), encoding="utf-8"
