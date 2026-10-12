@@ -45,6 +45,47 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2:
   - schematic/skill/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_3:
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/openapi/ollama.json
+docs_updated_during_phase_3:
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/gen/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_4:
+  - schematic/gen/src/cargo_gen.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/output/inventory.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/publish.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/level2/terminal_capture.rs
+  - schematic/justfile
+docs_updated_during_phase_4:
+  - schematic/README.md
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_4:
+  - schematic/docs/generation/partial-generation.md
+skills_files_updated_during_phase_4:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
 packages:
   - schematic-gen
   - test-toolkit
@@ -165,11 +206,11 @@ Run focused validator/CLI tests, then `just test` and `just lint`. Preserve the 
 
 ### Wave 6 — OpenAPI repair (sequential)
 
-- [ ] **Allocate unique operations** — Task 3.1; depends on Phase 2; owns `gen/src/export/openapi.rs` and its merge tests.
+- [x] **Allocate unique operations** — Task 3.1; depends on Phase 2; owns `gen/src/export/openapi.rs` and its merge tests.
   - Preserve compatible same-method/path auth-alternative merging; reject incompatible operations for OpenAPI only. Use normalized route identity without turning cross-API overlap into a Rust-wide error (R13).
   - Track operation ownership through the grouped merge. Reserve all originals before deterministic renaming, including an adversarial original already equal to a proposed prefixed name; allocate numeric suffixes without displacing it (R14).
   - Update owner-scoped in-document link `operationId` references. Do not globally replace an ambiguous raw id in links from different source documents. Final-scan grouped and ungrouped documents, including link targets where affected. Test determinism and unchanged unique per-API ids.
-- [ ] **Verify artifact identities** — Task 3.2; depends on Task 3.1; owns uniqueness/artifact checks and generated artifacts.
+- [x] **Verify artifact identities** — Task 3.2; depends on Task 3.1; owns uniqueness/artifact checks and generated artifacts.
   - Extend the existing passive artifact corpus coverage to reject duplicate ids in every committed OpenAPI document. Reuse the drift scans rather than duplicating them.
   - Regenerate using the generator and explain the Ollama id changes. Other OpenAPI content changes only where R14 requires; Postman and Rust remain unchanged unless live generator behavior explains them (R15). Do not hand-edit artifacts.
   - Update current export behavior docs and relevant merge comments.
@@ -182,22 +223,22 @@ Run merge/adversarial/link-reference tests and nextest's `artifact_drift::` sele
 
 ### Wave 7 — Publication foundations (parallelizable)
 
-- [ ] **Resolve retained inventory** — Task 4.1; depends on Phase 3; owns inventory/group/compatibility helpers under `gen/src/output/`.
+- [x] **Resolve retained inventory** — Task 4.1; depends on Phase 3; owns inventory/group/compatibility helpers under `gen/src/output/`.
   - Expand REST selections to complete current registry groups. Establish owned file/directory inventory plus parsed `lib.rs` modules/exports; validate retained declarations against current group exports. Preserve WebSocket members/support for REST and WebSocket selections.
   - Distinguish absent/empty roots from nonempty unsafe roots. Reject unknown owned modules, missing members, unclassifiable files, layout conflicts, corrupt exports, and enumeration/read errors. Preserve unrelated unowned content; do not follow symlinks or recursive cleanup through them (R1–R5, R7).
   - Centralize shared-runtime byte comparison; unchanged support passes, changed support with retained modules requires full generation. Test full generation after refusal and preserve the extension point for a future persisted marker (R34).
-- [ ] **Prepare mutation plans** — Task 4.2; depends on Phase 3; owns a separate preparation/publication helper and portable failure-injection seam.
+- [x] **Prepare mutation plans** — Task 4.2; depends on Phase 3; owns a separate preparation/publication helper and portable failure-injection seam.
   - Represent prepared files and ordered mutations sufficiently to report completed/pending writes/deletions, including manifests and layout conversions. Finish validation, assembly, syntax checks, and formatting in memory before publication.
   - Check ownership for every overwrite/delete/shared/manifest target. An unowned occupant fails before mutation; a file/directory conversion containing unowned content remains intact. Prepare replacements before obsolete-path cleanup (R3, R6).
   - Preserve atomic per-file writes, publish `lib.rs` last, and make dry-run preparation use the identical plan/diagnostics while creating no directories. Inject an I/O failure **during publication after preflight**, rather than an invalid planned filename that preflight correctly rejects.
 
 ### Wave 8 — Partial generation integration (sequential)
 
-- [ ] **Integrate safe publication** — Task 4.3; depends on Tasks 4.1–4.2; owns `output/mod.rs`, CLI/export integration, manifests, and registration.
+- [x] **Integrate safe publication** — Task 4.3; depends on Tasks 4.1–4.2; owns `output/mod.rs`, CLI/export integration, manifests, and registration.
   - Connect group expansion, retained inventory, per-output preparation, and publication. Rebuild shared files/prelude/lib exports from retained plus regenerated groups; preserve every unselected module byte-for-byte (R1–R2).
   - Restrict partial cleanup to selected groups; full generation may remove obsolete owned groups. Rust/OpenAPI/Postman roots establish safety independently. Partial artifacts rewrite only selected expanded groups; artifact-only failures do not prevent other valid roots publishing (R3–R8).
   - Include generated `Cargo.toml` and WebSocket shared files inside the preflight/report boundary; no earlier CLI side-write may bypass it. Aggregate final statuses honestly and suppress crate-updated success messages after partial failure (R6, R10).
-- [ ] **Prove partial safety** — Task 4.4; depends on Task 4.3; owns `gen/tests/l1/partial_generation.rs` and partial-generation docs.
+- [x] **Prove partial safety** — Task 4.4; depends on Task 4.3; owns `gen/tests/l1/partial_generation.rs` and partial-generation docs.
   - Generate all APIs into a temp tree, then select one Ollama member; assert both group members regenerate, all retained modules stay byte-identical, all 18 API exports remain, and the resulting tree compiles via the serialized fresh-output helper.
   - Test owned stale deletion alongside hand-written files/bin content, unowned occupied targets including manifests/shared files, corrupt/missing inventory, export mismatch, shared-runtime mismatch, symlink protection, layout conversion conflicts, and empty roots. Refusal preserves relative paths and bytes.
   - Cover group-limited OpenAPI/Postman publication, artifact-only roots, dry runs, repeated successful partial generation, and a portable mid-write failure with completed/pending lists. Retry must safely complete or request full generation without additional mutation; no promise of universal crash recovery.

@@ -44,6 +44,47 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2:
   - schematic/skill/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_3:
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/openapi/ollama.json
+docs_updated_during_phase_3:
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/gen/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_4:
+  - schematic/gen/src/cargo_gen.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/output/inventory.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/publish.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/level2/terminal_capture.rs
+  - schematic/justfile
+docs_updated_during_phase_4:
+  - schematic/README.md
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_4:
+  - schematic/docs/generation/partial-generation.md
+skills_files_updated_during_phase_4:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
 packages:
   - schematic-gen
   - test-toolkit
@@ -672,3 +713,463 @@ No dependency was added.
 6. Removed public items: `validate_api`, `run_validation`,
    `missing_schemas_error`, `run_generate_all`, and three `GeneratorError`
    variants.
+
+## Phase 3
+
+### Authorization state
+
+- Pre-authorization item 1 (regenerate schema/OpenAPI/Postman) still has no
+  recorded author confirmation. R15 is part of Phase 3 and the committed
+  `openapi/ollama.json` must match the generator for `artifact_drift` (an
+  ordinary L1 test) to pass, so — following Phase 1's reading of item 5 —
+  item 1 is read as authorized by the request to "implement phase 3" **for
+  this phase's generator-produced artifact refresh only**. Recorded for
+  review 1.
+- The regeneration ran the exact command of `just generate`
+  (`cargo run -p schematic-gen -- generate --api all --output schema/src
+  --openapi-out openapi --postman-out postman`) without the recipe's desktop
+  notification. Nothing was hand-edited.
+- Items 2–8 were not exercised.
+
+### What was built (Tasks 3.1–3.2)
+
+- **`export::openapi` split into build and write.**
+  `build_openapi_grouped(apis, module, registry, options) -> OpenAPI`
+  validates, exports each member, merges, assigns unique ids, and runs the
+  final scan; `write_openapi_document(doc, stem, format, dir)` serializes and
+  writes; `write_openapi_grouped` is now the two in sequence (signature
+  unchanged). All three plus `operation_id_diagnostics` are re-exported from
+  the crate root.
+- **Merge ownership.** `merge_documents` records every operation as
+  `(path, method) -> [contributing API indexes]` in first-owner order: API
+  registry order, the owner's document path order, then the fixed method
+  order GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE. A compatible
+  operation (equal apart from `security`, the EMQX case) adds its API to the
+  existing entry.
+- **Incompatible same route (R13, OpenAPI only).** Previously a
+  `ConfigError` string; now `GeneratorError::Validation` with one
+  `duplicate-method-path` OpenAPI error naming both APIs (`for_group`). The
+  Rust and Postman validators are unchanged, so cross-API overlap is not a
+  Rust-wide error.
+- **Id allocation (R14), `assign_operation_ids`.** Every original id is
+  reserved first. Walking in first-owner order, the first claimant keeps its
+  id; a later clash becomes `{PascalCase(owner API name)}{id}`, and if that is
+  reserved or already assigned, `{…}2`, `{…}3`, …. Per-API documents are never
+  renamed (default 7).
+- **Links.** Each API gets its own original→final map. A response link inside
+  an operation is rewritten through its *owner's* map, so the same raw id in a
+  link from another API's document is not touched. `components.links` are not
+  rewritten: they come from the seed API, which claims first and so is never
+  renamed.
+- **Final scan, `operation_id_diagnostics(doc, apis)`.** Public. Reports
+  `duplicate-operation-id` (an id declared by two routes, both named) and the
+  new `unresolved-link-operation` (a link in an operation response,
+  `components.links`, or `components.responses` naming no declared id). Run by
+  `build_openapi_grouped` and by the per-API `write_openapi`, and by the
+  corpus test over committed files.
+- **Pipeline (`publish_openapi`).** Builds every module's document before
+  writing any; a merge or scan failure in module N leaves the OpenAPI root
+  untouched (previously modules before N were already written — a partial
+  publish of a rejected batch). `run_openapi_export_grouped` now takes the
+  built document (no external callers; signature changed) and the version
+  rule moved to `openapi_export_options`.
+
+### Design choices not dictated by the spec
+
+- **Security-scheme renames now happen before path merging**, on the incoming
+  document. The old code rewrote, after merging, every operation on any path
+  `path_method_owners` attributed to the incoming API — which also rewrote
+  other APIs' operations sharing that path, and left the incoming API's
+  security unioned into a compatible seed-owned operation pointing at the
+  seed's same-named scheme. The incoming document's top-level `security` is
+  now renamed too. No live module has a scheme rename, so no artifact
+  changed. Done here because it was the ownership code this task rewrote.
+- **New feature id `unresolved-link-operation`** (the seventh beyond default
+  20's list) for the link-target half of the final scan, rather than
+  overloading `duplicate-operation-id`.
+- **Numeric suffixes start at 2** (`FooBList2`), and only on a clash.
+- **Incoming `components.links` are still dropped by the merge** (as are
+  other incoming component maps besides schemas and security schemes) — a
+  pre-existing gap. The exporter never emits links, so no artifact is
+  affected; recorded, not fixed.
+- **The exporter emits no OpenAPI links and only document-level
+  `security`.** Link handling is therefore tested on hand-augmented exported
+  documents through the private `merge_documents`; no shipped artifact
+  exercises it.
+
+### Artifact change (R15)
+
+`git diff --stat` after regeneration: `schematic/openapi/ollama.json | 4 ++--`
+and nothing else (Rust sources and Postman collections byte-identical):
+
+| Route | Before | After |
+| --- | --- | --- |
+| `POST /v1/embeddings` (OllamaOpenAI) | `Embeddings` | `OllamaOpenAIEmbeddings` |
+| `GET /v1/models` (OllamaOpenAI) | `ListModels` | `OllamaOpenAIListModels` |
+
+`OllamaNative` is first in registry order, so `POST /api/embeddings` and
+`GET /api/tags` keep `Embeddings` and `ListModels`. Every other live module
+keeps every endpoint id unchanged
+(`unique_ids_are_unchanged_for_every_live_module`).
+
+### Comment and doc drift found (code assumed correct)
+
+- `docs/io/export-openapi.md` "Grouped Export" claimed servers are a
+  "deduplicated union of base URLs", info has "concatenated descriptions",
+  and operations carry "per-operation security". The code takes servers and
+  info from the first member and the exporter emits document-level security
+  only. Rewritten, with the operationId rule.
+- `write_openapi_grouped` rustdoc said a path/method collision is a
+  `ConfigError`; it is now a `Validation` error, and the merge semantics moved
+  to `build_openapi_grouped`.
+- The merge's security-rename comment ("the simplest correct approach is to
+  rewrite all operations on paths …") described the approximation removed
+  above; deleted with it.
+- `artifact_drift.rs` module header gave the stale `cargo test` invocation
+  (noted in Phase 1); now the nextest selection.
+
+### Requirement → test mapping (Phase 3)
+
+| Requirement | Test(s) | Result |
+| --- | --- | --- |
+| R13 compatible auth alternatives merge | `export::openapi::tests::compatible_operations_merge_security_without_renaming` (one op, id kept, `basicAuth` + `bearerAuth`) | pass |
+| R13 incompatible overlap fails OpenAPI only, no partial publish | `export::openapi::tests::write_openapi_grouped_collides_on_duplicate_method_path` (exact rendered diagnostic, no file), `output_validation::incompatible_group_route_blocks_only_openapi_and_writes_no_document` (public `generate_batch`: valid `inventory` module first, OpenAPI root absent, Rust + Postman written) | pass; by inspection the second would fail on the pre-change code, which wrote `inventory.json` before returning `ConfigError` (not executed against the old code) |
+| R14 first keeps, later prefixed | `::later_clashing_ids_take_the_owning_api_prefix` (Ollama shape), `output_validation::grouped_document_renames_a_shared_raw_id` (written file via `generate_batch`) | pass |
+| R14 reserve originals / adversarial | `::renames_never_take_an_original_id_declared_later` (`FooC` declares `FooBList` → B gets `FooBList2`; `FooB2List` gets no suffix) | pass |
+| R14 determinism, registry order | `::allocation_is_deterministic_and_follows_registry_order` | pass |
+| R14 owner-scoped links | `::links_follow_the_rename_of_their_own_document_only` (A's link to `List` stays, B's two links become `FooBList`) | pass |
+| R14 final scan, grouped + ungrouped | `::scan_reports_duplicate_ids_and_unresolved_links`, `::scan_checks_component_links_too`; wired into `write_openapi` and `build_openapi_grouped` | pass |
+| R14 unique per-API ids unchanged | `::unique_ids_are_unchanged_for_every_live_module` (only the two Ollama renames across every live module with a registry — 15 documents) | pass |
+| R15 committed corpus | `artifact_drift::committed_openapi_documents_have_unique_operation_ids` — **failed before regeneration** with exactly the two `ollama` duplicates (`Embeddings`, `ListModels`), passes after; `artifact_drift::generated_openapi_artifacts_are_up_to_date` | pass |
+
+Fidelity/tier: the corpus test reads the real committed files
+(`schematic_root().join("openapi")` inside the `#[test]`); the two
+`output_validation` tests run the public `generate_batch` against temp
+directories (filesystem boundary). All are ordinary L1, each well under 1 s;
+none invokes Cargo, so none is `slow_`. All live in already-declared targets
+(the lib's unit tests and the `l1` binary's existing modules).
+
+Input Robustness Matrix: not applicable. The corpus test deserializes
+committed OpenAPI output with the existing `openapiv3` types to inspect it; no
+configuration or manifest reader was added.
+
+### Broader gates
+
+- `just test` (schematic): exit 0. L1 **1730 passed, 9 skipped** (Phase 2:
+  1718 + 12 new); fresh-output guard **4 passed** (28.6 s, warm), so the full
+  18-API compile and the Rust-source comparison stay green.
+- `just lint` (schematic): exit 0 (clippy only).
+- `artifact_drift::` nextest selection: 6 passed.
+- `cargo doc -p schematic-gen --no-deps`: no warnings in touched files (one
+  private intra-doc link introduced mid-phase was removed).
+
+### Platform evidence
+
+- macOS (this host): gates above.
+- Linux / native Windows / WSL2: not run. The change is in-memory document
+  manipulation plus the existing `fs::write`; the new tests use temp dirs and
+  compare JSON values, with no path spelling, line ending, or process
+  behavior. Phase 2's Windows run already covered the same write path. CI's
+  Linux and macOS pull-request legs cover it.
+
+### Files touched outside `schematic/`
+
+- `.claude/skills/schematic-define/schematic/gen.md` (Validation paragraph).
+
+No dependency was added.
+
+### Human review agenda items raised in Phase 3
+
+1. Item 1 (regeneration) read as authorized by the phase request, for the
+   `ollama.json` refresh only.
+2. Feature id `unresolved-link-operation` added.
+3. Security-scheme renames moved before path merging (behavior fix, no
+   artifact change).
+4. Incoming `components.links` (and other component maps) are still dropped
+   by the grouped merge.
+5. `run_openapi_export_grouped`'s public signature changed (takes a built
+   document).
+
+## Phase 4
+
+### Authorization state
+
+- No pre-authorization item is exercised by Phase 4: no regeneration of
+  committed artifacts (the full-generation check below ran against a copy
+  under `/tmp`, then the copy was deleted), no deletion in the checkout, no
+  `RequestParts` change, no dependency added, no `schematic-define` change, no
+  CI change. Items 1–8 remain unconfirmed.
+- Temporary output trees were created only under the system temp directory
+  (item 5, already read as authorized in Phase 1).
+
+### What was built (Tasks 4.1–4.4)
+
+- **`output/publish.rs` (new, public).** `Mutation { Write, RemoveFile,
+  RemoveDir }`, `MutationPlan` (writes in the preparer's order, then
+  deletions), `MutationPlan::publish` → `PublicationReport`, and
+  `print_dry_run`. A failed mutation returns the new
+  `GeneratorError::PublicationFailed { root, failed, completed, pending,
+  source }`, rendered with both lists and the remedy (rerun; if a partial run
+  then refuses, run full generation). Writes go through the existing
+  `write_atomic`.
+- **`output/inventory.rs` (new, crate-private).** Ownership proofs
+  (`occupant(path, Proof)` with `Proof::{RustSource, Manifest, Artifact}`),
+  using `symlink_metadata` so a link is never followed or proven, and an
+  unreadable entry or listing error is never proven owned. The ownership
+  helpers previously private in `output/mod.rs` (`is_generator_owned_*`,
+  `remove_conflicting_paths`, `cleanup_stale_files`, `collect_expected_files`)
+  were replaced by these. `read_rust_inventory` establishes retained groups
+  (default 3) and `shared_runtime_compatibility` is the single compatibility
+  function (default 4, R34).
+- **`output/mod.rs`.** New public `Selection { All, Apis(&[&RestApi]) }`,
+  `RustOutputRequest { registry, selection, output_dir, manifest_dir }`,
+  `RustOutputPlan { plan, regenerated, retained }`, `prepare_rust_output`,
+  and `expand_selection`. `generate_and_write_all` is now prepare(`All`) +
+  publish; `generate_and_write` unchanged in meaning. `generate_and_write_standalone`
+  (the OpenAPI import writer) uses the same planner. A crate-private
+  `prepare_export_output` plans an OpenAPI or Postman root.
+- **Pipeline.** `BatchScope::Selection` now carries API names
+  (`Selection(Vec<String>)`), and `generate_batch(&registry, &scope, …)`
+  treats `apis` as the registry. Each root expands the selection to complete
+  groups with its own module resolver (Rust: `get_module_path`; exports:
+  `resolve_module_name`), validates that batch, prepares, and publishes. The
+  generated `Cargo.toml` is now a planned write inside the Rust plan (it was a
+  separate `write_cargo_toml` call after the crate), so a refused or failed
+  Rust output writes no manifest. Success lines (`[OK] Generated …`,
+  `[OK] Published …`) print only after a successful publication.
+- **Renderers split from writers.** `export::openapi::render_openapi_document`
+  (now used by `write_openapi_document`) and
+  `export::postman::render_postman_module` (single API → that API's
+  collection, shared module → grouped collection, as the pipeline chose
+  before). Exports are now written atomically (temp + rename) instead of
+  `fs::write`.
+- **`cargo_gen::MANIFEST_OWNERSHIP_MARKER`**, the template's existing
+  `# This file was automatically generated by schematic-gen.` line, now the
+  manifest's ownership proof (unit test keeps template and constant in step).
+- **New errors.** `UnsafeOutput { root, problems, remedy }` (every problem
+  listed; remedy is either "run full generation or an isolated output
+  directory" for inventory problems, or "move or remove the listed paths" for
+  conflicts) and `RequiresFullGeneration { root, changed, retained }`. All say
+  "nothing was changed".
+
+### How a Rust run is prepared (the rules as implemented)
+
+1. Expand the selection to complete module groups through the registry (an
+   unknown API name is a `ConfigError`); validate the regenerated APIs.
+2. Partial run only: read the inventory unless the root is absent or empty.
+   Required: owned, parseable `lib.rs` and `prelude.rs`; every declared REST
+   module that is retained present as exactly one owned layout (`m.rs`, or a
+   real directory whose `mod.rs` is owned); every owned top-level module
+   declared (unless it is in a regenerated group, so a retry after a failed
+   run still completes); every declared module known to the current
+   definitions or a WebSocket module; prelude exports of every retained group
+   equal to `{Api, ApiRequest}` of its current members; no prelude export from
+   an undeclared module.
+3. `lib.rs` and `prelude.rs` are assembled from the retained + regenerated
+   groups **in registry order**, so a partial run over a full tree writes them
+   byte-identical to full generation.
+4. Compatibility: with any retained group, `shared.rs` and `ws_shared.rs` must
+   equal the new content byte-for-byte (a missing file counts as different).
+5. Plan writes: regenerated group modules (module-path order), `shared.rs`,
+   `ws_shared.rs`, the five WebSocket modules, `Cargo.toml` (when requested),
+   `prelude.rs`, `lib.rs`. Every target must be absent or an owned file.
+   Deletions: the other layout of each regenerated module (owned only; an
+   unowned one is a conflict, left intact), owned stale files inside a
+   regenerated directory module, and — full generation only — owned top-level
+   entries no module produces. Deletions are deduplicated.
+6. Export roots: each planned `<module>.json|yaml` /
+   `<module>.postman_collection.json` must be absent or a regular file; a
+   complete run deletes regular files with the artifact suffix that no module
+   produced; a partial run deletes nothing.
+
+### Design choices not dictated by the spec
+
+- **Default 3 adopted** with one refinement: a directory module's evidence is
+  an owned `mod.rs` in a real directory; whole-tree ownership is required
+  only to *delete* a directory. A retained split module containing a
+  hand-written file is therefore still a valid member (found when the R3 test
+  planted `large/hand.rs`).
+- **Default 4 adopted.** Runtime-bearing files are `shared.rs` and
+  `ws_shared.rs`. The five WebSocket definition modules are regenerated on
+  every run (as before), so they never need to stay compatible with an older
+  `ws_shared.rs`.
+- **Default 5, deviation in deletion order.** Writes run in the stated order
+  with `lib.rs` the last *write*; deletions of obsolete paths follow `lib.rs`.
+  "Prepare replacements before obsolete-path cleanup" and "`lib.rs` last"
+  cannot both hold when a layout changes; this order guarantees a replacement
+  exists before its old path goes, and a failure during deletions leaves
+  `lib.rs` already describing the new module set with the leftovers listed as
+  not done.
+- **Default 22 adopted.** Partial OpenAPI/Postman runs write only the
+  selected export modules under the current export resolver. For the 18 live
+  APIs the two resolvers give the same 15 module names (compared from the
+  committed `schema/src` and `openapi/` listings); no `PagerDutyApi`-style
+  discrepancy exists in the registry today.
+- **Export ownership** is name-based (JSON/YAML carry no header): a regular
+  file with the artifact suffix. Full-run export cleanup previously deleted
+  *every* unexpected entry (and failed on a subdirectory); it now deletes only
+  artifact-named regular files, so `README.md` or a subdirectory in
+  `openapi/` survives. Planned artifacts on a directory or symlink are
+  conflicts.
+- **Export roots need no inventory.** Nothing in them is rebuilt from
+  retained content, so a partial export run only checks its own targets. R7's
+  "nonempty directory missing required inventory evidence" applies to the
+  Rust root, which has shared exports.
+- **Full generation now refuses an unowned occupant** of any planned path
+  (e.g. a hand-written `lib.rs` or a `Cargo.toml` without the marker); it used
+  to overwrite them. Same for the standalone import writer, whose test
+  `standalone_import_preserves_hand_written_conflicting_directory` now expects
+  `UnsafeOutput` (before, it wrote `foo.rs` beside a hand-written `foo/`,
+  which Rust rejects as an ambiguous module).
+- **Failure-injection seam.** No test-only hook: the public two-step API
+  (`prepare_rust_output`, then `MutationPlan::publish`) lets a test change the
+  filesystem between preflight and publication. The tests put an empty
+  directory where a planned file goes; the rename onto it fails on macOS,
+  Linux, and Windows (verified on native Windows below), with no permission
+  bits.
+- **Dry run.** Rust prints each planned file's content (`=== path ===`) in plan
+  order, plus `would delete …` lines; exports print `[OK] Would write …` per
+  file (the L2 dry-run test still finds the module file names). Nothing,
+  including the output roots and `Cargo.toml`, is created.
+- **R1/R2 real-API evidence lives in the existing slow guard** rather than a
+  new `slow_` test. Generating all 18 APIs takes about 1.9 s in a debug build,
+  too close to the 5 s L1 budget under CI load for an ordinary test, and the
+  guard already generates and compiles them. `slow_real_apis_compile_offline`
+  now edits `ollama/requests.rs` and `anthropic.rs`, runs a partial
+  generation of `OllamaNative`, asserts `regenerated == ["ollama"]`, 14
+  retained groups, and `anthropic.rs` untouched, restores `anthropic.rs`,
+  then compares the whole tree with the committed `schema/src` and compiles
+  it. No new test name, so the R35 builder selection and archive exclusions
+  are unchanged.
+- **Removed public items** (no callers outside the crate):
+  `pipeline::cleanup_stale_artifacts`, `pipeline::run_postman_export`,
+  `pipeline::run_openapi_export_grouped`. Signature change:
+  `pipeline::generate_batch` takes `&BatchScope`, and `BatchScope::Selection`
+  carries names.
+
+### Comment and doc drift found (code assumed correct)
+
+- `output/mod.rs` module docs claimed atomic writes "prevent partial writes"
+  and described cleanup only; rewritten for prepare/publish, ownership, and
+  partial generation.
+- `schematic/gen/README.md` pipeline diagram said "Clean up stale .rs files",
+  and the output section said stale files "are automatically cleaned up";
+  both now state the ownership rule and full-only deletion. Its CLI example
+  "Generate code for the OpenAI API" now says it regenerates that group and
+  keeps the rest.
+- `schematic/README.md` and the `generate-one` recipe comment said "generate a
+  single API client"; they now say the module group is regenerated and the
+  rest kept. `.claude/skills/schematic-define/schematic/SKILL.md` said the
+  generator "cleans up stale files"; corrected.
+- `docs/generation/validation.md` flow said "Write Rust crate and
+  Cargo.toml"; now "prepare and publish", and links the new page.
+- **Pre-existing test drift (Phase 2):** the L2 test
+  `level2_validate_emits_ansi_styled_ok_on_success` still asserted the
+  pre-Phase-2 `validate` output (`[OK]`, "All validation checks passed").
+  Phase 4 did not change `run_validate`, and neither asserted string exists
+  in the committed `HEAD` pipeline, so the failure predates this phase
+  (established by reading `git show HEAD:schematic/gen/src/pipeline.rs`, not
+  by running the test on the old tree); Phase 2's gates did not include
+  `test-l2`. Updated to
+  assert the styled `[PASS]` line for each of `rust`, `openapi`, `postman`.
+
+### Requirement → test mapping (Phase 4)
+
+All in `schematic-gen`'s `l1` binary (`gen/tests/l1/partial_generation.rs`,
+registered in `main.rs`) unless noted. They run the public
+`prepare_rust_output`/`MutationPlan::publish`, `pipeline::generate_batch`, or
+the real `schematic-gen` binary against temporary directories (filesystem
+and process boundaries) and compare relative file lists and bytes with
+`snapshot_tree`.
+
+| Requirement | Test(s) | Result |
+| --- | --- | --- |
+| R1 whole group, rest byte-identical | `partial_run_regenerates_the_whole_group_and_keeps_every_other_module` (selecting `AlphaTwo` rewrites the edited `alpha.rs`; edited `beta.rs` kept; tree otherwise equals full generation; second run idempotent); `fresh_output_compile::slow_real_apis_compile_offline` (18 real APIs, `OllamaNative`) | pass |
+| R2 shared files from retained inventory; compiles | same two tests (prelude exports all four fixture APIs; real tree equals committed `schema/src` and passes `cargo check --offline --locked`) | pass |
+| R3 owned stale deleted; unowned kept; no overwrite; no symlinks | `owned_stale_files_in_a_regenerated_group_go_and_hand_written_content_stays` (split module `large/stale.rs` deleted only when `large` is regenerated; `large/hand.rs`, `large/notes.md`, `bin/main.rs`, `handwritten.rs` kept), `refuses_unowned_shared_file`, `unowned_manifest_is_never_overwritten`, `refuses_directory_at_a_planned_file`, `refuses_layout_conversion_with_unowned_content`, `symbolic_links_are_never_followed` (unix), `output::inventory::tests::{ownership_proofs, symbolic_links_are_never_followed}`, existing `output::tests::cleanup_preserves_hand_written_files_and_foreign_dirs` | pass |
+| R4 unsafe inventory fails before any write, actionable | `refuses_corrupt_lib_rs`, `refuses_hand_edited_lib_rs`, `refuses_missing_lib_rs`, `refuses_missing_member`, `refuses_undeclared_owned_module`, `refuses_unknown_declared_module`, `refuses_export_mismatch`, `refuses_conflicting_layouts` (each asserts the cause, "nothing was changed", and byte-identical tree; one `#[test]` per case via `macro_rules!`); `cli_refuses_an_unsafe_partial_run_and_claims_no_update` (real binary: exit 1, remedy names `generate --api all`) | pass |
+| R5 / R34 shared-runtime change | `refuses_changed_shared_runtime`, `refuses_changed_websocket_runtime`, `full_generation_recovers_after_a_compatibility_refusal`, `output::inventory::tests::compatibility_passes_identical_runtime_and_refuses_a_change` | pass |
+| R6 honest failure reporting, retry, dry run | `failure_during_publication_lists_completed_and_pending_mutations` (failure after preflight: `alpha.rs` written, `lib.rs` still old and listed pending; rerun completes; a `prelude.rs` failure makes the retry refuse with no change and full generation repairs), `output::publish::tests::writes_precede_deletions_and_failure_lists_completed_and_pending`, `dry_run_plans_every_root_and_creates_nothing` (no root, no `Cargo.toml` created; plan starts with the module and ends with `lib.rs`), `unowned_manifest_is_never_overwritten` (manifest inside the boundary), `cli_refuses_…` (no `[OK] Generated` line) | pass |
+| R7 OpenAPI/Postman group rule, empty roots, independent roots | `exports_rewrite_only_the_selected_groups`, `each_root_establishes_its_own_safety` (OpenAPI conflict fails only OpenAPI; Rust and Postman write only the `alpha` group), `absent_or_empty_root_gets_only_the_selected_groups` | pass |
+
+Regression evidence: before this phase `generate --api <one>` ran
+`generate_and_write_all` with one API and its full cleanup, so the real-API
+partial run above would have deleted the other 14 groups and failed the
+committed-tree comparison. This was established by reading the replaced code;
+the new tests were not executed against the old tree.
+
+Not covered at the CLI level: a mid-publication I/O failure through the
+binary (no portable way to inject one between preflight and publication from
+outside the process). The library tests above cover the report; the CLI
+prints a success line only after `publish` returns `Ok`.
+
+Input Robustness Matrix: not applicable. `read_rust_inventory` parses
+generator-written `lib.rs`/`prelude.rs` with `syn` as a consistency check;
+any unparseable or unexpected content refuses the run rather than being
+defaulted. No configuration, manifest, or lockfile reader was added (the
+manifest is checked only for its marker line).
+
+### Broader gates
+
+- `just test` (schematic): exit 0. L1 **1760 passed, 9 skipped** (Phase 3:
+  1730); fresh-output guard **4 passed** in 16.5 s (warm cache). Whole recipe
+  30 s wall. Slowest new test 1.05 s.
+- `just lint` (schematic): exit 0 (clippy only; the shared `_lint` recipe runs
+  no formatter). Also `cargo clippy -p schematic-gen --all-targets --features
+  terminal-tests -- -D warnings`: clean.
+- `just test-l2` (schematic, tmux backend, no window focus): **3 passed**
+  after the stale validate assertion above was updated.
+- `just check-tier-coverage schematic`: 0 stranded.
+- `cargo doc -p schematic-gen --no-deps`: no warnings in touched files (the
+  four pre-existing ones from Phase 2 remain).
+- Real CLI on a copy of the committed tree: `generate --api all` and then
+  `generate --api emqx-basic` (all three outputs) both left `schema/`,
+  `openapi/`, and `postman/` byte-identical to the checkout; the partial run
+  reported `Generated emqx … (14 written, 0 deleted; kept …14 groups)`, one
+  OpenAPI and one Postman file written.
+
+### Platform evidence
+
+- macOS (this host): gates above.
+- Native Windows: `just cross-check schematic-gen --os windows` on the local
+  tree: **609 passed, 12 skipped**, including the 23 non-unix
+  `partial_generation` tests (the directory-at-a-planned-file failure
+  injection, the CLI refusal, and the publication-failure retry) and the
+  `output::publish`/`output::inventory` unit tests. The symlink tests are
+  `#[cfg(unix)]` (creating symlinks on Windows needs Developer Mode or
+  elevation); Windows has no symlink evidence. `cross-check` runs no `slow_`
+  tests, so the partial run inside the real-API guard ran on macOS only.
+- Linux / WSL2: not run in Phase 4. The code uses only `std::fs` calls
+  already exercised on macOS and Windows; CI's pull-request Linux leg covers
+  it.
+
+### Files touched outside `schematic/`
+
+- `.claude/skills/schematic-define/schematic/gen.md` (library example, error
+  enum) and `.claude/skills/schematic-define/schematic/SKILL.md` (one
+  sentence on shared-module generation).
+
+No dependency was added (`indexmap` and `syn` were already dependencies).
+
+### Human review agenda items raised in Phase 4
+
+1. Default 3 refinement: a directory module is evidenced by its owned
+   `mod.rs`; extra hand-written files inside a retained module are allowed.
+   Retained modules whose endpoints changed (but not their exported names)
+   are kept stale — the inventory checks names, not content.
+2. Default 5 deviation: deletions follow the `lib.rs` write.
+3. Full generation and the import writer now refuse unowned occupants of
+   planned paths instead of overwriting them (a behavior change beyond partial
+   generation).
+4. Export ownership is name-based; full export cleanup no longer deletes
+   non-artifact files.
+5. Public API changes: `BatchScope::Selection(Vec<String>)`,
+   `generate_batch(&registry, &BatchScope, …)`; new `output::{Selection,
+   RustOutputRequest, RustOutputPlan, prepare_rust_output, expand_selection,
+   Mutation, MutationPlan, PublicationReport}`, `render_openapi_document`,
+   `render_postman_module`, `MANIFEST_OWNERSHIP_MARKER`, three
+   `GeneratorError` variants; removed `cleanup_stale_artifacts`,
+   `run_postman_export`, `run_openapi_export_grouped`.
+6. Inventory and compatibility adequacy once the runtime/envelope follow-up
+   adds a runtime package check: the byte comparison lives only in
+   `inventory::shared_runtime_compatibility`, the intended replacement point.
