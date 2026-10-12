@@ -518,13 +518,13 @@ fn kind_str(kind: ValidationProblemKind) -> &'static str {
     }
 }
 
+/// The problem's position in the complete document; the column is a 1-based
+/// UTF-8 byte column.
 fn format_location(problem: &ValidationProblem) -> String {
-    // The position map only ever records column 1 for top-level frontmatter
-    // keys (see `build_position_map` in the schemas validator), so the
-    // column information would always be redundant — line alone is enough.
-    match problem.line {
-        Some(line) => format!("line {line} of frontmatter"),
-        None => String::new(),
+    match (problem.line, problem.column) {
+        (Some(line), Some(column)) => format!("line {line}, column {column}"),
+        (Some(line), None) => format!("line {line}"),
+        (None, _) => String::new(),
     }
 }
 

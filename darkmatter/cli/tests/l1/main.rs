@@ -12,6 +12,8 @@ mod common;
 // `source-inputs`, and each test that uses it spells it with `include_str!`.
 #[path = "../../../lib/tests/union_fixtures/mod.rs"]
 mod union_fixtures;
+#[path = "../../../lib/tests/position_fixtures/mod.rs"]
+mod position_fixtures;
 
 mod clean;
 mod clean_frontmatter;
@@ -48,6 +50,7 @@ mod compose_unknown_identifiers;
 mod compose_value_provenance;
 mod context_construction_guard;
 mod delta;
+mod diagnostic_positions;
 mod get_set_rm;
 mod graph;
 mod hash;

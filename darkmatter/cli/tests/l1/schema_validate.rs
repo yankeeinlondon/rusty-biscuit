@@ -311,10 +311,10 @@ fn schema_validate_unparseable_frontmatter_exits_3() {
 }
 
 #[test]
-fn schema_validate_pretty_reports_line_for_type_mismatch() {
+fn schema_validate_pretty_reports_line_and_column_for_type_mismatch() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    // `rating` lands on line 3 of the canonical re-serialised frontmatter.
+    // The `nope` value starts on document line 4, byte column 9.
     let doc = write_file(
         tmp,
         "draft.md",
@@ -327,8 +327,7 @@ fn schema_validate_pretty_reports_line_for_type_mismatch() {
         .arg(&doc)
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("at line"))
-        .stdout(predicate::str::contains("of frontmatter"));
+        .stdout(predicate::str::contains("(at line 4, column 9)"));
 }
 
 #[test]
