@@ -1,0 +1,146 @@
+set dotenv-load
+set positional-arguments
+# set allow-duplicate-recipes
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "Content Policy Library & CLI"
+    echo "============================"
+    echo
+    just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @just _build content-policy "Content Policy Library" {{args}}
+    @just _build content-policy-cli "Content Policy CLI" {{args}}
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# `--all-features` on the library throughout: the bundled `FileChanged` file
+# adapter sits behind the off-by-default `file-adapter` feature, and the CLI
+# ships with it enabled.
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity_all "content-policy --all-features; content-policy-cli"
+
+# test library and CLI
+test *args="":
+    @just _test_all "content-policy --all-features; content-policy-cli" {{args}}
+
+# Level-2 real-terminal tests: the styled `policy check` and `policy renew` tables in tmux.
+test-l2 *args="":
+    @just _test_l2 content-policy-cli {{args}}
+
+# not applicable: content-policy has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for content-policy"
+
+# not applicable: content-policy emits reports, not HTML
+test-browser:
+    @echo "test-browser: not applicable for content-policy"
+
+# not applicable: content-policy has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for content-policy"
+
+# Lint both the library and CLI, then check the library's dependency graph
+lint:
+    @just _lint content-policy
+    @just _lint content-policy-cli
+    @just deps-check
+
+# Fail when the library's dependency graph reaches a PDF crate or Darkmatter.
+# Checked for the default build and for `--all-features`; dev-dependencies are
+# excluded because they never ship with the library.
+deps-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    status=0
+    for features in "" "--all-features"; do
+        label="${features:-default features}"
+        crates=$(cargo tree -p content-policy -e normal,build --prefix none --format '{p}' $features | awk '{print $1}' | sort -u)
+        offenders=$(printf '%s\n' "$crates" | grep -E 'pdf|^darkmatter' || true)
+        if [ -n "$offenders" ]; then
+            echo -e "{{RED}}deps-check ($label): forbidden crates in the content-policy graph:{{RESET}}"
+            printf '  %s\n' $offenders
+            status=1
+        else
+            echo "deps-check ($label): no PDF crate and no Darkmatter crate"
+        fi
+    done
+    exit $status
+
+# Criterion benches: not applicable, content-policy declares no benches
+bench:
+    @echo "bench: not applicable for content-policy"
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage content-policy --all-features {{args}}
+    @just _coverage content-policy-cli {{args}}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest content-policy --all-features {{args}}
+    @just _doctest content-policy-cli {{args}}
+
+# not applicable: content-policy has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for content-policy"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint content-policy || just _fix_lint content-policy
+    @just _lint content-policy-cli || just _fix_lint content-policy-cli
+
+# install CLI binary
+install *args="":
+    @just build --release
+    @just _install "./cli" "Content Policy" {{args}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the content-policy library code"
+    @echo ""
+    @cargo doc -p content-policy --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p content-policy-cli -- {{args}}
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

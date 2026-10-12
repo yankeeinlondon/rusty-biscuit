@@ -300,6 +300,21 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 
 Loads the `WrapperProfile` for the resolved provider and locates the binary on disk.
 
+On Windows, a provider installed with `npm install -g` is found as a `.cmd`
+batch shim (for example `%APPDATA%\npm\opencode.cmd`). Windows cannot pass a
+batch file an argument that contains a newline, and the composed prompt is
+delivered as one such argument, so Claudine starts the program the shim would
+run instead of the shim itself:
+
+| Shim's last line | Claudine starts |
+|---|---|
+| `"%dp0%\node_modules\opencode-ai\bin\opencode.exe" %*` | `opencode.exe` |
+| `"%_prog%" "%dp0%\node_modules\@openai\codex\bin\codex.js" %*` | `node.exe` beside the shim if present, else `node` from `PATH`, with `codex.js` as the first argument |
+
+This applies to every child Claudine starts, not only providers. A batch file in
+any other shape is started unchanged and still cannot receive a multi-line
+argument; install a native executable instead.
+
 ##### 6c. Early Header Emission
 
 Emits the execution line to stderr with `ComposeDisplay::Compose`, showing provider, file reference, operation, and flags.

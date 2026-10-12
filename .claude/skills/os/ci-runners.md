@@ -117,8 +117,9 @@ none are recorded here (see "Noise" below).
   at four and Sniff Windows L1 at one. Claudine CLI L1 deliberately has no
   package-wide group cap; an old `max-threads = 1` override serialized all
   2,500+ tests even on the 3–4-core public runners and overrode this policy.
-  Shared-resource L2 stays serial; isolated suites use the
-  `l2-parallel-self-spawn` marker. See the
+  L2 runs in parallel at `max(1, floor(logical_cores / 2))` workers on every
+  host (2 on `ubuntu-latest`, 1 on `macos-latest`) unless a package declares
+  `l2-serial` with a reason. See the
   [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook)
   for override and direct Nextest behavior.
 

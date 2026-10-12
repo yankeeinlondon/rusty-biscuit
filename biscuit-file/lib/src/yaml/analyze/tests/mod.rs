@@ -11,6 +11,7 @@ mod multi_document;
 mod normalization;
 mod reserved_indicator;
 mod scan;
+mod tab_indentation;
 mod whitespace;
 
 /// Reconstructs the expected output solely from accepted repair spans and

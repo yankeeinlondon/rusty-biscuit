@@ -3,9 +3,10 @@
 Detail behind the "Testing and verification" section of [SKILL.md](SKILL.md): the expression grammar gate, inserted-text rules, failure policy, undeclared properties, host bindings, and warning identity.
 
 The expression-grammar corpus gate is
-`lib/tests/l1/dasherized_identifier_corpus.rs`. It walks root `prompts/`,
-`.claude/commands/`, `darkmatter/prompts/`, and `claudine/prompts/` through
-the library's own extractors: `ExpressionFinder`,
+`lib/tests/prompts/dasherized_identifier_corpus.rs`, opt-in through the
+`prompt-tests` feature and run by `just test-prompts`, never by CI. It walks
+root `prompts/`, `.claude/commands/`, `darkmatter/prompts/`, and
+`claudine/prompts/` through the library's own extractors: `ExpressionFinder`,
 `scan_darkmatter_directives`, `parse_frontmatter_shell_value_spanned`, and
 `frontmatter_expression_values`, which finds Expression-typed properties of
 any name under each document's passively resolved effective schema, the

@@ -4596,6 +4596,18 @@
         "terminal-tests"
       ],
       "tier": "L3"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "dasherized_identifier_corpus"
+      ],
+      "name": "prompts",
+      "path": "darkmatter/lib/tests/prompts/main.rs",
+      "required_features": [
+        "prompt-tests"
+      ],
+      "tier": "prompts"
     }
   ],
   "version": 1

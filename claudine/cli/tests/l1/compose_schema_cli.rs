@@ -1164,57 +1164,81 @@ Implement {{plan}} from {{review}}.
     );
 }
 
-#[test]
-fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area() {
-    let checkout = biscuit_test_harness::manifest_dir!()
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("claudine CLI crate should live two levels below the repository root")
-        .to_path_buf();
+/// Eager caller file setters anchor before the shipped plan expression from
+/// both launch directories. One test per launch directory, so nextest runs the
+/// two `claudine` spawns in parallel.
+mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area {
+    use super::*;
 
-    // The subject is a *shipped* prompt's plan expression, so the real
-    // `prompts/plan.md` is the artifact under test — but the two launch
-    // directories it is exercised from must be repositories this test owns, not
-    // the rusty-biscuit checkout. Both files are copied at their checkout-
-    // relative paths, so every relative reference in them resolves identically.
-    let fixture = CliProcessFixture::named("compose-schema-cli");
-    fixture.initialize_repository();
-    let root = fixture.cwd().to_path_buf();
-    common::prompt_staging::stage_shipped_prompts(
-        &common::prompt_staging::workspace_root(),
-        &root.join("prompts"),
-        &["prompts/plan.md"],
-    );
-    let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
-    common::write(
-        &root.join(relative),
-        &std::fs::read_to_string(checkout.join(relative))
-            .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
-    );
-    // `--dry-run` never reaches the provider, but discovery still has to find
-    // one; the stub keeps that off the host's installed `claude`, and it fails
-    // loudly if the dry run ever does launch it.
-    common::write_dry_run_provider_stub(fixture.bin_dir(), "claude");
-
-    let area = root.join("claudine");
-    let runs = [
-        (
-            root.as_path(),
+    #[test]
+    fn from_the_repository_root() {
+        let checkout = biscuit_test_harness::manifest_dir!()
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("claudine CLI crate should live two levels below the repository root")
+            .to_path_buf();
+        let fixture = CliProcessFixture::named("compose-schema-cli");
+        let root = fixture.cwd().to_path_buf();
+        common::prompt_staging::stage_frozen_prompts(&root.join("prompts"), &["plan.md"]);
+        let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
+        common::write(
+            &root.join(relative),
+            &std::fs::read_to_string(checkout.join(relative))
+                .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
+        );
+        assert_plan_target_is_launch_directory_invariant(
+            &fixture,
+            &root,
             "prompts/plan.md",
             "spec=claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
-        ),
-        (
-            area.as_path(),
+        );
+    }
+
+    #[test]
+    fn from_the_package_area() {
+        let checkout = biscuit_test_harness::manifest_dir!()
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("claudine CLI crate should live two levels below the repository root")
+            .to_path_buf();
+        let fixture = CliProcessFixture::named("compose-schema-cli");
+        let root = fixture.cwd().to_path_buf();
+        common::prompt_staging::stage_frozen_prompts(&root.join("prompts"), &["plan.md"]);
+        let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
+        common::write(
+            &root.join(relative),
+            &std::fs::read_to_string(checkout.join(relative))
+                .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
+        );
+        assert_plan_target_is_launch_directory_invariant(
+            &fixture,
+            &root.join("claudine"),
             "../prompts/plan.md",
             "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
-        ),
-    ];
+        );
+    }
 
-    for (launch_dir, prompt_arg, setter) in runs {
+    /// The subject is a shipped prompt's plan expression, so a frozen copy of
+    /// `prompts/plan.md` (intentionally not kept in step with the live prompt)
+    /// is the artifact under test — but the launch directory it is exercised
+    /// from must be a repository this test owns, not the rusty-biscuit
+    /// checkout. Callers copy both files at their checkout-relative paths, so
+    /// every relative reference in them resolves identically.
+    fn assert_plan_target_is_launch_directory_invariant(
+        fixture: &CliProcessFixture,
+        launch_dir: &std::path::Path,
+        prompt_arg: &str,
+        setter: &str,
+    ) {
+        fixture.initialize_repository();
+        // `--dry-run` never reaches the provider, but discovery still has to
+        // find one; the stub keeps that off the host's installed `claude`, and
+        // it fails loudly if the dry run ever does launch it.
+        common::write_dry_run_provider_stub(fixture.bin_dir(), "claude");
         let assert = fixture
             .command_builder()
-            // The invariance claim *is* the launch directory, so each run is
-            // pinned to one of the two the copy above staged.
+            // The invariance claim *is* the launch directory, so the run is
+            // pinned to one the caller staged.
             .ambient_context(launch_dir)
             .build()
             .env("CLAUDE_CODE_EXIT", "0")
@@ -1813,78 +1837,170 @@ fn completion_file_match_honors_negated_path_qualified_glob() {
 /// Criterion 26 for completion: an authored directory name is
 /// case-sensitive in an absolute pattern as in a bare one, so `DOCS` does not
 /// offer `docs/a.md`, even on a case-insensitive filesystem where it opens.
-#[test]
-fn completion_file_match_directory_names_are_case_sensitive() {
-    assert_completion_judges_directory_spelling("complete-schema-file-match-directory-case", "docs", "DOCS", None);
+mod completion_file_match_directory_names_are_case_sensitive {
+    use super::*;
+
+    const CASE: SpellingCase = SpellingCase {
+        label: "complete-schema-file-match-directory-case",
+        stored: "docs",
+        authored: "DOCS",
+        traversal_only: None,
+    };
+
+    #[test]
+    fn rejects_the_authored_spelling() {
+        CASE.assert_rejects_the_authored_spelling();
+    }
+
+    #[test]
+    fn offers_the_stored_spelling() {
+        CASE.assert_offers_the_stored_spelling();
+    }
 }
 
 /// Criterion 26 for completion with Unicode aliases that lowercasing does not
 /// reveal (`ς` for a stored `Σ`, `ß` for a stored `SS`). Where the alias
 /// does not open, the checks still run.
-#[test]
-fn completion_file_match_directory_names_reject_unicode_case_aliases() {
-    for (label, stored, authored) in
-        [("complete-schema-file-match-sigma", "Σ", "ς"), ("complete-schema-file-match-sharp-s", "SS", "ß")]
-    {
-        assert_completion_judges_directory_spelling(label, stored, authored, None);
+mod completion_file_match_directory_names_reject_unicode_case_aliases {
+    use super::*;
+
+    const SIGMA: SpellingCase = SpellingCase {
+        label: "complete-schema-file-match-sigma",
+        stored: "Σ",
+        authored: "ς",
+        traversal_only: None,
+    };
+    const SHARP_S: SpellingCase = SpellingCase {
+        label: "complete-schema-file-match-sharp-s",
+        stored: "SS",
+        authored: "ß",
+        traversal_only: None,
+    };
+
+    #[test]
+    fn final_sigma_is_rejected_for_a_stored_capital_sigma() {
+        SIGMA.assert_rejects_the_authored_spelling();
+    }
+
+    #[test]
+    fn capital_sigma_is_offered_as_stored() {
+        SIGMA.assert_offers_the_stored_spelling();
+    }
+
+    #[test]
+    fn sharp_s_is_rejected_for_a_stored_double_s() {
+        SHARP_S.assert_rejects_the_authored_spelling();
+    }
+
+    #[test]
+    fn double_s_is_offered_as_stored() {
+        SHARP_S.assert_offers_the_stored_spelling();
     }
 }
 
 /// Criterion 26 for completion below a traversal-only ancestor (mode
 /// `0111`): being unable to list it must not offer the mismatched `DOCS`.
 #[cfg(unix)]
-#[test]
-fn completion_file_match_directory_names_below_a_traversal_only_ancestor_are_case_sensitive() {
-    assert_completion_judges_directory_spelling(
-        "complete-schema-file-match-traversal-only",
-        "locked/anchor/docs",
-        "locked/anchor/DOCS",
-        Some("locked"),
-    );
+mod completion_file_match_directory_names_below_a_traversal_only_ancestor_are_case_sensitive {
+    use super::*;
+
+    const CASE: SpellingCase = SpellingCase {
+        label: "complete-schema-file-match-traversal-only",
+        stored: "locked/anchor/docs",
+        authored: "locked/anchor/DOCS",
+        traversal_only: Some("locked"),
+    };
+
+    #[test]
+    fn rejects_the_authored_spelling() {
+        CASE.assert_rejects_the_authored_spelling();
+    }
+
+    #[test]
+    fn offers_the_stored_spelling() {
+        CASE.assert_offers_the_stored_spelling();
+    }
 }
 
-/// Shipped `__complete` offers nothing for absolute and bare patterns
-/// spelling the stored directory `stored` as `authored`, and offers the file
-/// for the stored spelling. With `traversal_only`, that directory is set to
-/// mode `0111` first.
-fn assert_completion_judges_directory_spelling(label: &str, stored: &str, authored: &str, traversal_only: Option<&str>) {
-    let ws = common::TestWorkspace::named(label);
-    seed_cargo_workspace(ws.path(), &["pkg"]);
-    write_file(&ws.path().join(stored).join("a.md"), "# A\n");
-    common::fs_capability::probe_directory_alias(ws.path(), stored, authored);
-    let root = biscuit_file::to_portable_string(ws.path());
-    let offered = |pattern: &str| {
+/// Shipped `__complete` judging a pattern that spells the stored directory
+/// `stored` as `authored`. With `traversal_only`, that directory is set to
+/// mode `0111` first. Each judgment is its own test, so nextest runs their
+/// spawns in parallel.
+struct SpellingCase {
+    label: &'static str,
+    stored: &'static str,
+    authored: &'static str,
+    traversal_only: Option<&'static str>,
+}
+
+impl SpellingCase {
+    /// Absolute and bare patterns spelling the directory `authored` offer
+    /// nothing.
+    fn assert_rejects_the_authored_spelling(&self) {
+        let Some(staged) = self.stage() else { return };
+        for mismatched in [format!("{}/{}/*.md", staged.root, self.authored), format!("{}/*.md", self.authored)] {
+            assert_eq!(staged.offered(&mismatched), Vec::<String>::new(), "`{mismatched}`");
+        }
+    }
+
+    /// Patterns spelling the directory as stored offer the file.
+    fn assert_offers_the_stored_spelling(&self) {
+        let Some(staged) = self.stage() else { return };
+        let suffix = format!("{}/a.md'", self.stored);
+        let mut exact_patterns = vec![format!("{}/{}/*.md", staged.root, self.stored)];
+        // A bare pattern's walk starts at the workspace and cannot list a
+        // traversal-only folder, so it offers nothing there by design.
+        if self.traversal_only.is_none() {
+            exact_patterns.push(format!("{}/*.md", self.stored));
+        }
+        for exact in exact_patterns {
+            let got = staged.offered(&exact);
+            assert!(got.iter().any(|candidate| candidate.ends_with(&suffix)), "`{exact}`: {got:?}");
+        }
+    }
+
+    /// `None` when the traversal-only mode cannot be applied (a privileged
+    /// user can still list the directory).
+    fn stage(&self) -> Option<StagedSpelling> {
+        let ws = common::TestWorkspace::named(self.label);
+        seed_cargo_workspace(ws.path(), &["pkg"]);
+        write_file(&ws.path().join(self.stored).join("a.md"), "# A\n");
+        common::fs_capability::probe_directory_alias(ws.path(), self.stored, self.authored);
+        let root = biscuit_file::to_portable_string(ws.path());
+        #[cfg(unix)]
+        let guard = match self.traversal_only {
+            Some(dir) => Some(TraversalOnly::new(&ws.path().join(dir))?),
+            None => None,
+        };
+        Some(StagedSpelling {
+            #[cfg(unix)]
+            _guard: guard,
+            ws,
+            root,
+        })
+    }
+}
+
+struct StagedSpelling {
+    // Declared first so the mode is restored before the workspace is removed.
+    #[cfg(unix)]
+    _guard: Option<TraversalOnly>,
+    ws: common::TestWorkspace,
+    root: String,
+}
+
+impl StagedSpelling {
+    /// The `a.md` candidates shipped `__complete` offers for `spec=` under a
+    /// `file(match('{pattern}'))` schema.
+    fn offered(&self, pattern: &str) -> Vec<String> {
         write_file(
-            &ws.path().join("prompts").join("plan.md"),
+            &self.ws.path().join("prompts").join("plan.md"),
             &format!("---\n$schema:\n  spec: \"file(match('{pattern}'))\"\n---\nSee {{{{spec}}}}.\n"),
         );
-        run_complete(ws.path(), &["compose", "prompts/plan.md", "spec="])
+        run_complete(self.ws.path(), &["compose", "prompts/plan.md", "spec="])
             .into_iter()
             .filter(|candidate| candidate.contains("a.md"))
-            .collect::<Vec<_>>()
-    };
-    #[cfg(unix)]
-    let _guard = match traversal_only {
-        Some(dir) => match TraversalOnly::new(&ws.path().join(dir)) {
-            Some(guard) => Some(guard),
-            None => return,
-        },
-        None => None,
-    };
-
-    for mismatched in [format!("{root}/{authored}/*.md"), format!("{authored}/*.md")] {
-        assert_eq!(offered(&mismatched), Vec::<String>::new(), "`{mismatched}`");
-    }
-    let suffix = format!("{stored}/a.md'");
-    let mut exact_patterns = vec![format!("{root}/{stored}/*.md")];
-    // A bare pattern's walk starts at the workspace and cannot list a
-    // traversal-only folder, so it offers nothing there by design.
-    if traversal_only.is_none() {
-        exact_patterns.push(format!("{stored}/*.md"));
-    }
-    for exact in exact_patterns {
-        let got = offered(&exact);
-        assert!(got.iter().any(|candidate| candidate.ends_with(&suffix)), "`{exact}`: {got:?}");
+            .collect()
     }
 }
 
@@ -2080,48 +2196,81 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
 ///
 /// The document lives in `prompts/`, which holds no `fixes/` tree, so a value
 /// judged from the document's directory fails the run.
+///
+/// One test per shape and repository row, so nextest runs the spawns in
+/// parallel; `every_row_has_a_listed_test` keeps the list complete.
 #[cfg(unix)]
-#[test]
-fn compose_caller_file_resolves_from_the_launch_directory_for_every_schema_shape() {
-    let (fixture, count_path, _events) = caller_file_fixture("compose-caller-file-shapes");
-    let spec = fixture.cwd().join("fixes/x/spec.md");
-    fs::create_dir_all(spec.parent().unwrap()).unwrap();
-    fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
-    let prompts = fixture.cwd().join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    let union = concat!(
+mod compose_caller_file_resolves_from_the_launch_directory_for_every_schema_shape {
+    use super::*;
+
+    const UNION: &str = concat!(
         "$schema:\n",
         "  - kind: 'literal(feature)'\n",
         "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
         "  - kind: 'literal(fix)'\n",
         "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
     );
-    let shapes = [
-        ("single schema", "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n".to_string()),
-        ("union with a settled discriminator", format!("{union}kind: fix\n")),
-        ("undecided union", union.to_string()),
-    ];
-    let absolute = fixture.cwd().canonicalize().unwrap().join("fixes/x/spec.md");
+    const SHAPES: [&str; 3] = ["single schema", "union with a settled discriminator", "undecided union"];
+    const REPOSITORIES: [&str; 2] = ["outside a repository", "inside a repository"];
 
-    for repository in ["outside a repository", "inside a repository"] {
+    macro_rules! shape_tests {
+        ($($test:ident => ($shape:literal, $repository:literal)),* $(,)?) => {
+            $(#[test] fn $test() { assert_resolves_from_the_launch_directory($shape, $repository); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let listed = [$(($shape, $repository)),*];
+                let rows: Vec<(&str, &str)> = REPOSITORIES
+                    .iter()
+                    .flat_map(|repository| SHAPES.iter().map(move |shape| (*shape, *repository)))
+                    .collect();
+                assert_eq!(listed.to_vec(), rows);
+            }
+        };
+    }
+
+    shape_tests! {
+        single_schema_outside_a_repository => ("single schema", "outside a repository"),
+        settled_union_outside_a_repository => ("union with a settled discriminator", "outside a repository"),
+        undecided_union_outside_a_repository => ("undecided union", "outside a repository"),
+        single_schema_inside_a_repository => ("single schema", "inside a repository"),
+        settled_union_inside_a_repository => ("union with a settled discriminator", "inside a repository"),
+        undecided_union_inside_a_repository => ("undecided union", "inside a repository"),
+    }
+
+    fn schema(shape: &str) -> String {
+        match shape {
+            "single schema" => "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n".to_string(),
+            "union with a settled discriminator" => format!("{UNION}kind: fix\n"),
+            "undecided union" => UNION.to_string(),
+            other => panic!("unknown shape `{other}`"),
+        }
+    }
+
+    fn assert_resolves_from_the_launch_directory(shape: &str, repository: &str) {
+        let (fixture, count_path, _events) = caller_file_fixture("compose-caller-file-shapes");
+        let spec = fixture.cwd().join("fixes/x/spec.md");
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+        let prompts = fixture.cwd().join("prompts");
+        fs::create_dir_all(&prompts).unwrap();
+        let absolute = fixture.cwd().canonicalize().unwrap().join("fixes/x/spec.md");
         if repository == "inside a repository" {
             fixture.initialize_repository();
         }
-        for (shape, schema) in &shapes {
-            fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
-            for value in ["fixes/x/spec.md".to_string(), absolute.display().to_string()] {
-                let output = fixture
-                    .command()
-                    .args(["compose", "--goose", "prompts/plan.md", &format!("spec={value}")])
-                    .env("COLUMNS", "1000")
-                    .output()
-                    .unwrap();
-                let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-                let label = format!("{shape}, {repository}, spec={value}");
-                assert!(output.status.success(), "{label}: should compose; stderr:\n{plain}");
-                assert!(count_path.exists(), "{label}: the provider should launch; stderr:\n{plain}");
-                fs::remove_file(&count_path).unwrap();
-            }
+        fs::write(prompts.join("plan.md"), format!("---\n{}---\nSpec: {{{{spec}}}}\n", schema(shape))).unwrap();
+        for value in ["fixes/x/spec.md".to_string(), absolute.display().to_string()] {
+            let output = fixture
+                .command()
+                .args(["compose", "--goose", "prompts/plan.md", &format!("spec={value}")])
+                .env("COLUMNS", "1000")
+                .output()
+                .unwrap();
+            let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+            let label = format!("{shape}, {repository}, spec={value}");
+            assert!(output.status.success(), "{label}: should compose; stderr:\n{plain}");
+            assert!(count_path.exists(), "{label}: the provider should launch; stderr:\n{plain}");
+            fs::remove_file(&count_path).unwrap();
         }
     }
 }
@@ -2132,18 +2281,14 @@ fn compose_caller_file_resolves_from_the_launch_directory_for_every_schema_shape
 /// Only the `fix` arm requires `severity`, so an undecided union that fails on
 /// a missing `severity` for a `fixes/…` path proves the `feature` arm, which
 /// would otherwise accept it, was ruled out by its glob.
+///
+/// One test per run, so nextest runs the spawns in parallel;
+/// `every_launching_row_has_a_listed_test` keeps the launching list complete.
 #[cfg(unix)]
-#[test]
-fn compose_contested_file_match_selects_and_rejects_union_arms() {
-    let (fixture, count_path, _events) = caller_file_fixture("compose-contested-match");
-    for tree in ["features", "fixes"] {
-        let spec = fixture.cwd().join(tree).join("x/spec.md");
-        fs::create_dir_all(spec.parent().unwrap()).unwrap();
-        fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
-    }
-    let prompts = fixture.cwd().join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    let union = concat!(
+mod compose_contested_file_match_selects_and_rejects_union_arms {
+    use super::*;
+
+    const UNION: &str = concat!(
         "$schema:\n",
         "  - kind: 'literal(feature)'\n",
         "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
@@ -2151,11 +2296,88 @@ fn compose_contested_file_match_selects_and_rejects_union_arms() {
         "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
         "    severity: 'string(required)'\n",
     );
-    let single = "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n".to_string();
-    let settled = format!("{union}kind: fix\nseverity: high\n");
-    let run = |schema: &str, args: &[&str]| {
+    const SINGLE: &str = "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n";
+
+    fn settled() -> String {
+        format!("{UNION}kind: fix\nseverity: high\n")
+    }
+
+    /// Each row's label, the schema it runs (`single`, `settled`, or `union`),
+    /// and its arguments. Every row launches the provider.
+    const LAUNCHING_ROWS: [(&str, &str, &[&str]); 5] = [
+        ("single schema, matching path", "single", &["spec=fixes/x/spec.md"]),
+        ("single schema, path outside its glob", "single", &["spec=features/x/spec.md"]),
+        ("settled fix arm, fixes path", "settled", &["spec=fixes/x/spec.md"]),
+        ("undecided union, features path", "union", &["spec=features/x/spec.md"]),
+        (
+            "undecided union, fixes path with severity",
+            "union",
+            &["spec=fixes/x/spec.md", "severity=high"],
+        ),
+    ];
+
+    macro_rules! launching_tests {
+        ($($test:ident => $label:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_row_launches($label); })*
+
+            #[test]
+            fn every_launching_row_has_a_listed_test() {
+                let rows: Vec<&str> = LAUNCHING_ROWS.iter().map(|(label, _, _)| *label).collect();
+                assert_eq!(rows, [$($label),*]);
+            }
+        };
+    }
+
+    launching_tests! {
+        single_schema_matching_path_launches => "single schema, matching path",
+        single_schema_path_outside_its_glob_launches => "single schema, path outside its glob",
+        settled_fix_arm_fixes_path_launches => "settled fix arm, fixes path",
+        undecided_union_features_path_launches => "undecided union, features path",
+        undecided_union_fixes_path_with_severity_launches => "undecided union, fixes path with severity",
+    }
+
+    #[test]
+    fn settled_fix_arm_features_path_is_rejected() {
+        let (launched, stderr) = run(&settled(), &["spec=features/x/spec.md"]);
+        assert!(!launched, "settled fix arm, features path: must not launch; stderr:\n{stderr}");
+        assert!(stderr.contains("match(**/fixes/**/spec.md)"), "stderr:\n{stderr}");
+    }
+
+    #[test]
+    fn undecided_union_fixes_path_rules_out_the_feature_arm() {
+        let (launched, stderr) = run(UNION, &["spec=fixes/x/spec.md"]);
+        assert!(!launched, "undecided union, fixes path: must not launch; stderr:\n{stderr}");
+        assert!(stderr.contains("severity"), "the fix arm applies; stderr:\n{stderr}");
+        assert!(!stderr.contains("match(**/"), "the feature arm is ruled out; stderr:\n{stderr}");
+    }
+
+    fn assert_row_launches(label: &str) {
+        let (_, schema, args) = LAUNCHING_ROWS
+            .iter()
+            .find(|(row, _, _)| *row == label)
+            .unwrap_or_else(|| panic!("no row `{label}`"));
+        let schema = match *schema {
+            "single" => SINGLE.to_string(),
+            "settled" => settled(),
+            "union" => UNION.to_string(),
+            other => panic!("unknown schema `{other}`"),
+        };
+        let (launched, stderr) = run(&schema, args);
+        assert!(launched, "{label}: the provider should launch; stderr:\n{stderr}");
+    }
+
+    /// Runs `compose` on `schema` in a fresh fixture holding `features/x/spec.md`
+    /// and `fixes/x/spec.md`; `true` when it succeeded and launched the provider.
+    fn run(schema: &str, args: &[&str]) -> (bool, String) {
+        let (fixture, count_path, _events) = caller_file_fixture("compose-contested-match");
+        for tree in ["features", "fixes"] {
+            let spec = fixture.cwd().join(tree).join("x/spec.md");
+            fs::create_dir_all(spec.parent().unwrap()).unwrap();
+            fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+        }
+        let prompts = fixture.cwd().join("prompts");
+        fs::create_dir_all(&prompts).unwrap();
         fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
-        let _ = fs::remove_file(&count_path);
         let output = fixture
             .command()
             .args(["compose", "--goose", "prompts/plan.md"])
@@ -2165,50 +2387,20 @@ fn compose_contested_file_match_selects_and_rejects_union_arms() {
             .unwrap();
         let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         (output.status.success() && count_path.exists(), plain)
-    };
-
-    for (label, schema, args) in [
-        ("single schema, matching path", single.as_str(), vec!["spec=fixes/x/spec.md"]),
-        ("single schema, path outside its glob", single.as_str(), vec!["spec=features/x/spec.md"]),
-        ("settled fix arm, fixes path", settled.as_str(), vec!["spec=fixes/x/spec.md"]),
-        ("undecided union, features path", union, vec!["spec=features/x/spec.md"]),
-        (
-            "undecided union, fixes path with severity",
-            union,
-            vec!["spec=fixes/x/spec.md", "severity=high"],
-        ),
-    ] {
-        let (launched, stderr) = run(schema, &args);
-        assert!(launched, "{label}: the provider should launch; stderr:\n{stderr}");
     }
-
-    let (launched, stderr) = run(&settled, &["spec=features/x/spec.md"]);
-    assert!(!launched, "settled fix arm, features path: must not launch; stderr:\n{stderr}");
-    assert!(stderr.contains("match(**/fixes/**/spec.md)"), "stderr:\n{stderr}");
-
-    let (launched, stderr) = run(union, &["spec=fixes/x/spec.md"]);
-    assert!(!launched, "undecided union, fixes path: must not launch; stderr:\n{stderr}");
-    assert!(stderr.contains("severity"), "the fix arm applies; stderr:\n{stderr}");
-    assert!(!stderr.contains("match(**/"), "the feature arm is ruled out; stderr:\n{stderr}");
 }
 
+/// Every root union arm's `match` glob is enforced before the provider
+/// launches, whether the arms declare the property identically, only one arm
+/// declares it, or one arm is a raw JSON Schema.
+///
+/// One test per schema, so nextest runs the spawns in parallel;
+/// `every_schema_has_a_listed_test` keeps the list complete.
 #[cfg(unix)]
-#[test]
-fn compose_enforces_each_root_union_arm_match_before_provider_launch() {
-    let (fixture, count_path, _events) = caller_file_fixture("compose-every-arm-match");
-    for tree in ["features", "fixes"] {
-        let spec = fixture.cwd().join(tree).join("x/spec.md");
-        fs::create_dir_all(spec.parent().unwrap()).unwrap();
-        fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
-    }
-    let prompts = fixture.cwd().join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    fs::write(
-        prompts.join("raw.json"),
-        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"kind":{"const":"other"}},"required":["kind"]}"#,
-    )
-    .unwrap();
-    for (name, schema) in [
+mod compose_enforces_each_root_union_arm_match_before_provider_launch {
+    use super::*;
+
+    const SCHEMAS: [(&str, &str); 3] = [
         (
             "identical",
             "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n  - kind: 'literal(other)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\nkind: fix\n",
@@ -2221,7 +2413,44 @@ fn compose_enforces_each_root_union_arm_match_before_provider_launch() {
             "mixed-schema",
             "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n  - ./raw.json\nkind: fix\n",
         ),
-    ] {
+    ];
+
+    macro_rules! schema_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_arm_match_is_enforced($name); })*
+
+            #[test]
+            fn every_schema_has_a_listed_test() {
+                let names: Vec<&str> = SCHEMAS.iter().map(|(name, _)| *name).collect();
+                assert_eq!(names, [$($name),*]);
+            }
+        };
+    }
+
+    schema_tests! {
+        identical_arms => "identical",
+        one_declaring_arm => "one-declaration",
+        mixed_schema_arms => "mixed-schema",
+    }
+
+    fn assert_arm_match_is_enforced(name: &str) {
+        let (_, schema) = SCHEMAS
+            .iter()
+            .find(|(row, _)| *row == name)
+            .unwrap_or_else(|| panic!("no schema `{name}`"));
+        let (fixture, count_path, _events) = caller_file_fixture("compose-every-arm-match");
+        for tree in ["features", "fixes"] {
+            let spec = fixture.cwd().join(tree).join("x/spec.md");
+            fs::create_dir_all(spec.parent().unwrap()).unwrap();
+            fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+        }
+        let prompts = fixture.cwd().join("prompts");
+        fs::create_dir_all(&prompts).unwrap();
+        fs::write(
+            prompts.join("raw.json"),
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"kind":{"const":"other"}},"required":["kind"]}"#,
+        )
+        .unwrap();
         fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
         for (spec, accepted) in [("fixes/x/spec.md", true), ("features/x/spec.md", false)] {
             let _ = fs::remove_file(&count_path);

@@ -426,7 +426,7 @@ mod tests {
     fn resolves_repo_root_reference() {
         let dir = tempdir().unwrap();
         // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
 
         // Initialize a real git repo so repo-root discovery works
         gix::init(&root).unwrap();

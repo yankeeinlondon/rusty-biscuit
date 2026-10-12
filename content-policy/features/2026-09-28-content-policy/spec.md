@@ -26,7 +26,7 @@ $schema:
 reviewed: true
 reviewed_by: claude/opus
 reviewed_on: 2026-09-28
-review_iterations: 0
+review_iterations: 1
 review_note: the clarification process served as a review
 clarified: true
 clarified_by: claude/opus
@@ -41,8 +41,19 @@ references:
 related:
     - 2026-09-16-content-policy-no-cache
     - 2026-09-28-hash-writer-byte-fidelity
-depends-on:
     - 2026-09-28-recursive-schema-types
+    - 2026-10-04-content-policy-base-schema
+human_review: false
+message_to_agent: |-
+    Phase 5 (`FileChanged`) is done; `just test` (167) and `just lint` (incl. `deps-check`) pass in `content-policy/`, and `biscuit-file/` is green (895). Notes for Phase 6:
+
+    - Cross-OS evidence already gathered in Phase 5 (record it, don't redo it blindly): `just cross-check content-policy --os windows` 125/125 (the 3 `#[cfg(unix)]` symlink/permission tests excluded) and `--os linux` 128/128. The Phase 5 log records the `content-policy-cli` and `biscuit-file` Windows results. WSL2 has NOT been run for any Phase 5 code; 6.3 still needs it.
+    - OS-sensitive code to focus 6.3 on: `content-policy/lib/src/file_adapter.rs`, which canonicalizes the base and boundary through `biscuit_file::canonicalize_simplified` (the macOS `/var` vs `/private/var` trap), uses `find_git_root` and builds a `RepositoryScopeCatalog`; and Biscuit File's new `validate_boundary_containment` in `file_reference/resolve.rs`. Adapter tests are `content-policy::file_adapter`; they build repos with the `gix` dev-dependency and pass the tree root explicitly via `FileAdapter::with_tree_root`.
+    - New public API for the 6.2 skill: `EvaluationContext::with_files` / `RenewalContext::with_files(Arc<dyn FileProvider>, base_dir)`, `FileProvider`/`FileRequest`/`FileObservation`, `FingerprintScheme`, `FileAdapter` (feature `file-adapter`), `FileEvidence` (report `results[].file`), `RenewalError::MissingEvidence` + `EvidenceIssue{,Kind}`. `BaselineChange.previous`/`value` are now `String` (JSON unchanged).
+    - Decisions made in Phase 5 that the 6.4 audit should confirm against the spec: the `FileChanged` path is taken verbatim (not trimmed), so `FileChanged( a, @p)` is `invalid_path`; `^` package root = nearest `Cargo.toml`/`package.json` dir between base and repo root, package area = first dir below the root (Biscuit File has no package discovery; Sniff was judged too heavy); `with_tree_root` is public (tests are integration tests).
+    - CLI table finding: `policy` renders at 80 columns when piped (`COLUMNS` is ignored). A table holding a file rule or fingerprint wraps rule/evidence/baseline columns with `BespokeProse([' ', '-', '/', '_'])`; time-only tables keep the Phase 4 layout. The Prose summary line is not wrapped at 80 (pre-existing; unrelated to Phase 5).
+    - A workspace-wide `cargo check --all-targets --all-features` fails in `biscuit-terminal`'s own lib tests (`horizontal_rule`, 28 errors); that package was not touched by this feature. `claudine`, `darkmatter`, `sniff`, and `biscuit-file` check clean.
+    - Still open from Phase 1 (author decisions, Phase 6 only): the R16 `deps-check` CI gap. The AC 21 part-2 `md schema validate` question was retired by ruling 34 (2026-10-04).
 ---
 
 # Content Policy: Evaluation, Baselines, and Renewal
@@ -167,7 +178,7 @@ written into the body below, and its open question has been removed.
     maps actions to its own behavior.** Two consumers of one document may need
     to respond differently, and only the consumer owns that response. See
     [Relationship to the existing contract](#relationship-to-the-existing-contentpolicy-contract).
-22. **The `content_policy` schema line goes into whichever Darkmatter base
+22. *(Superseded by ruling 34.)* **The `content_policy` schema line goes into whichever Darkmatter base
     schema file Darkmatter loads when the schema task runs, with no new
     dependency, and is accepted by behavior.** The base schema's location is
     Darkmatter's to move, so the criterion checks the outcome rather than a
@@ -229,6 +240,19 @@ written into the body below, and its open question has been removed.
     error, in a repository and outside one.** A document should only watch
     files that travel with it; outside a repository the verdict can depend on
     the starting directory. See [Paths and the boundary](#paths-and-the-boundary).
+34. *(2026-10-04, after review 1.)* **content-policy offers its editor schema
+    to callers; incorporating it into a caller's own schema is the caller's
+    work.** The library exports the schema text as a public constant compiled
+    from `content-policy/schemas/content-policy.yaml`, so a caller embeds the
+    version that matches the parser it links. Darkmatter is expected to be
+    such a caller and to compile the schema into its base document schema.
+    That adoption, and Darkmatter's dependency on content-policy, belong to
+    Darkmatter's own feature work. The owner's direction for it: the base
+    schema is the default wherever Darkmatter validates, so
+    `md schema validate` applies it to a document with no `$schema`, as
+    `md compose` and DMLS already do. This supersedes ruling 22 and removes
+    this feature's dependency on `2026-09-28-recursive-schema-types`, which
+    only that adoption needs. See [Editor schema](#editor-schema).
 
 ## Agreed Model
 
@@ -350,11 +374,10 @@ second phase.
    day ahead of UTC, and content-policy reads it as a future baseline:
    `unknown`, not `fresh`. Each site switches to the UTC date and gains a test.
    See [Other writers of the baseline](#other-writers-of-the-baseline).
-3. **Ship the editor schema**, `content-policy/schemas/content-policy.yaml`
-   (see [Editor schema](#editor-schema)).
-4. **Reference it from Darkmatter's base document schema**, with one line in
-   whichever base schema file Darkmatter loads when this task runs (see
-   [Editor schema](#editor-schema)).
+3. **Ship the editor schema**, `content-policy/schemas/content-policy.yaml`,
+   and export its text from the library (see [Editor schema](#editor-schema)).
+4. *(Removed by ruling 34.)* Referencing the schema from Darkmatter's base
+   document schema is Darkmatter's adoption work, not this feature's.
 5. **Change Biscuit File** so the reader and renewal can rely on it. Each
    change has its own tests in Biscuit File:
 
@@ -369,9 +392,9 @@ second phase.
    The first four are prerequisites of phase 1's reader and renewal work; the
    containment change is needed by phase 2.
 
-Only tasks 3 and 4 wait on `2026-09-28-recursive-schema-types`: task 4 needs
-`policy[]` over a union type, and task 3 needs it only for the `(required)`
-marker on `rule`. Everything else in both phases proceeds without it.
+No task waits on `2026-09-28-recursive-schema-types`. Task 3 would use it
+only for the `(required)` marker on `rule`; without it the schema omits the
+marker and evaluation alone enforces it.
 
 Darkmatter's own `last_updated` writer is **not** changed here. Its byte-level
 defects are fixed by `2026-09-28-hash-writer-byte-fidelity` (see
@@ -760,31 +783,22 @@ it in.
 | `long_form` | An object: `rule` (a `short_form`, required) and `action` (`enum(refresh, archive, remove)`, required) |
 | `policy` | A union of `short_form` and `long_form`: one list entry |
 
-*(Decided 2026-09-28.)* Darkmatter's base document schema gains one line beside
-`last_updated`:
+*(Decided 2026-10-04, ruling 34.)* The library exports the file's text, so
+callers do not reach into this package's directory or read the file at run
+time:
 
-```yaml
-content_policy: policy[]@../../../content-policy/schemas/content-policy.yaml
+```rust
+pub const EDITOR_SCHEMA: &str = include_str!("../../schemas/content-policy.yaml");
 ```
 
-The line goes into whichever base schema file Darkmatter actually loads when
-the schema task runs. Today that is `darkmatter/docs/schemas/darkmatter.yaml`,
-which the runtime embeds with `include_str!` in
-[`darkmatter/lib/src/markdown/schemas/mod.rs`](../../../darkmatter/lib/src/markdown/schemas/mod.rs)
-(`darkmatter_base_schema_ref`). Moving the baseline to the authored catalog's
-`darkmatter/schemas/partials/doc.yaml` is part of Darkmatter's own schema work,
-not this feature; if that move has landed when the task runs, the line goes
-there instead. Both files sit three directories below the repository root, so
-the relative path above is the same for either.
-
-That line is a data-file reference, not a Rust dependency, so the
-[dependency rule](#library-architecture) is untouched, and this task adds no
-dependency of any kind. The task is accepted by behavior, not by file
-location: `md schema validate` and DMLS, built from the tree, apply the
-`content_policy` typing to an ordinary Markdown document with no `$schema` of
-its own. Today's embedded baseline contains no file references, so the task
-must also make the relative reference resolve from it; the acceptance
-criterion is what shows it does.
+The constant needs no optional feature. A caller that wants policy checks in
+its own schema embeds this text and references its types. Darkmatter, the
+expected caller, will type `content_policy` as `policy[]` in its base
+document schema so every ordinary document gets the checks, in the editor and
+from `md schema validate`. That adoption is Darkmatter's work: it needs
+`policy[]` over a union-typed named type (`2026-09-28-recursive-schema-types`)
+and a way for the embedded baseline to resolve a reference to another
+embedded file (spike S1, `spikes/embedded-schema-ref/findings.md`).
 
 An illustrative excerpt follows. The patterns are illustrative, not the final
 grammar; each is anchored with `^` and `$`.
@@ -824,8 +838,8 @@ this branch, accepts today. Experiments with that build found:
 
 - **`policy[]` over a union-typed named type is rejected** ("cannot apply `[]`
   / constraints to the union-typed named type"). `2026-09-28-recursive-schema-types`
-  lifts this (its design item 3), which is why this feature depends on it. Only
-  the schema tasks wait on it.
+  lifts this (its design item 3). Until then a document applies the schema to
+  one entry per property, and no caller can type the whole list.
 - **`(required)` on a union-typed reference hits the same rejection**, so
   `rule: "short_form(required)@…"` does not load today. Without `(required)`
   the file loads and validates, and a `long_form` entry missing `action` is
@@ -1614,14 +1628,12 @@ design.
     injected clock at a moment when the local date is ahead of UTC, showing the
     UTC date is written.
 21. `content-policy/schemas/content-policy.yaml` loads with
-    `md schema validate`. A mixed list of compact and `{ rule, action }`
-    entries validates; an unknown rule string (such as `Duration(3mo)`) and an
-    unknown action (such as `delete`) are each flagged. Once
-    `2026-09-28-recursive-schema-types` lands, `md schema validate` and DMLS,
-    built from the tree, apply the `content_policy` typing to an ordinary
-    Markdown document with no `$schema` of its own: the same cases hold for it,
-    through whichever base schema file Darkmatter loads at that time, and the
-    change adds no dependency.
+    `md schema validate`. Compact and `{ rule, action }` entries validate; an
+    unknown rule string (such as `Duration(3mo)`) and an unknown action (such
+    as `delete`) are each flagged. The library exports the file's text as
+    `EDITOR_SCHEMA` with default features off, and a test shows the constant
+    is the file's text. Applying the schema to ordinary documents through
+    Darkmatter's base schema is outside this criterion (ruling 34).
 22. The library's default features are `serde`, `serde_json`, `chrono`,
     `biscuit-hash`, and Biscuit File with only `yaml`; `cargo tree` for the
     default build shows no PDF crate.

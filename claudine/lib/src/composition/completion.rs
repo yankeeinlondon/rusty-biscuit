@@ -16,6 +16,8 @@
 
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
+
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::hash::{FrontmatterDelta, FrontmatterDeltaEntry};
 use darkmatter::markdown::schemas::{SchemaPhase, ValidationProblem, ValidationProblemKind};
@@ -159,8 +161,8 @@ pub struct CompletionContext<'a> {
     /// body requirement was already satisfied by the write it is recovering
     /// from (spec §D4).
     pub prior_body_change: bool,
-    /// Today's date, in `%Y-%m-%d`, for the `last_updated` stamp.
-    pub today: &'a str,
+    /// The instant the `last_updated` stamp is taken from; its UTC date is written.
+    pub now: DateTime<Utc>,
 }
 
 /// The completion verdict plus the inline artifact it was taken against.
@@ -209,7 +211,7 @@ pub fn complete_active_document(
             })?;
             match reconcile_inline_artifact_with_evidence(
                 guard,
-                context.today,
+                context.now,
                 context.prior_body_change,
             )? {
                 InlineReconciliation::Rejected(reason) => Ok(CompletionOutcome {

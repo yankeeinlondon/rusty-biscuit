@@ -942,7 +942,7 @@ mod tests {
 
         let doc = "---\nagent: \"codex\"\n$schema:\n    spec: \"features/x/spec.md\"\n    iteration: \"frontmatter(spec, 'n')\"\nyolo: false\n---\n# Body\n";
         let ctx = SourceContext::new(
-            PathBuf::from("/repo/prompt.md"),
+            PathBuf::from(if cfg!(windows) { "C:/repo/prompt.md" } else { "/repo/prompt.md" }),
             PathBuf::from("prompt.md"),
             doc,
         );
@@ -950,7 +950,7 @@ mod tests {
             function: "frontmatter",
             reference: "features/x/spec.md".to_string(),
             kind: FileRefFailure::NotFound,
-            cwd: PathBuf::from("/repo"),
+            cwd: PathBuf::from(if cfg!(windows) { "C:/repo" } else { "/repo" }),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -965,7 +965,11 @@ mod tests {
         // OSC8 link survives to the optimistic (capable) terminal raw output.
         let raw = block.render_optimistic(Some(80));
         assert!(
-            raw.contains("\x1b]8;;file:///repo/prompt.md"),
+            raw.contains(if cfg!(windows) {
+                "\x1b]8;;file:///C:/repo/prompt.md"
+            } else {
+                "\x1b]8;;file:///repo/prompt.md"
+            }),
             "expected OSC8 hyperlink to the prompt file. raw:\n{raw}"
         );
 

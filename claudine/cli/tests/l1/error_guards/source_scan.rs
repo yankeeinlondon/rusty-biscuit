@@ -292,7 +292,7 @@ fn run_scan() -> ScanResult {
             }
             let text = fs::read_to_string(&file)
                 .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
-            if text.contains("@generated") {
+            if text.contains("@generated") || !may_hold_a_scan_subject(&text) {
                 continue;
             }
             let ast = syn::parse_file(&text)
@@ -377,6 +377,26 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// Whether `text` names any identifier a [`FileScan`] arm starts from.
+///
+/// Parsing dominates the scan's cost, and every arm keys on an identifier
+/// that must appear literally in the file: an error-binding combinator, an
+/// `Err(e)` pattern, a snapshot binding or type, a `Diagnostic`/`BlockError`
+/// impl, or a `Box<T>`. A file with none of them cannot produce a finding,
+/// trait impl, or boxed error. Keep this in step with the visitor.
+fn may_hold_a_scan_subject(text: &str) -> bool {
+    const NEEDLES: &[&str] = &["map_err", "or_else", "snapshot", "Diagnostic", "BlockError", "Box"];
+    NEEDLES.iter().any(|needle| text.contains(needle)) || contains_word(text, "Err")
+}
+
+fn contains_word(text: &str, word: &str) -> bool {
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(start, _)| {
+        !text[..start].chars().next_back().is_some_and(is_ident)
+            && !text[start + word.len()..].chars().next().is_some_and(is_ident)
+    })
 }
 
 fn relative_to(root: &Path, file: &Path) -> String {

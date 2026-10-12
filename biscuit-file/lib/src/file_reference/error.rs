@@ -52,6 +52,13 @@ pub enum FileReferenceError {
         escaped_candidate: PathBuf,
     },
 
+    #[error("reference `{reference}` escapes boundary `{boundary}` through candidate `{escaped_candidate}`")]
+    BoundaryEscape {
+        reference: String,
+        boundary: PathBuf,
+        escaped_candidate: PathBuf,
+    },
+
     #[error(
         "repository root `{repository_root}` does not contain the resolution source `{source_path}`"
     )]

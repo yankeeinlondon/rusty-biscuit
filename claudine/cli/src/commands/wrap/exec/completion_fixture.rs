@@ -52,6 +52,20 @@ pub(crate) fn event(event: &SemanticEvent) {
 
 pub(crate) fn output() { stall(Point::Output); }
 
+/// Holds the observation freeze until the output-delivery stall has begun.
+///
+/// That stall runs on the output worker's thread, which nothing else orders
+/// before the freeze; on a loaded host the freeze could otherwise win and
+/// observe no delivery in progress.
+pub(crate) fn await_output_stall() {
+    let Some(Some(fixture)) = FIXTURE.get() else { return; };
+    if fixture.point != Point::Output { return; }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !fixture.entered.load(Ordering::Acquire) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 fn stall(point: Point) {
     let Some(Some(fixture)) = FIXTURE.get() else { return; };
     if fixture.point != point || fixture.entered.swap(true, Ordering::AcqRel) { return; }

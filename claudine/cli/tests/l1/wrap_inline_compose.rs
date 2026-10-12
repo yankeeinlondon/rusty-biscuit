@@ -4,7 +4,7 @@
 //! `common::wrap`.
 
 #[cfg(unix)]
-use chrono::Local;
+use chrono::Utc;
 use std::fs;
 use crate::common;
 use common::{CliProcessFixture, strip_ansi};
@@ -164,7 +164,7 @@ fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
         "the agent's own frontmatter must survive; file: {final_content}"
     );
 
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let today = Utc::now().format("%Y-%m-%d").to_string();
     assert!(
         final_content.contains(&format!("last_updated: '{today}'")),
         "last_updated should be today; file: {final_content}"
@@ -290,7 +290,7 @@ fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
     assert_eq!(final_content.matches("generated_by:").count(), 1);
     assert!(final_content.contains("Refreshed access-point inventory."));
 
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let today = Utc::now().format("%Y-%m-%d").to_string();
     assert!(final_content.contains(&format!("last_updated: '{today}'")));
     let markdown: darkmatter::markdown::Markdown = final_content.into();
     let options = claudine::composition::closure::inline_hash_options();

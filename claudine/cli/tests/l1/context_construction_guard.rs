@@ -187,6 +187,18 @@ const ALLOWLIST: &[Allowance] = &[
     ),
     ambient("output/mod.rs", "std::env::var", 1, "`CLAUDINE_SYSTEM_PROMPT` sets system-prompt report verbosity"),
     ambient(
+        "shutdown.rs",
+        "std::env::var",
+        1,
+        "`CLAUDINE_TEST_DRAIN_BUDGET_MS` shortens the exit drain budget (`test-fixtures` only)",
+    ),
+    ambient(
+        "shutdown.rs",
+        "std::env::var_os",
+        1,
+        "`CLAUDINE_TEST_DRAIN_STARTED` marks the drain's start (`terminal-tests` only)",
+    ),
+    ambient(
         "telemetry.rs",
         "std::env::current_dir",
         2,

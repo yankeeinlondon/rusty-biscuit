@@ -63,9 +63,10 @@ pub(super) fn serve(
         .map_err(|source| create_error(&endpoint, &name, source))?;
 
     let (tx, rx) = mpsc::channel(ACCEPT_BACKLOG);
+    let pipe_name = name.clone();
     let task = tokio::spawn(accept_loop(name, descriptor, first, tx));
 
-    let cleanup = Box::new(PipeCleanup { task });
+    let cleanup = Box::new(PipeCleanup { name: pipe_name, task });
     Ok(serve_local_incoming(
         endpoint,
         prepared,
@@ -222,8 +223,30 @@ fn existing_pipe_is_reachable(name: &OsStr) -> bool {
     }
 }
 
+/// Waits until `name` no longer resolves.
+///
+/// Dropping the last server handle cancels the acceptor's pending
+/// `ConnectNamedPipe` in the kernel asynchronously, so the name can outlive the
+/// task for a moment, most visibly on a loaded host. A client arriving in that
+/// window opens an instance that is about to vanish and fails mid-request,
+/// which contradicts `shutdown` having returned. Bounded: a name still held
+/// after the limit is left to the caller.
+async fn wait_for_name_to_vanish(name: &OsStr) {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(2);
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+    let started = std::time::Instant::now();
+    while started.elapsed() < LIMIT {
+        match ClientOptions::new().open(name) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+            // A successful probe is dropped at once, disconnecting it.
+            Ok(_) | Err(_) => tokio::time::sleep(POLL).await,
+        }
+    }
+}
+
 /// Closes the daemon's pipe instances.
 struct PipeCleanup {
+    name: OsString,
     task: JoinHandle<()>,
 }
 
@@ -242,6 +265,7 @@ impl EndpointCleanup for PipeCleanup {
     fn wait_released(&mut self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let _ = (&mut self.task).await;
+            wait_for_name_to_vanish(&self.name).await;
         })
     }
 }

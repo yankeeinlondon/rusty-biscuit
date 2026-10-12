@@ -54,6 +54,7 @@ environment's cell and how to record an execution ban.
 | Linux and WSL red, macOS and Windows green, only an order differs | ext4 `read_dir` hash order | [linux.md](linux.md#read_dir-order-red-on-linux-and-wsl-green-on-macos-and-windows) |
 | ASCII `>` where `▶` was expected, only on `BUILD_LINUX` | `LANG=C` in that host's shells | [linux.md](linux.md#langc-on-the-build_linux-host-ascii-where-a-glyph-was-expected) |
 | A substring count in rendered output red on Linux | temp-path length changes where text wraps | [linux.md](linux.md#temp-path-length-changes-word-wrapping) |
+| A test hangs to its timeout on Debian/Ubuntu/WSL2 only when run from a terminal, a `set -m` shell fixture | `/bin/sh` is dash, whose job control stops itself in a background process group | [linux.md](linux.md#binsh-is-dash-set--m-hangs-or-silently-does-nothing) |
 | A process count too high on Linux or WSL | `sysinfo` lists threads as processes | [linux.md](linux.md#sysinfo-lists-threads-as-processes) |
 | Red only on `wsl2-ubuntu` | the guest runs an archive built on `ubuntu-latest`; builder paths baked in at compile time (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures, toolchain lookups; fix binaries with `biscuit_test_harness::bin_exe!`) | [wsl.md](wsl.md) |
 | Red only in an archive run (WSL2, or `just cross-check --os windows`), "could not resolve `../../…`" | an extracted archive has no `.git`, so `build_resolution_context` makes the request directory the tree root and a snapshot built at a package refuses a fixture's `..` climb; anchor it at the run-time repository root (`manifest_dir!()`'s ancestor), never `env!("CARGO_MANIFEST_DIR")` | [wsl.md](wsl.md) |
@@ -62,6 +63,7 @@ environment's cell and how to record an execution ban.
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Windows cell red although every test passed, `UnicodeEncodeError` in the last step | Python's piped stdout is cp1252; workflows must set `PYTHONUTF8=1` | [windows.md](windows.md#environment-and-processes) |
+| Red on Windows only when the agent ran it, a git child exiting `0xC0000005` with empty stderr | the run descended from Git Bash (the agent's Bash tool); rerun from PowerShell | [windows.md](windows.md#environment-and-processes) |
 | Python-gated test PASSes in ~0.3 s on BUILD_WIN over SSH, nothing ran | `python3`/`python` resolve to WindowsApps aliases; prepend the real interpreter on a process-scoped `PATH` | [windows.md](windows.md#environment-and-processes) |
 | Red only on Windows, "still checking" or another wait expiring, many small git commands in `GIT_TRACE` | ~47 ms per git process; read metadata in-process instead of raising the wait | [windows.md](windows.md#environment-and-processes) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
@@ -71,6 +73,7 @@ environment's cell and how to record an execution ban.
 | Need "which processes hold this path" on Windows without the per-handle hang | ask from the file side with `FileProcessIdsUsingFileInformation` | [windows.md](windows.md#asking-which-processes-have-a-path-open) |
 | `/proc` fd scan finds nothing for a process you know holds files | `procfs` skips per-fd `EACCES`, or `sdev` was compared without decoding | [linux.md](linux.md#reading-proc-for-another-processs-descriptors) |
 | Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
+| WezTerm L2 tests time out at spawn or capture, or report `WezTerm not available`, a different set each run | too many concurrent `wezterm cli` clients for the GUI's main thread; the harness lets two run at a time | [macos.md](macos.md) |
 | macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |
 | Slow on one leg only, or a timing delta under 15% | runner size and per-leg profile; noise is 5–15% per leg | [ci-runners.md](ci-runners.md) |
 

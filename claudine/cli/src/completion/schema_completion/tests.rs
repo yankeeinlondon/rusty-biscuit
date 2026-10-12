@@ -436,6 +436,39 @@ fn property_value_bare_match_offers_the_launch_folder_then_the_repository_root()
 }
 
 #[test]
+fn property_value_bare_match_outside_a_repository_reads_only_the_launch_folder() {
+    // Launched from a folder in no repository (a home folder, say), a bare
+    // pattern searches that folder alone. The walk skips the folders its
+    // literal prefix rules out, but what it offers is unchanged: `DOCS/` at
+    // the top only, and a `**` pattern still reaches every depth.
+    let tmp = TempDir::new().unwrap();
+    let launch = tmp.path().join("home");
+    write(&launch.join("DOCS").join("a.md"), "# a\n");
+    write(&launch.join("DOCS").join("deeper").join("b.md"), "# b\n");
+    write(&launch.join("bulk").join("DOCS").join("c.md"), "# c\n");
+    write(&launch.join("bulk").join("n").join("d.md"), "# d\n");
+    let ctx = ScopeContext::discover_from(&launch);
+
+    for (pattern, expected) in [
+        ("DOCS/*.md", &["spec='DOCS/a.md'"][..]),
+        (
+            "**/*.md",
+            &[
+                "spec='DOCS/a.md'",
+                "spec='DOCS/deeper/b.md'",
+                "spec='bulk/DOCS/c.md'",
+                "spec='bulk/n/d.md'",
+            ],
+        ),
+    ] {
+        let effective = effective_from_doc(&format!(
+            "---\n$schema:\n  spec: \"file(match('{pattern}'))\"\n---\nbody\n"
+        ));
+        assert_eq!(property_value(&effective, "spec", "", &ctx), expected, "{pattern}");
+    }
+}
+
+#[test]
 fn file_candidate_paths_match_pattern_excludes_underscore_dirs() {
     // The ENTER-path chooser shares the same exclusion contract.
     let tmp = TempDir::new().unwrap();

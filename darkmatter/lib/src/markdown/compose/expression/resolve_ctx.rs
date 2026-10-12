@@ -83,6 +83,10 @@ pub struct ResolutionContext {
     /// sink, so the root report receives them. The default sink is drained by
     /// no one.
     pub(crate) glob_warnings: crate::markdown::compose::glob_listing::GlobWarningSink,
+    /// The request's shell-alias lookup record, so a frontmatter `$(...)`
+    /// value lists its commands with the lookups the rest of the run shares.
+    /// The default record belongs to no request.
+    pub(crate) alias_resolutions: crate::markdown::compose::shell_expansion::alias::AliasResolutions,
     /// Refresh authority for the lazy `current` root, carrying the invocation's
     /// capability to observe one mutable fact now. The default holds no
     /// provider, so a surface that was not given one fails closed instead of
@@ -122,6 +126,7 @@ impl ResolutionContext {
             nested_compose: Default::default(),
             icmp: Default::default(),
             glob_warnings: Default::default(),
+            alias_resolutions: Default::default(),
             current: Default::default(),
             file_resolution_context: context,
             caller_file_provenance: HashMap::new(),

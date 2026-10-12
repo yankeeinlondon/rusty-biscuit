@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, GlobReference, GlobReferenceError};
+use biscuit_file::{FileResolutionContext, GlobReference, GlobReferenceError, PreparedGlobReference};
 use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::{Map, Value};
 
@@ -64,19 +64,12 @@ impl FileMatchGlobs {
         self.globs.matches(path, ctx)
     }
 
-    /// Whether a listing that reached the existing file `path` would offer it:
-    /// [`matches`](Self::matches), less a file symlink whose target leaves
-    /// the tree (see [`GlobReference::lists_file`]).
+    /// The globs resolved against `ctx` once, for a caller that walks their
+    /// roots and judges each file it reaches (see
+    /// [`GlobReference::prepare`]). `None` for an invalid context.
     #[must_use]
-    pub fn lists_file(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
-        self.globs.lists_file(path, ctx)
-    }
-
-    /// The positive patterns' roots in precedence order, for a caller that
-    /// walks them and judges each file with [`lists_file`](Self::lists_file).
-    #[must_use]
-    pub fn roots(&self, ctx: &FileResolutionContext) -> Vec<PathBuf> {
-        self.globs.roots(ctx)
+    pub fn prepare(&self, ctx: &FileResolutionContext) -> Option<PreparedGlobReference> {
+        self.globs.prepare(ctx)
     }
 }
 

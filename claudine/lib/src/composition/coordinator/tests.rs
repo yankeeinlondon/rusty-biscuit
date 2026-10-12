@@ -799,7 +799,7 @@ mod commit_records_only_handoffs {
     impl Workspace {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let root = dir.path().canonicalize().unwrap();
+            let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
             for name in ["source.md", "target.md", "other.md"] {
                 std::fs::write(root.join(name), "body\n").unwrap();
             }

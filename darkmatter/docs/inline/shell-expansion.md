@@ -127,6 +127,23 @@ Darkmatter parses the line and starts each program itself; it does not hand the 
 
 To filter one command's output with another, do the filtering in the program itself (`git log --grep`, `rg` reading a file) or move the work into a script and run the script.
 
+## Shell aliases
+
+A program name that is not on `PATH` may be one of your shell aliases. Composition asks the login shell named by `SHELL` (for example `zsh -ic 'alias ll'`) and, if `ll` is an alias for `eza -l`, runs `eza -l` instead. Approval and the command cache see the expanded command.
+
+`SHELL` is read from the request's environment, not from the process. `md` captures its own environment, so aliases work there as in your terminal. A library caller whose `RequestSnapshot` carries no `SHELL` gets no alias expansion and no shell start-up: an unknown name is reported as not found straight away.
+
+Starting a login shell can take a second or more when its profile is heavy, so one composition asks it about each name at most once. Pre-flight approval, the pre-approval check, and execution all need the answer; the first lookup is remembered for the rest of the run, and so is "not an alias". A `$( … )` in frontmatter and a `::shell` directive that use the same name share that one lookup, and so do transcluded files.
+
+```md
+---
+listing: $(ll docs)
+---
+::shell ll src
+```
+
+Here `zsh -ic 'alias ll'` runs once, not once for each stage and directive. Nothing is remembered between compositions: each `md compose` run, and each composition a library caller starts from a new `ComposeOptions`, asks the shell again, so an alias you edit takes effect on the next run. A caller that composes twice with clones of one `ComposeOptions` shares the lookups across both.
+
 ## Working directory
 
 A command runs in the first of these that applies:

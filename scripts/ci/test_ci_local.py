@@ -63,11 +63,14 @@ def relocate_home(environment: dict[str, str], home: Path) -> None:
 
 def thread_policy_recipe() -> str:
     lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
-    start = next(index for index, line in enumerate(lines) if line.startswith("_test_threads:"))
-    end = start + 1
-    while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
-        end += 1
-    return "".join(lines[start:end])
+    recipes = []
+    for name in ("_test_threads", "_test_l2_threads"):
+        start = next(index for index, line in enumerate(lines) if line.startswith((f"{name}:", f"{name} ")))
+        end = start + 1
+        while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
+            end += 1
+        recipes.append("".join(lines[start:end]))
+    return "\n".join(recipes)
 
 
 def clean_policy_environment() -> dict[str, str]:
@@ -103,7 +106,7 @@ def gate_loop_package(name: str, **overrides: object) -> dict:
         "tiers": ["L1", "L2"],
         "test_args": "--features terminal-tests,daemon-tests",
         "check_args": f"-p {name}",
-        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+        "runner_tools": ["l2-serial"] if name == "serial" else [],
         "l2_backends": ["tmux"],
     } | overrides
 
@@ -136,6 +139,7 @@ class CiLocalTests(unittest.TestCase):
         expect_success: bool = True,
         output: dict | None = None,
         plan_fields: dict | None = None,
+        wrapper: str | None = "kache",
     ) -> list[dict]:
         if packages is None:
             packages = [gate_loop_package(name) for name in ("parallel", "serial")]
@@ -148,6 +152,8 @@ class CiLocalTests(unittest.TestCase):
             bin_dir.mkdir()
             scripts.mkdir(parents=True)
             shutil.copyfile(RECIPE, root / "ci-local.just")
+            # The real wrapper decision, which picks the target directory.
+            shutil.copyfile(ROOT / "scripts" / "kache-host.sh", root / "scripts" / "kache-host.sh")
             (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
             (root / "justfile").write_text(
                 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
@@ -227,8 +233,8 @@ class CiLocalTests(unittest.TestCase):
                 ),
                 "just": (
                     "import json, os, subprocess, sys\n"
-                    "if sys.argv[1:] == ['_test_threads']:\n"
-                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], '_test_threads'], check=False).returncode)\n"
+                    "if sys.argv[1] in ('_test_threads', '_test_l2_threads'):\n"
+                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], *sys.argv[1:]], check=False).returncode)\n"
                     "assert sys.argv[1] in ('_lint', '_test', '_test_l2'), sys.argv\n"
                     "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
                     "    log.write(json.dumps({'args': sys.argv[1:], "
@@ -260,13 +266,15 @@ class CiLocalTests(unittest.TestCase):
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
                 "CARGO_TARGET_DIR": str(root / "polluted-target"),
-                "RUSTC_WRAPPER": "kache",
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            environment.pop("RUSTC_WRAPPER", None)
+            if wrapper is not None:
+                environment["RUSTC_WRAPPER"] = wrapper
             # The hook exports these for the run it wraps, and this suite runs
             # inside that run's self-test loop; a fed plan would refuse `--all`.
             for key in (
@@ -324,10 +332,20 @@ class CiLocalTests(unittest.TestCase):
                 call["junit_workspace_root"],
             )
 
+    def test_with_no_rustc_wrapper_the_gates_share_the_normal_target(self) -> None:
+        # No wrapper, so no kache hardlinks to collide with: the gates build
+        # where the developer's own builds go, here the exported directory.
+        calls = self.run_recipe(wrapper=None)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertTrue(call["target_dir"].replace("\\", "/").endswith("/polluted-target"), call)
+            self.assertEqual("", call["rustc_wrapper"])
+
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
-        self.assertEqual(["14", "1"], [call["threads"] for call in l2])
+        # 16 cores: parallel L2 takes half of them.
+        self.assertEqual(["8", "1"], [call["threads"] for call in l2])
         for call in l2:
             self.assertEqual("tmux", call["backends"])
             self.assertEqual(["--features", "terminal-tests,daemon-tests"], call["args"][2:])
@@ -357,7 +375,7 @@ class CiLocalTests(unittest.TestCase):
             reports["gate_backends"],
         )
 
-    def test_parallel_policy_reserves_two_cores_on_small_hosts(self) -> None:
+    def test_parallel_policy_keeps_one_worker_on_small_hosts(self) -> None:
         calls = self.run_recipe(cores=3)
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
@@ -702,7 +720,9 @@ class CiLocalDiffScopeTests(unittest.TestCase):
 
 
 class ThreadPolicyTests(unittest.TestCase):
-    def run_policy(self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False) -> str:
+    def run_policy(
+        self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False, recipe_name: str = "_test_threads"
+    ) -> str:
         with tempfile.TemporaryDirectory(prefix="test-thread-policy-") as temporary:
             root = Path(temporary)
             bin_dir = root / "bin"
@@ -733,7 +753,7 @@ class ThreadPolicyTests(unittest.TestCase):
             })
             environment.update(markers or {})
             result = subprocess.run(
-                [JUST, "--justfile", str(recipe), "_test_threads"],
+                [JUST, "--justfile", str(recipe), recipe_name],
                 cwd=root,
                 env=environment,
                 capture_output=True,
@@ -758,6 +778,12 @@ class ThreadPolicyTests(unittest.TestCase):
 
     def test_false_ci_markers_keep_local_policy(self) -> None:
         self.assertEqual("2", self.run_policy(4, {"CI": "false", "GITHUB_ACTIONS": "false", "BISCUIT_CI_ENVIRONMENT": ""}))
+
+    def test_l2_policy_takes_half_the_cores_rounded_down_on_every_host(self) -> None:
+        for markers in (None, {"CI": "true"}, {"GITHUB_ACTIONS": "true"}, {"BISCUIT_CI_ENVIRONMENT": "macos-latest"}):
+            for cores, expected in ((1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (8, 4), (16, 8)):
+                with self.subTest(markers=markers, cores=cores):
+                    self.assertEqual(str(expected), self.run_policy(cores, markers, recipe_name="_test_l2_threads"))
 
     def test_platform_fallback_retains_policy_when_sniff_fails(self) -> None:
         self.assertEqual("6", self.run_policy(8, sniff_fails=True))
@@ -1173,7 +1199,9 @@ class PlanSurfaceTests(unittest.TestCase):
             environment.pop("BISCUIT_CI_PLAN_IN", None)
             command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--plan"]
             if capture is not None:
-                command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command,
                 cwd=root,
@@ -1517,8 +1545,10 @@ class PlanFedRunTests(unittest.TestCase):
             if through_env:
                 environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
             else:
-                command += ["--plan-in", str(root / "plan.json")]
-            command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-in", (root / "plan.json").as_posix()]
+            command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command, cwd=root, env=environment, capture_output=True, text=True, timeout=60
             )
@@ -1928,9 +1958,15 @@ class WorkflowScopeStepTests(unittest.TestCase):
             # One shell per step, as GitHub runs them; a failing step ends
             # the job unless it is `continue-on-error` (the notes fetch is,
             # and fails here because the fixture has no `origin`).
-            for step in self.steps:
+            for index, step in enumerate(self.steps):
+                # From a file, as GitHub runs a step: on Windows a `-c`
+                # argument goes through the command line, where MSYS and
+                # Cygwin re-split the script at its nested quotes and bash
+                # runs only the first fragment.
+                script = root / f"step-{index}.sh"
+                script.write_text(step.script, encoding="utf-8", newline="\n")
                 result = subprocess.run(
-                    [STEP_BASH, "-c", step.script],
+                    [STEP_BASH, script.as_posix()],
                     cwd=root,
                     env=environment,
                     capture_output=True,

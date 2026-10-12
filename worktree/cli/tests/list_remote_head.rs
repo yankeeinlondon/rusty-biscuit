@@ -389,6 +389,7 @@ fn list_in_pty(fixture: &Fixture, dir: &std::path::Path) -> (bool, String) {
 
 /// Fresh PR and live-head answers for the fixture's `origin`, so the listing
 /// itself has no reason to ask.
+#[cfg(unix)]
 fn seed_fresh_answers(fixture: &Fixture, head: &str) {
     use worktree::pull_requests::{PR_STORE_FORMAT_VERSION, origin_digest, origin_url, pr_store_path};
     let now = std::time::SystemTime::now()

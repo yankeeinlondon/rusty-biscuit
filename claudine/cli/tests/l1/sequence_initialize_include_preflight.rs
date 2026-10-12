@@ -20,7 +20,6 @@ use std::fs;
 use std::path::PathBuf;
 
 const GENERATED: &str = "generated/notes.md";
-const GENERATED_MARKER: &str = "GENERATED-BY-INITIALIZE";
 const NOTE: &str = "note: a sequence checks every prompt document before its first step runs, \
      so a file that target.md includes must already exist. Neither an earlier step nor the \
      document's own initialize can create it. Create the file before starting the sequence.";
@@ -168,6 +167,8 @@ fn a_direct_compose_missing_include_carries_no_sequence_note() {
 mod existing_include {
     use super::*;
     use common::{sh_quote, write_executable};
+
+    const GENERATED_MARKER: &str = "GENERATED-BY-INITIALIZE";
 
     /// A fake `claude` that records the prompt it received.
     fn install_provider(case: &Case) -> PathBuf {

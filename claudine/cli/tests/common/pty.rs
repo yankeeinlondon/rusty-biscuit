@@ -50,8 +50,8 @@ pub(crate) const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
 /// replies a real emulator sends.
 ///
 /// A bare expectrl PTY has no emulator behind it, so an unanswered query costs
-/// the child biscuit-terminal's whole `DEFAULT_TIMEOUT` (1 s) *per code* before
-/// it can render its first byte. That is not the child doing work: it is the
+/// the child biscuit-terminal's query timeout before it can render its first
+/// byte. That is not the child doing work: it is the
 /// test forcing the child to wait out a timeout, which is exactly what a
 /// readiness deadline must replace with observation. Answering is the same
 /// contract [`answer_pending_dsr`] already honours for the cursor probe.
@@ -60,9 +60,15 @@ pub(crate) const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
 /// `lib/tests/l1/level1_terminal_osc_cache.rs`: a dark background and a light
 /// foreground, i.e. the ordinary developer terminal these tests' styling
 /// assertions were written against.
-const COLOR_QUERY_ANSWERS: [(&[u8], &[u8]); 2] = [
+///
+/// biscuit-terminal ends each batch with a DA1 request (`ESC[c`) and reads
+/// until the DA1 reply, so the color replies alone still leave the child
+/// waiting out its timeout. The DA1 entry stays last: replies go out in this
+/// order, and the child treats the DA1 reply as the end of the batch.
+const COLOR_QUERY_ANSWERS: [(&[u8], &[u8]); 3] = [
     (b"\x1b]10;?\x07", b"\x1b]10;rgb:e5e5/e5e5/e5e5\x07"),
     (b"\x1b]11;?\x07", b"\x1b]11;rgb:1e1e/1e1e/1e1e\x07"),
+    (b"\x1b[c", b"\x1b[?62;22c"),
 ];
 
 /// Reply to any [`COLOR_QUERY_ANSWERS`] query present in `chunk`.

@@ -98,8 +98,9 @@ All automatic entry points—builder methods and the `playa*` free functions—u
 the same native-first pipeline when `native-playback` is enabled, then fall back
 to the capability-ranked host players. Any native failure before audio reaches
 the device (including a device-open timeout or an already-tripped breaker) falls
-back within the same call; a stall after audio was submitted is fatal rather
-than replayed. A device-open timeout or stall disables native playback for the
+back within the same call. Two failures are fatal instead: finding no output
+device at all (a host player would have nowhere to play), and a stall after
+audio was submitted (replaying could play the audio twice). A device-open timeout or stall disables native playback for the
 rest of the process. APIs that explicitly name an
 `AudioPlayer` remain host-only. `play_with_report` and
 `play_async_with_report` expose the selected route, expected duration, elapsed

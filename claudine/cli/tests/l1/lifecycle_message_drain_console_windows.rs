@@ -41,6 +41,10 @@ const STILL_DRAINING: Duration = Duration::from_secs(1);
 /// otherwise run for most of its 10 s budget.
 const FORCE_EXIT_WITHIN: Duration = Duration::from_secs(3);
 
+/// Windows Terminal's answer to the Primary Device Attributes query. A bare
+/// `ESC [ ? 1 ; 0 c` does not release ConPTY; this longer attribute list does.
+const DEVICE_ATTRIBUTES_REPLY: &[u8] = b"\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c";
+
 const POLL: Duration = Duration::from_millis(20);
 
 type HandlerRoutine = unsafe extern "system" fn(u32) -> i32;
@@ -60,7 +64,7 @@ const SCREEN: PtySize = PtySize {
 /// `claudine` in a pseudoconsole; killed and closed on drop.
 struct Console {
     child: Box<dyn Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     output: Arc<Mutex<Vec<u8>>>,
     _master: Box<dyn MasterPty + Send>,
 }
@@ -104,9 +108,11 @@ impl Console {
             .master
             .try_clone_reader()
             .expect("pseudoconsole reader");
-        let writer = pair.master.take_writer().expect("pseudoconsole writer");
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(pair.master.take_writer().expect("pseudoconsole writer")));
         let output = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&output);
+        let replies = Arc::clone(&writer);
         // Draining continuously keeps ConPTY from blocking the child on a
         // full output pipe.
         std::thread::spawn(move || {
@@ -116,6 +122,14 @@ impl Console {
                     break;
                 }
                 sink.lock().unwrap().extend_from_slice(&chunk[..n]);
+                // ConPTY opens with a Primary Device Attributes query (ESC [ c)
+                // and holds the child's startup for about 3 s unless the
+                // hosting terminal answers, as every real terminal does.
+                if chunk[..n].windows(3).any(|window| window == b"\x1b[c") {
+                    let mut writer = replies.lock().unwrap();
+                    let _ = writer.write_all(DEVICE_ATTRIBUTES_REPLY);
+                    let _ = writer.flush();
+                }
             }
         });
         Self {
@@ -133,10 +147,9 @@ impl Console {
     /// Type Ctrl+C.
     fn press(&mut self) -> Instant {
         let pressed = Instant::now();
-        self.writer
-            .write_all(b"\x03")
-            .expect("write ETX to the console");
-        self.writer.flush().expect("flush the console");
+        let mut writer = self.writer.lock().unwrap();
+        writer.write_all(b"\x03").expect("write ETX to the console");
+        writer.flush().expect("flush the console");
         pressed
     }
 

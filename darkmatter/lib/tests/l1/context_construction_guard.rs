@@ -40,7 +40,7 @@ const ALLOWLIST: &[Allowance] = &[
         "markdown/compose/shell_expansion/alias.rs",
         "std::env::var",
         1,
-        "`$SHELL` names the shell asked to expand a command alias (shell execution, not resolution)",
+        "`$SHELL` for the public `resolve_alias` helper; composition reads the request's `SHELL` instead (shell execution, not resolution)",
     ),
     allow(
         Gate::AmbientState,

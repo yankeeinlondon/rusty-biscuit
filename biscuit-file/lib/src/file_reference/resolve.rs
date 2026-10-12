@@ -320,6 +320,7 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         | E::ForeignAbsolutePath { .. }
         | E::UnsupportedScheme { .. }
         | E::RepositoryEscape { .. }
+        | E::BoundaryEscape { .. }
         | E::RelativeTreeEscape { .. }
         | E::RelativePath { .. } => ResolutionFailure::InvalidReference,
         E::MissingEnvironmentVariable { .. }
@@ -1448,6 +1449,52 @@ pub(crate) fn validate_repository_containment(
         reference,
         candidate,
     )
+}
+
+/// Enforce lexical and resolved-target containment of any candidate in
+/// `boundary`.
+///
+/// Unlike [`validate_repository_containment`], the resolved check follows
+/// symlinks from the deepest ancestor whose *target* exists, so a broken
+/// symlink is judged by the directory holding it and reads as missing rather
+/// than as an I/O failure.
+pub(crate) fn validate_boundary_containment(
+    reference: &str,
+    candidate: &Path,
+    boundary: &Path,
+) -> Result<(), FileReferenceError> {
+    let escape = || FileReferenceError::BoundaryEscape {
+        reference: reference.to_string(),
+        boundary: normalize_components(boundary),
+        escaped_candidate: normalize_components(candidate),
+    };
+    if !normalize_components(candidate).starts_with(normalize_components(boundary)) {
+        return Err(escape());
+    }
+    let canonical_boundary = crate::canonicalize_simplified(boundary).map_err(|source| {
+        FileReferenceError::Io {
+            path: boundary.to_path_buf(),
+            source,
+        }
+    })?;
+    let normalized = normalize_components(candidate);
+    let mut current = Some(normalized.as_path());
+    while let Some(path) = current {
+        match crate::canonicalize_simplified(path) {
+            Ok(canonical) if canonical.starts_with(&canonical_boundary) => return Ok(()),
+            Ok(_) => return Err(escape()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                current = path.parent();
+            }
+            Err(source) => {
+                return Err(FileReferenceError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        }
+    }
+    Err(escape())
 }
 
 fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError> {

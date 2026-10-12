@@ -56,8 +56,10 @@ fn shipped_review_plan_repository(process: &CliProcessFixture) -> PathBuf {
     let root = process.cwd().to_path_buf();
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::create_dir_all(root.join("prompts/_implement")).unwrap();
-    for shipped in ["prompts/_implement/review-findings-plan.md", "prompts/_no_formatting.md"] {
-        fs::copy(checkout.join(shipped), root.join(shipped)).unwrap();
+    // Frozen copies, intentionally not kept in step with `prompts/`.
+    let frozen = checkout.join("darkmatter/cli/tests/fixtures/frozen_prompts/prompts");
+    for prompt in ["_implement/review-findings-plan.md", "_no_formatting.md"] {
+        fs::copy(frozen.join(prompt), root.join("prompts").join(prompt)).unwrap();
     }
     fs::create_dir_all(root.join("feature")).unwrap();
     fs::write(root.join("feature/spec.md"), "---\nreview_iterations: 2\n---\n# Spec\n").unwrap();

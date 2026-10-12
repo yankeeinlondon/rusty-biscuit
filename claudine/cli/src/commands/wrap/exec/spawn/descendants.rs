@@ -132,9 +132,15 @@ mod tests {
     /// gives each background job one), the shape Pi's `bash` tool produces.
     /// Killing the shell alone leaves the sleep running; the watch finds and
     /// terminates it.
+    ///
+    /// WHY bash, not `/bin/sh`: where `sh` is dash (Debian, Ubuntu, WSL2),
+    /// `set -m` stops the shell with `SIGTTIN` when a controlling terminal
+    /// exists and nextest's per-test process group is not its foreground
+    /// group, and with no terminal it turns job control off, leaving the
+    /// sleep inside the shell's group.
     #[test]
     fn a_descendant_outside_the_group_is_terminated_after_its_parent_dies() {
-        let mut shell = Command::new("/bin/sh")
+        let mut shell = Command::new("/bin/bash")
             .args(["-c", "set -m; /bin/sleep 30 & echo $!; wait"])
             .stdout(Stdio::piped())
             .spawn()
@@ -143,6 +149,9 @@ mod tests {
         std::io::BufRead::read_line(&mut std::io::BufReader::new(shell.stdout.take().unwrap()), &mut line).unwrap();
         let sleeper: u32 = line.trim().parse().expect("sleeper pid");
         let start = crate::cli_utils::process_start(sleeper).expect("sleeper is running");
+        // SAFETY: `getpgid(2)` has no memory-safety preconditions.
+        let (shell_group, sleeper_group) = unsafe { (libc::getpgid(shell.id() as i32), libc::getpgid(sleeper as i32)) };
+        assert_ne!(shell_group, sleeper_group, "the sleeper runs outside the shell's process group");
 
         let watch = DescendantWatch::start(shell.id());
         let deadline = Instant::now() + Duration::from_secs(5);

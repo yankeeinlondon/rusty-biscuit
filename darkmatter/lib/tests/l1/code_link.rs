@@ -19,13 +19,9 @@ use renderable::markdown::MarkdownRenderable;
 use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
 
 /// Each migrated template, with the frontmatter value line that carries its
-/// `code_link()` call.
-const TEMPLATES: [(&str, &str); 4] = [
-    ("prompts/plan.md", include_str!("../../../../prompts/plan.md")),
-    (
-        "prompts/_reviews/review-spec-inline.md",
-        include_str!("../../../../prompts/_reviews/review-spec-inline.md"),
-    ),
+/// `code_link()` call. Two are frozen copies of the review prompt held by
+/// other packages' tests; the live `prompts/` are never read here.
+const TEMPLATES: [(&str, &str); 2] = [
     (
         "claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md",
         include_str!(

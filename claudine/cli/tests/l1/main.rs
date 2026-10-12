@@ -116,14 +116,15 @@ mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
+// Installs the `claudine-fake-goose` fixture binary on Windows, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;
 mod path_lookup_guard;
 mod preflight_execution_parity;
-mod pr_flow_rehearsal;
-mod prompt_guide_defects;
 mod lifecycle_set_shell_values;
 mod literal_glob_hint;
 #[cfg(unix)]
@@ -171,8 +172,6 @@ mod sequence_prompt_property;
 #[cfg(unix)]
 mod sequence_schema;
 mod sequence_sources_cli;
-mod shipped_prompt_contract;
-mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;

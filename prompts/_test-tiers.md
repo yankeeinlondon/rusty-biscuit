@@ -26,3 +26,7 @@ you call the work done.
 
 When reviewing, treat a new test that no declared target compiles, or that no running tier selects,
 as a missing test.
+
+::file "./_testing-anti-patterns.md"
+
+See the `rust-testing` skill's `test-speed.md` for worked examples.

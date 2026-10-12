@@ -42,11 +42,10 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
 use serial_test::serial;
@@ -114,7 +113,7 @@ impl PromptPane for TmuxHarness {
     fn history(&mut self) -> io::Result<CapturedFrame> {
         // `capture()` reads the visible pane only; `-S -` starts at the
         // oldest history line.
-        let out = Command::new("tmux")
+        let out = tmux_command()
             .args([
                 "capture-pane",
                 "-p",
@@ -457,14 +456,27 @@ fn run_scenario<H: PromptPane>(harness: &mut H, scenario: Scenario) {
         );
     }
 
-    for step in scenario.steps {
+    // The last frame observed, against which a key's redraw is detected.
+    let mut last = open.raw.clone();
+    for (index, step) in scenario.steps.iter().enumerate() {
         match step {
             Step::Press(key) => {
                 harness.press(*key).expect("press key");
-                harness.settle();
+                last = wait_for_redraw(harness, &last);
+                // An Enter that closes a prompt is followed by biscuit-tui
+                // draining pending input after its final redraw, so a key
+                // sent on that redraw can be discarded. An `Expect` for the
+                // next prompt synchronizes on its own; a bare press keeps
+                // the settle.
+                if matches!(key, Key::Enter)
+                    && matches!(scenario.steps.get(index + 1), Some(Step::Press(_)))
+                {
+                    harness.settle();
+                    last = harness.capture().expect("capture pane").raw;
+                }
             }
             Step::Expect(text) => {
-                wait_for_pane_text(harness, text, Duration::from_secs(10));
+                last = wait_for_pane_text(harness, text, Duration::from_secs(10)).raw;
             }
         }
     }
@@ -539,6 +551,32 @@ fn run_scenario<H: PromptPane>(harness: &mut H, scenario: Scenario) {
         "lifecycle audio was published to {}",
         fixture.audio_spool().display()
     );
+}
+
+/// Upper bound on [`wait_for_redraw`]; reaching it is not a failure.
+const REDRAW_WAIT: Duration = Duration::from_secs(2);
+
+/// Waits until the pane differs from `before`, the last frame observed ahead
+/// of a key press, so the next key is not sent until the prompt has acted on
+/// this one; returns the latest frame's raw text.
+///
+/// Every key a scenario presses redraws the prompt, so this replaces a fixed
+/// settle per key with the condition that settle stood in for. A press that
+/// drew nothing falls through after [`REDRAW_WAIT`]; the scenario's next
+/// `Expect` is what fails a lost key.
+fn wait_for_redraw<H: PromptPane>(harness: &mut H, before: &str) -> String {
+    let deadline = std::time::Instant::now() + REDRAW_WAIT;
+    let mut latest = before.to_string();
+    while std::time::Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            if frame.raw != before {
+                return frame.raw;
+            }
+            latest = frame.raw;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    latest
 }
 
 const PICK_SECOND: &[Step] = &[Step::Press(Key::Down), Step::Press(Key::Enter)];

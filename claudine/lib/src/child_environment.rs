@@ -177,22 +177,42 @@ pub fn contribute_child_environment(
 }
 
 /// Build a `std` command for `program` whose child already carries `AGENT_CWD`.
+///
+/// On Windows an npm `.cmd` shim is replaced by the program it runs, so the
+/// command's program and leading arguments can differ from `program`.
 pub fn command(program: impl AsRef<OsStr>) -> Result<std::process::Command, ChildEnvironmentError> {
+    let (program, leading_args) = launch_target(program.as_ref());
     // The one governed constructor; every other production site is denied.
     #[allow(clippy::disallowed_methods)]
     let mut command = std::process::Command::new(program);
+    command.args(leading_args);
     contribute_child_environment(&mut command)?;
     Ok(command)
 }
 
 /// Build a Tokio command for `program` whose child already carries `AGENT_CWD`.
+///
+/// Shims are replaced as in [`command`].
 pub fn tokio_command(
     program: impl AsRef<OsStr>,
 ) -> Result<tokio::process::Command, ChildEnvironmentError> {
+    let (program, leading_args) = launch_target(program.as_ref());
     #[allow(clippy::disallowed_methods)]
     let mut command = tokio::process::Command::new(program);
+    command.args(leading_args);
     contribute_child_environment(&mut command)?;
     Ok(command)
+}
+
+/// The program to start for `program`, and the arguments that precede the
+/// caller's: `std` cannot hand a batch file a multi-line prompt, so an npm
+/// shim is bypassed (see `crate::npm_shim`).
+fn launch_target(program: &OsStr) -> (OsString, Vec<OsString>) {
+    #[cfg(windows)]
+    if let Some(target) = crate::npm_shim::resolve(program) {
+        return (target.program, target.leading_args);
+    }
+    (program.to_owned(), Vec::new())
 }
 
 /// Build a `std` command whose child sees exactly `env` plus `AGENT_CWD`.

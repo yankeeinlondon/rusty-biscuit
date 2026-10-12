@@ -319,6 +319,7 @@ UnsupportedUserHome(String)
 MissingHomeContext
 OutsideRepository { sigil, reference_cwd }
 RepositoryEscape { sigil, reference, repository_root, escaped_candidate }
+BoundaryEscape { reference, boundary, escaped_candidate }
 RepositoryRootNotContainingSource { repository_root, source_path }
 RelativeContextDirectory { anchor, path }
 RelativePath { from, to }
@@ -333,7 +334,12 @@ sigils.
 is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
 nothing is translated between operating systems.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
-request `cwd` and normal derived authoring `cwd`s. `RemoteNotLocal`
+request `cwd` and normal derived authoring `cwd`s. `BoundaryEscape` comes only from
+`FileReference::validate_contained_candidate(candidate, boundary)`, the
+public containment check for *any* reference kind against a caller-chosen
+directory (lexical, then through symlinks from the deepest ancestor whose
+target exists, so a broken symlink reads as missing, not as `Io`). Resolution
+itself checks containment only for `&` and `^`. `RemoteNotLocal`
 means a URL reached a local path API; use the `url`-gated
 `resolve_target_in_context(&ctx)` (or the ambient `resolve_target()`) when the
 caller accepts `Resolved::Remote`. Only the context form fills a URL's

@@ -60,8 +60,29 @@ Two spellings look like reads but are not counted:
 
 | Spelling | Why it is not a read | Write instead |
 |---|---|---|
-| `repo_root().join("prompts")` | a single top-level directory is too coarse to say which file is read | the full path, `"prompts/implement.md"` |
-| `stage(&repo_root(), "prompts/implement.md")` | a root call followed by `,` does not mark the file as reading through a root, so the literal beside it is ignored | `let root = repo_root();` then `stage(&root, …)` |
+| `repo_root().join("docs")` | a single top-level directory is too coarse to say which file is read | the full path, `"docs/testing-strategy.md"` |
+| `stage(&repo_root(), "docs/testing-strategy.md")` | a root call followed by `,` does not mark the file as reading through a root, so the literal beside it is ignored | `let root = repo_root();` then `stage(&root, …)` |
+
+### The internal prompt folders are never test inputs
+
+`prompts/`, `darkmatter/prompts/`, and `claudine/prompts/` hold the
+repository's internal prompts. They are tools, they may be drafts or
+deliberately broken, and CI never tests them. A change under one of them
+schedules nothing, even where a test names the file
+(`INTERNAL_PROMPT_PREFIXES` in `affected_scope.py`).
+
+Their tests are opt-in. Each package that has them declares a `prompt-tests`
+feature, which no CI configuration and no `just test` recipe enables, and
+`just test-prompts` runs them and reports failures without failing. A test
+whose subject is a package's own behavior, and that only needs a realistic
+prompt as input, reads a frozen copy instead: `tests/fixtures/frozen_prompts/`
+holds it byte-for-byte at its repository-relative path, and the copy is
+deliberately not kept in step with the live prompt.
+
+| A test that… | Lives in | Reads |
+|---|---|---|
+| asserts what a prompt says or does (`prompts/implement.md` routes a reviewed case) | the package's opt-in `prompts` binary, or behind `#[cfg(feature = "prompt-tests")]` | the live prompt |
+| proves package behavior using a prompt as input (a proxy target resolves a supplied partial) | its normal tier | `tests/fixtures/frozen_prompts/prompts/…` |
 
 ### Files a read document transcludes
 
@@ -72,14 +93,14 @@ document some test reads, directly or through other documents, that test is
 scheduled exactly as if it named the changed file.
 
 ```text
-prompts/_os.md changed
-  ← transcluded by prompts/_implement/implement-plan.md   (::file "../_os.md")
-    ← named by compose_caller_file_provenance::shipped_implement_router_…
-→ one narrowed L1 cell for that test, its reason naming prompts/_os.md
+docs/_shared.md changed                                 (illustrative names)
+  ← transcluded by docs/guide.md      (::file "./_shared.md")
+    ← named by guide::guide_wording_holds
+→ one narrowed L1 cell for that test, its reason naming docs/_shared.md
 ```
 
 The search covers Markdown files in the changed file's top-level directory
-(`prompts/` for `prompts/_os.md`). A target is relative to the document, or to
+(`docs/` for `docs/_shared.md`). A target is relative to the document, or to
 the repository root when spelled `@…`; a target holding an expression
 (`{{lessons_learned}}`) names no file until run time and is skipped. Only test
 references carry over: a document embedded into shipped code holds its own

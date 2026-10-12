@@ -151,6 +151,11 @@ ORCHESTRATION_PREFIXES = (".github/actions/",)
 # not recoverable from the file alone.
 LOCKFILE_PATH = "Cargo.lock"
 
+# The repository's internal prompt folders. They are tools, may hold drafts or
+# deliberately broken prompts, and are never tested in CI, so a change under one
+# is never a test input. Their tests are opt-in (`just test-prompts`).
+INTERNAL_PROMPT_PREFIXES = ("prompts/", "darkmatter/prompts/", "claudine/prompts/")
+
 # The two execution models a registered suite can have. A `cargo` suite runs
 # inside its owner's ordinary Nextest cells, so no single environment hosts it.
 # A `companion` suite is a non-Cargo suite the owner's package job runs beside
@@ -470,7 +475,7 @@ KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
     "node-22",
     "pnpm-10",
-    "l2-parallel-self-spawn",
+    "l2-serial",
     "neovim",
     "zed-extension",
 }
@@ -523,6 +528,10 @@ CI_TEST_FIELDS = {
     #: out of that scan, so such a test runs only when its own package changes
     #: (see `test_input_references`).
     "source-inputs",
+    #: Why the package's L2 tier cannot run in parallel. Required with the
+    #: `l2-serial` runner tool and rejected without it: L2 runs in parallel
+    #: unless a package states why it must not.
+    "l2-serial-reason",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -1525,6 +1534,20 @@ def validate_package_ci(
         raise RuntimeError(
             f"{label}.tests names unknown runner tool(s) {invalid_tools}; the "
             f"vocabulary is closed: {sorted(KNOWN_RUNNER_TOOLS)}"
+        )
+
+    serial_reason = tests.get("l2-serial-reason")
+    if "l2-serial" in tools:
+        if "L2" not in tiers:
+            raise RuntimeError(f"{label}.tests names the 'l2-serial' runner tool without the L2 tier")
+        if not isinstance(serial_reason, str) or not serial_reason.strip():
+            raise RuntimeError(
+                f"{label}.tests names the 'l2-serial' runner tool without 'l2-serial-reason'; "
+                "L2 runs in parallel unless the package states why it cannot"
+            )
+    elif serial_reason is not None:
+        raise RuntimeError(
+            f"{label}.tests sets 'l2-serial-reason' without the 'l2-serial' runner tool"
         )
 
     validate_archive_includes(label, tests.get("archive-includes", []))
@@ -4832,6 +4855,10 @@ def test_input_references(
     declaration names the cross-package couplings that are worth a narrowed
     cell — a contract suite that executes another package's script.
 
+    A file under one of the internal prompt folders is never a test input: the
+    folders are tools, possibly drafts, and CI never tests them
+    (`INTERNAL_PROMPT_PREFIXES`).
+
     A Markdown document that transcludes a changed path (`::file`, directly or
     through other documents) is searched too, and a test reading it is
     reported against the changed path. Only test references carry over: a
@@ -4841,7 +4868,8 @@ def test_input_references(
     candidates = [
         path
         for path in normalized_paths(paths)
-        if not is_package_source_path(PurePosixPath(path)) or path in source_inputs
+        if not path.startswith(INTERNAL_PROMPT_PREFIXES)
+        and (not is_package_source_path(PurePosixPath(path)) or path in source_inputs)
     ]
     if not candidates:
         return []

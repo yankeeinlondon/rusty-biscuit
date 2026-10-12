@@ -21,6 +21,7 @@ pub mod errors;
 pub mod families;
 pub mod generate;
 pub mod inputs;
+mod memo;
 pub mod offerings;
 pub mod registry;
 pub mod report;
@@ -48,7 +49,7 @@ pub use families::{build_families, check_families, compiled_family_keys, familie
 pub use offerings::OfferingJoinReport;
 pub use generate::{
     CheckOutcome, CoercionSkip, Generation, Provenance, ResolvedField, RosterCrossCheck,
-    check_area, committed_data_path, cross_validate_roster, diff_lines, find_area, generate_all,
+    check_all, check_area, committed_data_path, cross_validate_roster, diff_lines, find_area, generate_all,
     generate_for_area, provider_slugs,
 };
 pub use registry::{

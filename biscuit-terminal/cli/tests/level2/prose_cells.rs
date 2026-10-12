@@ -27,18 +27,22 @@ static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
-/// Runs a `bt` command with color forced on and returns the captured frame.
+/// Runs a `bt` command with color forced on, on a cleared screen, and returns
+/// the settled frame: the command's output and the prompt after it.
+///
+/// The `clear` shares the command line, so no fixed wait for it is needed and
+/// output from an earlier test in a shared pane cannot reach the frame. One
+/// subshell runs both: on a loaded macOS host the interactive shell's job
+/// control can print `child setpgid` errors for each job it forks.
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     let bin = biscuit_test_harness::bin_exe!("bt");
     let escaped = bin.to_string_lossy().replace('\'', "'\\''");
     let args = cmd
         .strip_prefix("bt ")
         .expect("capture_bt command must start with `bt `");
-    let cmd = format!("'{escaped}' {args}");
-    harness
-        .send_command_with_env(&cmd, &[("FORCE_COLOR", "1")])
-        .expect("send_command_with_env failed");
-    biscuit_test_harness::capture_settled(harness).expect("capture failed")
+    let line = format!("FORCE_COLOR='1' '{escaped}' {args}");
+    biscuit_test_harness::send_command_settled(harness, &format!("(clear; {line})"), &[])
+        .unwrap_or_else(|error| panic!("failed to run {line:?}: {error}"))
 }
 
 /// The raw (escape-bearing) capture line for a rendered table cell: the row
@@ -846,31 +850,37 @@ fn assert_prose_cell_link_styled<H: TerminalHarness>(harness: &mut H, cursor_ali
     }
 }
 
-/// Asserts inline code in a Prose table cell as the terminal displays it: the
-/// backtick delimiters are gone, the dim covers exactly the code (no border,
-/// padding, or neighboring text), a colored run keeps its color across the code
-/// and resumes after it, wrapped code stays bordered and dim on each line, a
-/// multi-line fence displays as one dim inline value with spaces for its
-/// newlines, and the colorless fallback keeps a backtick fence.
-///
-/// Border glyphs are visible cells, so a style run that bled onto a border
-/// would show up in the compared runs.
-fn assert_prose_cell_inline_code<H: TerminalHarness>(harness: &mut H) {
-    let dim_runs = |row: &str| common::active_runs(&attr_run_cells(row, "2"), true);
+// Inline code in a Prose table cell as the terminal displays it: the backtick
+// delimiters are gone, the dim covers exactly the code (no border, padding, or
+// neighboring text), a colored run keeps its color across the code and
+// resumes after it, wrapped code stays bordered and dim on each line, a
+// multi-line fence displays as one dim inline value with spaces for its
+// newlines, and the colorless fallback keeps a backtick fence. Border glyphs
+// are visible cells, so a style run that bled onto a border would show up in
+// the compared runs.
 
+fn cell_dim_runs(row: &str) -> Vec<String> {
+    common::active_runs(&attr_run_cells(row, "2"), true)
+}
+
+fn assert_cell_code_span<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt table --columns \"Cmd\" --prose-row 'run `md hash`'");
     assert_bordered_line(&frame, "run md hash");
     let row = cell_row(&frame, "run md hash")
         .unwrap_or_else(|| panic!("missing the inline-code cell.\nplain:\n{}", frame.plain));
-    assert_eq!(dim_runs(&row), ["md hash"], "{row:?}");
+    assert_eq!(cell_dim_runs(&row), ["md hash"], "{row:?}");
+}
 
+fn assert_cell_code_in_color<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt table --columns \"Note\" --prose-row '<red>x `y` z</red>'");
     let row = cell_row(&frame, "x y z")
         .unwrap_or_else(|| panic!("missing the colored cell.\nplain:\n{}", frame.plain));
     assert_fg_red_contained(&row, "x y z");
     assert_eq!(common::active_runs(&fg_red_run_cells(&row), true), ["x y z"], "{row:?}");
-    assert_eq!(dim_runs(&row), ["y"], "{row:?}");
+    assert_eq!(cell_dim_runs(&row), ["y"], "{row:?}");
+}
 
+fn assert_cell_code_wrapped<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Cmd\" --col-width 9 --prose-row 'alpha `bravo charlie` delta'",
@@ -880,25 +890,29 @@ fn assert_prose_cell_inline_code<H: TerminalHarness>(harness: &mut H) {
         let row = cell_row(&frame, word)
             .unwrap_or_else(|| panic!("missing wrapped line {word:?}.\nplain:\n{}", frame.plain));
         let expected: Vec<&str> = if code { vec![word] } else { Vec::new() };
-        assert_eq!(dim_runs(&row), expected, "{row:?}");
+        assert_eq!(cell_dim_runs(&row), expected, "{row:?}");
     }
+}
 
+fn assert_cell_code_fenced<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt table --columns \"Cmd\" --prose-row '```\\nfoo\\nbar\\n```'");
     assert_bordered_line(&frame, "foo bar");
     let row = cell_row(&frame, "foo bar")
         .unwrap_or_else(|| panic!("missing the fenced cell.\nplain:\n{}", frame.plain));
-    assert_eq!(dim_runs(&row), ["foo bar"], "{row:?}");
+    assert_eq!(cell_dim_runs(&row), ["foo bar"], "{row:?}");
     assert!(
         !frame.plain.lines().any(|line| line.contains('│') && line.contains("```")),
         "the fence must not display in the cell.\nplain:\n{}",
         frame.plain,
     );
+}
 
+fn assert_cell_code_plain_fallback<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt table --plain --columns \"Cmd\" --prose-row 'run `md hash`'");
     assert_bordered_line(&frame, "run `md hash`");
     let row = cell_row(&frame, "run `md hash`")
         .unwrap_or_else(|| panic!("missing the fallback cell.\nplain:\n{}", frame.plain));
-    assert!(dim_runs(&row).is_empty(), "{row:?}");
+    assert!(cell_dim_runs(&row).is_empty(), "{row:?}");
 }
 
 /// The inner cell segments of a rendered data row: the substrings between the
@@ -982,63 +996,12 @@ fn assert_mixed_row_alignment<H: TerminalHarness>(harness: &mut H, cursor_align:
     }
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_cells_in_wezterm() {
-    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
-    let mut guard = SHARED_WEZTERM
-        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
-    let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    assert_prose_cell_styled(harness);
-    assert_prose_cell_dim_styled(harness);
-    assert_prose_cell_link_styled(harness, false);
-    assert_prose_cell_link_styled(harness, true);
-    assert_prose_cell_wraps_styled(harness);
-    assert_prose_cell_multiline_styled(harness);
-    assert_prose_rows_independently_styled(harness);
-    assert_prose_cursor_align(harness);
-    assert_mixed_row_alignment(harness, false);
-    assert_mixed_row_alignment(harness, true);
-    assert_prose_cell_inline_code(harness);
-}
+// tmux relays text glyphs and box-drawing borders faithfully. Its cases
+// assert the Prose-cell text and borders survive and that no raw escape
+// garbage leaks into the displayed cells; the OSC8 destination and extent are
+// asserted on the GUI terminals.
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_cells_in_kitty() {
-    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
-    let mut guard =
-        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
-    let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    assert_prose_cell_styled(harness);
-    assert_prose_cell_dim_styled(harness);
-    assert_prose_cell_link_styled(harness, false);
-    assert_prose_cell_link_styled(harness, true);
-    assert_prose_cell_wraps_styled(harness);
-    assert_prose_cell_multiline_styled(harness);
-    assert_prose_rows_independently_styled(harness);
-    assert_prose_cursor_align(harness);
-    assert_mixed_row_alignment(harness, false);
-    assert_mixed_row_alignment(harness, true);
-    assert_prose_cell_inline_code(harness);
-}
-
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_cells_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
-    let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-
-    // tmux relays text glyphs and box-drawing borders faithfully. Assert the
-    // Prose-cell text and borders survive and that no raw escape garbage leaks
-    // into the displayed cells.
+fn assert_tmux_cell_text<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Status,Owner\" --prose-row \"<b>active</b>,<red>Alice</red>\"",
@@ -1053,8 +1016,10 @@ fn level2_prose_cells_in_tmux() {
         "expected no raw escape bytes in the tmux plain capture.\nplain:\n{}",
         frame.plain,
     );
+}
 
-    // The cursor-alignment path also relays its text faithfully through tmux.
+/// The cursor-alignment path also relays its text faithfully through tmux.
+fn assert_tmux_cursor_align_text<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Msg\" --prose-row \"<b>cursorword</b>\" --cursor-align",
@@ -1064,10 +1029,10 @@ fn level2_prose_cells_in_tmux() {
         "expected the cursor-aligned Prose cell text in tmux.\nplain:\n{}",
         frame.plain,
     );
+}
 
-    // tmux must also wrap a long styled cell onto
-    // multiple bordered visual lines, and honor a hard line break inside a
-    // styled run. Assert the wrap/newline geometry survives with intact borders.
+/// A long styled cell wraps onto multiple bordered visual lines.
+fn assert_tmux_wrap_geometry<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Notes\" --prose-row \"<b>alpha bravo charlie</b>\" --col-width 9",
@@ -1075,6 +1040,10 @@ fn level2_prose_cells_in_tmux() {
     for word in ["alpha", "bravo", "charlie"] {
         assert_bordered_line(&frame, word);
     }
+}
+
+/// A hard line break inside a styled run keeps both lines bordered.
+fn assert_tmux_multiline_geometry<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Msg\" --prose-row \"<b>line one\\nline two</b>\"",
@@ -1087,22 +1056,193 @@ fn level2_prose_cells_in_tmux() {
         "expected no raw escape bytes in the tmux multiline plain capture.\nplain:\n{}",
         frame.plain,
     );
+}
 
-    // The link label and the cell box geometry relay faithfully (the OSC8
-    // destination and extent are asserted on the GUI terminals above).
+/// The link label and the cell box geometry relay faithfully.
+fn assert_tmux_link_geometry<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Link\" --prose-row '<a href=\"https://example.com\">go</a>'",
     );
     assert_bordered_line(&frame, "go");
+}
 
-    // Typed-column alignment is geometry, not styling, so tmux must reproduce it:
-    // the Prose cell at the left edge and the numeric cells at the right edge.
-    assert_mixed_row_alignment(harness, false);
+/// A named scenario run against one terminal.
+type Case<H> = (&'static str, fn(&mut H));
 
-    // `capture-pane -e` re-serializes each cell's SGR, so inline-code styling
-    // and its containment are checked here as on the GUI terminals.
-    assert_prose_cell_inline_code(harness);
+/// The scenarios a styling-capable terminal (WezTerm, Kitty) checks. The
+/// names are the test names; `every_case_has_a_test_per_terminal` holds each
+/// terminal's test list to this table.
+fn styled_cases<H: TerminalHarness>() -> [Case<H>; 15] {
+    [
+        ("styled", |h| assert_prose_cell_styled(h)),
+        ("dim_styled", |h| assert_prose_cell_dim_styled(h)),
+        ("link_styled", |h| assert_prose_cell_link_styled(h, false)),
+        ("link_styled_cursor_align", |h| assert_prose_cell_link_styled(h, true)),
+        ("wraps_styled", |h| assert_prose_cell_wraps_styled(h)),
+        ("multiline_styled", |h| assert_prose_cell_multiline_styled(h)),
+        ("rows_independently_styled", |h| assert_prose_rows_independently_styled(h)),
+        ("cursor_align", |h| assert_prose_cursor_align(h)),
+        ("mixed_row_alignment", |h| assert_mixed_row_alignment(h, false)),
+        ("mixed_row_alignment_cursor_align", |h| assert_mixed_row_alignment(h, true)),
+        ("inline_code_span", |h| assert_cell_code_span(h)),
+        ("inline_code_in_color", |h| assert_cell_code_in_color(h)),
+        ("inline_code_wrapped", |h| assert_cell_code_wrapped(h)),
+        ("inline_code_fenced", |h| assert_cell_code_fenced(h)),
+        ("inline_code_plain_fallback", |h| assert_cell_code_plain_fallback(h)),
+    ]
+}
+
+/// The scenarios tmux checks: text and border relay, typed-column alignment
+/// (geometry, not styling), and inline code, whose SGR `capture-pane -e`
+/// re-serializes.
+fn tmux_cases<H: TerminalHarness>() -> [Case<H>; 11] {
+    [
+        ("styled_text", |h| assert_tmux_cell_text(h)),
+        ("cursor_align_text", |h| assert_tmux_cursor_align_text(h)),
+        ("wrap_geometry", |h| assert_tmux_wrap_geometry(h)),
+        ("multiline_geometry", |h| assert_tmux_multiline_geometry(h)),
+        ("link_geometry", |h| assert_tmux_link_geometry(h)),
+        ("mixed_row_alignment", |h| assert_mixed_row_alignment(h, false)),
+        ("inline_code_span", |h| assert_cell_code_span(h)),
+        ("inline_code_in_color", |h| assert_cell_code_in_color(h)),
+        ("inline_code_wrapped", |h| assert_cell_code_wrapped(h)),
+        ("inline_code_fenced", |h| assert_cell_code_fenced(h)),
+        ("inline_code_plain_fallback", |h| assert_cell_code_plain_fallback(h)),
+    ]
+}
+
+/// Runs the case called `name` from `cases`.
+fn run_case<H>(harness: &mut H, cases: &[Case<H>], name: &str) {
+    let (_, case) = cases
+        .iter()
+        .find(|(case, _)| *case == name)
+        .unwrap_or_else(|| panic!("no prose-cell case named {name:?}"));
+    case(harness);
+}
+
+fn styled_case_in_wezterm(name: &str) {
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    run_case(harness, &styled_cases(), name);
+}
+
+fn styled_case_in_kitty(name: &str) {
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    run_case(harness, &styled_cases(), name);
+}
+
+fn tmux_case(name: &str) {
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    run_case(harness, &tmux_cases(), name);
+}
+
+/// Generates module `$module` with one `#[test]` per listed case, gated on
+/// `$harness` and run by `$run`, and a `CASES` list of the names for the
+/// guard test. One test per case lets nextest spread them over the runner's
+/// cores; one test running every case took over 5 s in WezTerm. The module
+/// name carries the `level2_` tier marker the file's own name lacks.
+macro_rules! case_tests {
+    ($module:ident, $harness:ty, $backend:expr, $run:ident, [$($case:ident),* $(,)?]) => {
+        mod $module {
+            use super::*;
+
+            pub(super) const CASES: &[&str] = &[$(stringify!($case)),*];
+
+            $(
+                #[test]
+                #[serial(level2_terminal)]
+                fn $case() {
+                    require_level!(Level::L2, <$harness>::available(), $backend);
+                    $run(stringify!($case));
+                }
+            )*
+        }
+    };
+}
+
+case_tests!(
+    level2_prose_cells_in_wezterm,
+    WezTermHarness,
+    Backend::WezTerm,
+    styled_case_in_wezterm,
+    [
+        styled,
+        dim_styled,
+        link_styled,
+        link_styled_cursor_align,
+        wraps_styled,
+        multiline_styled,
+        rows_independently_styled,
+        cursor_align,
+        mixed_row_alignment,
+        mixed_row_alignment_cursor_align,
+        inline_code_span,
+        inline_code_in_color,
+        inline_code_wrapped,
+        inline_code_fenced,
+        inline_code_plain_fallback,
+    ]
+);
+
+case_tests!(
+    level2_prose_cells_in_kitty,
+    KittyHarness,
+    Backend::Kitty,
+    styled_case_in_kitty,
+    [
+        styled,
+        dim_styled,
+        link_styled,
+        link_styled_cursor_align,
+        wraps_styled,
+        multiline_styled,
+        rows_independently_styled,
+        cursor_align,
+        mixed_row_alignment,
+        mixed_row_alignment_cursor_align,
+        inline_code_span,
+        inline_code_in_color,
+        inline_code_wrapped,
+        inline_code_fenced,
+        inline_code_plain_fallback,
+    ]
+);
+
+case_tests!(
+    level2_prose_cells_in_tmux,
+    TmuxHarness,
+    Backend::Tmux,
+    tmux_case,
+    [
+        styled_text,
+        cursor_align_text,
+        wrap_geometry,
+        multiline_geometry,
+        link_geometry,
+        mixed_row_alignment,
+        inline_code_span,
+        inline_code_in_color,
+        inline_code_wrapped,
+        inline_code_fenced,
+        inline_code_plain_fallback,
+    ]
+);
+
+/// A case added to a table without a test in every terminal's list would
+/// never run.
+#[test]
+fn every_case_has_a_test_per_terminal() {
+    let names = |cases: &[Case<TmuxHarness>]| cases.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+    let styled = names(&styled_cases());
+    assert_eq!(styled, level2_prose_cells_in_wezterm::CASES);
+    assert_eq!(styled, level2_prose_cells_in_kitty::CASES);
+    assert_eq!(names(&tmux_cases()), level2_prose_cells_in_tmux::CASES);
 }
 
 /// L1 unit coverage for the [`assert_bold_contained`] SGR-state reconstruction.

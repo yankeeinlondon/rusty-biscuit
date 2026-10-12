@@ -610,20 +610,24 @@ fn path_triggers_and_match_validation_give_the_same_verdicts() {
         package.join("src/notes.txt"),
     ];
 
+    // A context depends only on its document's folder, not on the pattern, so
+    // build each once rather than once per pattern.
+    let document_contexts: Vec<FileResolutionContext> =
+        documents.iter().map(|document| fixture.context(document, &[])).collect();
+    let value_context = fixture.context(&package.join("value.md"), &[]);
+
     for pattern_list in patterns {
         let authored: Vec<String> = pattern_list.iter().map(|p| p.to_string()).collect();
         let expr = MatchExpr::Path(PathGlobs::new(authored.clone()).expect("valid $path"));
         let globs = FileMatchGlobs::new(&authored).expect("valid match()");
-        for document in &documents {
+        for (document, document_context) in documents.iter().zip(&document_contexts) {
             // The trigger sits in `{package}/schemas`, so its bare patterns are
             // read from the package; `match()` judges a value whose folder is
             // the package.
-            let document_context = fixture.context(document, &[]);
-            let value_context = fixture.context(&package.join("value.md"), &[]);
             let trigger = matches(
                 &expr,
                 &json!({}),
-                &PathSubject::new(document, &document_context).with_pattern_cwd(&package),
+                &PathSubject::new(document, document_context).with_pattern_cwd(&package),
             );
             let validation = globs.matches(document, &value_context);
             assert_eq!(trigger, validation, "{pattern_list:?} on {}", document.display());

@@ -126,6 +126,20 @@ pub(crate) struct ShellProbe {
     child_environment: Vec<(String, Option<String>)>,
 }
 
+/// The request's `$SHELL`, when set and non-empty. Alias resolution asks the
+/// same shell this probe does.
+pub(crate) fn login_shell(environment: &HashMap<String, String>) -> Option<&str> {
+    environment_value(environment, "SHELL").filter(|shell| !shell.is_empty())
+}
+
+/// Windows variable names are case-insensitive.
+fn environment_value<'a>(environment: &'a HashMap<String, String>, wanted: &str) -> Option<&'a str> {
+    environment
+        .iter()
+        .find(|(key, _)| if cfg!(windows) { key.eq_ignore_ascii_case(wanted) } else { key.as_str() == wanted })
+        .map(|(_, value)| value.as_str())
+}
+
 #[derive(Debug, Clone)]
 struct ShellRequest {
     /// `$SHELL`, when set and non-empty.
@@ -150,18 +164,10 @@ impl Default for ShellProbe {
 impl ShellProbe {
     /// An authority for the login shell named by `environment`.
     pub(crate) fn from_environment(environment: &HashMap<String, String>) -> Self {
-        let lookup = |wanted: &str| {
-            environment
-                .iter()
-                .find(|(key, _)| {
-                    if cfg!(windows) { key.eq_ignore_ascii_case(wanted) } else { key.as_str() == wanted }
-                })
-                .map(|(_, value)| value.clone())
-        };
         Self {
             request: Some(ShellRequest {
-                shell: lookup("SHELL").filter(|shell| !shell.is_empty()),
-                path: lookup("PATH"),
+                shell: login_shell(environment).map(str::to_string),
+                path: environment_value(environment, "PATH").map(str::to_string),
             }),
             ..Self::default()
         }

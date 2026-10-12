@@ -2582,6 +2582,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "content-policy"
+version = "0.1.0"
+dependencies = [
+ "biscuit-file",
+ "biscuit-hash",
+ "chrono",
+ "gix",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "content-policy-cli"
+version = "0.1.0"
+dependencies = [
+ "biscuit-terminal",
+ "biscuit-test-harness",
+ "chrono",
+ "clap 4.6.1",
+ "clap_complete",
+ "content-policy",
+ "serde_json",
+ "tempfile",
+ "test-toolkit",
+ "unicode-width 0.2.2",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

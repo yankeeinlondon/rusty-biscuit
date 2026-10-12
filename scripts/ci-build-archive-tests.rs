@@ -71,6 +71,9 @@ fn clear_readonly(path: &Path) {
             clear_readonly(&child);
         } else if let Ok(metadata) = fs::symlink_metadata(&child) {
             let mut permissions = metadata.permissions();
+            // Windows-only: clearing the read-only attribute grants no Unix
+            // world-write, which is what this lint guards against.
+            #[allow(clippy::permissions_set_readonly_false)]
             permissions.set_readonly(false);
             let _ = fs::set_permissions(&child, permissions);
         }
@@ -1115,7 +1118,8 @@ fn shared_build() -> PathBuf {
     let mut identity = fs::read(&binary).expect("reading the shipped binary");
     fixture_source_bytes(&fixture_workspace(), &mut identity);
     let key = format!("{:016x}", biscuit_hash::xx_hash_bytes(&identity));
-    let parent = binary.parent().expect("the binary has a directory").join("ci-build-archive-fixture");
+    let binary_dir = binary.parent().expect("the binary has a directory");
+    let parent = fixture_parent(binary_dir);
     fs::create_dir_all(&parent).expect("creating the shared fixture directory");
     let root = parent.join(&key);
     let lock = fs::File::create(parent.join(format!("{key}.lock"))).expect("creating the fixture lock");
@@ -1135,6 +1139,23 @@ fn shared_build() -> PathBuf {
         }
     }
     root
+}
+
+/// Where the shared fixture builds live: beside the shipped binary.
+#[cfg(not(windows))]
+fn fixture_parent(binary_dir: &Path) -> PathBuf {
+    binary_dir.join("ci-build-archive-fixture")
+}
+
+/// On Windows, a short directory under TEMP instead. Beside the binary of an
+/// extracted nextest archive, the fixture's own `target\…\deps\rustc*\` files
+/// passed 260 characters and `link.exe` failed with LNK1104. The name hashes
+/// the binary's directory, so two checkouts never share or prune each other's
+/// fixtures.
+#[cfg(windows)]
+fn fixture_parent(binary_dir: &Path) -> PathBuf {
+    let owner = biscuit_hash::xx_hash_bytes(binary_dir.as_os_str().as_encoded_bytes());
+    std::env::temp_dir().join(format!("cbaf-{:08x}", owner as u32))
 }
 
 /// Appends every fixture file's path and bytes, in a stable order.
@@ -2175,7 +2196,10 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
     let counters = dir.join("build-counters");
     let target = dir.join("owner-target");
 
-    let output = Command::new("bash")
+    // From PATH, not a bare `bash`: Windows' `Command` searches System32
+    // first, and on the hosted runner that holds the WSL launcher.
+    let bash = which("bash").expect("bash must be on PATH");
+    let output = Command::new(bash)
         .arg(repo_root().join("scripts/ci/produce-owner.sh"))
         .env("CI_BUILD_BIN", &binary)
         .env("CI_BUILD_PLAN", &plan)

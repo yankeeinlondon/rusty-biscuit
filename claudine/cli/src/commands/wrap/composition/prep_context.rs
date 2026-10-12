@@ -216,6 +216,18 @@ mod tests {
         let source_file = source_dir.path().join("prompt.md");
         std::fs::write(&source_file, "# Test\n").unwrap();
 
+        // Launch from a fixture repository: an ambient launch inside this
+        // checkout walks the whole monorepo.
+        let repo = tempfile::tempdir().unwrap();
+        let git_status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .expect("git should initialize the fixture repository");
+        assert!(git_status.success());
+        let repo_root = biscuit_file::canonicalize_simplified(repo.path()).unwrap();
+        let _cwd = ScopedCwd::enter(&repo_root);
+
         let excluded = BTreeSet::new();
         let ctx = build_prep_context(&source_file, &excluded).unwrap();
 

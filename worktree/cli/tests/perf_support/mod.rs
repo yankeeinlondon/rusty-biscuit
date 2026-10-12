@@ -980,14 +980,20 @@ impl ProxyStub {
         Self { port, connections, held: Arc::default(), released: Arc::default() }
     }
 
-    /// A port with nothing listening: every connection is refused at once,
-    /// as with the network down.
+    /// Every connection fails at once, as with the network down: a port with
+    /// nothing listening. On Windows a connect to such a port is retried for
+    /// about 2 s before it is refused, so there a listener closes each
+    /// connection the moment it accepts it instead.
     pub fn refusing() -> Self {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .expect("bind a free port")
-            .local_addr()
-            .expect("free port address")
-            .port();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free port");
+        let port = listener.local_addr().expect("free port address").port();
+        if cfg!(windows) {
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    drop(stream);
+                }
+            });
+        }
         Self {
             port,
             connections: Arc::default(),

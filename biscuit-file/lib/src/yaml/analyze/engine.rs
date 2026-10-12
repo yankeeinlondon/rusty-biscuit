@@ -9,8 +9,9 @@
 //!   candidates are accepted only when the patched source reparses to a
 //!   `serde_yaml_ng::Value` exactly equal to the original's.
 //! - **S3 (parse-recovery)**: when the original does not parse at all, the
-//!   reserved-indicator quoting algorithm in [`recover`] applies its own
-//!   dedicated proof chain.
+//!   byte-order-mark and tab-indentation recoveries below, then the
+//!   reserved-indicator quoting algorithm in [`recover`], each apply their own
+//!   dedicated proof.
 //!
 //! Documents without diagnostics carry no candidates and are never reparsed.
 
@@ -80,7 +81,8 @@ pub fn analyze_yaml(source: &str) -> YamlAnalysis {
         }
         YamlParseOutcome::Failed(failure) => match bom_recovery(source) {
             Some(diagnostic) => vec![diagnostic],
-            None => recover::recover(source, &map, failure),
+            None => tab_indentation_recovery(source)
+                .unwrap_or_else(|| recover::recover(source, &map, failure)),
         },
     };
     diagnostics.extend(report::report(source, &map));
@@ -214,6 +216,59 @@ fn bom_recovery(source: &str) -> Option<YamlDiagnostic> {
         )
         .into_diagnostic(),
     )
+}
+
+/// Recovers a document that parses only once leading tabs become spaces.
+///
+/// Each tab in a line's leading whitespace becomes two spaces, and spaces in
+/// that prefix are kept. This is byte-for-byte Darkmatter's frontmatter tab
+/// normalization, so a document reads the same through both. Inside a block
+/// scalar that includes tabs past the scalar's own indentation: they are
+/// content, yet they still become spaces, because that is how Darkmatter
+/// reads them.
+///
+/// Like [`bom_recovery`], this runs only when the original does not parse, so
+/// there is no original value to preserve. The gate instead requires the
+/// combined edit set to reproduce the tab-normalized interpretation: the
+/// patched source must parse to the same value as the normalized text built
+/// independently of the edits. One diagnostic is emitted per tab-indented
+/// line, all of which must apply together.
+fn tab_indentation_recovery(source: &str) -> Option<Vec<YamlDiagnostic>> {
+    let mut normalized = String::with_capacity(source.len() + 16);
+    let mut drafts = Vec::new();
+    let mut line_start = 0;
+    for (index, line) in source.split('\n').enumerate() {
+        if index > 0 {
+            normalized.push('\n');
+        }
+        let indent_end = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let indent = &line[..indent_end];
+        if indent.contains('\t') {
+            let spaces = indent.replace('\t', "  ");
+            normalized.push_str(&spaces);
+            normalized.push_str(&line[indent_end..]);
+            drafts.push(Draft::new(
+                YamlDiagnosticCode::TabIndentation,
+                line_start..line_start + indent_end,
+                "tab in indentation",
+                &spaces,
+                "replace each indentation tab with two spaces",
+            ));
+        } else {
+            normalized.push_str(line);
+        }
+        line_start += line.len() + 1;
+    }
+    if drafts.is_empty() {
+        return None;
+    }
+    let expected = parse_value(&normalized).ok()?;
+    let repairs: Vec<YamlRepair> = drafts.iter().map(|draft| draft.repair.clone()).collect();
+    let patched = apply_edit_set(source, &repairs);
+    if !patched.audit.rejected.is_empty() || !parses_equal(&patched.source, &expected) {
+        return None;
+    }
+    Some(drafts.into_iter().map(Draft::into_diagnostic).collect())
 }
 
 /// A single UTF-8 BOM at stream start is removed as a normalization.

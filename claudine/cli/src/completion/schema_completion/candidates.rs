@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::{
     FileReference, FileResolutionContext, PathIdentity, PortabilityPreference, PortablePath,
@@ -195,18 +196,26 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
 /// shape suggestions only; validation still admits a filtered file a user
 /// types. Each file is examined once, in the first root's walk that reaches
 /// it, which is the most local root that contains it, and judged by
-/// [`MatchGlobs::lists_file`] (nearest-root judgment), so a later root never
-/// re-offers a file an earlier root's pattern excluded. A file symlink whose
-/// target leaves the tree is omitted without a warning: a suggestion list is
-/// not a place for warnings.
+/// [`biscuit_file::PreparedGlobReference::lists_file`] (nearest-root judgment), so a later
+/// root never re-offers a file an earlier root's pattern excluded. A file
+/// symlink whose target leaves the tree is omitted without a warning: a
+/// suggestion list is not a place for warnings.
+///
+/// The walk skips a directory no pattern could list a file below
+/// ([`biscuit_file::PreparedGlobReference::may_list_below`]): a root such as the home
+/// folder can hold far more than `DOCS/*.md` ever reaches.
 ///
 /// The result is in native order: root precedence, then fewest components
 /// below the root, then component-wise, as `GlobReference::list_files`
 /// orders its matches.
 fn match_glob_files(globs: &MatchGlobs, resolution: &FileResolutionContext) -> Vec<PathBuf> {
+    let Some(prepared) = globs.prepare(resolution) else {
+        return Vec::new();
+    };
+    let prepared = Arc::new(prepared);
     let mut examined: HashSet<PathIdentity> = HashSet::new();
     let mut out: Vec<PathBuf> = Vec::new();
-    for root in globs.roots(resolution) {
+    for root in prepared.roots() {
         let Ok(canonical_root) = canonicalize_simplified(&root) else {
             continue;
         };
@@ -215,7 +224,18 @@ fn match_glob_files(globs: &MatchGlobs, resolution: &FileResolutionContext) -> V
             .hidden(true)
             .git_ignore(true)
             .require_git(false)
-            .filter_entry(walker::entry_passes_filters)
+            .filter_entry({
+                let prepared = Arc::clone(&prepared);
+                let root = root.clone();
+                let canonical_root = canonical_root.clone();
+                move |entry| {
+                    walker::entry_passes_filters(entry)
+                        && (!entry.file_type().is_some_and(|kind| kind.is_dir())
+                            || entry.path().strip_prefix(&root).is_ok_and(|below_root| {
+                                prepared.may_list_below(&PathIdentity::new(&canonical_root.join(below_root)))
+                            }))
+                }
+            })
             .build();
         for entry in walker.flatten() {
             let path = entry.path();
@@ -231,7 +251,7 @@ fn match_glob_files(globs: &MatchGlobs, resolution: &FileResolutionContext) -> V
             if !examined.insert(PathIdentity::new(&canonical_root.join(below_root))) {
                 continue;
             }
-            if !globs.lists_file(path, resolution) {
+            if !prepared.lists_file(path) {
                 continue;
             }
             let names = below_root.iter().map(OsString::from).collect();

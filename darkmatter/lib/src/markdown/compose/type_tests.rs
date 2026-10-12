@@ -235,7 +235,9 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
 
     #[test]
     fn test_compose_context_capture() {
-        let ctx = ComposeContext::capture_for_dir(&std::env::current_dir().unwrap());
+        // Anchored at a temp dir: capturing at the process directory walks the whole monorepo.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ComposeContext::capture_for_dir(dir.path());
 
         // Should have reasonable values
         assert!(ctx.year().parse::<i32>().is_ok());

@@ -602,7 +602,7 @@ When an inline prompt document is executed the following happens:
     - it passes along instructions to ensure that the agent knows that it's primary responsibility is to update the **body** of the inline prompt document.
 - When the agent claims it's done Claudine automatically validates that the inline document's body has been updated
 - It then cleans up the body using the **normalization** and **re-leveling** operations
-- Finally, it saves the `last_updated` frontmatter property to today's date (local time)
+- Finally, it saves the `last_updated` frontmatter property to today's date (UTC)
 
 Now you have content you can use on your project and if you ever need to refresh it you can just rerun the inline-compose again on the document as both content and the prompt-to-create-the-content are stored.
 

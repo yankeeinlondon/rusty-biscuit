@@ -76,6 +76,7 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
     let (tx, rx) =
         mpsc::channel::<Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>>>();
 
+    crate::native_audio::pin_com_for_process();
     std::thread::spawn(move || {
         let _ = tx.send(get_output_channels_inner());
     });
@@ -176,6 +177,7 @@ pub(crate) fn find_device_by_id_or_name_with_timeout(
     let name = id_or_name.to_string();
     let (tx, rx) = mpsc::channel();
 
+    crate::native_audio::pin_com_for_process();
     std::thread::spawn(move || {
         let _ = tx.send(find_device_by_id_or_name_inner(&name));
     });

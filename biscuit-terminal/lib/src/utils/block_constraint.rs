@@ -178,6 +178,32 @@ pub fn visible_width(content: &str) -> u32 {
     width
 }
 
+/// [`visible_width`] that stops scanning once the width exceeds `cap`, so a
+/// caller asking "does this fit?" pays for at most `cap` columns rather than
+/// the whole string. Returns the exact width when it is `<= cap`, and some
+/// value `> cap` otherwise.
+fn visible_width_capped(content: &str, cap: u32) -> u32 {
+    let mut width = 0u32;
+    let mut idx = 0usize;
+    let bytes = content.as_bytes();
+
+    while idx < content.len() && width <= cap {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+
+        let ch = match content[idx..].chars().next() {
+            Some(ch) => ch,
+            None => break,
+        };
+        width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(1) as u32);
+        idx += ch.len_utf8();
+    }
+
+    width
+}
+
 /// Splits `content` into its visible body and the run of trailing escape
 /// sequences that follow the last visible character.
 ///
@@ -394,8 +420,9 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
     }
 
     let mut wrapped: Vec<String> = Vec::new();
+    // Each check below is bounded by `width`: wrapping a long line row by
+    // row must not rescan the whole remainder per row.
     for line in lines {
-        let original_width = visible_width(&line);
         let mut remaining = line;
 
         loop {
@@ -403,7 +430,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
             // append them to the previous line so they don't become a blank row.
             // This happens when a word-wrap split lands just before closing
             // sequences like \x1b[0m or \x1b]8;;\x1b\\.
-            if !remaining.is_empty() && visible_width(&remaining) == 0 {
+            if !remaining.is_empty() && visible_width_capped(&remaining, 0) == 0 {
                 if let Some(last) = wrapped.last_mut() {
                     last.push_str(&remaining);
                 }
@@ -418,9 +445,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                     WordWrap::WrapProse(_, hanging_indent)
                     | WordWrap::BespokeProse(_, _, hanging_indent) => {
                         let indent = hanging_indent.unwrap_or(0) as usize;
-                        let is_cont =
-                            !wrapped.is_empty() || visible_width(&remaining) != original_width;
-                        (indent, is_cont)
+                        (indent, !wrapped.is_empty())
                     }
                     _ => (0, false),
                 };
@@ -429,7 +454,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 } else {
                     width
                 };
-                if visible_width(&remaining) <= fits_width {
+                if visible_width_capped(&remaining, fits_width) <= fits_width {
                     let final_text = if is_continuation && indent > 0 {
                         format!("{}{}", " ".repeat(indent), remaining)
                     } else {
@@ -458,8 +483,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 WordWrap::WrapProse(offset, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
                     let indent = hanging_indent.unwrap_or(0) as usize;
-                    let is_continuation =
-                        !wrapped.is_empty() || visible_width(&remaining) != original_width;
+                    let is_continuation = !wrapped.is_empty();
                     let effective_width = if is_continuation && indent > 0 {
                         width.saturating_sub(indent as u32)
                     } else {
@@ -512,8 +536,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 WordWrap::BespokeProse(offset, break_chars, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
                     let indent = hanging_indent.unwrap_or(0) as usize;
-                    let is_continuation =
-                        !wrapped.is_empty() || visible_width(&remaining) != original_width;
+                    let is_continuation = !wrapped.is_empty();
                     let effective_width = if is_continuation && indent > 0 {
                         width.saturating_sub(indent as u32)
                     } else {

@@ -15,11 +15,8 @@ processes and the environment in [windows.md](windows.md).
   minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
   not evaluate the config at all, which is why the harness's availability
   gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
-  `biscuit-test-harness` now runs every `wezterm` client under an empty
-  `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
-  own config. The empty config is a private, uniquely created temporary file
-  retained until that client exits and then removed; creation/write errors
-  propagate rather than selecting an existing shared pathname. Do not "fix"
+  `biscuit-test-harness` now runs every `wezterm` client as
+  `wezterm --skip-config`; the mux server keeps its own config. Do not "fix"
   this by raising the timeout.
 - A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
   (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
@@ -92,6 +89,14 @@ Measured on `build-win-native` on 2026-09-25 through `just cross-check`
   as a terminal launching a shell effectively does
   (`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`,
   `build-win-native`, 2026-09-27).
+- **A ConPTY child starts about 3 s late unless the host answers its Device
+  Attributes query.** ConPTY writes `ESC [ c` first and holds the child's
+  startup until a reply arrives or ~3 s pass; even `cmd /c echo hi` took 3 s.
+  Answer from the output-reader thread with Windows Terminal's reply
+  (`ESC [ ? 61;4;6;7;14;21;22;23;24;28;32;42 c`); a bare `ESC [ ? 1;0 c` does
+  NOT release it. The child then starts in ~50 ms
+  (`lifecycle_message_drain_console_windows.rs`, 2026-10-09). Any other test
+  that reads a `xpty` pseudoconsole should do the same.
 - **`xpty::CommandBuilder` starts from the parent's environment**, like
   `std::process::Command`. When copying a `Command` built by a fixture that
   inherits and only overrides, apply its `get_envs()` on top without

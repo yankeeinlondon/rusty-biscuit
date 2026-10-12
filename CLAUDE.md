@@ -50,6 +50,11 @@
   for a package that declares it in `[package.metadata.ci.tests]
   source-inputs`. Spell a test's repository reads in the forms the
   `rust-testing` skill lists. See `docs/cicd/test-inputs.md`.
+- **The internal `prompts/` folders are never tested in CI.** A change under
+  `prompts/`, `darkmatter/prompts/`, or `claudine/prompts/` schedules nothing.
+  Tests of a prompt are opt-in (`prompt-tests`, `just test-prompts`), and a
+  behavior test that needs a prompt reads a frozen copy under
+  `tests/fixtures/frozen_prompts/`.
 - **Producers prove their cells; each area audits its planned coverage.** Each
   executing cell is one dispatch row, and its producer compares its own
   expected-test listing with its reports and uploads a completion record

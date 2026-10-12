@@ -223,7 +223,7 @@ mod loading {
         let graph = build_preflight_graph_with_context(
             &plan,
             &resolved,
-            darkmatter::markdown::compose::ComposeContext::capture_for_dir(&std::env::current_dir().unwrap()),
+            darkmatter::markdown::compose::ComposeContext::capture_for_dir(&source_dir),
             &snapshot,
         )
         .unwrap();
@@ -1561,7 +1561,7 @@ mod lifecycle_literals {
         .add_magic_path(magic.clone(), biscuit_file::PathPosition::Start);
         // One capture for all six spellings: a full capture probes the host,
         // and the context is not what varies between the cases.
-        let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(&std::env::current_dir().unwrap());
+        let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(&sequences);
 
         for (reference, dir, file) in cases {
             write_source(dir, file, &[("success", success.clone())], "Prompt.\n");

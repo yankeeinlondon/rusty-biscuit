@@ -214,12 +214,44 @@ fn every_entry_point_has_a_row() {
     }
 }
 
+/// Every cell costs a repository discovery in `ComposeRequest::prepare`, so one
+/// test over all cells is far past the L1 budget; the matrix is split across
+/// tests nextest runs in parallel. A `match()` validation row prepares a request
+/// per candidate (over a second each), so those rows are spread over their own
+/// parts; the light rows share the rest.
+const HEAVY_PARTS: usize = 12;
+const LIGHT_PARTS: usize = 14;
+
+fn is_heavy(row: &Row) -> bool {
+    matches!(row, Row::GlobValue(_) | Row::GlobDocument(GlobDocumentCell { consumer: GlobConsumer::MatchValidation, .. }))
+}
+
+/// Every owned entry point has a row, so the parts together run each one.
 #[test]
-fn darkmatter_entry_points_agree_on_every_reference() {
+fn every_darkmatter_entry_point_runs_a_matrix_row() {
+    let rows = rows_for(Owner::Darkmatter);
+    for entry in EntryPoint::ALL.into_iter().filter(|entry| entry.owner() == Owner::Darkmatter) {
+        assert!(rows.iter().any(|row| row.entry() == entry), "{entry:?} has no darkmatter matrix row");
+    }
+}
+
+/// Runs one part of the matrix; the union of all parts is every row.
+fn run_matrix_part(part: usize) {
     let root = tempfile::TempDir::new().expect("fixture root");
     let fixture = ParityFixture::create(root.path());
     let mut report = ParityReport::new(Owner::Darkmatter);
-    for row in rows_for(Owner::Darkmatter) {
+    let (mut heavy, mut light) = (0, 0);
+    let rows = rows_for(Owner::Darkmatter).into_iter().filter(|row| {
+        let slot = if is_heavy(row) {
+            heavy += 1;
+            (heavy - 1) % HEAVY_PARTS
+        } else {
+            light += 1;
+            HEAVY_PARTS + (light - 1) % LIGHT_PARTS
+        };
+        slot == part
+    });
+    for row in rows {
         let cell = match row {
             Row::Document(cell) => cell,
             Row::GlobDocument(cell) => {
@@ -258,7 +290,47 @@ fn darkmatter_entry_points_agree_on_every_reference() {
         };
         report.record(&fixture, &row, &fixture.expected_document(&cell), &observed);
     }
-    report.assert_parity();
+    report.assert_cells_agree();
+}
+
+macro_rules! matrix_parts {
+    ($($name:ident => $part:expr),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                run_matrix_part($part);
+            }
+        )*
+    };
+}
+
+matrix_parts! {
+    darkmatter_entry_points_agree_on_every_reference_part_00 => 0,
+    darkmatter_entry_points_agree_on_every_reference_part_01 => 1,
+    darkmatter_entry_points_agree_on_every_reference_part_02 => 2,
+    darkmatter_entry_points_agree_on_every_reference_part_03 => 3,
+    darkmatter_entry_points_agree_on_every_reference_part_04 => 4,
+    darkmatter_entry_points_agree_on_every_reference_part_05 => 5,
+    darkmatter_entry_points_agree_on_every_reference_part_06 => 6,
+    darkmatter_entry_points_agree_on_every_reference_part_07 => 7,
+    darkmatter_entry_points_agree_on_every_reference_part_08 => 8,
+    darkmatter_entry_points_agree_on_every_reference_part_09 => 9,
+    darkmatter_entry_points_agree_on_every_reference_part_10 => 10,
+    darkmatter_entry_points_agree_on_every_reference_part_11 => 11,
+    darkmatter_entry_points_agree_on_every_reference_part_12 => 12,
+    darkmatter_entry_points_agree_on_every_reference_part_13 => 13,
+    darkmatter_entry_points_agree_on_every_reference_part_14 => 14,
+    darkmatter_entry_points_agree_on_every_reference_part_15 => 15,
+    darkmatter_entry_points_agree_on_every_reference_part_16 => 16,
+    darkmatter_entry_points_agree_on_every_reference_part_17 => 17,
+    darkmatter_entry_points_agree_on_every_reference_part_18 => 18,
+    darkmatter_entry_points_agree_on_every_reference_part_19 => 19,
+    darkmatter_entry_points_agree_on_every_reference_part_20 => 20,
+    darkmatter_entry_points_agree_on_every_reference_part_21 => 21,
+    darkmatter_entry_points_agree_on_every_reference_part_22 => 22,
+    darkmatter_entry_points_agree_on_every_reference_part_23 => 23,
+    darkmatter_entry_points_agree_on_every_reference_part_24 => 24,
+    darkmatter_entry_points_agree_on_every_reference_part_25 => 25,
 }
 
 /// The compose pipeline over each `::toc-linking` fallback chain: the

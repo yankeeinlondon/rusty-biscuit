@@ -122,13 +122,18 @@ fn git_command_status(dir: Option<&Path>, args: &[&str], allow_no_match: bool) -
     if let Some(dir) = dir {
         command.current_dir(dir);
     }
-    let output = calls::output(command.args(args)).map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+    // Keep the discovery diagnostic stable so it can become an actionable error.
+    let output = calls::output(command.env("LC_ALL", "C").args(args))
+        .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
         if allow_no_match && output.status.code() == Some(1) {
             return Ok(None);
         }
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.starts_with("fatal: not a git repository (or any") {
+            return Err(WorktreeError::NotInGitRepo);
+        }
         return Err(WorktreeError::GitCommand(stderr));
     }
 

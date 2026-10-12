@@ -5,7 +5,7 @@ use crate::request::MdRequest;
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
-    ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
+    Change, ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
     select_kind,
 };
 use darkmatter::markdown::Markdown;
@@ -56,8 +56,15 @@ pub fn run_hash(
         let resolved = opened
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
         let (source, md) = read_markdown_text(&resolved)?;
-        let stored = parse_stored_hash(&md, &options)?;
-        return run_hash_save(&md, &source, &resolved, stored.as_ref(), &options);
+        let stored = md.stored_hash(&options)?;
+        return run_hash_save(
+            &md,
+            &source,
+            &resolved,
+            stored.as_ref(),
+            &options,
+            chrono::Utc::now(),
+        );
     }
 
     let md = match &opened {
@@ -65,7 +72,7 @@ pub fn run_hash(
             .wrap_err_with(|| format!("Failed to read file: {:?}", file))?,
         None => load_markdown(input, request)?,
     };
-    let stored = parse_stored_hash(&md, &options)?;
+    let stored = md.stored_hash(&options)?;
 
     if diff {
         return run_hash_diff(&md, stored.as_ref(), &options);
@@ -127,15 +134,6 @@ fn parse_ignore_properties(raw: &str, property: &str) -> Vec<String> {
         .collect()
 }
 
-/// Reads and parses the document's stored hash property, or `None` when the
-/// property is absent or null.
-fn parse_stored_hash(md: &Markdown, options: &MdHashOptions) -> Result<Option<StoredHash>> {
-    match md.frontmatter().as_map().get(options.property.as_str()) {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(value) => Ok(Some(StoredHash::parse(value, &options.property)?)),
-    }
-}
-
 /// Prints a computed hash: the flat string for `fm`/`body`/`simple`/`structured`,
 /// or the nested YAML object for `detailed`.
 fn print_computed_hash(computed: &ComputedHash) -> Result<()> {
@@ -187,9 +185,8 @@ fn run_hash_save(
     resolved: &std::path::Path,
     stored: Option<&StoredHash>,
     options: &MdHashOptions,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let decision = md.plan_hash_save(stored, options)?;
-
     // A first baseline has nothing to compare against, so it has no explanation.
     // Computed here, before the write below, so it describes the in-memory
     // document against its *previous* stored hash.
@@ -198,11 +195,9 @@ fn run_hash_save(
         None => None,
     };
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let stamp = md.stamp_baseline(source, options, now, Change::Detect)?;
 
-    if let Some(written) = darkmatter::markdown::hash::apply_hash_save_text(
-        source, &decision, options, &today,
-    )? {
+    if let Some(written) = stamp.text {
         std::fs::write(resolved, written)
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
@@ -212,7 +207,7 @@ fn run_hash_save(
         None => {
             println!(
                 "No stored hash found; wrote initial {} baseline",
-                decision.kind
+                stamp.decision.kind
             );
         }
     }
@@ -321,4 +316,39 @@ fn run_hash_directory(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_save_stamps_last_updated_with_the_utc_date() {
+        let instant: chrono::DateTime<chrono::Utc> = "2026-09-28T23:30:00Z".parse().unwrap();
+        let east_of_utc = chrono::FixedOffset::east_opt(10 * 3600).unwrap();
+        assert_eq!(
+            instant.with_timezone(&east_of_utc).date_naive().to_string(),
+            "2026-09-29"
+        );
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        // A stale stored hash of the same kind is a content change, which bumps
+        // `last_updated`.
+        std::fs::write(
+            &file,
+            "---\ntitle: T\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# H\n\nBody.\n",
+        )
+        .unwrap();
+        let (source, md) = read_markdown_text(&file).unwrap();
+        let options = MdHashOptions::default();
+        let stored = md.stored_hash(&options).unwrap();
+
+        run_hash_save(&md, &source, &file, stored.as_ref(), &options, instant).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            written.contains("last_updated: 2026-09-28\n"),
+            "expected the UTC date stamp in:\n{written}"
+        );
+    }
 }

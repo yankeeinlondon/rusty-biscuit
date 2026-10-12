@@ -280,7 +280,7 @@ fn row_raw<'a>(frame: &'a CapturedFrame, label: &str) -> Option<&'a str> {
 }
 
 /// The Value-column lines of the Description row, as (plain, raw) pairs.
-fn description_cell_lines<'a>(frame: &'a CapturedFrame) -> Vec<(String, &'a str)> {
+fn description_cell_lines(frame: &CapturedFrame) -> Vec<(String, &str)> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let mut cell = Vec::new();
     let mut inside = false;

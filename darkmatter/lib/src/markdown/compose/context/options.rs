@@ -493,6 +493,13 @@ pub struct ComposeOptions {
     /// root report.
     pub(crate) glob_warnings: crate::markdown::compose::glob_listing::GlobWarningSink,
 
+    /// The run's shell-alias lookups, shared by every clone so preflight,
+    /// pre-approval, and execution start the login shell at most once per
+    /// name. A memo, never an input: it is outside every options identity, and
+    /// each new `ComposeOptions` starts empty so a long-lived host sees alias
+    /// edits.
+    pub(crate) alias_resolutions: crate::markdown::compose::shell_expansion::alias::AliasResolutions,
+
     /// The request's refresh authority behind the lazy `current` root (R30).
     /// It owns the invocation's capability to observe one mutable fact now and
     /// the sink its fail-closed `PartialRuntimeCapture` diagnostics land in.
@@ -914,6 +921,7 @@ impl ComposeOptions {
             nested_compose: Default::default(),
             icmp: Default::default(),
             glob_warnings: Default::default(),
+            alias_resolutions: Default::default(),
             current: Default::default(),
             schema_phase: None,
             preflight_graph: None,
@@ -1528,6 +1536,7 @@ impl ComposeOptions {
         }
         context.icmp = self.icmp_authority();
         context.glob_warnings = self.glob_warnings.clone();
+        context.alias_resolutions = self.alias_resolutions.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
@@ -1573,6 +1582,7 @@ impl ComposeOptions {
         }
         context.icmp = self.icmp_authority();
         context.glob_warnings = self.glob_warnings.clone();
+        context.alias_resolutions = self.alias_resolutions.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context
@@ -2620,6 +2630,9 @@ impl ComposeOptions {
             icmp,
             // A warning sink: it changes the report, never a composed result.
             glob_warnings: _,
+            // A lookup memo: it changes how often the shell starts, never a
+            // composed result.
+            alias_resolutions: _,
             current,
             schema_phase,
             exclude_keys,
@@ -4121,6 +4134,16 @@ mod tests {
         assert_eq!(id(&opts), id(&opts.clone()));
         let other = fixed_opts().with_shared_remote_fetch();
         assert_ne!(id(&opts), id(&other));
+    }
+
+    /// Unlike the shared runtime above, the alias lookup record is a memo: two
+    /// requests with separate records compose and cache identically.
+    #[test]
+    fn options_identity_ignores_the_alias_lookup_record() {
+        let opts = fixed_opts();
+        let other = fixed_opts();
+        assert_eq!(id(&opts), id(&other));
+        assert_eq!(fp(&opts), fp(&other));
     }
 
     #[test]

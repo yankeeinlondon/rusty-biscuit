@@ -2114,7 +2114,7 @@ mod tests {
             "linked path missing from rendered diagnostic: {rendered}"
         );
         assert!(
-            rendered.contains("file:///test.md"),
+            rendered.contains(if cfg!(windows) { "file:///C:/test.md" } else { "file:///test.md" }),
             "file link missing from rendered diagnostic: {rendered}"
         );
     }
@@ -2243,7 +2243,7 @@ mod tests {
 
     fn full_file_source_context() -> SourceContext {
         SourceContext::new(
-            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from(if cfg!(windows) { "C:/test.md" } else { "/test.md" }),
             std::path::PathBuf::from("test.md"),
             "---\ntitle: Test\ncmd: \"$(echo fail)\"\n---\n# Body\n::shell sniff repo packages --bad-flag\n",
         )

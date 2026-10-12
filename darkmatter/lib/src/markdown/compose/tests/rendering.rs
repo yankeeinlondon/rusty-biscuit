@@ -447,7 +447,11 @@ fn test_compose_cleanup_preserves_ten_digit_prose_boundary() {
 }
 
 #[test]
-fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
+fn compose_cleanup_preserves_quoted_marker_looking_indented_code() {
+    use crate::markdown::cleanup::{
+        cleanup_content, cleanup_content_with_indent, reflow_to_width,
+    };
+    use crate::markdown::compose::{ComposeRequest, RequestSnapshot};
     let fixtures = [
         "> - Parent.\n>\n>       - literal code\n>\n> - Later sibling.\n",
         "> 1. Parent.\n>\n>       1. literal code\n>\n> 2. Later sibling.\n",
@@ -455,42 +459,42 @@ fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
         "> > 1. Parent.\n> >\n> >       1. literal code\n> >\n> > 2. Later sibling.\n",
     ];
 
+    // Requests are prepared against a temp dir: the default process directory
+    // sits inside this repository and every preparation walks it for Git state,
+    // which dominated this test's runtime and has nothing to do with cleanup.
+    let dir = tempfile::tempdir().unwrap();
+    let request = |options: ComposeOptions| {
+        ComposeRequest::prepare(options, &RequestSnapshot::new(dir.path())).unwrap()
+    };
+
     for source in fixtures {
         let direct_default = library_cleanup(source, true, None, Indentation::Four, ListItemPadding::Preserve);
         let (default, _) = Markdown::from(source)
-            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[ComposeOperation::Cleanup])))
+            .compose_with(&request(ComposeOptions::new().only(&[ComposeOperation::Cleanup])))
             .unwrap();
         assert_eq!(default.content(), direct_default);
 
         let (configured, _) = Markdown::from(source)
-            .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
+            .compose_with(&request(
+                ComposeOptions::new()
                     .only(&[ComposeOperation::Cleanup])
-                    .with_indentation(Indentation::Two)),
-            )
+                    .with_indentation(Indentation::Two),
+            ))
             .unwrap();
         assert_eq!(
             configured.content(),
             library_cleanup(source, true, None, Indentation::Two, ListItemPadding::Preserve)
         );
 
-        let (fixed, _) = Markdown::from(source)
-            .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
-                    .only(&[ComposeOperation::Cleanup])
-                    .with_fixed_width(24)),
-            )
-            .unwrap();
-        assert_eq!(
-            fixed.content(),
-            library_cleanup(source, true, Some(24), Indentation::Four, ListItemPadding::Preserve)
-        );
+        let fixed_options = || {
+            ComposeOptions::new()
+                .only(&[ComposeOperation::Cleanup])
+                .with_fixed_width(24)
+        };
+        let (fixed, _) = Markdown::from(source).compose_with(&request(fixed_options())).unwrap();
+        assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
         let (fixed_second, _) = Markdown::from(fixed.content())
-            .compose_with(
-                &crate::markdown::compose::test_request(ComposeOptions::new()
-                    .only(&[ComposeOperation::Cleanup])
-                    .with_fixed_width(24)),
-            )
+            .compose_with(&request(fixed_options()))
             .unwrap();
         assert_eq!(fixed_second.content(), fixed.content());
     }

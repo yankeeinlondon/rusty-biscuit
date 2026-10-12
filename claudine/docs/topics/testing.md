@@ -82,7 +82,9 @@ listener.apply_route_env(&mut command);
   `claude`, the route, and the document for one command, and returns its
   arguments. `pane::assert_second_press_during_the_drain_exits_130` runs the
   whole two-press scenario in any `TerminalHarness`. The caller passes the
-  press as a closure, so each tier differs only in how the key arrives:
+  press as a closure, so each tier differs only in how the key arrives. It
+  presses only after the binary creates its `CLAUDINE_TEST_DRAIN_STARTED`
+  file, so the first press always lands in the drain:
 
   ```rust
   assert_second_press_during_the_drain_exits_130(&mut harness, DrainCommand::Sequence, |pane| {
@@ -191,6 +193,7 @@ under a test feature, and a production binary ignores the variable entirely.
 |----------|---------------|--------------|
 | `CLAUDINE_TEST_DESKTOP_NOTIFICATION=stall` | `test-fixtures` | holds every desktop notification open before any host backend |
 | `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT=<path>` | `test-fixtures` | writes the diagnostic selected for a top-level error to `<path>` as JSON |
+| `CLAUDINE_TEST_DRAIN_STARTED=<path>` | `terminal-tests` | creates `<path>` once the exit drain's interrupt ladder is in place, so a press can be aimed at the drain |
 | `CLAUDINE_TEST_TEARDOWN_HOLD=<path>` | `terminal-tests` (Unix) | holds the process-group teardown open until `<path>.release` exists |
 
 `claudine-cli`'s `test-fixtures` feature enables the library's feature of the

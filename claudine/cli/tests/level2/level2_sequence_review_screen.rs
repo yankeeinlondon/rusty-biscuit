@@ -41,9 +41,11 @@ const REDRAW_TIMEOUT: Duration = Duration::from_secs(10);
 /// The geometry the harness spawns tmux panes at, restored after each test.
 const FULL: (u32, u32) = (120, 40);
 
+/// Send one key without waiting for a redraw: the screen reads keys in order,
+/// so a sequence needs no pacing, and each assertion below waits on the frame
+/// it inspects.
 fn press(harness: &mut TmuxHarness, key: &str) {
     harness.send_key(key).expect("send key");
-    harness.settle();
 }
 
 fn pane() -> TmuxHarness {
@@ -81,7 +83,7 @@ fn wait_until(
             "{what} never rendered; plain:\n{}",
             frame.plain
         );
-        harness.settle();
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 

@@ -488,68 +488,84 @@ fn darkmatter_composes(fixture: &CliProcessFixture, file: &str) -> String {
     composed.content().to_string()
 }
 
+const PARTIAL_KID: &str =
+    "KID os=[{{ ctx.os }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n";
+
 /// A property mentioned only in a transcluded file is captured for the run
-/// and renders exactly as Darkmatter renders the same tree, however deep the
-/// file is, however its path is spelled, whatever the parent already names,
-/// and beside a value the include overlays.
-#[test]
-fn a_partial_only_property_renders_as_darkmatter_renders_it() {
-    const KID: &str =
-        "KID os=[{{ ctx.os }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n";
-    for (label, kid, files) in [
-        (
-            "direct partial",
-            KID,
-            vec![("parent.md", "Parent line.\n\n::file ./kid.md\n")],
-        ),
-        (
-            "two levels deep",
-            KID,
-            vec![
-                ("parent.md", "Parent line.\n\n::file ./sub/mid.md\n"),
-                ("sub/mid.md", "Middle line.\n\n::file ../kid.md\n"),
-            ],
-        ),
-        (
-            "interpolated reference",
-            KID,
-            vec![("parent.md", "---\nwhich: kid\n---\nParent line.\n\n::file ./{{ which }}.md\n")],
-        ),
-        // The F5 row where the parent's own mention used to decide the capture.
-        (
-            "parent names one of the kids properties",
-            "KID repo=[{{ ctx.repo }}] os=[{{ ctx.os }}]\n",
-            vec![("parent.md", "Parent repo={{ ctx.repo }}.\n\n::file ./kid.md\n")],
-        ),
-        (
-            "local overlay",
-            "---\nlabel: default\n---\nKID label=[{{ label }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n",
-            vec![("parent.md", "Parent line.\n\n::file ./kid.md set.label=\"local\"\n")],
-        ),
-    ] {
-        let fixture = repo(&format!("ctx-per-run-partial-{}", label.replace(' ', "-")));
-        // `ctx.repo` names the repository after its remote.
-        git(&fixture, &["remote", "add", "origin", "https://example.com/fixture/widget.git"]);
-        doc(&fixture, "kid.md", kid);
-        for (name, content) in &files {
-            doc(&fixture, name, content);
-        }
-
-        let run = run(&fixture, &["compose", "--claude", "--dry-run", "parent.md"]);
-        let expected = darkmatter_composes(&fixture, "parent.md");
-
-        assert_eq!(run.code, Some(0), "{label}: {}", run.output);
-        let claudine = line_with(&run.output, "KID ");
-        assert_eq!(claudine, line_with(&expected, "KID "), "{label}");
-        assert!(!claudine.contains("[]"), "{label}: every value is captured: {claudine}");
-        match label {
-            "local overlay" => assert!(claudine.contains("label=[local]"), "{claudine}"),
-            "parent names one of the kids properties" => {
-                assert!(claudine.contains("repo=[widget]"), "{claudine}")
-            }
-            _ => {}
-        }
+/// and renders exactly as Darkmatter renders the same tree. One test per
+/// shape, so nextest runs them in parallel.
+fn assert_partial_renders_as_darkmatter(label: &str, kid: &str, files: &[(&str, &str)]) {
+    let fixture = repo(&format!("ctx-per-run-partial-{}", label.replace(' ', "-")));
+    // `ctx.repo` names the repository after its remote.
+    git(&fixture, &["remote", "add", "origin", "https://example.com/fixture/widget.git"]);
+    doc(&fixture, "kid.md", kid);
+    for (name, content) in files {
+        doc(&fixture, name, content);
     }
+
+    let run = run(&fixture, &["compose", "--claude", "--dry-run", "parent.md"]);
+    let expected = darkmatter_composes(&fixture, "parent.md");
+
+    assert_eq!(run.code, Some(0), "{label}: {}", run.output);
+    let claudine = line_with(&run.output, "KID ");
+    assert_eq!(claudine, line_with(&expected, "KID "), "{label}");
+    assert!(!claudine.contains("[]"), "{label}: every value is captured: {claudine}");
+    match label {
+        "local overlay" => assert!(claudine.contains("label=[local]"), "{claudine}"),
+        "parent names one of the kids properties" => {
+            assert!(claudine.contains("repo=[widget]"), "{claudine}")
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn a_partial_only_property_renders_as_darkmatter_renders_it_direct() {
+    assert_partial_renders_as_darkmatter(
+        "direct partial",
+        PARTIAL_KID,
+        &[("parent.md", "Parent line.\n\n::file ./kid.md\n")],
+    );
+}
+
+#[test]
+fn a_partial_only_property_renders_as_darkmatter_renders_it_two_levels_deep() {
+    assert_partial_renders_as_darkmatter(
+        "two levels deep",
+        PARTIAL_KID,
+        &[
+            ("parent.md", "Parent line.\n\n::file ./sub/mid.md\n"),
+            ("sub/mid.md", "Middle line.\n\n::file ../kid.md\n"),
+        ],
+    );
+}
+
+#[test]
+fn a_partial_only_property_renders_as_darkmatter_renders_it_interpolated_reference() {
+    assert_partial_renders_as_darkmatter(
+        "interpolated reference",
+        PARTIAL_KID,
+        &[("parent.md", "---\nwhich: kid\n---\nParent line.\n\n::file ./{{ which }}.md\n")],
+    );
+}
+
+/// The F5 row where the parent's own mention used to decide the capture.
+#[test]
+fn a_partial_only_property_renders_as_darkmatter_renders_it_when_parent_names_one() {
+    assert_partial_renders_as_darkmatter(
+        "parent names one of the kids properties",
+        "KID repo=[{{ ctx.repo }}] os=[{{ ctx.os }}]\n",
+        &[("parent.md", "Parent repo={{ ctx.repo }}.\n\n::file ./kid.md\n")],
+    );
+}
+
+#[test]
+fn a_partial_only_property_renders_as_darkmatter_renders_it_with_local_overlay() {
+    assert_partial_renders_as_darkmatter(
+        "local overlay",
+        "---\nlabel: default\n---\nKID label=[{{ label }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n",
+        &[("parent.md", "Parent line.\n\n::file ./kid.md set.label=\"local\"\n")],
+    );
 }
 
 /// A partial and its parent are one run: both read one observation.
