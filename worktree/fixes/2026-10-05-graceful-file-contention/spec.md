@@ -29,74 +29,64 @@ depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: false
 message_to_agent: |-
-  Phases 1-4 are closed. The plan was renumbered to 12 phases on
-  2026-10-12 (old 4 -> 4-5, old 5 -> 6-9, old 6/7/8 -> 10/11/12); the log's
-  Phase 1-2 text uses the old numbers, and its "Author rulings and
-  renumbering" section maps them. Every author decision is made: see
-  "## Decisions" below. Do not set human_review for them again.
+  Phases 1-6 are closed. The plan was renumbered to 12 phases on
+  2026-10-12; the log's Phase 1-2 text uses the old numbers, and its "Author
+  rulings and renumbering" section maps them. Every author decision is made:
+  see "## Decisions" below. Do not set human_review for them again.
 
-  Read implementation-log.md "## Phase 1" (spike findings), "## Phase 2"
-  (decisions 1-12), "## Phase 3", and "## Phase 4" only as far as the phase
-  you are running needs.
+  Read implementation-log.md "## Phase 1" (S2 for watchers) and "## Phase 6"
+  (observer decisions), and .claude/skills/worktree/observation.md.
 
-  Phase 2 built the library contracts in worktree/lib/src/remove/: outcome.rs
-  (RemovalOutcome, OperationReport) and recovery/ (OperationId, record.rs,
-  journal.rs, lock.rs, store.rs, private storage.rs). Use them; do not add a
-  second store or lock. Facts that bear on later phases:
-  - RecoveryStore::begin is the "record intent before mutation" step. It
-    refuses while any record is pending for the same worktree record, or while
-    any record is unreadable. Phase 10 turns those refusals (StoreError::
-    Pending, StoreError::Record) into user guidance.
-  - The store flushes with storage::flush. On macOS that is plain fsync, not
-    std's F_FULLFSYNC (~25 ms a call). Do not call File::sync_all or sync_data
-    in per-batch code. The journal flushes twice per batch.
-  - Windows refuses to rename a directory with an open file anywhere inside
-    it. Close handles inside the checkout before the quarantine move.
-  - Phase 9 persists the deletion inventory with the journal. The journal
-    format (version 1) has header/intent/results lines only. Add an inventory
-    line and bump JOURNAL_VERSION, extend the reader's ordering rules (where
-    the inventory may appear), and add the new line's fields to
-    journal_robustness_matrix in recovery/store/tests.rs.
-  - Not built yet: reopening an existing journal to continue deleting after a
-    crash, and the exit-code mapping (both Phase 10;
-    OperationReport::branch_failed covers "checkout removed, branch failed").
-  - Every record field is required and nothing is nullable. A new field needs
-    matrix cells in record_robustness_matrix.
+  Library pieces in worktree/lib/src/remove/ (use them; do not add a second
+  store, lock, rename, move, or observer type):
+  - outcome.rs, recovery/ (OperationId, record, journal, lock, store,
+    storage). storage::flush is plain fsync on macOS; never sync_all in
+    per-batch code. Phase 9 adds an inventory line to the journal (bump
+    JOURNAL_VERSION, extend reader ordering, add journal_robustness_matrix
+    cells in recovery/store/tests.rs).
+  - usage.rs: check_usage(&SniffUsage, ..) with OwnedHandles.
+  - quarantine/: rename_no_replace, identity, quarantine_path, plan_move,
+    move_to_quarantine(base, &plan, activity_observed).
+  - observation/ (Phase 6): Observation::start(Targets::new(original,
+    quarantine, admin)?, ObserverOptions) -> drain() -> Drain { events, lost }
+    with Scope::{Tree(rel), Original(rel), Quarantine(rel), Admin(name)};
+    moved_to_quarantine() right after the rename; release_admin() before the
+    Git unregister; register_handles(&mut OwnedHandles) before check_usage.
+    Lost coverage is sticky. ObservationError (Unsupported, Setup) is exit 4
+    before mutation (Phase 10 maps it).
 
-  Rules from S3 (Phases 4-5): never use `git worktree move` (it replaces an
-  existing empty directory). Do a native no-replacement rename to a
-  same-depth sibling, rewrite only the admin gitdir in the record's existing
-  link format (a relative gitdir is relative to the admin directory itself),
-  and leave the .git file unchanged. The final unregister deletes content
-  with .git last, rmdirs the quarantine, and then reuses missing.rs
-  remove_missing_record (a plain `git worktree remove` of the absent path);
-  never pass --force.
+  For Phases 7 (FSEvents) and 8 (ReadDirectoryChangesW):
+  - add a `Backend` impl in observation/<adapter>.rs and dispatch to it in
+    `native_backend` (mod.rs); report raw events as RawEvent { root, path
+    relative to that root, .. } and let Sink/EventQueue classify. A
+    delivery thread pushes into `EventQueue` (bounded, never waits,
+    classifies before counting); drain moves it into the sink with
+    `take_into`. Path-based adapters re-map in `Backend::moved_to_quarantine`.
+  - widen `cfg!(target_os = "linux")` in observation/tests.rs `native()` so
+    the shared native contract tests run on your OS; they currently assert
+    Unsupported there.
+  - `Sink::push` and `Sink::targets` carry
+    `cfg_attr(not(target_os = "linux"), expect(dead_code))`; once your
+    adapter calls push, the lint fails until you widen or remove it.
+  - Linux drains need no marker (inotify queues inside the causing syscall);
+    macOS uses FSEventStreamFlushSync; Windows still needs its marker.
+  - Linux clippy cannot run from the Mac (aws-lc-sys needs a Linux C cross
+    compiler) and cross-check has no lint mode; Windows cross-target clippy
+    works (`cargo clippy -p worktree --lib --tests --target
+    x86_64-pc-windows-gnu -- -D warnings`).
 
-  Phase 3 left two hooks for later phases:
-  - Phase 6 (watchers): Sniff does not drop wt's own evidence, except Windows
-    open handles, which the kernel drops. Every watcher descriptor wt opens
-    must be registered in `remove::usage::OwnedHandles` (kind + descriptor)
-    before `check_usage` runs, or wt refuses its own removal.
-  - Phase 10 (lifecycle): call `check_usage(&SniffUsage, ..)` as the decisive
-    query and map a refusal with
-    `worktree_cli::commands::remove::usage::usage_refusal` (exit 3, including
-    `UsageRefusal::Unverified`). Then delete the `#[allow(dead_code)]` and its
-    comment on `pub mod usage` in `cli/src/commands/remove/mod.rs`, and the
-    early/inner `check_no_processes` + Windows probe per R8.
+  Rules from S3: never use `git worktree move` or `git worktree repair`; the
+  final unregister deletes content with .git last, rmdirs the quarantine, and
+  reuses missing.rs remove_missing_record; never pass --force.
 
-  Phase 4 built `remove::quarantine::rename` (Phase 5 builds on it):
-  - `rename_no_replace(from, to)` is the quarantine move. It returns
-    `RenameError { kind: RenameFailure, source }`; map exits from `kind`
-    alone: `Sharing` and `Unsupported` -> exit 4 before mutation;
-    `Collision`, `CrossDevice`, `Permission`, `Other` -> operational
-    errors, never labeled as process usage. A missing source is `Other`
-    with `io::ErrorKind::NotFound` in `source`.
-  - `identity(path)` gives the no-follow `FileIdentity` in Sniff's encoding;
-    compare it with the record's `checkout_identity` after the move.
-  - `remove/quarantine/mod.rs` exists with only `pub mod rename;`. Put the
-    naming and association code beside it.
-  - Windows `std::path::absolute` is applied to the destination inside the
-    rename; a relative destination is fine but pass the same-depth sibling.
+  Phase 3 hook still open for Phase 10: map a usage refusal with
+  worktree_cli::commands::remove::usage::usage_refusal (exit 3), then delete
+  the #[allow(dead_code)] and its comment on `pub mod usage` in
+  cli/src/commands/remove/mod.rs, and the early/inner check_no_processes +
+  Windows probe per R8.
+
+  Test trap: on macOS a TestRepo path is /var/... while Git's listing (and
+  so plan.original) is /private/var/...; compare with same_location.
 ---
 
 # Graceful removal under filesystem contention

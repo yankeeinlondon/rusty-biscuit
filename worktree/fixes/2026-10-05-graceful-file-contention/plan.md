@@ -1,7 +1,7 @@
 ---
 total_phases: 12
 created: 2026-10-11
-phase: 4
+phase: 6
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -66,6 +66,37 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/worktree/remove.md
+source_files_during_phase_5:
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/naming.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/quarantine/association/tests.rs
+docs_updated_during_phase_5:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_6:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+docs_updated_during_phase_6:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/observation.md
 packages:
   - worktree
   - worktree-cli
@@ -504,12 +535,12 @@ injected error). `just test` and `just lint` pass.
 
 ### Wave 6
 
-- [ ] **Quarantine naming** - Collision-resistant hidden sibling selection
+- [x] **Quarantine naming** - Collision-resistant hidden sibling selection
       (`.wt-remove-<slug>-<token>` beside the target, same depth;
       `FILE_ATTRIBUTE_HIDDEN` on Windows per R7); same filesystem by
       construction; never a global temp dir; never copy-and-delete; the
       destination is created only by the Phase 4 move itself.
-- [ ] **Association update and rollback** - Under R1/R6: re-list and validate
+- [x] **Association update and rollback** - Under R1/R6: re-list and validate
       lock status and admin/checkout links immediately before moving; perform
       the move; rewrite exactly the admin `gitdir` in the record's existing
       format (absolute, or relative to the admin directory itself), verified
@@ -536,7 +567,7 @@ Fixes the observer contract that Phases 7-9 build on.
 
 ### Wave 7
 
-- [ ] **Observer type** - `remove/observation/mod.rs`: one internal observer
+- [x] **Observer type** - `remove/observation/mod.rs`: one internal observer
       type per R4 with: watch the original's parent (recreation), the
       checkout/quarantine (descendant activity), and the admin files behind
       the target's identity and approved index (`index`, `index.lock`,
@@ -548,10 +579,10 @@ Fixes the observer contract that Phases 7-9 build on.
       typed signal, never a silent downgrade; handle registration with Phase
       3's exclusion registry; no thread left after the session ends.
       Unestablishable observation is exit 4 before mutation.
-- [ ] **Injected observer** - A test observer driven by the test (events,
+- [x] **Injected observer** - A test observer driven by the test (events,
       overflow, lost watch, delayed delivery) so Phase 9's engine and the
       policy tests never depend on host timing.
-- [ ] **Linux adapter** - inotify via the `inotify` 0.11 crate (ISC): parent
+- [x] **Linux adapter** - inotify via the `inotify` 0.11 crate (ISC): parent
       non-recursive, checkout recursive, admin directory; watch descriptors
       follow inodes across the move (relabel, no gap); `IN_Q_OVERFLOW` and an
       unexpected `IN_IGNORED` are lost coverage; drain is a marker per root

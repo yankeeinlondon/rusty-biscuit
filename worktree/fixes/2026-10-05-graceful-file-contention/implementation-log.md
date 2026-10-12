@@ -65,6 +65,37 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/worktree/remove.md
+source_files_during_phase_5:
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/naming.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/quarantine/association/tests.rs
+docs_updated_during_phase_5:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/remove.md
+source_files_during_phase_6:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+docs_updated_during_phase_6:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/observation.md
 packages:
   - worktree
   - worktree-cli
@@ -838,3 +869,285 @@ Not run: `just test-l2` (no terminal code changed); a Linux-target clippy
 CI lints on Linux).
 
 Phase 4 is complete; ready for review.
+
+## Phase 5
+
+Started and finished 2026-10-12. Phase 5 adds the quarantine's name and the
+move that keeps Git's registration on the moved checkout, with verified
+rollback. Nothing calls it yet (Phase 10 does), so `wt remove`'s behavior is
+unchanged.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/quarantine/naming.rs` | `quarantine_path(original, &OperationId)` → `<parent>/.wt-remove-<slug>-<token>`: the slug is the checkout name reduced to ASCII letters, digits, `-`, `_` (at most 40 bytes, `worktree` when nothing is left); the token is the first 16 hex characters of the operation ID. `hide(path)` (Windows) sets `FILE_ATTRIBUTE_HIDDEN`, keeping other attributes |
+| `worktree/lib/src/remove/quarantine/association.rs` | `plan_move(base, &WorktreeEntry, &OperationId) -> Result<MovePlan, MoveRefusal>` and `move_to_quarantine(base, &MovePlan, activity_observed) -> Result<(), MoveError>`. `MoveRefusal` (`NotARealDirectory`, `Locked { reason }`, `Submodules { entry }`, `Unsupported`, `Association`, `Changed`, `Uninspectable`); `MoveError` (`Refused`, `Rename`, `RolledBack { cause }`, `Stranded { cause, reason, state: MoveState }`) with `class()` → `MoveErrorClass` and `nothing_changed()`. `pub(crate) move_with(.., &Faults)` is the fault seam |
+| `worktree/lib/src/remove/quarantine/association/tests.rs` | Real repositories, real renames, Git reading the result back |
+| `admin_entry.rs`, `recovery/mod.rs`, `recovery/storage.rs` | Visibility only: `path_from_bytes`, `storage`, `storage::flush`, and `storage::sync_dir` become `pub(crate)` for reuse |
+
+The checks `plan_move` runs, and `move_to_quarantine` runs again immediately
+before the rename: the original is a real directory with the planned
+identity; a fresh `git worktree list` shows the same worktree (branch, or
+HEAD when detached) exactly once, not prunable; the same admin entry points at
+it; the admin `gitdir` bytes are unchanged; no `locked` entry; the `.git` file
+is a regular file linking to the admin directory in a form that survives a
+same-depth move; and no submodule (admin `modules`, or a `160000` gitlink in
+the worktree's index).
+
+After the rename: the quarantine's identity must equal the plan's; the admin
+`gitdir` is replaced (temp file, original permissions, flush, rename, directory
+flush) with the recorded bytes in which only the checkout's name changed; then
+Git's record must name `<quarantine>/.git`, the `.git` file must still resolve
+to the admin directory, and a fresh listing must show the worktree, not
+prunable, at the quarantine and nothing at the original.
+
+### Decisions and departures
+
+1. **The record rewrite is a byte substitution of the last directory name**
+   (`rewrite_back_reference`), not a path recomputation. It keeps everything
+   Git wrote: absolute or relative (relative to the admin directory), `/` on
+   Windows, the trailing newline. A record whose last two components are not
+   `<name>/.git` refuses as `Unsupported` (for example a Windows 8.3 short
+   name, or a case difference).
+2. **Forward-link rule.** A relative `.git` link is accepted only as one or
+   more leading `..` steps followed by names. Lexically normalizing both
+   sides was considered and rejected: `../x/../../repo/...` normalizes equal
+   from the sibling, yet resolves through the checkout's own name, which no
+   longer exists after the move. The test pins this case.
+3. **Rollback is skipped when the quarantine's identity changed**, in
+   addition to the plan's two conditions (original absent, no activity).
+   Moving back whatever now sits at the quarantine would put someone else's
+   directory at the original path. "No destructive work" holds by
+   construction: deletion has not begun when the move runs. Rollback renames
+   back first and restores `gitdir` second, so a failure in between leaves the
+   content at its user-visible path; either way the stranded state is
+   observed and reported (`MoveState`: checkout location by identity,
+   `original_recreated`, `RegistrationState`).
+4. **Exit classes.** `Refused` (exit 3) for every `MoveRefusal`, including a
+   lock and a submodule. `BlockedByEnvironment` (exit 4) for rename `Sharing`
+   and `Unsupported`. Everything else is `Failed`: `Collision`, `CrossDevice`,
+   `Permission`, `Other` (nothing moved, never labeled usage), and a
+   rolled-back or stranded move (a move happened, matching decision 7's
+   "exit 1 means a move happened"). Phase 10 maps the class to
+   `WorktreeError`. Today a locked worktree fails inside `git worktree
+   remove` with exit 1; under the lifecycle it will exit 3 before mutation
+   (the docs' planned section says so).
+5. **`activity_observed: &dyn Fn() -> bool`** is the rollback's activity
+   input until Phase 6's observer exists; Phase 10 passes the observer's
+   "anything unexpected so far" check.
+6. **Hidden attribute (Windows) is best-effort** and set last, after the
+   association is verified, so a rollback never needs to undo it. A failure
+   to set it is ignored: the dot prefix and the record already identify the
+   quarantine.
+7. **Not done here:** writing the recovery record between plan and move
+   (Phase 10 owns `RecoveryStore::begin`), and the `record.quarantine` field
+   is filled from `plan.quarantine`. The quarantine name satisfies
+   `RecoveryRecord::validate` (prefix and sibling) by construction.
+
+### Requirement-to-test mapping
+
+All tests are L1 (no tier marker) in the `worktree` library binary, module
+`remove::quarantine`; the slowest takes 0.3 s on macOS and 1.7 s on native
+Windows. The input robustness matrix does not apply: the only files read are
+Git's own `gitdir`/`.git`/`locked`, read strictly and compared byte for byte,
+not a configuration this code parses into fields.
+
+| Requirement (plan Phase 5) | Test |
+| --- | --- |
+| Hidden sibling `.wt-remove-<slug>-<token>`, same parent, prefix the record accepts | `naming::tests::the_quarantine_is_a_hidden_sibling_named_for_the_operation` |
+| Collision-resistant (token per operation) | `naming::tests::different_operations_get_different_quarantines` |
+| Slug variants: case, punctuation, non-ASCII, empty, over-long, trailing dash after truncation | `naming::tests::the_slug_is_ascii_and_bounded` |
+| Non-UTF-8 name still yields a valid sibling (Unix) | `naming::tests::a_name_that_is_not_utf8_still_yields_a_valid_sibling` |
+| No parent or name → no quarantine | `naming::tests::a_path_without_a_parent_or_name_has_no_quarantine` |
+| Absolute format: Git reads the quarantine under its retained registration (listing, branch, `status`), `prune --dry-run` leaves it, `.git` unchanged, only the name changed in `gitdir`, unrelated and prunable records untouched, no `move`/`repair`/`prune`/`unlock`/`--force` call; hidden on Windows | `association::tests::an_absolute_record_moves_and_git_reads_the_quarantine` |
+| Relative format kept (Git ≥ 2.48; skips on 2.47) | `association::tests::a_relative_record_keeps_its_format` |
+| Locked worktree refuses at planning (with reason) and when locked after planning (no reason); lock kept; nothing changed | `association::tests::a_locked_worktree_refuses_at_planning_and_at_the_move` |
+| Submodule refusal, both of Git's signals; nothing changed | `association::tests::a_checkout_with_a_submodule_refuses_before_anything_moves` |
+| Main checkout and a `.git` link that would break refuse; a leading-`..` relative link moves | `association::tests::unsupported_shapes_refuse_before_anything_moves` |
+| Re-validation immediately before moving: switched branch, replaced directory, link at the path | `association::tests::state_that_changed_since_planning_refuses_the_move` |
+| Rename collision never replaces (acceptance item 5); exit class `Failed`; nothing changed | `association::tests::a_collision_at_the_quarantine_is_never_replaced` |
+| Failed association write → verified rollback, every Git byte restored | `association::tests::a_failed_record_rewrite_is_rolled_back` |
+| Written but unverifiable association → rollback restores the original `gitdir` | `association::tests::an_unverified_record_rewrite_is_rolled_back_and_restored` |
+| Activity → no rollback; quarantine preserved; actual state reported | `association::tests::observed_activity_leaves_the_quarantine_in_place` |
+| Recreated original is never overwritten or merged into | `association::tests::a_recreated_original_is_never_overwritten` |
+| Replaced quarantine is not moved back | `association::tests::a_replaced_quarantine_is_not_moved_back` |
+| Sharing/Unsupported → exit 4 class; collision, cross-device, permission, other → `Failed`; refusals → `Refused` | `association::tests::rename_failures_map_to_their_exit_classes` |
+| Windows open file → `Sharing`, exit 4 class, nothing changed | `association::tests::an_open_file_in_the_checkout_blocks_the_move_as_in_use` (Windows only) |
+| The rewrite changes only the name (absolute, relative, CRLF, no newline, mismatches; Windows backslashes) | `association::tests::the_record_rewrite_changes_only_the_checkout_name` |
+
+Mutation checks on macOS, each restored afterwards: skipping the `gitdir`
+restore during rollback failed
+`an_unverified_record_rewrite_is_rolled_back_and_restored`; removing the lock
+check failed `a_locked_worktree_refuses_at_planning_and_at_the_move`.
+
+Unsupported rename (drvfs) as exit 4 before mutation is covered by the class
+mapping; Phase 4's classification tests cover the `EINVAL` → `Unsupported`
+step, since no host here produces it on demand.
+
+### Verification
+
+Gates in `worktree/` on macOS (Git 2.56), 2026-10-12, after the final change:
+
+- `just test`: 1253 passed, 14 skipped (the area's existing skips), 0 failed.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+
+Cross-OS (`just cross-check worktree --os <os> quarantine`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local, Git 2.56) | 28 passed; the relative-format test ran |
+| Linux (`build-linux`, Git 2.47.3) | 29 passed; the relative-format test skips (Git writes absolute links only) |
+| native Windows (`build-win-native`) | 27 passed, including the open-file test and the hidden attribute |
+| WSL2 | not run: the same Linux code and Git association logic; drvfs is a classification case covered above |
+
+Not run: `just test-l2` (no terminal code changed).
+
+Phase 5 is complete; ready for review.
+
+## Phase 6
+
+Started and finished 2026-10-12. Phase 6 adds the activity observer's
+contract, an injected observer for tests, and the Linux inotify adapter.
+Nothing calls it yet (Phase 10 does), so `wt remove`'s behavior is unchanged.
+On macOS and Windows `Observation::start` returns
+`ObservationError::Unsupported` until Phases 7 and 8 add their adapters.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/observation/mod.rs` | `Targets` (original, quarantine sibling, admin dir); `Observation` (`start`, `drain`, `moved_to_quarantine`, `release_admin`, `register_handles`, `tree_location`); `Drain { events, lost }`; `ObservedEvent { scope, kind, directory, received }`; `Scope` (`Tree`, `Original`, `Quarantine`, `Admin`); `EventKind`; `CoverageLost` (`Overflow`, `QueueFull`, `WatchLost { root }`, `ReadFailed`); `ObservationError` (`Unsupported`, `Setup`); `ADMIN_FILES` and `is_admin_file`; the crate-internal `Backend` trait, `Sink`, and the bounded `EventQueue` for adapters with a delivery thread |
+| `worktree/lib/src/remove/observation/inotify.rs` | The Linux adapter |
+| `worktree/lib/src/remove/observation/injected.rs` | `Observation::injected` and `Injector` (test only) |
+| `worktree/lib/src/remove/observation/tests.rs` | Shared contract tests: injected, and native wherever an adapter exists |
+| `worktree/lib/src/remove/observation/inotify/tests.rs` | Linux-only adapter tests |
+| `worktree/lib/src/remove/usage.rs` | Test-only `OwnedHandles::is_registered` |
+| `worktree/lib/Cargo.toml`, `Cargo.lock` | `inotify` 0.11.5 (ISC), Linux only, `default-features = false` (the default `stream` feature pulls in tokio) |
+
+### Decisions and departures
+
+1. **The inotify drain writes no marker.** The plan said "drain is a marker
+   per root read until `EAGAIN`". inotify queues an event inside the system
+   call that causes it (fsnotify runs synchronously in the VFS operation), so
+   reading until `EAGAIN` already includes every change whose call returned
+   before the drain. A marker file would put the operation's own files into
+   the checkout and into Git's admin directory. The barrier is pinned by
+   `native_drain_is_a_barrier_for_every_change_kind` (50 rounds of
+   write-then-drain with no sleep, green on build-linux and WSL2). FSEvents
+   (Phase 7) uses `FSEventStreamFlushSync`. Windows (Phase 8) still needs its
+   marker.
+2. **No delivery thread on Linux.** The kernel queue (`max_queued_events`)
+   is the bound between drains, and `IN_Q_OVERFLOW` is `Overflow`. The
+   session's own bound (`ObserverOptions::queue_capacity`, default 16,384)
+   applies per drain. `EventQueue` is the bounded, never-waiting queue for
+   threaded adapters. The injected observer already feeds it, so its contract
+   is tested before Phase 7 uses it.
+3. **Out-of-scope events never count against the bound.**
+   `Targets::classify` runs before an event is queued. The first version
+   counted a sibling's event before dropping it, and the injected
+   queue-bound test caught it. FSEvents watches the parent recursively, so
+   busy sibling worktrees would otherwise fill the queue.
+4. **Scopes, not absolute paths.** A tree event is `Scope::Tree(relative)`
+   before and after the move, because inotify watch descriptors follow the
+   inode. `Original`/`Quarantine` are the parent's entries with those names.
+   `moved_to_quarantine` changes `tree_location()` and lets a path-based
+   adapter re-map paths; on Linux it needs nothing else, with no gap.
+5. **Watch-end rules.** A tree directory's `IN_IGNORED` is expected only
+   after its own `IN_DELETE_SELF`. The parent's and admin directory's
+   `IN_DELETE_SELF`/`IN_MOVE_SELF`/`IN_UNMOUNT`, and any unexplained
+   `IN_IGNORED`, are `WatchLost`. A tree directory's `IN_DELETE_SELF` and
+   `IN_MOVE_SELF` produce no event, because the directory holding it already
+   reports the entry. A moved tree subdirectory keeps its old label; the move
+   is already new activity. `release_admin` removes the admin watch before
+   Git's unregister deletes the admin directory, so that deletion is not
+   loss. Windows' "close the admin handle before the final unregister"
+   (Phase 8) uses the same call.
+6. **Setup.** Each tree directory is watched before it is listed, so a child
+   created during the walk is either listed or reported by its parent. A child
+   gone or replaced between listing and watch (`ENOENT`/`ENOTDIR`) is skipped
+   for that reason. A watch descriptor returned twice (a bind mount, or an
+   admin directory inside the tree) fails setup, because paths could not be
+   told apart. Every setup error (`EMFILE`, `ENOSPC` at `max_user_watches`, a
+   link at the tree root refused by `IN_DONT_FOLLOW | IN_ONLYDIR`, a missing
+   admin directory) is `ObservationError::Setup`. Phase 10 maps it to exit 4.
+7. **Kinds.** `IN_MODIFY` and `IN_CLOSE_WRITE` are both `Modified`
+   (`CLOSE_WRITE` also covers `mmap` writes, which raise no `IN_MODIFY`).
+   `IN_EXCL_UNLINK` is not set.
+8. **R12 registration.** `register_handles` registers
+   `(WatchRegistration, <inotify fd>)`. The parent and admin watches are
+   outside the queried tree, so Sniff never reports them. FSEvents needs no
+   entry (fseventsd holds the watch).
+9. **`expect(dead_code)` off Linux** on `Sink::push` and `Sink::targets`:
+   only native adapters push raw events. `expect` (not `allow`) fails the lint
+   once Phase 7 uses them, which forces removing the attribute.
+
+### Requirement-to-test mapping
+
+All tests are L1 (no tier marker) in the `worktree` library binary. Each runs
+in under 0.12 s. The input robustness matrix does not apply: nothing here
+reads a file format or configuration.
+
+| Requirement (plan Phase 6) | Test |
+| --- | --- |
+| Targets are distinct named siblings | `observation::tests::targets_must_be_distinct_named_siblings` |
+| Admin files: `index`, `index.lock`, `sharedindex.*`, `HEAD`, `gitdir`, `locked`, and nothing else | `observation::tests::admin_files_are_the_identity_and_index_files` |
+| Classification: tree, original entry and below, quarantine entry, admin files; siblings, the parent itself, and other admin files dropped; a drain hands events over once | `observation::tests::injected_events_are_classified_and_unrelated_ones_dropped` |
+| Delayed delivery (injected) | `observation::tests::delayed_events_arrive_only_once_delivered` |
+| Overflow and lost watch (each root) are typed, sticky, keep earlier events, and the first loss wins | `observation::tests::coverage_loss_is_typed_and_stays_lost` |
+| Bounded queue: a full queue is loss, keeps what fit, siblings don't count; exactly the capacity is not loss | `observation::tests::a_full_queue_is_coverage_loss_keeping_what_fit`, `exactly_the_capacity_is_not_a_loss` |
+| Released admin: no events, no loss | `observation::tests::a_released_admin_directory_is_neither_reported_nor_lost` |
+| Relabel, handle registration, session end on drop | `observation::tests::the_move_is_relabeled_and_handles_registered_and_released` |
+| Drain is a barrier for create, modify, metadata, rename, directory create, remove (real files, no sleep) | `observation::tests::native_drain_is_a_barrier_for_every_change_kind` |
+| Coverage follows the real no-replacement move without a gap; recreation of the original is seen | `observation::tests::native_coverage_follows_the_move_and_sees_recreation` |
+| Real siblings ignored; real admin writes (`index.lock` → `index` rename, `sharedindex`, `HEAD`, `gitdir`, `locked`) reported; `ORIG_HEAD` and `logs/` not | `observation::tests::native_siblings_are_ignored_and_admin_files_reported` |
+| Intentional children-first deletion of the quarantine and released admin removal are not loss; the parent watch still works | `observation::tests::native_intentional_deletion_is_not_coverage_loss` |
+| Deleted admin dir and moved parent are `WatchLost`, sticky | `observation::tests::native_losing_a_watched_directory_is_coverage_loss` |
+| Real full queue | `observation::tests::native_a_full_queue_is_coverage_loss` |
+| Missing admin and a link at the tree root are setup errors; nothing changed | `observation::tests::native_setup_failure_is_an_error_before_anything_changes` |
+| No adapter → `Unsupported` (macOS, Windows) | the same `native_*` tests through `native()` |
+| `IN_Q_OVERFLOW` (wd -1) is `Overflow` | `inotify::tests::a_kernel_overflow_is_coverage_loss` |
+| A real kernel queue overflow between drains | `inotify::tests::the_kernel_queue_overflowing_between_drains_is_coverage_loss` (runs where `max_queued_events` ≤ 32,768: ran on WSL2, skips with a message on build-linux) |
+| Unexpected `IN_IGNORED` (each root) is loss; after `IN_DELETE_SELF` or release it is not; parent/admin `DELETE_SELF` is loss | `inotify::tests::an_ignored_watch_is_loss_unless_its_directory_was_deleted_or_released` |
+| `IN_UNMOUNT`, moved parent/admin are loss; a moved tree subdirectory is not | `inotify::tests::an_unmount_or_a_moved_parent_or_admin_directory_is_loss` |
+| Mask → kind mapping, `IN_ISDIR`, events on the watched directory itself | `inotify::tests::event_masks_map_to_kinds_under_the_watch_path` |
+| `EMFILE` at the instance limit is a setup failure | `inotify::tests::the_instance_limit_is_a_setup_failure` (lowers `RLIMIT_NOFILE` in its own nextest process and restores it) |
+| Registration with Phase 3's exclusion: unregistered watches refuse through a real Sniff query, registered ones clear (2 excluded), none remain after drop; no thread started | `inotify::tests::sniff_sees_the_watches_until_the_session_ends` |
+
+Mutation check on build-linux, restored afterwards: no longer recording a tree
+directory's `IN_DELETE_SELF` failed
+`native_intentional_deletion_is_not_coverage_loss` and
+`an_ignored_watch_is_loss_unless_its_directory_was_deleted_or_released`.
+
+"Unestablishable observation is exit 4 before mutation" is the
+`ObservationError` contract here. The exit mapping lands with Phase 10's
+lifecycle, as for Phase 5's `MoveErrorClass`.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1269 passed, 14 skipped (the area's existing skips), 0 failed.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+- Linux clippy was not run: cross-target clippy for Linux cannot build
+  `aws-lc-sys` here (no Linux C cross-compiler), and `cross-check` has no lint
+  mode. The Linux code compiled on build-linux and WSL2 without warnings, and it
+  was reviewed by hand against default clippy lints (one `cmp_owned` in a test
+  was fixed). CI's Linux lint job is the gate.
+
+Cross-OS (`just cross-check worktree --os <os> [observation]`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | 17 passed: 16 observation tests (native tests assert `Unsupported`) plus one unrelated name match |
+| Linux (`build-linux`) | `observation`: 24 passed (23 plus the same unrelated match) (the kernel-overflow test skips: `max_queued_events` 8,388,608); full `worktree` library: 679 passed |
+| WSL2 (`build-win`) | `observation`: 24 passed, including the real kernel overflow |
+| native Windows (`build-win-native`) | `observation`: 17 passed, as on macOS |
+
+Not run: `just test-l2` (no terminal code changed).
+
+Phase 6 is complete; ready for review.
