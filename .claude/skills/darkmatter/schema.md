@@ -8,6 +8,7 @@ and DMLS schema behavior.
 - [Document kinds](#document-kinds)
 - [Composition and validation](#composition-and-validation)
 - [Imports and dictionaries](#imports-and-dictionaries)
+- [Named union references](#named-union-references)
 - [Special types](#special-types)
 - [Suggestions and DMLS](#suggestions-and-dmls)
 - [Testing](#testing)
@@ -168,6 +169,58 @@ excluded keys without executing anything.
 - `min-keys` and `max-keys` constrain dictionaries.
 - Examples are documentation artifacts validated at schema-load time and
   emitted through `x-darkmatter-example`.
+
+## Named union references
+
+User docs: `darkmatter/docs/topics/schemas/definition.md` (Named Union
+References; Choosing an Arm: Reporting versus Changing Data).
+
+- A reference to a union-typed named type (bare, `@this`, `@file`, all
+  identical) accepts: `U` (inlined, unchanged), `U(required|generated|eager)`,
+  `U -> text`, `U[]`, and `U[](min; max; unique; required; generated; eager;
+  default; example)`. `apply_import_postfix` hands a union base to
+  `apply_union_postfix` (`resolve.rs`).
+- Everything else is `SchemaError::UnionReference { name, rejection, site,
+  definition }` with `SchemaUnionRejection::{Constraint { keyword,
+  array_level }, ArrayArm { arm }, ScalarDefault { arm, value }}`. Rejected:
+  value constraints without `[]` (`U(max(10))`), non-list constraints after
+  `[]`, `[]` when a flattened arm's outer value is an array (looks through
+  imports and nested postfixed unions; arrays inside object arms are fine),
+  and any arm `default` under `[]`. `U(c)[]` is a grammar error. Match on the
+  fields, never the message. DMLS projects it as
+  `dm.schema.invalid_type_definition` with the definition as related info.
+- Scope: arm constraints stay on items; post-`[]` constraints go on the
+  container (merged via `merge_constraints`, so contradictions are
+  `ConstraintConflict`). Arm `required`/`generated` hoist to the property.
+  `eager` on the reference is property timing and never makes a lazy `file`
+  arm eager; on `U[]`, an arm's `eager` times items only (`phase.rs`).
+- Defaults: `default([...])` is a string in the grammar, so every arm default
+  under `[]` fails as `ScalarDefault`; do not document list defaults as
+  working. No default is ever inserted.
+- Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
+  is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
+  (resolver-only; never parsed) and `atom.is_array` for `U[]`. Helpers:
+  `PropertyAtom::union_arms()`, `PropertyDef::alternatives()` (`None` for a
+  list of a union); the crate-private `is_required`/`is_generated`/
+  `has_default` read through arms. There is no anonymous `(A | B)[]` syntax and no second encoding.
+- Lowering (`convert.rs`): `type: array` + `items.anyOf` of the flattened
+  arms; items get no null arm; the optional `anyOf: [null, …]` wrapper (and a
+  use-site description) goes on the property only. A nested postfixed arm
+  stays one nested `anyOf`.
+- Consumers must not read `properties` off an `anyOf` wrapper. Use
+  `schemas::flattened_alternatives(def)` (`Alternative { atom, arm,
+  is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
+  value)` to judge a present value (so `null` matches only a null-accepting
+  arm). Editors use `completion::{for_list_item, for_property_value,
+  alternatives_for_def}`; never add a DMLS-local union interpretation.
+- Safety rule per consumer: validation accepts any arm; literal-tag narrowing
+  (and root-union closest arm) only shapes reports; coercion commits only
+  when exactly one candidate validates; eager-file rewriting needs exactly one
+  validating arm containing an eager `file`; cleanup never repairs inside a
+  union.
+- Known gaps: item problems carry the top-level key's line/column; Claudine's
+  `classify.rs` treats an arm's `eager` under `U[]` as property timing while
+  darkmatter `phase.rs` does not.
 
 ## Special types
 

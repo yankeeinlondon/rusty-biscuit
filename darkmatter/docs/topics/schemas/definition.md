@@ -727,7 +727,15 @@ $schema:
 | `max(n)`          | Maximum number of items.                     | `maxItems`       |
 | `unique`          | All items must be distinct.                  | `uniqueItems`    |
 | `required`        | Array property is required (not items).      | parent `required` |
-| `default([...])`  | Default array.                               | `default`        |
+| `default(value)`  | Default for the array property.              | `default`        |
+
+The `default(...)` argument is read as a scalar, like every other constraint
+argument, so `default([a])` stores the string `"[a]"`, not a one-item list. A
+list-valued default cannot be written in the type-expression grammar today.
+
+To make a list whose items may each take one of several shapes, name the
+union and reference it with `[]`: `steps: step[](min(1))`, where `step` is a
+union-typed named type. See [Named Union References](#named-union-references).
 
 ## Inline Object Literals
 
@@ -885,7 +893,7 @@ Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? ('@' fileref)?`. A ba
 - `Name -> description` — a use-site description replaces the inherited one; omitting it keeps the inherited description.
 - `@this` (or no `@` at all) — the current schema (self-target), including inline top-level documents.
 
-`[]` must come before the constraint list: `Name(c)[]` is a grammar error. Adding `[]` to a named type that is already an array is an error. A postfix of any kind, including a description, on a reference to a **union-typed** named type is rejected; a plain reference to it, or its use as a union arm, is supported. Postfixes on union-typed references are **planned**.
+`[]` must come before the constraint list: `Name(c)[]` is a grammar error. Adding `[]` to a named type that is already an array is an error. A reference to a **union-typed** named type accepts `[]` with list constraints, the `required`, `generated`, and `eager` markers, and a description, in all three forms (bare, `@this`, and `Name@file`); any other constraint on it is an error. See [Named Union References](#named-union-references).
 
 The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
@@ -1138,6 +1146,191 @@ $schema:
     width: [literal(auto), "number(min(1))"]   # the keyword `auto` or a positive number
 ```
 
+### Named Union References
+
+A union written once as a [named type](#cross-file-named-type-imports-namefile)
+can be reused, marked required, described, or turned into a list at each place
+that references it. This is how you declare a list whose items may each take a
+different shape, such as "a non-empty list whose entries are each a rule
+string or a rule mapping".
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    step:
+      - "string -> A shell command"
+      - "{ run: string(required), cwd: string }"
+```
+
+```yaml
+$schema:
+    setup: step@./types.yaml                              # the union, optional
+    main:  "step(required)@./types.yaml -> The main step" # the union, required
+    steps: "step[](min(1); unique)@./types.yaml"          # a non-empty list of distinct steps
+```
+
+The bare (`step[]`), `@this` (`step[]@this`), and cross-file
+(`step[]@./types.yaml`) forms of a reference behave identically.
+
+#### What a reference may add
+
+| Use site | Meaning |
+|---|---|
+| `U` | The union, inlined: its arms become the property's arms. |
+| `U(required)`, `U(generated)`, `U(eager)`, or a combination | The union, with the marker applied to the property as a whole, exactly as on a [property-level union](#property-level-unions). `eager` does not imply `required`. |
+| `U -> text` | The union, described as a whole. Each arm keeps its own description. |
+| `U[]` | A list whose every item is one of `U`'s arms. Each item is judged on its own and may match a different arm. |
+| `U[](min(n); max(n); unique; required; generated; eager)` | That list, with the constraints applied to the list itself. `default(...)` and `example(...)` are accepted after `[]` as on [any other array](#array-constraints). |
+
+Anything else is rejected with `SchemaError::UnionReference`, rather than being
+copied into every arm. The error names the property, the union, what was
+rejected (a `SchemaUnionRejection`), and where the union is defined; DMLS
+reports the same error at the reference.
+
+| Rejected use site | Why | `SchemaUnionRejection` |
+|---|---|---|
+| `U(max(10))`, `U(pattern(^a))`, `U(unique)`, `U(default(x))` | A value constraint without `[]` would have to apply to every arm. Put it on the arms instead. | `Constraint { keyword, array_level: false }` |
+| `U[](pattern(^a))`, `U[](integer)` | After `[]`, only list constraints apply. | `Constraint { keyword, array_level: true }` |
+| `U[]` where an arm is already a list, such as `[string[], number]` | Checked after imported and nested union arms are expanded, so an array arm behind an import is caught too. | `ArrayArm { arm }` |
+| `U[]` where an arm carries a `default(...)` | The arm's default cannot become the list's default; see [Defaults](#defaults-on-named-union-references). | `ScalarDefault { arm, value }` |
+| `U(c)[]` | `[]` must come before the constraint list. | `SchemaError::Grammar` |
+
+```text
+p: constraint `max` cannot apply to a union-typed type (named type `choice`)
+```
+
+A list *inside* an object arm is fine: `[string, "{ tags: string[] }"]` may be
+referenced as `U[]`, because no arm's outer value is a list.
+
+Only a **named** union takes these postfixes. An anonymous union cannot be
+followed by `[]`, and an `(A | B)[]` spelling is not supported.
+
+#### Item versus container scope
+
+An arm's constraints describe one item; constraints after `[]` describe the
+list. They never merge, even when they share a keyword:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    choice: ["string(required; min(3))", number]
+```
+
+```yaml
+$schema:
+    list: "choice[](max(2))@./types.yaml"
+```
+
+- `min(3)` stays on the string arm: each string item needs at least three
+  characters. It does not become the list's minimum item count.
+- `max(2)` follows `[]`, so the list holds at most two items.
+- `required` on the arm is a presence marker, so it hoists to `list`, which is
+  required.
+
+#### Presence and timing
+
+- `required` and `generated` declared on any arm hoist to the property that
+  holds the reference, whether that property is the union (`U`, `U(eager)`) or
+  a list of it (`U[]`), just as they do for a property-level union. Markers
+  written at the use site add to them.
+- `generated` keeps its [usual meaning](#universal-constraints): it adds the
+  `x-darkmatter-generated` annotation and removes the property from the static
+  `required` list. It supplies no value.
+- `eager` written at the use site (`U(eager)` or `U[](eager)`) is property
+  timing: a supplied value is validated at launch. On `U`, an arm's `eager`
+  also times the property, as on a property-level union. On `U[]`, an arm's
+  `eager` times only the items, as with `file(eager)[]`.
+- `eager` on the reference never turns a lazy `file` arm into `file(eager)`.
+  An arm already declared `file(eager)` keeps its existence check either way.
+- Fields of an object arm keep their own `required`, `generated`, and `eager`.
+
+#### Defaults on named union references
+
+- Without `[]`, an arm's `default(...)` hoists to the property as on any
+  property-level union.
+- With `[]`, an arm's default could only become the list's default. A scalar
+  default cannot, so the declaration fails with `ScalarDefault`, naming the
+  arm and the value. The default is neither dropped nor wrapped in a one-item
+  list. Because the grammar reads every `default(...)` argument as a scalar
+  (see [Array Constraints](#array-constraints)), any arm default fails this
+  way.
+- A `default(...)` written after `[]` at the use site lowers exactly as on any
+  other array.
+- Darkmatter never inserts a default value into a document.
+
+#### Lowering
+
+A list of a union lowers to an array whose `items` is the union's `anyOf`.
+Nested unions flatten into one `anyOf`, arm order and arm descriptions are
+kept, and items get no `null` arm. An optional property wraps the whole array
+in the usual `anyOf: [{ type: null }, …]`, so a missing or `null` property is
+allowed while a `null` item is not. A use-site description sits on that
+wrapper. The `content_policy` property of the
+[example below](#example-a-content-policy-list) lowers to:
+
+```json
+{
+  "anyOf": [
+    { "type": "null" },
+    {
+      "type": "array",
+      "minItems": 1,
+      "items": { "anyOf": [ { "type": "string", "pattern": "^Evergreen$" },
+                            …,
+                            { "type": "object", "properties": { "rule": { "anyOf": [ … ] }, "action": { … } },
+                              "required": ["rule", "action"], "additionalProperties": false } ] }
+    }
+  ]
+}
+```
+
+`U(required)` lowers to the union's `anyOf` with no `null` arm and the
+property in the parent's `required` list. A nested arm that carries its own
+postfix, such as `[pair(required), boolean]`, stays one nested `anyOf` arm
+instead of flattening.
+
+In the typed model, a bare `U` stays a `PropertyDef::Union`. A postfixed
+reference becomes one `PropertyAtom` whose `ty` is `TypeExpr::Union(arms)`,
+with `is_array` set for `U[]`. Use `schemas::flattened_alternatives` to list
+the leaf alternatives of either form.
+
+#### Example: a content policy list
+
+A content-policy style schema whose policies may be short strings or
+`{ rule, action }` mappings:
+
+```yaml
+# content-policy.yaml
+kind: schema
+types:
+    short_form:
+      - string(pattern(^Evergreen$))
+      - string(pattern(^TimeSensitive$))
+      # … one pattern arm each for ValidFor(…), ValidUntil(…), and FileChanged(…)
+    long_form:
+        rule: short_form(required)
+        action: enum(refresh, archive, remove; required)
+    policy: [short_form, long_form]
+```
+
+```yaml
+$schema:
+    content_policy: "policy[](min(1))@./content-policy.yaml"
+```
+
+| `content_policy` value | Result | Why |
+|---|---|---|
+| `[ValidFor(3mo), {rule: ValidUntil(2027-01-01), action: archive}]` | valid | Each item matches an arm; items may match different arms. |
+| missing, or `null` | valid | The property is optional. |
+| `[null]` | invalid | Items have no `null` arm. |
+| `ValidFor(3mo)` | invalid | A single string is not a list. |
+| `[]` | invalid | `min(1)` |
+| `[Duration(3mo)]` | invalid | No arm matches. |
+| `[{action: archive}]` or `[{rule: null, action: archive}]` | invalid | `rule` is required in `long_form`. |
+| `[{rule: ValidFor(3mo), action: delete}]` | invalid | `delete` is not an `action` member. |
+
 ### Discriminated Unions
 
 When the arms of a union are inline objects that each carry a `literal`-typed **discriminant** key, the union becomes a genuine tagged union. Both `md schema validate` diagnostics and DMLS editor behavior narrow to the single matched arm.
@@ -1162,6 +1355,41 @@ An arm is selected **only when** all of the following hold:
 - exactly **one** arm's typed literal equals the instance value.
 
 Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep byte-identical `anyOf` diagnostics.
+
+### Choosing an Arm: Reporting versus Changing Data
+
+Several parts of Darkmatter ask "which arm does this value belong to?" at a
+union location: a property union, an item of a `U[]` list, or a field nested
+inside either. How much evidence each needs depends on what it does with the
+answer. Explaining a problem may lean on a heuristic such as the closest arm;
+changing stored data may not.
+
+```mermaid
+flowchart TD
+    V[Value at a union location] --> Q{What is the answer used for?}
+    Q -->|validate| VA[Valid when at least one arm accepts it]
+    Q -->|report a problem| RP{Does a literal tag select exactly one arm?}
+    RP -->|yes| RN["Report that arm's problems"]
+    RP -->|no| RU[Report the ordinary union problems]
+    Q -->|coerce or rewrite| TC{Does exactly one arm qualify?}
+    TC -->|yes| TA[Change the value through that arm]
+    TC -->|no| TU[Leave the value unchanged]
+    Q -->|clean up| CL["Never repair inside a union, report only"]
+```
+
+| Consumer | Picks an arm when | Otherwise |
+|---|---|---|
+| Validation | It never needs to: the value is valid when any arm accepts it. | — |
+| Problem reporting | A literal tag selects one arm ([Discriminated Unions](#discriminated-unions)). A root union also reports its closest arm. | The ordinary union report. |
+| Coercion (compose) | Exactly one arm's coerced candidate validates ([Inline Object and Union Coercion](#inline-object-and-union-coercion)). | The value is left unchanged. |
+| Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](#files)). | The value is left unchanged. |
+| Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
+| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
+
+The same rules apply to every item of a `U[]` list, judged on its own, so
+neighboring items can select different arms. Closest-arm scoring only ever
+explains a failure: it never decides which arm coerces, rewrites, or cleans a
+value.
 
 ### Root-Level Unions
 
@@ -1623,10 +1851,13 @@ md schema about
 SimplifiedSchema Language Reference
   …
   ## Schema Shapes
-    - Inline mapping
+    - Single object
     - Root-level union
-    - File reference
     - Property-level union
+    - Inline object literal
+    - Nested mapping object
+    - Array of a named union
+    - Marked union reference
   ## Type Vocabulary
     - string, date, datetime, time, number, numberlike, …
   ## Constraint Vocabulary
@@ -1835,6 +2066,7 @@ All failure modes are variants of `SchemaError`:
 | `ImportCycle`           | A named-type reference (bare or `Name@file`) references itself directly or transitively (or exceeds the import-depth cap). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
 | `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, or `Default`). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
+| `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
 | `Io`                    | Filesystem read failure with the offending path.                                                          |
@@ -1937,7 +2169,8 @@ unless the same baseline is supplied explicitly.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
-- **No arrays of ordinary denoted-value unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays). Use an external JSON Schema when an ordinary property needs an array of union-valued items.
+- **No arrays of anonymous unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form; there is no `(A | B)[]` spelling. Name the union and reference it as `U[]` instead (see [Named Union References](#named-union-references)). This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays).
+- **No line and column for a problem inside a list item.** A problem such as `/content_policy/1/rule` carries the full path, but its `line` / `column` are those of the top-level property's key.
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
 - **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.

@@ -155,11 +155,12 @@ on stderr even with `--json`), `2` on usage. `--key`, `--default-policy`, and
 `content-policy/schemas/content-policy.yaml` declares `short_form`,
 `long_form`, and `policy` for DMLS; the library exports its text as
 `content_policy::EDITOR_SCHEMA` for callers to compile into their own schema.
-`policy[]` (a list of the union type)
-cannot be loaded: Darkmatter rejects `[]` on a union-typed named type
-("cannot apply `[]`/constraints to the union-typed named type"), so its base
-schema does not type `content_policy` yet, and `rule` is not `(required)`. Its tests live
-in `darkmatter/lib/tests/l1/content_policy_editor_schema.rs`.
+Darkmatter accepts a list of the union (`policy[](min(1))@./content-policy.yaml`)
+and `short_form(required)`, but the shipped schema has not adopted them: its
+base schema does not type `content_policy` yet, and `rule` is not
+`(required)`. Its tests live in
+`darkmatter/lib/tests/l1/content_policy_editor_schema.rs`; the list form is
+exercised against a modified copy in `schemas_union_postfix.rs`.
 
 ## Recipes (run in `content-policy/`)
 
