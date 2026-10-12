@@ -423,7 +423,9 @@ fn standalone_outcome(
 
 fn is_named_type_error(error: &SchemaError) -> bool {
     match error {
-        SchemaError::UnknownNamedType { .. } | SchemaError::ConstraintConflict { .. } => true,
+        SchemaError::UnknownNamedType { .. }
+        | SchemaError::ConstraintConflict { .. }
+        | SchemaError::UnionReference { .. } => true,
         SchemaError::ReferencedSchema { source, .. } => is_named_type_error(source),
         SchemaError::Aggregate { errors } => errors.iter().any(is_named_type_error),
         _ => false,

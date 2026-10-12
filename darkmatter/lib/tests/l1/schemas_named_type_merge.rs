@@ -755,16 +755,11 @@ fn a_cycle_through_bare_and_explicit_references_reports_the_chain() {
 // ── AC10: retained restrictions and unchanged output ──────────────────────
 
 #[test]
-fn union_postfix_and_already_array_suffix_remain_rejected() {
+fn already_array_suffix_remains_rejected() {
     let dir = TempDir::new().expect("tempdir");
-    for schema in [
-        "choice: [string, number]\np: choice(required)\n",
-        "choice: [string, number]\np: choice -> described\n",
-        "list: string[]\np: list[]\n",
-    ] {
-        let err = resolve_inline(dir.path(), schema).expect_err(schema);
-        assert!(matches!(err, SchemaError::Convert { .. }), "{schema}: {err:?}");
-    }
+    let schema = "list: string[]\np: list[]\n";
+    let err = resolve_inline(dir.path(), schema).expect_err(schema);
+    assert!(matches!(err, SchemaError::Convert { .. }), "{schema}: {err:?}");
 }
 
 #[test]
