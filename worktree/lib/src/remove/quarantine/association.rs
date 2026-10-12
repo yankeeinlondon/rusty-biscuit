@@ -251,7 +251,46 @@ pub(crate) fn move_with(
     Ok(())
 }
 
+/// Checks that the checkout an interrupted removal moved is still the
+/// worktree Git keeps at `quarantine`: a real directory with `identity`,
+/// listed there exactly once and not prunable, the record `admin_dir` naming
+/// it and its `.git` file naming that record, unlocked, and without
+/// submodules. Returns the listed entry.
+///
+/// ## Errors
+///
+/// A [`MoveRefusal`] for the first condition that does not hold.
+pub fn verify_quarantined(base: &Path, quarantine: &Path, identity: &FileIdentity, admin_dir: &Path) -> Result<WorktreeEntry, MoveRefusal> {
+    if real_directory_identity(quarantine)? != *identity {
+        return Err(MoveRefusal::Changed("a different directory is now at the quarantine".into()));
+    }
+    let admin = AdminEntry { dir: admin_dir.to_path_buf() };
+    match read_back_reference(admin_dir) {
+        Ok(named) if same_location(&named, &quarantine.join(".git")) => {}
+        Ok(named) => return Err(MoveRefusal::Changed(format!("Git's record names {}", named.display()))),
+        Err(error) => return Err(MoveRefusal::Uninspectable(error.to_string())),
+    }
+    check_forward_link(quarantine, admin_dir)?;
+    let entries = worktree_list(base).map_err(MoveRefusal::Changed)?;
+    let found: Vec<&WorktreeEntry> = entries.iter().filter(|listed| same_location(&listed.path, quarantine)).collect();
+    let [entry] = found.as_slice() else {
+        return Err(MoveRefusal::Changed(format!("Git's worktree list shows the quarantine {} times", found.len())));
+    };
+    if entry.prunable.is_some() {
+        return Err(MoveRefusal::Changed("Git marks the quarantine prunable".into()));
+    }
+    check_unlocked(&admin)?;
+    check_no_submodules(base, &admin)?;
+    Ok((*entry).clone())
+}
+
 impl MovePlan {
+    /// Whether the admin `gitdir` holds exactly the record this plan
+    /// rewrites it to, naming the quarantine.
+    pub fn back_reference_rewritten(&self) -> bool {
+        fs::read(self.admin.dir.join("gitdir")).is_ok_and(|bytes| bytes == self.rewritten)
+    }
+
     /// Every condition the move relies on, read fresh.
     fn check(&self, base: &Path) -> Result<(), MoveRefusal> {
         if real_directory_identity(&self.original)? != self.identity {

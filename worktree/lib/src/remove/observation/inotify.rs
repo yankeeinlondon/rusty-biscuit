@@ -71,7 +71,9 @@ fn content_mask() -> WatchMask {
 }
 
 impl Inotify {
-    pub fn start(targets: &Targets) -> Result<Self, ObservationError> {
+    /// Watches the tree at `tree`: the original path, or the quarantine
+    /// when a resumed removal starts after the move.
+    pub fn start(targets: &Targets, tree: &Path) -> Result<Self, ObservationError> {
         let inotify = inotify::Inotify::init().map_err(setup(targets.original()))?;
         let mut adapter = Self {
             inotify,
@@ -82,7 +84,7 @@ impl Inotify {
         };
         adapter.add(targets.parent(), Root::Parent, PathBuf::new(), parent_mask()).map_err(setup(targets.parent()))?;
         adapter.add(targets.admin(), Root::Admin, PathBuf::new(), content_mask()).map_err(setup(targets.admin()))?;
-        adapter.add_tree(targets.original())?;
+        adapter.add_tree(tree)?;
         Ok(adapter)
     }
 

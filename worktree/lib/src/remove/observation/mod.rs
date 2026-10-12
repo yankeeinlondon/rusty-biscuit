@@ -32,12 +32,14 @@
 //! verdicts: deciding which are the operation's own deletions is the deletion
 //! engine's job.
 
+pub mod deletion;
 #[cfg(target_os = "macos")]
 mod fsevents;
 #[cfg(test)]
 pub(crate) mod injected;
 #[cfg(target_os = "linux")]
 mod inotify;
+pub mod inventory;
 #[cfg(windows)]
 mod read_directory_changes;
 
@@ -290,8 +292,17 @@ impl Observation {
     /// Starts watching with this platform's native adapter. The tree must
     /// still be at the original path.
     pub fn start(targets: Targets, options: ObserverOptions) -> Result<Self, ObservationError> {
-        let backend = native_backend(&targets, options)?;
+        let backend = native_backend(&targets, options, false)?;
         Ok(Self::with_backend(targets, options, backend))
+    }
+
+    /// Starts watching a tree that an earlier, interrupted attempt already
+    /// moved to the quarantine, which must be a real directory.
+    pub fn start_at_quarantine(targets: Targets, options: ObserverOptions) -> Result<Self, ObservationError> {
+        let backend = native_backend(&targets, options, true)?;
+        let mut observation = Self::with_backend(targets, options, backend);
+        observation.moved = true;
+        Ok(observation)
     }
 
     pub(crate) fn with_backend(targets: Targets, options: ObserverOptions, backend: Box<dyn Backend>) -> Self {
@@ -343,23 +354,25 @@ impl Observation {
     }
 }
 
+/// `moved`: the tree is already at the quarantine.
 #[cfg(target_os = "linux")]
-fn native_backend(targets: &Targets, _options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
-    Ok(Box::new(inotify::Inotify::start(targets)?))
+fn native_backend(targets: &Targets, _options: ObserverOptions, moved: bool) -> Result<Box<dyn Backend>, ObservationError> {
+    let tree = if moved { targets.quarantine() } else { targets.original() };
+    Ok(Box::new(inotify::Inotify::start(targets, tree)?))
 }
 
 #[cfg(target_os = "macos")]
-fn native_backend(targets: &Targets, options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
-    Ok(Box::new(fsevents::FsEvents::start(targets, options)?))
+fn native_backend(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Box<dyn Backend>, ObservationError> {
+    Ok(Box::new(fsevents::FsEvents::start(targets, options, moved)?))
 }
 
 #[cfg(windows)]
-fn native_backend(targets: &Targets, options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
-    Ok(Box::new(read_directory_changes::ReadDirectoryChanges::start(targets, options)?))
+fn native_backend(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Box<dyn Backend>, ObservationError> {
+    Ok(Box::new(read_directory_changes::ReadDirectoryChanges::start(targets, options, moved)?))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn native_backend(_targets: &Targets, _options: ObserverOptions) -> Result<Box<dyn Backend>, ObservationError> {
+fn native_backend(_targets: &Targets, _options: ObserverOptions, _moved: bool) -> Result<Box<dyn Backend>, ObservationError> {
     Err(ObservationError::Unsupported { reason: "no native adapter exists for this platform yet" })
 }
 

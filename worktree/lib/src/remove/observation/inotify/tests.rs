@@ -48,7 +48,7 @@ fn feed_id(adapter: &mut Inotify, targets: &Targets, id: i32, mask: EventMask, n
 #[test]
 fn a_kernel_overflow_is_coverage_loss() {
     let fixture = new_fixture();
-    let mut adapter = Inotify::start(&fixture.targets).unwrap();
+    let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     // The kernel reports an overflow with watch descriptor -1.
     let drain = feed_id(&mut adapter, &fixture.targets, -1, EventMask::Q_OVERFLOW, None);
     assert_eq!(drain.lost, Some(CoverageLost::Overflow));
@@ -58,14 +58,14 @@ fn a_kernel_overflow_is_coverage_loss() {
 fn an_ignored_watch_is_loss_unless_its_directory_was_deleted_or_released() {
     for root in [Root::Parent, Root::Tree, Root::Admin] {
         let fixture = new_fixture();
-        let mut adapter = Inotify::start(&fixture.targets).unwrap();
+        let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
         let drain = feed(&mut adapter, &fixture.targets, root, "", EventMask::IGNORED, None);
         assert_eq!(drain.lost, Some(CoverageLost::WatchLost { root }), "{root:?}: unexplained IN_IGNORED");
     }
 
     // A tree directory's own deletion explains its IN_IGNORED.
     let fixture = new_fixture();
-    let mut adapter = Inotify::start(&fixture.targets).unwrap();
+    let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     let deleted = feed(&mut adapter, &fixture.targets, Root::Tree, "sub", EventMask::DELETE_SELF, None);
     let ignored = feed(&mut adapter, &fixture.targets, Root::Tree, "sub", EventMask::IGNORED, None);
     assert_eq!((deleted.lost, deleted.events.len()), (None, 0), "the parent directory reports the deletion");
@@ -74,14 +74,14 @@ fn an_ignored_watch_is_loss_unless_its_directory_was_deleted_or_released() {
     // The parent and the admin directory must outlive the session.
     for root in [Root::Parent, Root::Admin] {
         let fixture = new_fixture();
-        let mut adapter = Inotify::start(&fixture.targets).unwrap();
+        let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
         let drain = feed(&mut adapter, &fixture.targets, root, "", EventMask::DELETE_SELF, None);
         assert_eq!(drain.lost, Some(CoverageLost::WatchLost { root }), "{root:?}");
     }
 
     // A released admin directory reports nothing, and its end is expected.
     let fixture = new_fixture();
-    let mut adapter = Inotify::start(&fixture.targets).unwrap();
+    let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     let id = adapter.watches.iter().find(|(_, watch)| watch.root == Root::Admin).map(|(id, _)| *id).unwrap();
     adapter.release_admin();
     for mask in [EventMask::MODIFY, EventMask::DELETE_SELF, EventMask::IGNORED] {
@@ -99,14 +99,14 @@ fn an_unmount_or_a_moved_parent_or_admin_directory_is_loss() {
         (Root::Admin, EventMask::MOVE_SELF),
     ] {
         let fixture = new_fixture();
-        let mut adapter = Inotify::start(&fixture.targets).unwrap();
+        let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
         let drain = feed(&mut adapter, &fixture.targets, root, "", mask, None);
         assert_eq!(drain.lost, Some(CoverageLost::WatchLost { root }), "{root:?} {mask:?}");
     }
 
     // A moved tree directory is reported by the directory it left.
     let fixture = new_fixture();
-    let mut adapter = Inotify::start(&fixture.targets).unwrap();
+    let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     let drain = feed(&mut adapter, &fixture.targets, Root::Tree, "sub", EventMask::MOVE_SELF, None);
     assert_eq!((drain.lost, drain.events.len()), (None, 0));
 }
@@ -114,7 +114,7 @@ fn an_unmount_or_a_moved_parent_or_admin_directory_is_loss() {
 #[test]
 fn event_masks_map_to_kinds_under_the_watch_path() {
     let fixture = new_fixture();
-    let mut adapter = Inotify::start(&fixture.targets).unwrap();
+    let mut adapter = Inotify::start(&fixture.targets, fixture.targets.original()).unwrap();
     for (mask, kind) in [
         (EventMask::CREATE, EventKind::Created),
         (EventMask::DELETE, EventKind::Removed),

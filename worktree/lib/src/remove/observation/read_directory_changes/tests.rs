@@ -33,7 +33,7 @@ fn new_fixture() -> Fixture {
 }
 
 fn start(fixture: &Fixture) -> ReadDirectoryChanges {
-    ReadDirectoryChanges::start(&fixture.targets, ObserverOptions::default()).unwrap()
+    ReadDirectoryChanges::start(&fixture.targets, ObserverOptions::default(), false).unwrap()
 }
 
 fn drain(adapter: &mut ReadDirectoryChanges, targets: &Targets) -> Drain {
@@ -150,7 +150,7 @@ fn markers_are_never_reported_and_leave_nothing_behind() {
 #[test]
 fn a_system_buffer_overflow_is_coverage_loss() {
     let fixture = new_fixture();
-    let mut adapter = ReadDirectoryChanges::start_with_buffer(&fixture.targets, ObserverOptions::default(), 4096).unwrap();
+    let mut adapter = ReadDirectoryChanges::start_with_buffer(&fixture.targets, ObserverOptions::default(), 4096, false).unwrap();
     let gate = adapter.shared.gate.lock().unwrap();
     for index in 0..500 {
         fs::write(fixture.checkout.join(format!("burst-file-{index:04}.txt")), b"x").unwrap();
@@ -238,20 +238,20 @@ fn sniff_sees_nothing_of_the_session() {
 fn a_link_or_a_missing_directory_is_a_setup_failure() {
     let fixture = new_fixture();
     let missing = Targets::new(&fixture.checkout, &fixture.quarantine, &fixture.parent.join("no-admin")).unwrap();
-    let error = ReadDirectoryChanges::start(&missing, ObserverOptions::default()).err().expect("no admin directory");
+    let error = ReadDirectoryChanges::start(&missing, ObserverOptions::default(), false).err().expect("no admin directory");
     assert!(matches!(&error, ObservationError::Setup { path, .. } if path.ends_with("no-admin")), "{error:?}");
 
     let file = fixture.parent.join("file");
     fs::write(&file, b"x").unwrap();
     let not_a_directory = Targets::new(&file, &fixture.quarantine, &fixture.admin).unwrap();
-    let error = ReadDirectoryChanges::start(&not_a_directory, ObserverOptions::default()).err().expect("a file");
+    let error = ReadDirectoryChanges::start(&not_a_directory, ObserverOptions::default(), false).err().expect("a file");
     assert!(matches!(&error, ObservationError::Setup { path, .. } if path == &file), "{error:?}");
 
     let link = fixture.parent.join("link");
     match std::os::windows::fs::symlink_dir(&fixture.checkout, &link) {
         Ok(()) => {
             let through_link = Targets::new(&link, &fixture.quarantine, &fixture.admin).unwrap();
-            let error = ReadDirectoryChanges::start(&through_link, ObserverOptions::default()).err().expect("a link");
+            let error = ReadDirectoryChanges::start(&through_link, ObserverOptions::default(), false).err().expect("a link");
             assert!(matches!(&error, ObservationError::Setup { path, .. } if path == &link), "{error:?}");
         }
         Err(error) => eprintln!("creating a directory link failed ({error}); the link case was not exercised"),
@@ -295,7 +295,7 @@ fn on_refs_a_directory_removed_with_posix_semantics_is_not_reported() {
     let admin = root.path().join("admin");
     fs::create_dir(&admin).unwrap();
     let targets = Targets::new(&checkout, &checkout.with_file_name(".q"), &admin).unwrap();
-    let mut adapter = ReadDirectoryChanges::start(&targets, ObserverOptions::default()).unwrap();
+    let mut adapter = ReadDirectoryChanges::start(&targets, ObserverOptions::default(), false).unwrap();
     let removed = |drain: &Drain, path: &str| drain.events.iter().any(|event| event.scope == Scope::Tree(path.into()) && event.kind == EventKind::Removed);
 
     fs::remove_dir(checkout.join("plain")).unwrap();

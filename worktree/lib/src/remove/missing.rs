@@ -118,6 +118,40 @@ pub fn inspect_missing(base: &Path, entry: &WorktreeEntry) -> Result<MissingChec
     Ok(MissingCheckout { admin, head, staged, index_digest, entries_digest })
 }
 
+/// The approved state of a worktree's index, taken before its checkout is
+/// moved, so the final unregister can refuse a staged write that consent
+/// never covered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexBinding {
+    /// The commit the index was approved against.
+    pub head: String,
+    /// See [`MissingCheckout::index_digest`].
+    pub index_digest: [u8; 32],
+    /// See [`MissingCheckout::entries_digest`].
+    pub entries_digest: [u8; 32],
+}
+
+impl IndexBinding {
+    /// Whether `inspected` still has exactly this index and HEAD.
+    pub fn matches(&self, inspected: &MissingCheckout) -> bool {
+        self.head == inspected.head && self.index_digest == inspected.index_digest && self.entries_digest == inspected.entries_digest
+    }
+}
+
+/// Binds the index of `admin` (bytes, and Git's reading of every entry) and
+/// `head`, the commit the checkout's state was approved at.
+///
+/// ## Errors
+///
+/// [`MissingRefusal::IndexAbsent`] or [`MissingRefusal::IndexUninspectable`]
+/// when the index cannot be read.
+pub fn bind_index(base: &Path, admin: &AdminEntry, head: String) -> Result<IndexBinding, MissingRefusal> {
+    let index = admin.index();
+    let index_digest = biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?);
+    let entries_digest = entries_digest(base, &index)?;
+    Ok(IndexBinding { head, index_digest, entries_digest })
+}
+
 /// The bytes of the surviving `index`, which must be a regular file.
 fn index_bytes(index: &Path) -> Result<Vec<u8>, MissingRefusal> {
     let uninspectable = |reason: String| MissingRefusal::IndexUninspectable { path: index.to_path_buf(), reason };

@@ -6,7 +6,8 @@
 //! | File | Written | Kept after completion |
 //! | --- | --- | --- |
 //! | `record.json` ([`record`]) | before any mutation; rewritten as phases finish | yes, marked completed |
-//! | `journal.jsonl` ([`journal`]) | intent before each deletion batch, result after | no |
+//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | no |
+//! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, the journal so far is kept under the next free `<n>` | no |
 //! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes | yes |
 //!
 //! The store lives in the common Git directory, outside both checkout paths

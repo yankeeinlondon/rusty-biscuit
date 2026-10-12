@@ -34,7 +34,7 @@ fn new_fixture() -> Fixture {
 }
 
 fn resolve(fixture: &Fixture) -> Paths {
-    Paths::resolve(&fixture.targets, &fixture.markers).unwrap()
+    Paths::resolve(&fixture.targets, &fixture.markers, false).unwrap()
 }
 
 /// An adapter's shared state, as the callback sees it, without a stream.
@@ -273,7 +273,7 @@ fn a_burst_is_delivered_completely_or_reported_as_lost() {
 #[test]
 fn the_run_loop_thread_ends_with_the_session_even_with_a_full_queue() {
     let fixture = new_fixture();
-    let adapter = FsEvents::start(&fixture.targets, ObserverOptions { queue_capacity: 1 }).unwrap();
+    let adapter = FsEvents::start(&fixture.targets, ObserverOptions { queue_capacity: 1 }, false).unwrap();
     let alive = Arc::downgrade(&adapter.thread_alive);
     for index in 0..50 {
         fs::write(fixture.checkout.join(format!("f{index}")), b"x").unwrap();
@@ -292,7 +292,7 @@ fn a_setup_failure_names_the_path_and_starts_nothing() {
     let missing = Targets::new(&fixture.checkout.with_file_name("missing"), &fixture.quarantine, &fixture.admin).unwrap();
     for (name, targets) in [("a file", file), ("a missing checkout", missing)] {
         let expected = targets.original().to_path_buf();
-        match FsEvents::start(&targets, ObserverOptions::default()) {
+        match FsEvents::start(&targets, ObserverOptions::default(), false) {
             Err(ObservationError::Setup { path, .. }) => assert_eq!(path, expected, "{name}"),
             Err(other) => panic!("{name}: {other:?}"),
             Ok(_) => panic!("{name}: started"),

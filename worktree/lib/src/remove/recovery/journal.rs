@@ -3,11 +3,15 @@
 //! became of them.
 //!
 //! ```text
-//! {"header":{"journal_version":1,"operation_id":"…"}}
+//! {"header":{"journal_version":2,"operation_id":"…"}}
+//! {"inventory":{"root":{…},"entries":[{"path":{"display":"target/a.o"},"identity":{…},"shape":{"file":{…}}}]}}
 //! {"intent":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"kind":"file"}]}}
 //! {"results":{"batch":1,"entries":[{"path":{"display":"target/a.o"},"state":"deleted"}]}}
 //! ```
 //!
+//! The second line is the operation-start [`DeletionInventory`]: every entry
+//! the removal is approved to delete. It is written with the header, before
+//! the move, and a batch may only plan entries it lists, with the same kind.
 //! Paths are relative to the quarantine and use Sniff's lossless
 //! [`NativeString`] form. A batch holds at most [`MAX_BATCH_ENTRIES`]
 //! entries of one directory. Its intent is flushed before any entry is
@@ -21,23 +25,26 @@
 
 use std::collections::HashSet;
 use std::fs::File;
+use std::sync::Arc;
 use std::io::{self, Write};
-use std::path::{Component, Path};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sniff::filesystem::query::NativeString;
 
 use super::OperationId;
+use crate::remove::observation::inventory::{DeletionInventory, Shape, is_plain_relative};
 use crate::remove::outcome::{EntryCounts, JournalSummary};
 
 /// The only `journal_version` this build reads or writes.
-pub const JOURNAL_VERSION: u32 = 1;
+pub const JOURNAL_VERSION: u32 = 2;
 
 /// The most entries one deletion batch may plan. A batch also never spans
 /// two directories; S2 found 256-event bursts arrive intact on FSEvents.
 pub const MAX_BATCH_ENTRIES: usize = 256;
 
-/// The journal's size limit. Reaching it stops deletion; an intent is
+/// The journal's size limit for deletion batches; the header and inventory
+/// lines do not count against it. Reaching it stops deletion; an intent is
 /// refused while there is still room for the results it would need, so a
 /// confirmed deletion is never lost to the limit.
 pub const DEFAULT_JOURNAL_LIMIT: u64 = 64 * 1024 * 1024;
@@ -49,6 +56,17 @@ pub enum EntryKind {
     Directory,
     /// A symlink or junction; removing it never touches its target.
     Link,
+}
+
+impl EntryKind {
+    /// The kind of an inventory entry with `shape`.
+    pub fn of(shape: &Shape) -> Self {
+        match shape {
+            Shape::File { .. } => Self::File,
+            Shape::Directory { .. } => Self::Directory,
+            Shape::Link { .. } => Self::Link,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +99,7 @@ struct EntryResult {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Line {
     Header { journal_version: u32, operation_id: OperationId },
+    Inventory(DeletionInventory),
     Intent { batch: u64, entries: Vec<PlannedEntry> },
     Results { batch: u64, entries: Vec<EntryResult> },
 }
@@ -110,6 +129,7 @@ pub struct Batch {
 /// A journal as read back, before the filesystem is consulted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalLog {
+    pub inventory: DeletionInventory,
     pub batches: Vec<Batch>,
     /// An unterminated final line was dropped.
     pub torn_tail: bool,
@@ -143,7 +163,6 @@ pub fn parse(bytes: &[u8], operation: &OperationId) -> Result<JournalLog, Journa
     // newline; anything else there is a torn write.
     let tail = lines.pop().unwrap_or_default();
     let torn_tail = !tail.is_empty();
-    let mut log = JournalLog { batches: Vec::new(), torn_tail };
     let malformed = |line: usize, reason: &str| JournalInvalid::Malformed { line, reason: reason.to_string() };
 
     let Some((first, rest)) = lines.split_first() else {
@@ -161,11 +180,21 @@ pub fn parse(bytes: &[u8], operation: &OperationId) -> Result<JournalLog, Journa
         Ok(_) => return Err(malformed(1, "the header is missing")),
         Err(error) => return Err(malformed(1, &error.to_string())),
     }
+    let Some((second, rest)) = rest.split_first() else {
+        return Err(malformed(2, "the inventory is missing"));
+    };
+    let inventory = match serde_json::from_slice::<Line>(second) {
+        Ok(Line::Inventory(inventory)) => inventory,
+        Ok(_) => return Err(malformed(2, "the inventory is missing")),
+        Err(error) => return Err(malformed(2, &error.to_string())),
+    };
+    let mut log = JournalLog { inventory, batches: Vec::new(), torn_tail };
 
     for (index, text) in rest.iter().enumerate() {
-        let line = index + 2;
+        let line = index + 3;
         match serde_json::from_slice::<Line>(text).map_err(|error| malformed(line, &error.to_string()))? {
             Line::Header { .. } => return Err(malformed(line, "a second header")),
+            Line::Inventory(_) => return Err(malformed(line, "a second inventory")),
             Line::Intent { batch, entries } => {
                 if log.batches.last().is_some_and(|open| open.results.is_none()) {
                     return Err(malformed(line, "an intent before the previous batch's results"));
@@ -173,7 +202,7 @@ pub fn parse(bytes: &[u8], operation: &OperationId) -> Result<JournalLog, Journa
                 if batch != log.batches.last().map_or(1, |last| last.number + 1) {
                     return Err(malformed(line, "batch numbers are not consecutive"));
                 }
-                check_batch(&entries).map_err(|reason| malformed(line, reason))?;
+                check_batch(&entries, &log.inventory).map_err(|reason| malformed(line, reason))?;
                 log.batches.push(Batch { number: batch, entries, results: None });
             }
             Line::Results { batch, entries } => {
@@ -242,7 +271,7 @@ pub fn summarize(entries: &[JournalEntry]) -> JournalSummary {
 }
 
 /// A batch the writer would refuse, and the reader too.
-fn check_batch(entries: &[PlannedEntry]) -> Result<(), &'static str> {
+fn check_batch(entries: &[PlannedEntry], inventory: &DeletionInventory) -> Result<(), &'static str> {
     if entries.is_empty() || entries.len() > MAX_BATCH_ENTRIES {
         return Err("a batch plans no entries or more than the batch bound");
     }
@@ -250,11 +279,11 @@ fn check_batch(entries: &[PlannedEntry]) -> Result<(), &'static str> {
     let mut seen = HashSet::new();
     for entry in entries {
         let path = entry.path.as_path();
-        let relative = !path.as_os_str().is_empty()
-            && !path.as_os_str().as_encoded_bytes().contains(&0)
-            && path.components().all(|component| matches!(component, Component::Normal(_)));
-        if !relative {
+        if !is_plain_relative(path) {
             return Err("an entry path is not a plain relative path");
+        }
+        if inventory.get(path).is_none_or(|listed| EntryKind::of(&listed.shape) != entry.kind) {
+            return Err("a batch plans an entry the inventory does not list with that kind");
         }
         if path.parent() != parent {
             return Err("a batch spans more than one directory");
@@ -300,6 +329,7 @@ pub enum JournalWriteError {
 /// Appends batches to a journal whose header it wrote.
 pub struct JournalWriter<S: JournalSink = File> {
     sink: S,
+    inventory: Arc<DeletionInventory>,
     written: u64,
     limit: u64,
     last_batch: u64,
@@ -308,21 +338,34 @@ pub struct JournalWriter<S: JournalSink = File> {
 }
 
 impl<S: JournalSink> JournalWriter<S> {
-    /// Writes and flushes the header of `operation`'s journal to `sink`.
-    pub fn start(sink: S, operation: &OperationId, limit: u64) -> Result<Self, JournalWriteError> {
-        let mut writer = Self { sink, written: 0, limit, last_batch: 0, open: None, poisoned: false };
+    /// Writes and flushes the header and `inventory` of `operation`'s
+    /// journal to `sink`.
+    pub fn start(
+        sink: S,
+        operation: &OperationId,
+        inventory: Arc<DeletionInventory>,
+        limit: u64,
+    ) -> Result<Self, JournalWriteError> {
         let header = line(&Line::Header { journal_version: JOURNAL_VERSION, operation_id: operation.clone() });
-        if header.len() as u64 > limit {
-            return Err(JournalWriteError::LimitReached { limit });
-        }
-        writer.write(&header)?;
+        let listed = line(&Line::Inventory((*inventory).clone()));
+        let mut writer = Self::after_header(sink, inventory, limit);
+        let mut opening = header;
+        opening.extend_from_slice(&listed);
+        writer.write(&opening)?;
+        // The inventory is as large as the checkout; only batches count
+        // against the limit.
+        writer.written = 0;
         Ok(writer)
     }
 
     /// Continues, through a newly opened `sink`, a journal that holds only
-    /// its header and is `written` bytes long.
-    pub(super) fn after_header(sink: S, written: u64, limit: u64) -> Self {
-        Self { sink, written, limit, last_batch: 0, open: None, poisoned: false }
+    /// its header and inventory.
+    pub(super) fn after_header(sink: S, inventory: Arc<DeletionInventory>, limit: u64) -> Self {
+        Self { sink, inventory, written: 0, limit, last_batch: 0, open: None, poisoned: false }
+    }
+
+    pub fn inventory(&self) -> &Arc<DeletionInventory> {
+        &self.inventory
     }
 
     /// Flushes the intent to delete `entries`, which must be the children
@@ -335,7 +378,7 @@ impl<S: JournalSink> JournalWriter<S> {
         if self.open.is_some() {
             return Err(JournalWriteError::InvalidBatch("the previous batch has no results"));
         }
-        check_batch(&entries).map_err(JournalWriteError::InvalidBatch)?;
+        check_batch(&entries, &self.inventory).map_err(JournalWriteError::InvalidBatch)?;
         let batch = self.last_batch + 1;
         let intent = line(&Line::Intent { batch, entries: entries.clone() });
         // Reserve the longest results line this batch could need.
@@ -413,6 +456,17 @@ mod tests {
         PlannedEntry { path: NativeString::from(path), kind: EntryKind::File }
     }
 
+    /// Lists every file a test plans, so batches name inventory entries.
+    fn listed() -> Arc<DeletionInventory> {
+        let mut files: Vec<String> = ["d/a", "d/b", "d/c", "e/x", "e/y", "e/b", "a", "b", "x"].map(String::from).to_vec();
+        files.extend((0..=MAX_BATCH_ENTRIES).map(|n| format!("d/{n}")));
+        Arc::new(DeletionInventory::listing(sniff::filesystem::query::FileIdentity::Unix { device: 1, inode: 1 }, &files.iter().map(String::as_str).collect::<Vec<_>>()))
+    }
+
+    fn start(sink: MemorySink, limit: u64) -> Result<JournalWriter<MemorySink>, JournalWriteError> {
+        JournalWriter::start(sink, &id(), listed(), limit)
+    }
+
     /// An in-memory sink that can fail its `n`th append or sync.
     #[derive(Clone, Default)]
     struct MemorySink {
@@ -460,9 +514,9 @@ mod tests {
     }
 
     #[test]
-    fn a_header_only_journal_means_nothing_was_attempted() {
+    fn a_journal_without_batches_means_nothing_was_attempted() {
         let sink = MemorySink::default();
-        JournalWriter::start(sink.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
         let log = parse(&sink.contents(), &id()).unwrap();
         assert!(log.batches.is_empty());
         assert!(!log.torn_tail);
@@ -472,7 +526,7 @@ mod tests {
     #[test]
     fn confirmed_results_and_an_interrupted_batch_recover_distinctly() {
         let sink = MemorySink::default();
-        let mut writer = JournalWriter::start(sink.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
         writer.begin_batch(vec![file("d/a"), file("d/b"), file("d/c")]).unwrap();
         writer.finish_batch(&[ResultState::Deleted, ResultState::ExternallyAbsent, ResultState::Kept]).unwrap();
         writer.begin_batch(vec![file("e/x"), file("e/y")]).unwrap();
@@ -497,7 +551,7 @@ mod tests {
     #[test]
     fn a_torn_results_line_leaves_its_batch_uncertain() {
         let sink = MemorySink { fail_append: Some(3), torn: 20, ..MemorySink::default() };
-        let mut writer = JournalWriter::start(sink.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
         writer.begin_batch(vec![file("a")]).unwrap();
         let error = writer.finish_batch(&[ResultState::Deleted]).unwrap_err();
         assert!(matches!(error, JournalWriteError::Io(_)), "{error}");
@@ -511,7 +565,7 @@ mod tests {
     #[test]
     fn a_failed_intent_flush_refuses_the_batch_and_every_later_write() {
         let sink = MemorySink { fail_sync: Some(2), ..MemorySink::default() };
-        let mut writer = JournalWriter::start(sink.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
         assert!(matches!(writer.begin_batch(vec![file("a")]), Err(JournalWriteError::Io(_))));
         assert_eq!(writer.open_batch(), None);
         assert!(matches!(writer.finish_batch(&[ResultState::Deleted]), Err(JournalWriteError::Poisoned)));
@@ -519,24 +573,25 @@ mod tests {
 
     #[test]
     fn the_limit_refuses_an_intent_while_its_results_still_fit() {
-        let sink = MemorySink::default();
-        let header_only = {
+        let opening = {
             let probe = MemorySink::default();
-            JournalWriter::start(probe.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
-            probe.contents().len() as u64
+            start(probe.clone(), 0).unwrap();
+            probe.contents().len()
         };
         let entries = vec![file("a")];
         let intent = line(&Line::Intent { batch: 1, entries: entries.clone() }).len() as u64;
         let worst = results_line(1, &entries, &[ResultState::ExternallyAbsent]).len() as u64;
 
+        // The header and inventory never count: a zero limit still opens.
         // One byte short of intent plus worst-case results: refused, nothing written.
-        let mut writer = JournalWriter::start(sink.clone(), &id(), header_only + intent + worst - 1).unwrap();
+        let sink = MemorySink::default();
+        let mut writer = start(sink.clone(), intent + worst - 1).unwrap();
         assert!(matches!(writer.begin_batch(entries.clone()), Err(JournalWriteError::LimitReached { .. })));
-        assert_eq!(sink.contents().len() as u64, header_only);
+        assert_eq!(sink.contents().len(), opening);
 
         // Exactly enough: the batch and its results both fit.
         let sink = MemorySink::default();
-        let mut writer = JournalWriter::start(sink.clone(), &id(), header_only + intent + worst).unwrap();
+        let mut writer = start(sink.clone(), intent + worst).unwrap();
         writer.begin_batch(entries).unwrap();
         writer.finish_batch(&[ResultState::ExternallyAbsent]).unwrap();
         let log = parse(&sink.contents(), &id()).unwrap();
@@ -544,8 +599,22 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_names_only_inventory_entries_of_their_kind() {
+        let mut writer = start(MemorySink::default(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        for entries in [
+            vec![file("d/unlisted")],
+            vec![PlannedEntry { path: NativeString::from("d/a"), kind: EntryKind::Directory }],
+            vec![PlannedEntry { path: NativeString::from("d"), kind: EntryKind::Link }],
+        ] {
+            let shown = format!("{entries:?}");
+            assert!(matches!(writer.begin_batch(entries), Err(JournalWriteError::InvalidBatch(_))), "{shown}");
+        }
+        assert_eq!(writer.begin_batch(vec![PlannedEntry { path: NativeString::from("d"), kind: EntryKind::Directory }]).unwrap(), 1);
+    }
+
+    #[test]
     fn batches_outside_the_bound_are_refused_by_writer_and_reader() {
-        let mut writer = JournalWriter::start(MemorySink::default(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        let mut writer = start(MemorySink::default(), DEFAULT_JOURNAL_LIMIT).unwrap();
         let too_many: Vec<_> = (0..=MAX_BATCH_ENTRIES).map(|n| file(&format!("d/{n}"))).collect();
         let full: Vec<_> = (0..MAX_BATCH_ENTRIES).map(|n| file(&format!("d/{n}"))).collect();
         let invalid = [
@@ -569,7 +638,7 @@ mod tests {
     #[test]
     fn another_operations_journal_is_refused() {
         let sink = MemorySink::default();
-        JournalWriter::start(sink.clone(), &id(), DEFAULT_JOURNAL_LIMIT).unwrap();
+        start(sink.clone(), DEFAULT_JOURNAL_LIMIT).unwrap();
         let other = OperationId::parse("ffffffffffffffffffffffffffffffff").unwrap();
         assert_eq!(parse(&sink.contents(), &other), Err(JournalInvalid::OperationMismatch));
     }

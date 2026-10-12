@@ -5,12 +5,14 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::journal::{self, DEFAULT_JOURNAL_LIMIT, JournalEntry, JournalInvalid, JournalWriteError, JournalWriter};
 use super::lock::{self, LOCKS_DIR, LockError, OperationLock};
 use super::record::{self, Phase, RecordInvalid, RecoveryRecord, RepositoryBinding};
 use super::storage::{self, StorageProblem};
 use super::OperationId;
+use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::outcome::OperationReport;
 
 /// The store's directory name inside the common Git directory.
@@ -37,6 +39,9 @@ pub enum StoreError {
     Record { id: String, reason: RecordInvalid },
     #[error("the deletion journal of removal {id} cannot be used: {reason}")]
     Journal { id: OperationId, reason: JournalInvalid },
+    /// The inventory was not taken of the checkout the record names.
+    #[error("the deletion inventory does not describe the recorded checkout")]
+    InventoryMismatch,
     #[error("a phase can only move forward, and completion goes through `complete`")]
     PhaseOrder,
     #[error(transparent)]
@@ -61,6 +66,8 @@ pub struct PendingRecord {
 #[derive(Debug)]
 pub struct Recovered {
     pub record: RecoveryRecord,
+    /// What the operation was approved to delete, as it was at the start.
+    pub inventory: DeletionInventory,
     pub entries: Vec<JournalEntry>,
     /// The journal's final line was cut short by a crash.
     pub torn_tail: bool,
@@ -107,15 +114,23 @@ impl RecoveryStore {
         Ok(lock::acquire(&self.root, name)?)
     }
 
-    /// Makes `record` durable as a new pending operation, before anything is
-    /// mutated. Refuses while another operation on the same worktree record
-    /// is pending, and while any record cannot be read, since an unreadable
-    /// record could describe this worktree.
-    pub fn begin(&self, lock: OperationLock, record: RecoveryRecord) -> Result<Operation, StoreError> {
+    /// Makes `record` and the deletion `inventory` durable as a new pending
+    /// operation, before anything is mutated. Refuses while another operation
+    /// on the same worktree record is pending, and while any record cannot be
+    /// read, since an unreadable record could describe this worktree.
+    pub fn begin(
+        &self,
+        lock: OperationLock,
+        record: RecoveryRecord,
+        inventory: Arc<DeletionInventory>,
+    ) -> Result<Operation, StoreError> {
         let id = record.operation_id.clone();
         record.validate().map_err(|reason| StoreError::Record { id: id.to_string(), reason })?;
         if record.completed_phase != Phase::Prepared {
             return Err(StoreError::PhaseOrder);
+        }
+        if *inventory.root() != record.checkout_identity {
+            return Err(StoreError::InventoryMismatch);
         }
         let admin = record.repository.admin_name().ok_or(StoreError::WrongLock)?;
         if lock.key() != lock::key_for(admin) {
@@ -131,31 +146,28 @@ impl RecoveryStore {
 
         let staging = self.root.join(format!(".{id}.tmp"));
         let dir = self.operation_dir(&id);
-        let staged = (|| -> Result<u64, StoreError> {
+        let staged = (|| -> Result<(), StoreError> {
             storage::create_private_dir(&staging)?;
             let file = storage::create_private_file(&staging.join(JOURNAL_FILE))?;
             // Closed before the rename: Windows refuses to rename a
             // directory with an open file anywhere inside it.
-            drop(JournalWriter::start(file, &id, DEFAULT_JOURNAL_LIMIT)?);
+            drop(JournalWriter::start(file, &id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
             storage::write_durable(&staging.join(RECORD_FILE), &record.to_json())?;
             storage::sync_dir(&staging)?;
             fs::rename(&staging, &dir)?;
             storage::sync_dir(&self.root)?;
-            Ok(fs::symlink_metadata(dir.join(JOURNAL_FILE))?.len())
+            Ok(())
         })();
-        let header_len = match staged {
-            Ok(len) => len,
-            Err(error) => {
-                // Only the staging directory this call created; nothing else
-                // has been touched.
-                let _ = fs::remove_dir_all(&staging);
-                return Err(error);
-            }
-        };
+        if let Err(error) = staged {
+            // Only the staging directory this call created; nothing else has
+            // been touched.
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
         // From here the operation is durable and pending; a failure leaves it
         // for recovery.
         let file = storage::open_append(&dir.join(JOURNAL_FILE))?;
-        let journal = JournalWriter::after_header(file, header_len, DEFAULT_JOURNAL_LIMIT);
+        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 
@@ -194,6 +206,44 @@ impl RecoveryStore {
         Ok(record)
     }
 
+    /// Takes over pending operation `id` to resume it: its record must
+    /// describe the worktree record `expected` names and `lock` must cover
+    /// it. The journal so far is kept as `journal-<n>.jsonl`, and a new one
+    /// starts with `inventory`, a fresh inventory of what survives.
+    pub fn reopen(
+        &self,
+        lock: OperationLock,
+        id: &OperationId,
+        expected: &RepositoryBinding,
+        inventory: Arc<DeletionInventory>,
+    ) -> Result<Operation, StoreError> {
+        let record = self.read_record(id)?;
+        if record.completed_phase == Phase::Completed {
+            return Err(StoreError::Completed(id.clone()));
+        }
+        record.check_binding(expected).map_err(|reason| StoreError::Record { id: id.to_string(), reason })?;
+        let admin = record.repository.admin_name().ok_or(StoreError::WrongLock)?;
+        if lock.key() != lock::key_for(admin) {
+            return Err(StoreError::WrongLock);
+        }
+        if *inventory.root() != record.checkout_identity {
+            return Err(StoreError::InventoryMismatch);
+        }
+        let dir = self.operation_dir(id);
+        let current = dir.join(JOURNAL_FILE);
+        let archived = (1..)
+            .map(|generation| dir.join(format!("journal-{generation}.jsonl")))
+            .find(|path| matches!(fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound))
+            .expect("an unused generation exists");
+        // The name was just found unused, and the held lock keeps every other
+        // `wt` out of this operation's directory.
+        fs::rename(&current, &archived)?;
+        let file = storage::create_private_file(&current)?;
+        let journal = JournalWriter::start(file, id, inventory, DEFAULT_JOURNAL_LIMIT)?;
+        storage::sync_dir(&dir)?;
+        Ok(Operation { dir, record, journal, _lock: lock })
+    }
+
     /// Reads pending operation `id` for recovery: its record, which must
     /// describe the repository and worktree record `expected` names, and its
     /// journal replayed against the quarantine. `present` reports whether a
@@ -212,8 +262,11 @@ impl RecoveryStore {
         let path = self.operation_dir(id).join(JOURNAL_FILE);
         let bytes = storage::read_private_file(&path).map_err(storage_error(&path))?;
         let log = journal::parse(&bytes, id).map_err(|reason| StoreError::Journal { id: id.clone(), reason })?;
+        if *log.inventory.root() != record.checkout_identity {
+            return Err(StoreError::InventoryMismatch);
+        }
         let entries = log.replay(present)?;
-        Ok(Recovered { record, entries, torn_tail: log.torn_tail })
+        Ok(Recovered { record, inventory: log.inventory, entries, torn_tail: log.torn_tail })
     }
 }
 
@@ -255,6 +308,35 @@ impl Operation {
         self.persist_phase(phase)
     }
 
+    /// [`Operation::advance`], except that a phase already recorded (by an
+    /// earlier attempt this one resumes) is left as it is.
+    pub fn advance_to(&mut self, phase: Phase) -> Result<(), StoreError> {
+        if phase <= self.record.completed_phase {
+            return Ok(());
+        }
+        self.advance(phase)
+    }
+
+    /// The current journal replayed, as [`RecoveryStore::recover`] does;
+    /// `present` reports whether a quarantine-relative path still exists.
+    pub fn journal_entries(&self, present: impl FnMut(&Path) -> io::Result<bool>) -> Result<Vec<JournalEntry>, StoreError> {
+        let path = self.dir.join(JOURNAL_FILE);
+        let bytes = storage::read_private_file(&path).map_err(storage_error(&path))?;
+        let id = self.id().clone();
+        let log = journal::parse(&bytes, &id).map_err(|reason| StoreError::Journal { id, reason })?;
+        Ok(log.replay(present)?)
+    }
+
+    /// Deletes this operation's directory. Only for an operation that
+    /// changed nothing: its record then describes nothing that happened.
+    pub fn discard(self) -> Result<(), StoreError> {
+        let Self { dir, journal, _lock, .. } = self;
+        // Closed first: Windows cannot delete an open file.
+        drop(journal);
+        fs::remove_dir_all(&dir)?;
+        Ok(storage::sync_dir(dir.parent().unwrap_or(&dir))?)
+    }
+
     /// Saves `report` as `report.json`, replacing any earlier one.
     pub fn save_report(&self, report: &OperationReport) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(report).map_err(io::Error::from)?;
@@ -269,11 +351,15 @@ impl Operation {
         self.persist_phase(Phase::Completed)?;
         let Self { dir, journal, .. } = self;
         drop(journal);
-        let path = dir.join(JOURNAL_FILE);
-        Ok(match fs::remove_file(&path) {
-            Ok(()) => Vec::new(),
-            Err(error) => vec![BookkeepingWarning::JournalNotCleared { path, error: error.to_string() }],
-        })
+        let mut journals = vec![dir.join(JOURNAL_FILE)];
+        journals.extend((1..).map(|generation| dir.join(format!("journal-{generation}.jsonl"))).take_while(|path| path.exists()));
+        Ok(journals
+            .into_iter()
+            .filter_map(|path| match fs::remove_file(&path) {
+                Ok(()) => None,
+                Err(error) => Some(BookkeepingWarning::JournalNotCleared { path, error: error.to_string() }),
+            })
+            .collect())
     }
 
     fn persist_phase(&mut self, phase: Phase) -> Result<(), StoreError> {

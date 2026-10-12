@@ -163,7 +163,7 @@ test-group = 'apple-terminal-l2'
 # genuine deadlock still trips the longer window.
 [[profile.default.overrides]]
 platform = { host = "cfg(target_os = \"macos\")" }
-filter = 'package(worktree) & (test(/^remove::observation::tests::native_/) | test(/^remove::observation::fsevents::/))'
+filter = 'package(worktree) & (test(/^remove::.*::native_/) | test(/^remove::observation::fsevents::/))'
 test-group = 'fsevents-l1'
 
 [[profile.default.overrides]]

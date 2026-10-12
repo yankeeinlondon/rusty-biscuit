@@ -8,8 +8,11 @@
 //! surviving index is checked ([`missing`]). A contention-aware removal
 //! reports a typed [`outcome`] and keeps durable [`recovery`] state; [`usage`]
 //! is its decisive check that no other process is using the checkout,
-//! [`quarantine`] moves the checkout aside without replacing anything, and
-//! [`observation`] watches both locations while that happens.
+//! [`quarantine`] moves the checkout aside without replacing anything (and
+//! unregisters it once it is gone), and [`observation`] watches both
+//! locations while that happens and deletes the moved checkout entry by
+//! entry against its operation-start inventory. [`lifecycle`] runs those
+//! steps in order as one removal, and resumes one that stopped.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -19,6 +22,7 @@ pub mod admin_entry;
 pub mod handoff;
 pub mod included;
 pub mod inventory;
+pub mod lifecycle;
 pub mod missing;
 pub mod observation;
 pub mod outcome;

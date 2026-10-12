@@ -459,12 +459,14 @@ pub(super) struct ReadDirectoryChanges {
 }
 
 impl ReadDirectoryChanges {
-    pub fn start(targets: &Targets, options: ObserverOptions) -> Result<Self, ObservationError> {
-        Self::start_with_buffer(targets, options, LARGE_BUFFER_BYTES)
+    /// `moved` says the tree is already at the quarantine (a resumed
+    /// removal).
+    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Self, ObservationError> {
+        Self::start_with_buffer(targets, options, LARGE_BUFFER_BYTES, moved)
     }
 
-    fn start_with_buffer(targets: &Targets, options: ObserverOptions, parent_buffer: usize) -> Result<Self, ObservationError> {
-        require_directory(targets.original())?;
+    fn start_with_buffer(targets: &Targets, options: ObserverOptions, parent_buffer: usize, moved: bool) -> Result<Self, ObservationError> {
+        require_directory(if moved { targets.quarantine() } else { targets.original() })?;
         let parent = Watch::open(Root::Parent, targets.parent(), true, parent_buffer)?;
         let admin = Watch::open(Root::Admin, targets.admin(), false, NETWORK_BUFFER_BYTES)?;
         let parent_identity = identity(targets.parent()).map_err(setup(targets.parent()))?;
@@ -476,7 +478,7 @@ impl ReadDirectoryChanges {
             original_name: targets.original_name().to_os_string(),
             quarantine_name: targets.quarantine_name().to_os_string(),
             marker_prefix: format!(".wt-observe-{:016x}-", u64::from_ne_bytes(random)).into(),
-            moved: AtomicBool::new(false),
+            moved: AtomicBool::new(moved),
             delivered: Mutex::new(Delivered::default()),
             progress: Condvar::new(),
             #[cfg(test)]

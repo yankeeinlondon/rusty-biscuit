@@ -14,12 +14,16 @@ use super::recovery::OperationId;
 
 /// Version of the [`OperationReport`] serialization. Bump it with any change
 /// to the persisted shape.
-pub const REPORT_VERSION: u32 = 1;
+pub const REPORT_VERSION: u32 = 2;
 
 /// The most activity observations a report lists. Later ones are counted in
 /// [`Truncation::activity_omitted`]; the deletion journal itself is never
 /// truncated.
 pub const MAX_REPORTED_ACTIVITY: usize = 200;
+
+/// The most deleted entries a report names. The journal summary's counts
+/// stay exact.
+pub const MAX_REPORTED_DELETED: usize = 200;
 
 /// The most retained entries a report names. The count in
 /// [`QuarantineReport::retained_entries`] stays exact.
@@ -253,6 +257,18 @@ pub struct BranchOutcome {
 pub struct Truncation {
     pub activity_omitted: u64,
     pub retained_omitted: u64,
+    pub deleted_omitted: u64,
+}
+
+/// A statement the report makes about its own limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportNote {
+    /// Deletion checked each entry and both locations, but a write that lands
+    /// between an entry's last check and its unlink is deleted with it, and a
+    /// writer can start after the final check. The report never claims that
+    /// no writer was active.
+    ConcurrentWriteLimit,
 }
 
 /// Everything known about one removal attempt; persisted as `report.json`.
@@ -271,6 +287,10 @@ pub struct OperationReport {
     pub discovery: Vec<DiscoveryRun>,
     pub activity: Vec<ObservedActivity>,
     pub journal: JournalSummary,
+    /// Up to [`MAX_REPORTED_DELETED`] entries this operation deleted, as
+    /// absolute paths.
+    pub deleted: Vec<NativeString>,
+    pub notes: Vec<ReportNote>,
     pub branches: Vec<BranchOutcome>,
     pub errors: Vec<String>,
     pub truncation: Truncation,
@@ -291,6 +311,8 @@ impl OperationReport {
             discovery: Vec::new(),
             activity: Vec::new(),
             journal: JournalSummary::default(),
+            deleted: Vec::new(),
+            notes: Vec::new(),
             branches: Vec::new(),
             errors: Vec::new(),
             truncation: Truncation::default(),
@@ -314,6 +336,13 @@ impl OperationReport {
         quarantine.retained_entries = entries.len() as u64;
         self.truncation.retained_omitted = entries.len().saturating_sub(MAX_REPORTED_RETAINED) as u64;
         quarantine.retained = entries.into_iter().take(MAX_REPORTED_RETAINED).collect();
+    }
+
+    /// Records the entries this operation deleted: the first
+    /// [`MAX_REPORTED_DELETED`] by name, the rest counted.
+    pub fn set_deleted(&mut self, entries: Vec<NativeString>) {
+        self.truncation.deleted_omitted = entries.len().saturating_sub(MAX_REPORTED_DELETED) as u64;
+        self.deleted = entries.into_iter().take(MAX_REPORTED_DELETED).collect();
     }
 
     /// Whether any branch action was attempted and failed.

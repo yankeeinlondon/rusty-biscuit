@@ -89,6 +89,16 @@ pub fn identity(path: &Path) -> io::Result<FileIdentity> {
     platform::identity(path)
 }
 
+/// The [`identity`] of the object an open handle refers to.
+///
+/// ## Errors
+///
+/// The error from reading the handle's file ID.
+#[cfg(windows)]
+pub(crate) fn handle_identity(handle: std::os::windows::io::RawHandle) -> io::Result<FileIdentity> {
+    platform::handle_identity(handle)
+}
+
 /// Maps an OS error from `stage` to a [`RenameFailure`].
 pub(crate) fn classify(stage: Stage, error: &io::Error) -> RenameFailure {
     let Some(code) = error.raw_os_error() else {
@@ -265,10 +275,14 @@ mod platform {
 
     pub(super) fn identity(path: &Path) -> io::Result<FileIdentity> {
         let handle = open(path, FILE_READ_ATTRIBUTES)?;
+        handle_identity(handle.0)
+    }
+
+    pub(super) fn handle_identity(handle: HANDLE) -> io::Result<FileIdentity> {
         let mut info: FILE_ID_INFO = unsafe { std::mem::zeroed() };
         let read = unsafe {
             GetFileInformationByHandleEx(
-                handle.0,
+                handle,
                 FileIdInfo,
                 (&mut info as *mut FILE_ID_INFO).cast(),
                 size_of::<FILE_ID_INFO>() as u32,

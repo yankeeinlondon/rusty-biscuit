@@ -3,7 +3,7 @@
 //! [`EventQueue`] and [`Sink`] as a native adapter's.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -25,6 +25,7 @@ struct Shared {
     admin_released: AtomicBool,
     moved: AtomicBool,
     ended: AtomicBool,
+    drains: AtomicUsize,
 }
 
 struct InjectedBackend {
@@ -41,9 +42,17 @@ impl Observation {
             admin_released: AtomicBool::new(false),
             moved: AtomicBool::new(false),
             ended: AtomicBool::new(false),
+            drains: AtomicUsize::new(0),
         });
         let backend = InjectedBackend { shared: Arc::clone(&shared) };
         (Self::with_backend(targets, options, Box::new(backend)), Injector { shared })
+    }
+
+    /// [`Observation::injected`] for a tree already at the quarantine.
+    pub(crate) fn injected_at_quarantine(targets: Targets, options: ObserverOptions) -> (Self, Injector) {
+        let (mut observation, injector) = Self::injected(targets, options);
+        observation.moved = true;
+        (observation, injector)
     }
 }
 
@@ -92,6 +101,11 @@ impl Injector {
         self.shared.moved.load(Ordering::SeqCst)
     }
 
+    /// How many times the session was drained.
+    pub fn drains(&self) -> usize {
+        self.shared.drains.load(Ordering::SeqCst)
+    }
+
     /// Whether the session was dropped.
     pub fn ended(&self) -> bool {
         self.shared.ended.load(Ordering::SeqCst)
@@ -104,6 +118,7 @@ fn raw(root: Root, path: &Path, kind: EventKind) -> RawEvent {
 
 impl Backend for InjectedBackend {
     fn drain(&mut self, sink: &mut Sink<'_>) {
+        self.shared.drains.fetch_add(1, Ordering::SeqCst);
         self.shared.queue.take_into(sink);
     }
 

@@ -5,6 +5,7 @@ use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 use tempfile::TempDir;
 
 use super::*;
+use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::outcome::RemovalOutcome;
 use crate::remove::recovery::journal::{EntryKind, EntryState, PlannedEntry, ResultState};
 use crate::remove::recovery::record::{BranchBinding, IntendedAction, RECORD_VERSION};
@@ -82,9 +83,37 @@ fn record(f: &Fixture, admin: &str) -> RecoveryRecord {
     }
 }
 
+/// The inventory every test operation is approved to delete: one hashed
+/// file first (so the matrix's first-occurrence edits land on it), files and
+/// directories, and a link.
+fn inventory_value() -> Value {
+    let id = |inode: u64| json!({"kind": "unix", "device": "7", "inode": inode.to_string()});
+    let file = |path: &str, inode: u64, content: Value| {
+        json!({"path": {"display": path}, "identity": id(inode),
+               "shape": {"file": {"size": 5, "modified": {"secs": 1_700_000_000, "nanos": 5}, "mode": 420, "content": content}}})
+    };
+    let dir = |path: &str, inode: u64| json!({"path": {"display": path}, "identity": id(inode), "shape": {"directory": {"mode": 493}}});
+    json!({
+        "root": id(3),
+        "entries": [
+            file("a", 10, json!({"blake3": "ab".repeat(32)})),
+            dir("d", 11),
+            file("d/a", 12, json!("unhashed")),
+            file("d/b", 13, json!("unhashed")),
+            dir("e", 14),
+            file("e/x", 15, json!("unhashed")),
+            {"path": {"display": "l"}, "identity": id(16), "shape": {"link": {"target": {"display": "../elsewhere"}}}},
+        ]
+    })
+}
+
+fn inventory() -> Arc<DeletionInventory> {
+    Arc::new(serde_json::from_value(inventory_value()).unwrap())
+}
+
 fn begin(f: &Fixture, record: RecoveryRecord) -> Operation {
     let lock = f.store.lock(&record.repository).unwrap();
-    f.store.begin(lock, record).unwrap()
+    f.store.begin(lock, record, inventory()).unwrap()
 }
 
 fn file(path: &str) -> PlannedEntry {
@@ -145,7 +174,7 @@ fn a_held_lock_refuses_a_second_removal_and_a_stale_lock_file_does_not() {
 fn the_lock_covers_only_the_worktree_it_was_taken_for() {
     let f = fixture();
     let lock = f.store.lock(&binding(&f, "wt1")).unwrap();
-    assert!(matches!(f.store.begin(lock, record(&f, "wt2")), Err(StoreError::WrongLock)));
+    assert!(matches!(f.store.begin(lock, record(&f, "wt2"), inventory()), Err(StoreError::WrongLock)));
     assert!(f.store.pending().unwrap().is_empty());
 }
 
@@ -158,7 +187,7 @@ fn a_pending_record_blocks_a_new_operation_on_the_same_worktree_only() {
 
     let again = record(&f, "wt1");
     let lock = f.store.lock(&again.repository).unwrap();
-    match f.store.begin(lock, again) {
+    match f.store.begin(lock, again, inventory()) {
         Err(StoreError::Pending(id)) => assert_eq!(id, first.operation_id),
         other => panic!("expected the pending record to block: {:?}", other.map(|op| op.id().clone())),
     }
@@ -176,7 +205,7 @@ fn an_unreadable_record_blocks_every_new_operation() {
 
     let other = record(&f, "wt2");
     let lock = f.store.lock(&other.repository).unwrap();
-    assert!(matches!(f.store.begin(lock, other), Err(StoreError::Record { .. })));
+    assert!(matches!(f.store.begin(lock, other, inventory()), Err(StoreError::Record { .. })));
     let pending = f.store.pending().unwrap();
     assert_eq!(pending.len(), 1);
     assert!(matches!(pending[0].record, Err(StoreError::Record { .. })));
@@ -229,7 +258,7 @@ fn a_record_that_cannot_be_created_leaves_no_operation() {
     let saved = record(&f, "wt1");
     let lock = f.store.lock(&saved.repository).unwrap();
     fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o500)).unwrap();
-    let result = f.store.begin(lock, saved);
+    let result = f.store.begin(lock, saved, inventory());
     fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o700)).unwrap();
     assert!(matches!(result, Err(StoreError::Io(_))));
     let names: Vec<_> = fs::read_dir(f.store.root()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
@@ -482,7 +511,8 @@ fn journal_robustness_matrix() {
     let written = fs::read(&path).unwrap();
     let lines: Vec<Value> =
         written.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()).map(|line| serde_json::from_slice(line).unwrap()).collect();
-    assert_eq!(lines.len(), 4, "header, intent, results, open intent");
+    assert_eq!(lines.len(), 5, "header, inventory, intent, results, open intent");
+    assert_eq!(lines[1]["inventory"], inventory_value(), "the inventory is persisted as given");
 
     let join = |lines: &[Vec<u8>]| -> Vec<u8> { lines.iter().flat_map(|line| line.iter().copied().chain(*b"\n")).collect() };
     let compact = |line: &Value| serde_json::to_vec(line).unwrap();
@@ -496,14 +526,27 @@ fn journal_robustness_matrix() {
     use EntryState::*;
     use Expect::*;
     let control = vec![("d/a", Deleted), ("d/b", Kept), ("e/x", Uncertain)];
-    let mut cells: Vec<JournalCell> = vec![("control".into(), written.clone(), Valid, control)];
+    let mut cells: Vec<JournalCell> = vec![("control".into(), written.clone(), Valid, control.clone())];
     let mut invalid = |cell: &str, bytes: Vec<u8>| cells.push((cell.to_string(), bytes, Invalid, Vec::new()));
 
-    // (column, line, pointer, wrong type, empty, invalid content)
+    // (column, line, pointer, wrong type, empty, invalid content). Every
+    // inventory pointer names the first entry (the hashed file "a") or the
+    // only link, so `duplicate`'s first-occurrence edit lands on the same
+    // member.
     let columns: Vec<(&str, usize, &str, Value, Value, Value)> = vec![
-        ("path", 1, "/intent/entries/0/path", json!(123), json!({}), json!({"display": "../d/a"})),
-        ("kind", 1, "/intent/entries/0/kind", json!(123), json!(""), json!("socket")),
-        ("state", 2, "/results/entries/0/state", json!(123), json!(""), json!("vanished")),
+        ("path", 2, "/intent/entries/0/path", json!(123), json!({}), json!({"display": "../d/a"})),
+        ("kind", 2, "/intent/entries/0/kind", json!(123), json!(""), json!("socket")),
+        ("state", 3, "/results/entries/0/state", json!(123), json!(""), json!("vanished")),
+        ("inventory root", 1, "/inventory/root", json!(123), json!({}), json!({"kind": "unix", "device": "x", "inode": "3"})),
+        ("inventory entries", 1, "/inventory/entries", json!(123), json!({}), json!([{"path": {"display": "a"}}])),
+        ("inventory path", 1, "/inventory/entries/0/path", json!(123), json!({}), json!({"display": "/a"})),
+        ("inventory identity", 1, "/inventory/entries/0/identity", json!(123), json!({}), json!({"kind": "plan9", "qid": "1"})),
+        ("inventory shape", 1, "/inventory/entries/0/shape", json!(123), json!({}), json!({"socket": {}})),
+        ("file size", 1, "/inventory/entries/0/shape/file/size", json!("5"), json!(""), json!(-1)),
+        ("file modified", 1, "/inventory/entries/0/shape/file/modified", json!(123), json!({}), json!({"secs": 1, "nanos": -1})),
+        ("file mode", 1, "/inventory/entries/0/shape/file/mode", json!("644"), json!(""), json!(-1)),
+        ("file content", 1, "/inventory/entries/0/shape/file/content", json!(123), json!(""), json!({"blake3": "zz"})),
+        ("link target", 1, "/inventory/entries/6/shape/link/target", json!(123), json!({}), json!({"display": "a\u{0}b"})),
     ];
     for (column, line, pointer, wrong_type, empty, bad) in columns {
         let key = pointer.rsplit('/').next().unwrap();
@@ -514,33 +557,68 @@ fn journal_robustness_matrix() {
         invalid(&format!("{column}: duplicate key"), with_line(line, duplicate(&lines[line], key)));
         invalid(&format!("{column}: invalid content"), with_line(line, set(&lines[line], pointer, bad)));
     }
-    let entry = lines[1].pointer("/intent/entries/0").unwrap().clone();
-    invalid("entries: one element wrong type", with_line(1, set(&lines[1], "/intent/entries", json!([entry, 123]))));
-    invalid("entries: every element wrong type", with_line(1, set(&lines[1], "/intent/entries", json!([123]))));
-    invalid("entries: empty batch", with_line(1, set(&lines[1], "/intent/entries", json!([]))));
-    invalid("path: unknown member", with_line(1, set(&lines[1], "/intent/entries/0/path", json!({"display": "d/a", "extra": 1}))));
+    let entry = lines[2].pointer("/intent/entries/0").unwrap().clone();
+    invalid("entries: one element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([entry, 123]))));
+    invalid("entries: every element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([123]))));
+    invalid("entries: empty batch", with_line(2, set(&lines[2], "/intent/entries", json!([]))));
+    invalid("path: unknown member", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/a", "extra": 1}))));
+    let listed = lines[1].pointer("/inventory/entries/0").unwrap().clone();
+    invalid("inventory entries: one element wrong type", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().push(json!(123));
+    })));
+    invalid("inventory entries: every element wrong type", with_line(1, set(&lines[1], "/inventory/entries", json!([123]))));
+    // An empty inventory is a valid line, but the batches then plan entries it
+    // does not list.
+    invalid("inventory entries: empty", with_line(1, set(&lines[1], "/inventory/entries", json!([]))));
+    invalid("inventory: unknown member", with_line(1, set(&lines[1], "/inventory/extra", json!(1))));
+    invalid("inventory entry: unknown member", with_line(1, set(&lines[1], "/inventory/entries/0/extra", json!(1))));
+    invalid("inventory entries: a path twice", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().push(listed.clone());
+    })));
+    invalid("inventory entries: a child before its directory", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().swap(1, 2);
+    })));
+    invalid("inventory root: another checkout", with_line(1, set(&lines[1], "/inventory/root", json!({"kind": "unix", "device": "7", "inode": "4"}))));
+    invalid("intent: an entry the inventory does not list", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/new"}))));
+    invalid("intent: a kind other than the inventory's", with_line(2, set(&lines[2], "/intent/entries/0/kind", json!("directory"))));
+    let mut garbage = compact(&lines[2]);
+    garbage.extend_from_slice(b" junk");
+    invalid("line: trailing content", with_line(2, garbage));
     let mut garbage = compact(&lines[1]);
     garbage.extend_from_slice(b" junk");
-    invalid("line: trailing content", with_line(1, garbage));
-    invalid("line: blank line", with_line(1, Vec::new()));
+    invalid("inventory line: trailing content", with_line(1, garbage));
+    invalid("line: blank line", with_line(2, Vec::new()));
     invalid("header: absent", join(&lines[1..].iter().map(compact).collect::<Vec<_>>()));
-    invalid("header: repeated", with_line(1, compact(&lines[0])));
-    invalid("header: other version", with_line(0, set(&lines[0], "/header/journal_version", json!(2))));
+    invalid("header: repeated", with_line(2, compact(&lines[0])));
+    invalid("header: other version", with_line(0, set(&lines[0], "/header/journal_version", json!(1))));
     invalid("header: other operation", with_line(0, set(&lines[0], "/header/operation_id", json!(other_id))));
-    invalid("results: wrong batch", with_line(2, set(&lines[2], "/results/batch", json!(2))));
-    let mut swapped = lines[2].clone();
+    let without_inventory: Vec<Vec<u8>> = lines.iter().enumerate().filter(|(at, _)| *at != 1).map(|(_, line)| compact(line)).collect();
+    invalid("inventory: absent", join(&without_inventory));
+    invalid("inventory: header only", join(&[compact(&lines[0])]));
+    invalid("inventory: repeated", with_line(2, compact(&lines[1])));
+    let mut after_intent: Vec<Vec<u8>> = lines.iter().map(compact).collect();
+    after_intent.swap(1, 2);
+    invalid("inventory: after an intent", join(&after_intent));
+    invalid("results: wrong batch", with_line(3, set(&lines[3], "/results/batch", json!(2))));
+    let mut swapped = lines[3].clone();
     swapped.pointer_mut("/results/entries").unwrap().as_array_mut().unwrap().reverse();
-    invalid("results: misaligned entries", with_line(2, compact(&swapped)));
+    invalid("results: misaligned entries", with_line(3, compact(&swapped)));
 
-    // Valid: a header-only journal, and the two places a crash can tear a line.
-    let header_only = join(&[compact(&lines[0])]);
-    cells.push(("empty: header only".into(), header_only, Valid, Vec::new()));
-    let mut torn_intent = join(&lines[..3].iter().map(compact).collect::<Vec<_>>());
-    torn_intent.extend_from_slice(&compact(&lines[3])[..10]);
+    let mut torn_inventory = join(&lines[..1].iter().map(compact).collect::<Vec<_>>());
+    torn_inventory.extend_from_slice(&compact(&lines[1])[..10]);
+    invalid("inventory: torn", torn_inventory);
+
+    // Valid: no batches, the two places a crash can tear a line, and the
+    // unchanged inventory written with different but equivalent spacing.
+    cells.push(("empty: header and inventory only".into(), join(&lines[..2].iter().map(compact).collect::<Vec<_>>()), Valid, Vec::new()));
+    let mut torn_intent = join(&lines[..4].iter().map(compact).collect::<Vec<_>>());
+    torn_intent.extend_from_slice(&compact(&lines[4])[..10]);
     cells.push(("torn intent".into(), torn_intent, Valid, vec![("d/a", Deleted), ("d/b", Kept)]));
-    let mut torn_results = join(&lines[..2].iter().map(compact).collect::<Vec<_>>());
-    torn_results.extend_from_slice(&compact(&lines[2])[..10]);
+    let mut torn_results = join(&lines[..3].iter().map(compact).collect::<Vec<_>>());
+    torn_results.extend_from_slice(&compact(&lines[3])[..10]);
     cells.push(("torn results".into(), torn_results, Valid, vec![("d/a", Uncertain), ("d/b", Planned)]));
+    let pretty_spaces = with_line(1, serde_json::to_string(&lines[1]).unwrap().replace("\":", "\": ").into_bytes());
+    cells.push(("inventory: spaced".into(), pretty_spaces, Valid, control));
 
     let present = BTreeSet::from(["d/b"]);
     let mut failures = Vec::new();
@@ -551,9 +629,9 @@ fn journal_robustness_matrix() {
             (Ok(recovered), Valid) => {
                 let got: Vec<_> = recovered.entries.iter().map(|entry| (entry.path.display().into_owned(), entry.state)).collect();
                 let want: Vec<_> = states.iter().map(|(path, state)| (path.to_string(), *state)).collect();
-                got == want && recovered.torn_tail == cell.starts_with("torn")
+                got == want && recovered.torn_tail == cell.starts_with("torn") && recovered.inventory == *inventory()
             }
-            (Err(StoreError::Journal { .. }), Invalid) => true,
+            (Err(StoreError::Journal { .. } | StoreError::InventoryMismatch), Invalid) => true,
             _ => false,
         };
         if !ok {
@@ -561,4 +639,14 @@ fn journal_robustness_matrix() {
         }
     }
     assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn begin_refuses_an_inventory_of_another_checkout() {
+    let f = fixture();
+    let saved = record(&f, "wt1");
+    let lock = f.store.lock(&saved.repository).unwrap();
+    let other = Arc::new(DeletionInventory::listing(identity(4), &["a"]));
+    assert!(matches!(f.store.begin(lock, saved.clone(), other), Err(StoreError::InventoryMismatch)));
+    assert!(f.store.pending().unwrap().is_empty(), "nothing was saved");
 }

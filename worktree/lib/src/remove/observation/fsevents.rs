@@ -107,24 +107,32 @@ struct Paths {
 }
 
 impl Paths {
-    fn resolve(targets: &Targets, markers: &Path) -> Result<Self, ObservationError> {
+    /// `moved` says the tree is already at the quarantine (a resumed
+    /// removal); the tree's current path must be a real directory.
+    fn resolve(targets: &Targets, markers: &Path, moved: bool) -> Result<Self, ObservationError> {
         let parent = std::fs::canonicalize(targets.parent()).map_err(setup(targets.parent()))?;
-        // A link at the original would be watched at its target, which is not
-        // what the operation moves.
-        let metadata = std::fs::symlink_metadata(targets.original()).map_err(setup(targets.original()))?;
+        let tree = if moved { targets.quarantine() } else { targets.original() };
+        // A link at the tree's path would be watched at its target, which is
+        // not what the operation moves or deletes.
+        let metadata = std::fs::symlink_metadata(tree).map_err(setup(tree))?;
         if !metadata.is_dir() {
-            return Err(setup(targets.original())(io::Error::new(io::ErrorKind::NotADirectory, "not a directory (links are not followed)")));
+            return Err(setup(tree)(io::Error::new(io::ErrorKind::NotADirectory, "not a directory (links are not followed)")));
         }
-        let original = std::fs::canonicalize(targets.original()).map_err(setup(targets.original()))?;
-        if original.parent() != Some(parent.as_path()) {
-            return Err(setup(targets.original())(io::Error::other("the checkout does not resolve beside its quarantine")));
+        let resolved = std::fs::canonicalize(tree).map_err(setup(tree))?;
+        if resolved.parent() != Some(parent.as_path()) {
+            return Err(setup(tree)(io::Error::other("the checkout does not resolve beside its quarantine")));
         }
         let admin = std::fs::canonicalize(targets.admin()).map_err(setup(targets.admin()))?;
         if !admin.is_dir() {
             return Err(setup(targets.admin())(io::Error::new(io::ErrorKind::NotADirectory, "not a directory")));
         }
+        let (original, quarantine) = if moved {
+            (parent.join(targets.original_name()), resolved)
+        } else {
+            (resolved, parent.join(targets.quarantine_name()))
+        };
         Ok(Self {
-            quarantine: parent.join(targets.quarantine_name()),
+            quarantine,
             original,
             admin,
             parent,
@@ -267,16 +275,16 @@ pub(super) struct FsEvents {
 }
 
 impl FsEvents {
-    pub fn start(targets: &Targets, options: ObserverOptions) -> Result<Self, ObservationError> {
+    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Self, ObservationError> {
         let markers = MarkerDirectory::create().map_err(|source| ObservationError::Setup { path: PathBuf::from("<per-user temporary directory>"), source })?;
-        let paths = Paths::resolve(targets, &markers.0)?;
+        let paths = Paths::resolve(targets, &markers.0, moved)?;
         let parent = identity(&paths.parent).map_err(setup(targets.parent()))?;
         let admin = identity(&paths.admin).map_err(setup(targets.admin()))?;
         let watched = [paths.original.clone(), paths.quarantine.clone(), paths.admin.clone(), paths.markers.clone()];
         let shared = Arc::new(Shared {
             queue: EventQueue::new(targets.clone(), options.queue_capacity),
             paths,
-            moved: AtomicBool::new(false),
+            moved: AtomicBool::new(moved),
             admin_released: AtomicBool::new(false),
             marker_seen: AtomicU64::new(0),
         });

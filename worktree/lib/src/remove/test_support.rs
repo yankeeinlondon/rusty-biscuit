@@ -184,3 +184,24 @@ pub fn replace_with_link(path: &Path, saved_name: &str) -> PathBuf {
     }
     saved
 }
+
+/// Links `link` to the directory `target`: a symlink on Unix; on Windows a
+/// symlink where this host may create one, else a junction, which needs no
+/// privilege and is removed the same way.
+pub fn link_dir(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    if std::os::windows::fs::symlink_dir(target, link).is_err() {
+        let status = Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J {} {}", link.display(), target.display());
+    }
+}
