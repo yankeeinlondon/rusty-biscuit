@@ -1084,3 +1084,451 @@ fn schema_yaml_spellings_resolve_to_conventional_json_schema() {
         assert_eq!(actual, expected, "{label}");
     }
 }
+
+// Reused named types through normal `md schema validate` resolution
+// (`2026-10-13-named-type-presence-and-local-names`). `md schema validate`
+// judges the authored document, so an absent `generated` property passes here
+// even when it is also `required`; the runtime phase that enforces it is
+// checked in `schema_validate_phase`.
+
+/// A types-only schema file: `kind: schema` cannot also carry `$schema`.
+/// `title_base` reaches `label` by a bare name, which resolves in this file.
+const NAMED_TYPES: &str = "kind: schema\ntypes:\n  code: string(required; generated)\n  title: string(required)\n  label: string(min(3))\n  title_base: label\n";
+
+/// The document's own `$schema` defines `title`, `code`, and `label` as
+/// sibling entries and reuses each through a bare name, `@this`, and
+/// `@./types.yaml`; `hop` and `heading` are multi-hop chains.
+const NAMED_TYPE_SCHEMA: &str = "$schema:\n  title: string(required)\n  a: title\n  b: title@this\n  c: title@./types.yaml\n  code: string(required; generated)\n  ga: code\n  gb: code@this\n  gc: code@./types.yaml\n  label: string(min(3))\n  title_base: label\n  hop: title_base@./types.yaml\n  heading: title_base(max(5))\n";
+
+/// Values that satisfy every required property and bound of
+/// [`NAMED_TYPE_SCHEMA`], leaving every generated property absent.
+const NAMED_TYPE_REQUIRED_VALUES: [&str; 4] = ["title=t", "a=t", "b=t", "c=t"];
+
+/// Runs `md schema validate --format json` on `doc` with `extra` positional
+/// inputs, returning the exit code and the parsed report.
+fn validate_json(
+    process: &CliProcessFixture,
+    doc: &Path,
+    extra: &[&str],
+) -> (Option<i32>, serde_json::Value) {
+    let output = process
+        .command()
+        .args([
+            "schema",
+            "validate",
+            "--no-trigger-schemas",
+            "--format",
+            "json",
+        ])
+        .arg(doc)
+        .args(extra)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report =
+        serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: stdout {stdout:?}"));
+    (output.status.code(), report)
+}
+
+/// The `(path, message)` of every reported problem, sorted by path.
+fn problems(report: &serde_json::Value) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = report["problems"]
+        .as_array()
+        .unwrap_or_else(|| panic!("report has no problems array: {report}"))
+        .iter()
+        .map(|problem| {
+            let path = match problem["property"].as_str() {
+                Some(property) => format!("/{property}"),
+                None => problem["path"].as_str().unwrap().to_owned(),
+            };
+            (path, problem["message"].as_str().unwrap().to_owned())
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+fn named_type_document(process: &CliProcessFixture, values: &str) -> PathBuf {
+    let tmp = process.cwd();
+    write_file(tmp, "types.yaml", NAMED_TYPES);
+    write_file(
+        tmp,
+        "doc.md",
+        &format!("---\n{NAMED_TYPE_SCHEMA}{values}---\nBody\n"),
+    )
+}
+
+#[test]
+fn schema_validate_inherited_required_is_reported_for_every_reference_spelling() {
+    let process = CliProcessFixture::new();
+    let doc = named_type_document(&process, "");
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(1), "{report}");
+    let missing: Vec<String> = problems(&report)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    // `ga`, `gb`, `gc`, and `code` inherit `generated` too, so authored
+    // validation lets them stay absent.
+    assert_eq!(missing, ["/a", "/b", "/c", "/title"], "{report}");
+    for problem in report["problems"].as_array().unwrap() {
+        assert_eq!(problem["kind"], "missing", "{report}");
+    }
+}
+
+#[test]
+fn schema_validate_supplied_required_and_absent_generated_pass_authored_validation() {
+    let process = CliProcessFixture::new();
+    let doc = named_type_document(&process, "");
+
+    let (code, report) = validate_json(&process, &doc, &NAMED_TYPE_REQUIRED_VALUES);
+
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
+}
+
+#[test]
+fn schema_validate_rejects_a_wrong_typed_value_through_every_generated_spelling() {
+    let process = CliProcessFixture::new();
+    // A sequence, because a scalar would be coerced to the declared string.
+    let doc = named_type_document(&process, "code: [1]\nga: [1]\ngb: [1]\ngc: [1]\n");
+
+    let (code, report) = validate_json(&process, &doc, &NAMED_TYPE_REQUIRED_VALUES);
+
+    assert_eq!(code, Some(1), "{report}");
+    let expected: Vec<(String, String)> = ["/code", "/ga", "/gb", "/gc"]
+        .into_iter()
+        .map(|path| (path.to_owned(), "[1] is not of type \"string\"".to_owned()))
+        .collect();
+    assert_eq!(problems(&report), expected, "{report}");
+}
+
+#[test]
+fn schema_validate_enforces_inherited_and_use_site_length_bounds_across_hops() {
+    let process = CliProcessFixture::new();
+    let doc = named_type_document(&process, "");
+
+    let mut inputs = NAMED_TYPE_REQUIRED_VALUES.to_vec();
+    // `title_base` and `hop` inherit `min(3)` from `label` (one hop locally,
+    // two across files); `heading` adds `max(5)` on top of it.
+    inputs.extend(["title_base=ab", "hop=ab", "heading=abcdef"]);
+    let (code, report) = validate_json(&process, &doc, &inputs);
+
+    assert_eq!(code, Some(1), "{report}");
+    assert_eq!(
+        problems(&report),
+        [
+            (
+                "/heading".to_owned(),
+                "\"abcdef\" is longer than 5 characters".to_owned()
+            ),
+            (
+                "/hop".to_owned(),
+                "\"ab\" is shorter than 3 characters".to_owned()
+            ),
+            (
+                "/title_base".to_owned(),
+                "\"ab\" is shorter than 3 characters".to_owned()
+            ),
+        ],
+        "{report}"
+    );
+}
+
+/// `tag` reuses `code(pattern(^a))` from `types.yaml` and adds `pattern(z$)`;
+/// a value must satisfy both. `None` is valid, otherwise the pattern the
+/// value violates.
+fn assert_conjunctive_pattern(value: &str, violated: Option<&str>) {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    write_file(
+        tmp,
+        "types.yaml",
+        "kind: schema\ntypes:\n  code: string(pattern(^a))\n",
+    );
+    let doc = write_file(
+        tmp,
+        "doc.md",
+        "---\n$schema:\n  tag: code(pattern(z$))@./types.yaml\n---\nBody\n",
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[&format!("tag={value}")]);
+
+    match violated {
+        None => assert_eq!(code, Some(0), "{value}: {report}"),
+        Some(pattern) => {
+            assert_eq!(code, Some(1), "{value}: {report}");
+            assert_eq!(
+                problems(&report),
+                [(
+                    "/tag".to_owned(),
+                    format!("\"{value}\" does not match \"{pattern}\"")
+                )],
+                "{value}: {report}"
+            );
+        }
+    }
+}
+
+macro_rules! conjunctive_pattern_rows {
+    ($($name:ident: $value:literal => $violated:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            assert_conjunctive_pattern($value, $violated);
+        }
+    )*};
+}
+
+conjunctive_pattern_rows! {
+    schema_validate_conjunctive_patterns_accept_a_value_matching_both: "az" => None;
+    schema_validate_conjunctive_patterns_reject_a_value_missing_the_use_site_pattern: "ab" => Some("z$");
+    schema_validate_conjunctive_patterns_reject_a_value_missing_the_inherited_pattern: "bz" => Some("^a");
+}
+
+#[test]
+fn schema_validate_multi_hop_bound_contradiction_names_both_origins() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let types = write_file(
+        tmp,
+        "types.yaml",
+        "kind: schema\ntypes:\n  label: string(min(10))\n  title_base: label\n",
+    );
+    let doc = write_file(
+        tmp,
+        "doc.md",
+        "---\n$schema:\n  heading: title_base(max(5))@./types.yaml\nheading: abc\n---\nBody\n",
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(report["error"], "schema", "{report}");
+    let message = report["message"].as_str().unwrap();
+    for fragment in [
+        "heading: contradictory bounds on named type `title_base`".to_owned(),
+        format!("`min` in `{}`", resolved_display(&types)),
+        "`max` in the inline `$schema`".to_owned(),
+    ] {
+        assert!(
+            message.contains(&fragment),
+            "missing {fragment:?} in {message}"
+        );
+    }
+}
+
+#[test]
+fn schema_validate_unknown_bare_name_in_an_inline_schema_is_a_schema_error() {
+    let process = CliProcessFixture::new();
+    let doc = write_file(
+        process.cwd(),
+        "doc.md",
+        "---\n$schema:\n  heading: nosuchtype\nheading: abc\n---\nBody\n",
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(report["error"], "schema", "{report}");
+    assert_eq!(
+        report["message"], "heading: unknown named type `nosuchtype` in the inline `$schema`",
+        "{report}"
+    );
+}
+
+#[test]
+fn schema_validate_unknown_bare_name_in_a_referenced_schema_names_that_file() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let broken = write_file(
+        tmp,
+        "broken.yaml",
+        "kind: schema\ntypes:\n  heading: nosuchtype\n",
+    );
+    let doc = write_file(tmp, "doc.md", "---\n$schema: ./broken.yaml\n---\nBody\n");
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(2), "{report}");
+    let message = report["message"].as_str().unwrap();
+    let fragment = format!(
+        "heading: unknown named type `nosuchtype` in `{}`",
+        resolved_display(&broken)
+    );
+    assert!(
+        message.contains(&fragment),
+        "missing {fragment:?} in {message}"
+    );
+}
+
+/// The `guide` arm's `spec` reuses `doc: file(match('*.md'))` and adds
+/// `match('guide*')`; the `other` arm needs `owner`, so a file the `guide` arm
+/// rules out is judged by the `other` arm when `kind` is not set.
+const GROUPED_UNION_SCHEMA: &str = "$schema:\n  - kind: 'literal(guide)'\n    spec: \"doc(required; eager; match('guide*'))@./types.yaml\"\n  - kind: 'literal(other)'\n    owner: 'string(required)'\n";
+
+/// Real files for every row of the grouped-`match` table, plus the shared
+/// `types.yaml`, the root-union document, and a single-schema document.
+fn grouped_match_documents(process: &CliProcessFixture) -> (PathBuf, PathBuf) {
+    let tmp = process.cwd();
+    for name in ["guide-intro.md", "notes.md", "guide.txt"] {
+        write_file(tmp, name, "# File\n");
+    }
+    write_file(
+        tmp,
+        "types.yaml",
+        "kind: schema\ntypes:\n  doc: \"file(match('*.md'))\"\n",
+    );
+    let union = write_file(
+        tmp,
+        "union.md",
+        &format!("---\n{GROUPED_UNION_SCHEMA}---\nBody\n"),
+    );
+    let single = write_file(
+        tmp,
+        "single.md",
+        "---\n$schema:\n  spec: \"doc(required; eager; match('guide*'))@./types.yaml\"\n---\nBody\n",
+    );
+    (union, single)
+}
+
+/// With `kind: guide` settled, the arm accepts `spec` only for a path every
+/// `match` group admits. `None` is accepted.
+fn assert_guide_arm(spec: &str, rejected_as: Option<&str>) {
+    let process = CliProcessFixture::new();
+    let (union, _) = grouped_match_documents(&process);
+
+    let (code, report) = validate_json(&process, &union, &["kind=guide", &format!("spec={spec}")]);
+
+    match rejected_as {
+        None => assert_eq!(code, Some(0), "{spec}: {report}"),
+        Some(message) => {
+            assert_eq!(code, Some(1), "{spec}: {report}");
+            assert_eq!(
+                problems(&report),
+                [("/spec".to_owned(), message.to_owned())],
+                "{spec}: {report}"
+            );
+            assert_eq!(report["problems"][0]["arm_index"], 0, "{spec}: {report}");
+        }
+    }
+}
+
+macro_rules! grouped_match_rows {
+    ($($name:ident: $spec:literal => $rejected_as:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            assert_guide_arm($spec, $rejected_as);
+        }
+    )*};
+}
+
+grouped_match_rows! {
+    schema_validate_grouped_match_arm_accepts_a_path_every_group_admits:
+        "guide-intro.md" => None;
+    schema_validate_grouped_match_arm_rejects_a_path_outside_the_use_site_group:
+        "notes.md" => Some("`notes.md` is outside this schema arm's `match(*.md)` and `match(guide*)`");
+    schema_validate_grouped_match_arm_rejects_a_path_outside_the_inherited_group:
+        "guide.txt" => Some("`guide.txt` is outside this schema arm's `match(*.md)` and `match(guide*)`");
+}
+
+/// Without `kind`, a path one group rejects rules the `guide` arm out, so the
+/// `other` arm judges the document and reports its own missing `owner`.
+#[test]
+fn schema_validate_grouped_match_rules_out_the_arm_for_an_undecided_document() {
+    let process = CliProcessFixture::new();
+    let (union, _) = grouped_match_documents(&process);
+
+    let (code, report) = validate_json(&process, &union, &["spec=guide.txt"]);
+
+    assert_eq!(code, Some(1), "{report}");
+    assert_eq!(
+        problems(&report),
+        [(
+            "/owner".to_owned(),
+            "\"owner\" is a required property".to_owned()
+        )],
+        "{report}"
+    );
+    assert_eq!(report["problems"][0]["arm_index"], 1, "{report}");
+}
+
+/// In a plain schema `match` stays passive: an existing file neither group
+/// admits is still a valid value.
+#[test]
+fn schema_validate_grouped_match_is_passive_in_a_single_schema() {
+    let process = CliProcessFixture::new();
+    let (_, single) = grouped_match_documents(&process);
+
+    let (code, report) = validate_json(&process, &single, &["spec=guide.txt"]);
+
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
+}
+
+/// Writes `doc.md` referencing the shipped Claudine baseline, which reuses the
+/// types in `claudine-types.yaml` through cross-file and `@this` references,
+/// followed by `values`.
+fn shipped_claudine_document(process: &CliProcessFixture, values: &str) -> PathBuf {
+    let schema = biscuit_test_harness::manifest_dir!()
+        .parent()
+        .expect("darkmatter/cli has a parent")
+        .join("docs/schemas/claudine.yaml");
+    assert!(schema.is_file(), "{} is missing", schema.display());
+    write_file(
+        process.cwd(),
+        "doc.md",
+        &format!("---\n$schema: '{}'\n{values}---\nBody\n", schema.display()),
+    )
+}
+
+#[test]
+fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_types() {
+    let process = CliProcessFixture::new();
+    // The baseline's `generated; required` sequence and loop properties are
+    // absent, which authored validation permits.
+    let doc = shipped_claudine_document(
+        &process,
+        "initialize:\n  say: hello\n  stack:\n    - when: 'true'\n      action:\n        notify: hi\nloop:\n  max: 3\n  action:\n    op: increment\n    prop: n\n",
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
+}
+
+/// `lifecycle-action` is an open mapping with `min-keys: 1`; an empty action
+/// matches none of the `action` union's arms.
+#[test]
+fn schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_action() {
+    let process = CliProcessFixture::new();
+    let doc = shipped_claudine_document(&process, "initialize:\n  stack:\n    - action: {}\n");
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(1), "{report}");
+    let found = problems(&report);
+    assert_eq!(found.len(), 1, "{report}");
+    assert_eq!(found[0].0, "/initialize/stack/0/action", "{report}");
+    assert!(found[0].1.contains("anyOf"), "{report}");
+}
+
+#[test]
+fn schema_validate_shipped_claudine_schema_rejects_values_inside_a_reused_loop_event() {
+    let process = CliProcessFixture::new();
+    let doc = shipped_claudine_document(
+        &process,
+        "loop:\n  max: 0\n  action:\n    op: explode\n    prop: n\n",
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(1), "{report}");
+    let found = problems(&report);
+    let paths: Vec<&str> = found.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(paths, ["/loop/action/op", "/loop/max"], "{report}");
+    assert!(found[0].1.contains("\"explode\" is not one of"), "{report}");
+    assert_eq!(found[1].1, "0 is less than the minimum of 1", "{report}");
+}

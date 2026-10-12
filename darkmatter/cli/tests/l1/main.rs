@@ -67,6 +67,7 @@ mod schema_detect;
 mod schema_triggers;
 mod schema_validate;
 mod schema_validate_baseline;
+mod schema_validate_phase;
 mod spawn_site_guard;
 mod test_layout;
 mod toc;
