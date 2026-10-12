@@ -206,8 +206,8 @@ fn save_config_to(config_path: &Path, base_dir: &Path) -> Result<(), WorktreeErr
 ///
 /// ## Errors
 ///
-/// - [`WorktreeError::BaseDirectoryNotConfigured`] — neither source is set; caller
-///   should run interactive setup and then call [`save_config`].
+/// - [`WorktreeError::BaseDirectoryNotConfigured`] — neither source is set; an
+///   interactive caller may run setup and then call [`save_config`].
 /// - [`WorktreeError::ConfigInvalidFormat`] — the config file is not UTF-8 JSON
 ///   with a string `base_dir`.
 /// - [`WorktreeError::BaseDirectoryInvalidEncoding`] — `WT` is not Unicode.

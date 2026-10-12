@@ -628,8 +628,11 @@ fn porcelain_path(line: &str) -> Option<&str> {
 /// Create a new worktree under `base`.
 ///
 /// The worktree is placed at `{base}/{repo-name}/{dasherized-branch}/`.
-/// Callers are responsible for resolving `base` (e.g. via
-/// [`worktree::config::resolve_base_dir`] or an interactive prompt).
+/// `base` is used as given and is not checked here: callers must resolve and
+/// validate it first, through [`crate::config::resolve_base_dir`] or, for a
+/// value chosen some other way, [`crate::config::validate_base_dir`] plus an
+/// existing-directory check. A relative `base` would place the worktree under
+/// the current directory.
 ///
 /// A new branch forks from the local branch `from`, or from the current
 /// branch when `from` is `None`, and its fork origin is recorded (see
