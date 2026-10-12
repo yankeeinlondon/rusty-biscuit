@@ -97,13 +97,18 @@ schema/src/
 ├── lib.rs           # Module declarations
 ├── prelude.rs       # Convenient re-exports
 ├── shared.rs        # RequestParts, SchematicError, auth resolution, cookie/query helpers, reqwest re-export
-├── anthropic.rs     # Anthropic API client
-├── openai.rs        # OpenAI API client
-├── elevenlabs.rs    # ElevenLabs API client
-├── huggingface.rs   # HuggingFace Hub API client
-├── lmstudio.rs      # LM Studio API client
-├── ollama.rs        # OllamaNative + OllamaOpenAI (combined, shared module)
-└── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
+├── ws_shared.rs     # WebSocket support shared by the *_ws modules
+├── anthropic.rs     # A module under 2000 lines stays one file
+├── lmstudio.rs
+├── openai/          # A larger module is split into a directory:
+│   ├── mod.rs       #   module docs and re-exports
+│   ├── client.rs    #   client struct and request methods
+│   ├── requests.rs  #   per-endpoint request structs
+│   └── responses.rs #   (when the module has response types)
+├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
+├── emqx/            # EmqxBasic + EmqxBearer (combined, shared module)
+├── elevenlabs_ws.rs # WebSocket clients
+└── ...              # one entry per remaining module group
 ```
 
 APIs that share a `module_path` (e.g., Ollama Native + OpenAI, EMQX Basic + Bearer)
@@ -139,7 +144,12 @@ pub enum SchematicError {
     ApiError { status: u16, body: String },
     UnsupportedMethod(String),
     SerializationError(String),
+    Io(String),
     MissingCredential { env_vars: Vec<String> },
+    AuthenticationRequired { .. },
+    Header(schematic_define::HeaderError),
+    WrongResponseDecoder { .. },
+    InternalError(String),
 }
 ```
 
@@ -176,9 +186,14 @@ pub struct MyApi {
     base_url: String,
     env_auth: Vec<String>,
     auth_strategy: schematic_define::AuthStrategy,
+    auth_policy: schematic_define::AuthPolicy,
     env_username: Option<String>,
-    headers: Vec<(String, String)>,
+    headers: schematic_define::Headers,
+    api_key_param: Option<schematic_define::SensitiveString>,
+    // ...
 }
+
+// `Debug` prints only `base_url` and `auth_policy` (`shared::debug_client`).
 
 impl MyApi {
     pub const BASE_URL: &'static str = "https://api.example.com/v1";
@@ -190,7 +205,8 @@ impl MyApi {
     pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self;
 
     // Variant with different config
-    pub fn variant(
+    pub fn variant(&self) -> MyApiVariantBuilder<'_>;
+    pub fn variant_with(
         &self,
         base_url: impl Into<String>,
         env_auth: Vec<String>,
@@ -220,6 +236,8 @@ impl Default for MyApi {
 and writes only outputs with no error; one output's failure never blocks the
 others, and any failure exits 1. Diagnostics print to stderr as
 `severity=… api=… endpoint=… feature=… output=…: message`; warnings never fail.
+A same-API duplicate method + normalized path (`/a/{x}` = `/a/{y}`) is an
+error in every output, with no exception list (`endpoint_uniqueness_key`).
 Grouped OpenAPI documents are built in memory for every module before any is
 written (`export::openapi::build_openapi_grouped`); a later group member's
 clashing `operationId` gets its API-name prefix, and the final
@@ -238,11 +256,12 @@ $ schematic-gen validate --api gitea
 
 | Module | Function | Purpose |
 |--------|----------|---------|
-| `api_struct.rs` | `generate_api_struct()` | Client struct with constructors/accessors |
-| `client.rs` | `generate_request_method()` | Async `request()` method with auth |
-| `error.rs` | `generate_error_type()` | SchematicError enum |
+| `api_struct/` | `generate_api_struct()` | Client struct with constructors/accessors |
+| `client/` | `generate_request_method()` | Async `request()` method with auth |
+| `client/shared_auth.rs` | `generate_request_auth_helpers()` | `shared::resolve_request_auth` and the other auth helpers emitted once into `shared.rs` |
+| `error.rs` | `generate_error_type()` | SchematicError enum, `append_query_pairs`, cookie helpers |
 | `request_enum.rs` | `generate_request_enum()` | Unified request enum |
-| `request_structs.rs` | `generate_request_struct()` | Per-endpoint structs |
+| `request_structs/` | `generate_request_struct()` | Per-endpoint structs; `named_params.rs` holds header/cookie parameter fields |
 | `module_docs.rs` | `ModuleDocBuilder` | Module documentation |
 | `import_pipeline.rs` | `run_import()` | OpenAPI import orchestration |
 | `model_gen.rs` | `generate_models()` | Generate types.rs from ModelCatalog |

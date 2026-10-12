@@ -18,7 +18,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
 | Artificial Analysis Data | `artificial_analysis` | `define_artificial_analysis_data_api()` | 6 | Artificial Analysis free data API for LLM and media-model benchmarks |
 | Artificial Analysis CritPt | `artificial_analysis` | `define_artificial_analysis_critpt_api()` | 1 | Artificial Analysis CritPt benchmark evaluation API |
-| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 16 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 265 | Full OpenAI platform surface, imported from the vendored spec (see `specs/openai/`) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
@@ -28,7 +28,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
 | EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
 | EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 30+ | EMQX MQTT Broker REST API with Bearer token auth |
-| GitHub | `github` | `define_github_api()` | 17 | GitHub REST API for repos, PRs, issues, releases |
+| GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
 | GitLab | `gitlab` | `define_gitlab_api()` | 19 | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | `define_gitea_api()` | 16 | Gitea REST API for self-hosted Git forge instances |
 | Eversolo | `eversolo` | `define_eversolo_api()` | 24 | Eversolo DMP-A8 local HTTP control API |
@@ -174,8 +174,7 @@ if paginated.has_next() {
 | Endpoint | Method | Path | Response Type |
 |----------|--------|------|---------------|
 | GetRepository | GET | `/repositories/{workspace}/{repo_slug}` | `Repository` |
-| ListDirectoryContents | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `PaginatedResponse<SourceEntry>` |
-| GetFileContentRaw | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `String` (text) |
+| GetSource | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `Bytes` (binary): JSON `PaginatedResponse<SourceEntry>` for a directory, raw content for a file |
 | ListPullRequests | GET | `/repositories/{workspace}/{repo_slug}/pullrequests` | `PaginatedResponse<PullRequest>` |
 | GetPullRequest | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}` | `PullRequest` |
 | ListPullRequestComments | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments` | `PaginatedResponse<PullRequestComment>` |

@@ -100,6 +100,48 @@
 
     _Tags: formatting, code-generation_
 
+- [biscuit-file](../../biscuit-file/lib) _v0.1.0_
+
+    _Local workspace dependency (`toml`, `yaml` features): TOML-safe string serialization in the generated manifest and YAML reading in the AsyncAPI importer._
+
+    _Tags: workspace_
+
+- [colored](https://github.com/colored-rs/colored) _v3.0_
+
+    _Terminal colors for the generator's status and diagnostic output._
+
+    _Tags: cli, terminal_
+
+- [schematic-definitions](../definitions) _v0.1.0_
+
+    _Local workspace dependency holding the API definitions the generator reads._
+
+    _Tags: workspace_
+
+- [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
+
+    _Serialization framework; `ValidationDiagnostic` derives `Serialize`._
+
+    _Tags: serialization_
+
+- [serde_json](https://github.com/serde-rs/json) _v1.0_
+
+    _JSON writer for the exported OpenAPI documents and Postman collections._
+
+    _Tags: json, serialization_
+
+- [openapiv3](https://github.com/glademiller/openapiv3) _v2_ [📄](https://docs.rs/openapiv3)
+
+    _OpenAPI 3 document types used by the OpenAPI importer and exporter._
+
+    _Tags: openapi, serialization_
+
+- [indexmap](https://github.com/indexmap-rs/indexmap) _v2_ [📄](https://docs.rs/indexmap)
+
+    _Insertion-ordered maps, so generation plans and exported documents keep a deterministic order._
+
+    _Tags: collections_
+
 ### Development Dependencies
 
 - [tempfile](https://github.com/Stebalien/tempfile) _v3.15_
@@ -130,11 +172,11 @@
 
     _Tags: workspace, testing_
 
-- [toml](https://github.com/toml-rs/toml) _v0.8_ [📄](https://docs.rs/toml)
+- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
 
-    _Native Rust encoder and decoder of TOML-formatted files with serde integration._
+    _JSON Schema validator (default features off) used by the L1 tests that validate exported Postman collections against the published schema._
 
-    _Tags: serialization, config_
+    _Tags: testing, json-schema_
 
 ---
 
@@ -144,9 +186,9 @@
 
 ### Production Dependencies
 
-- [reqwest](https://github.com/seanmonstar/reqwest) _v0.12_ [📄](https://docs.rs/reqwest)
+- [reqwest](https://github.com/seanmonstar/reqwest) _v0.13_ [📄](https://docs.rs/reqwest)
 
-    _Convenient HTTP client with async/blocking support, JSON, proxies, cookies, and TLS._
+    _HTTP client; default features off, with `form`, `json`, `multipart`, and `rustls`._
 
     _Tags: http, client, async_
 
@@ -173,3 +215,59 @@
     _Asynchronous runtime providing multithreaded task scheduler, reactor, and async I/O primitives._
 
     _Tags: async, runtime, concurrency_
+
+- [schematic-define](../define) _v0.1.0_
+
+    _Local dependency for `Headers`, `AuthPolicy`, `SensitiveString`, and the other runtime types generated clients use._
+
+    _Tags: workspace_
+
+- [schematic-definitions](../definitions) _v0.1.0_
+
+    _Local dependency for the request and response types the generated clients import._
+
+    _Tags: workspace_
+
+- [bytes](https://github.com/tokio-rs/bytes) _v1_ [📄](https://docs.rs/bytes)
+
+    _Byte buffers returned by binary response methods._
+
+    _Tags: bytes, io_
+
+- [urlencoding](https://github.com/kornelski/rust_urlencoding) _v2.1_ [📄](https://docs.rs/urlencoding)
+
+    _Percent-encodes path parameters and query pairs._
+
+    _Tags: url, encoding_
+
+- [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_
+
+    _Stream combinators for the WebSocket clients._
+
+    _Tags: async, streams_
+
+- [tokio-stream](https://github.com/tokio-rs/tokio) _v0.1_
+
+    _Stream adapters for the WebSocket clients._
+
+    _Tags: async, streams_
+
+- [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) _v0.26_ [📄](https://docs.rs/tokio-tungstenite)
+
+    _WebSocket transport (`connect`, `rustls-tls-native-roots`) for the generated WebSocket clients._
+
+    _Tags: websocket, async_
+
+### Development Dependencies
+
+- [wiremock](https://github.com/LukeMathWalker/wiremock-rs) _v0.6_ [📄](https://docs.rs/wiremock)
+
+    _Local mock HTTP server for tests of the generated clients._
+
+    _Tags: testing, http_
+
+- [serial_test](https://github.com/palfrey/serial_test) _v3_
+
+    _Serializes tests that share process state._
+
+    _Tags: testing_

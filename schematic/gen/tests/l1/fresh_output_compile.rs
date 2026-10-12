@@ -28,7 +28,8 @@ use schematic_gen::output::{RustOutputRequest, Selection, get_module_path, prepa
 use schematic_gen::pipeline::resolve_all_apis;
 
 use crate::common::fresh_output::{
-    Definitions, FreshCrate, TreeSnapshot, diff_summary, list_dir, schematic_root, snapshot_tree,
+    Definitions, FreshCrate, OFFLINE_CACHE_HINT, TreeSnapshot, diff_summary, list_dir,
+    offline_cache_hint, schematic_root, snapshot_tree,
 };
 
 /// The fixture APIs and the generator features each one covers.
@@ -818,9 +819,28 @@ fn slow_negative_control_reports_compiler_error() {
     assert!(!run.success, "a type error in emitted code must fail the check:\n{}", run.stderr);
     assert!(
         run.stderr.contains("error[E0308]") && run.stderr.contains("injected_type_error"),
-        "the compiler error should be shown:\n{}",
+        "the compiler error should be shown{}:\n{}",
+        offline_cache_hint(&run.stderr).map(|hint| format!(" ({hint})")).unwrap_or_default(),
         run.stderr
     );
+}
+
+/// The exact stderr `build-linux` produced when its Cargo cache lacked a crate
+/// pinned by `schema/Cargo.lock` gets the fetch hint; a compiler error does not.
+#[test]
+fn offline_cache_misses_name_the_fetch_that_fills_the_cache() {
+    let offline_miss = "error: failed to download `cc v1.2.52`\n\n\
+        Caused by:\n  attempting to make an HTTP request, but --offline was specified\n";
+    assert_eq!(offline_cache_hint(offline_miss), Some(OFFLINE_CACHE_HINT));
+    assert!(
+        OFFLINE_CACHE_HINT
+            .contains("cargo fetch --manifest-path schematic/schema/Cargo.toml"),
+        "{OFFLINE_CACHE_HINT}"
+    );
+
+    let compiler_error = "error[E0308]: mismatched types\n --> src/fixture_basic.rs:9:5\n";
+    assert_eq!(offline_cache_hint(compiler_error), None);
+    assert_eq!(offline_cache_hint(""), None);
 }
 
 /// Request lines the pre-split generator put on the wire, captured by a raw

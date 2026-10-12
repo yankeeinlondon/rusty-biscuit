@@ -160,7 +160,7 @@ Keep these aligned when docs/examples mention built-in APIs:
 - LM Studio: 6 endpoints, bearer auth via `LM_API_TOKEN`
 - EMQX Basic: 36 endpoints, basic auth via `EMQX_API_KEY` + `EMQX_API_SECRET`
 - EMQX Bearer: 38 endpoints, bearer auth via `EMQX_TOKEN`
-- GitHub: 14 endpoints, bearer auth via `GITHUB_TOKEN` or `GH_TOKEN`
+- GitHub: 16 endpoints, bearer auth via `GITHUB_TOKEN` or `GH_TOKEN`
 - Gitea: 14 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
 
 ## Update Workflow
@@ -223,8 +223,6 @@ so the imported API flows through the normal `generate` pipeline.
 
 ## Known Gaps
 
-- `Endpoint.params` is still dropped by the OpenAPI exporter (`export/paths.rs`),
-  so exported specs carry no query parameters.
 - `oneOf`/`anyOf` over *inline* (unnamed) schemas produce untagged enums whose
   variants are all `serde_json::Value` (e.g. `MessageStreamEvent`); only named
   members get real types.

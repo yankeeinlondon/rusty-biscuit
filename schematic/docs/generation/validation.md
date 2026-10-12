@@ -118,7 +118,7 @@ The same fields are available to code as
 | Feature id | Rust | OpenAPI | Postman | Severity |
 | --- | :-: | :-: | :-: | --- |
 | `duplicate-endpoint-id`: two endpoints of one API share an id | ✓ | ✓ | ✓ | error |
-| `duplicate-method-path`: two endpoints of one API share a method and path | ✓ | ✓ | ✓ | warning (see below) |
+| `duplicate-method-path`: two endpoints of one API share a method and path | ✓ | ✓ | ✓ | error (see below) |
 | `query-in-path`: a path template contains `?` | ✓ | ✓ | ✓ | warning (see below) |
 | `invalid-output-filename`: the file name is not one safe path component, or a module would overwrite a shared generated file | ✓ | ✓ | ✓ | error |
 | `invalid-identifier`: an API name, endpoint id, or parameter name cannot become the Rust identifier generated from it | ✓ | | | error |
@@ -132,14 +132,37 @@ The same fields are available to code as
 | `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
 | `text-request-body`, `binary-request-body`: the declared content type is empty or not a valid header value | ✓ | | | error |
 | `api-key-param`: a query API-key parameter name is empty, or a cookie API-key name is not a cookie name | ✓ | | | error |
-| `header-parameter`, `cookie-parameter`: the name is not an HTTP token, or the type is an array of arrays | ✓ | | | error |
-| `header-parameter`, `cookie-parameter`: a declared parameter Postman collections do not carry | | | ✓ | error if `required`, warning otherwise |
+| `header-parameter`, `cookie-parameter`: the name is not an HTTP token | ✓ | | | error |
+| `query-parameter`, `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features
 check only that the declared names and content types can go on the wire.
 How each one is sent is described in
 [request-side inputs](./request-side.md#text-and-binary-bodies).
+OpenAPI declares header and cookie parameters in their own locations, and a
+Postman collection carries each one as a request header, disabled when the
+parameter is optional (see
+[Postman parameter mapping](../io/export-postman.md#parameter-mapping)), so
+neither export has a rule for them.
+
+The Rust client sends each element of an array parameter as text: one
+repeated pair per element in the query, one `,`-joined value in a header or
+cookie. An element that is itself an array has no text form, so an array of
+arrays is an error at every location rather than a shape the client would
+drop or fail to compile. OpenAPI writes the nested shape as a parameter
+schema, and Postman carries no parameter type, so both exports are still
+written:
+
+```rust
+// Fails the Rust client only (`query-parameter`).
+EndpointParams::default().with_query_param(
+    "matrix",
+    QueryParamType::Array(Box::new(QueryParamType::Array(Box::new(QueryParamType::Boolean)))),
+    false,
+    None,
+)
+```
 
 Rust-only rules are never applied to the exports. An export carries type
 names and endpoint ids as data, so a name that is not valid Rust syntax still
@@ -158,13 +181,41 @@ every placeholder is replaced by `{}`. `GET /items/{id}` and
 `DELETE /items/{id}` are not. This comparison lives in one function,
 `schematic_gen::validation::endpoint_uniqueness_key`.
 
-`duplicate-method-path` is a **warning** today. GitHub (`GetGitTree`,
-`GetGitTreeRecursive`) and Bitbucket (`ListDirectoryContents`,
-`GetFileContentRaw`) each declare two endpoints on one route that differ only
-by their query or response. The Rust client keeps both, but an OpenAPI path
-item holds one operation per method, so those documents contain only the
-later endpoint. The severity is the constant
-`DUPLICATE_METHOD_PATH_SEVERITY`.
+An endpoint **is** its method and path. Two endpoints of one API on the
+same route are a `duplicate-method-path` **error** in every output, with no
+exceptions, so none of the three outputs is written for that batch. Nothing
+else joins the key: a query parameter, a request body, or a different
+response does not make a second endpoint on the same route. Declare one
+endpoint instead, with the distinguishing input as an optional parameter:
+
+```rust
+// Rejected: both are GET /repos/{owner}/{repo}/git/trees/{tree_sha}.
+//   GetGitTree           (no parameters)
+//   GetGitTreeRecursive  (recursive=true)
+
+// Accepted: one endpoint; `recursive` is an optional query parameter.
+Endpoint {
+    id: "GetGitTree".to_string(),
+    method: RestMethod::Get,
+    path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
+    params: Some(EndpointParams::default().with_query_param(
+        "recursive",
+        QueryParamType::Boolean,
+        false,
+        Some("Fetch the tree recursively instead of a single level"),
+    )),
+    // ...
+}
+```
+
+When one route answers with different shapes (Bitbucket's `src` route
+returns a JSON directory listing or raw file bytes, depending on what the
+path names), the single endpoint declares a response that is true for every
+shape: Bitbucket's `GetSource` returns `Binary`, and the caller decodes it.
+
+The same route in two **different** APIs is not a duplicate for the Rust
+client or Postman. For OpenAPI it matters only when both APIs share one
+module document; see the next section.
 
 Across the APIs of one module group (for example `OllamaNative` and
 `OllamaOpenAI`, which both generate into `ollama`), the same endpoint id is
@@ -256,6 +307,6 @@ reports an error. `export::openapi::build_openapi_grouped` returns a module's
 finished document without writing it, after the group checks above;
 `write_openapi_document` writes a built document.
 
-WebSocket validation is expected to report through the same
-`ValidationDiagnostic`, `Severity`, `Feature`, and `Output` types rather than
-a separate format.
+**Planned:** WebSocket definitions are not validated yet. When they are,
+they will report through the same `ValidationDiagnostic`, `Severity`,
+`Feature`, and `Output` types rather than a separate format.

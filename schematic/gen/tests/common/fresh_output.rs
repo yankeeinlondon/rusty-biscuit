@@ -7,7 +7,7 @@
 //! lockfile: `cargo update --workspace --offline` adds only the temporary
 //! package entries, and every build runs with `--offline --locked`. There is
 //! no online fallback; a host whose Cargo cache cannot satisfy the lockfile
-//! fails with Cargo's own explanation.
+//! fails with Cargo's own explanation and [`OFFLINE_CACHE_HINT`].
 //!
 //! Every child build shares one reusable target directory, a sibling of the
 //! outer build's profile directories inside the configured target storage.
@@ -53,12 +53,30 @@ pub struct CargoRun {
     pub command: String,
 }
 
+/// How to fill a Cargo cache that cannot satisfy `--offline`; every guard
+/// crate copies `schematic/schema/Cargo.lock`, and CI's build job runs the
+/// same fetch before the guard.
+pub const OFFLINE_CACHE_HINT: &str = "this host's Cargo cache lacks a crate pinned by \
+     schematic/schema/Cargo.lock; run `cargo fetch --manifest-path schematic/schema/Cargo.toml` \
+     from the repository root, then rerun";
+
+/// [`OFFLINE_CACHE_HINT`] when `stderr` shows Cargo refusing a download
+/// because of `--offline`.
+pub fn offline_cache_hint(stderr: &str) -> Option<&'static str> {
+    stderr
+        .contains("but --offline was specified")
+        .then_some(OFFLINE_CACHE_HINT)
+}
+
 impl CargoRun {
     /// Panics with the command, its exit, and both streams unless it succeeded.
     pub fn assert_success(&self) {
+        let hint = offline_cache_hint(&self.stderr)
+            .map(|hint| format!("\n\nhint: {hint}"))
+            .unwrap_or_default();
         assert!(
             self.success,
-            "`{}` failed\n\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            "`{}` failed{hint}\n\n--- stdout ---\n{}\n--- stderr ---\n{}",
             self.command, self.stdout, self.stderr
         );
     }

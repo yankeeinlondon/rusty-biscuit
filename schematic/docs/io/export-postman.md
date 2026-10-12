@@ -65,8 +65,45 @@ The algorithm strips leading `/`, ignores path variables `{...}`, and skips vers
 | `BearerToken { header: None }` | `bearer` | `{{bearerToken}}` |
 | `BearerToken { header: Some(h) }` | `apikey` | `{{apiKey}}` |
 | `ApiKey { header }` | `apikey` | `{{apiKey}}` |
+| `ApiKeyParam { location: Query, name }` | `apikey`, added to the query as `name` | `{{apiKey}}` |
+| `ApiKeyParam { location: Cookie, name }` | `apikey`, added as a `Cookie` header valued `name={{apiKey}}` | `{{apiKey}}` |
 | `Basic` | `basic` | `{{username}}`, `{{password}}` |
 | `None` | `noauth` | — |
+
+Postman's API-key auth can add a key only to a header or the query string,
+so a cookie key travels in a `Cookie` header that holds the cookie pair.
+
+## Parameter Mapping
+
+Every declared parameter appears in the request it belongs to, so a user can
+fill in any input the API accepts:
+
+| Location | Postman entry |
+|----------|---------------|
+| path | URL variable valued `<name>` |
+| query | URL query entry with no value |
+| header | request header `name: <name>` |
+| cookie | request header `Cookie: name=<name>` |
+
+A required header or cookie parameter is an enabled header. An optional one
+is written with `"disabled": true`, so Postman leaves it out until the user
+switches it on. A declared description becomes the header's description:
+
+```json
+"header": [
+  { "key": "x-required", "value": "<x-required>" },
+  { "key": "openai-beta", "value": "<openai-beta>", "disabled": true,
+    "description": "Optional beta features to enable for this request." },
+  { "key": "Cookie", "value": "session=<session>" }
+]
+```
+
+Each cookie parameter is its own `Cookie` entry so that each can be switched
+on separately. Postman sends every enabled entry, so a request with several
+enabled cookies carries several `Cookie` header lines, unlike the generated
+Rust client, which folds them into one. Declared parameters follow the API's
+and the endpoint's static headers and do not replace a same-named static
+header.
 
 ## Body Mapping
 

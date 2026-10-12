@@ -133,7 +133,9 @@ $ schematic-gen validate --api gitea
   [PASS] postman
 ```
 
-Warnings never fail a run. The diagnostic format, every check, and which
+Warnings never fail a run. Two endpoints of one API on the same method and
+path (placeholder names ignored) are an error in every output; merge them
+into one endpoint. The diagnostic format, every check, and which
 output applies it are described in
 [`docs/generation/validation.md`](../docs/generation/validation.md).
 
@@ -258,18 +260,19 @@ The generator produces per-API module files:
 schema/src/
 ├── lib.rs           # Module declarations
 ├── prelude.rs       # Convenient re-exports
-├── shared.rs        # RequestParts, append_query_pairs, SchematicError, VariantBuilder, Paginated trait, reqwest re-export
-├── anthropic.rs     # Anthropic API client
-├── openai.rs        # OpenAI API client
-├── elevenlabs.rs    # ElevenLabs API client
-├── huggingface.rs   # HuggingFace Hub API client
-├── lmstudio.rs      # LM Studio API client
-├── ollama.rs        # OllamaNative + OllamaOpenAI (combined, shared module)
-├── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
-├── bitbucket.rs     # Bitbucket API client
-├── gitea.rs         # Gitea API client
-├── github.rs        # GitHub API client
-└── gitlab.rs        # GitLab API client
+├── shared.rs        # RequestParts, SchematicError, auth resolution, cookie/query helpers, reqwest re-export
+├── ws_shared.rs     # WebSocket support shared by the *_ws modules
+├── anthropic.rs     # A module under 2000 lines stays one file
+├── lmstudio.rs
+├── openai/          # A larger module is split into a directory:
+│   ├── mod.rs       #   module docs and re-exports
+│   ├── client.rs    #   client struct and request methods
+│   ├── requests.rs  #   per-endpoint request structs
+│   └── responses.rs #   (when the module has response types)
+├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
+├── emqx/            # EmqxBasic + EmqxBearer (combined, shared module)
+├── elevenlabs_ws.rs # WebSocket clients
+└── ...              # one entry per remaining module group
 ```
 
 APIs sharing a `module_path` are automatically combined into a single output file.
@@ -501,9 +504,15 @@ pub struct OpenAI {
     base_url: String,
     env_auth: Vec<String>,
     auth_strategy: schematic_define::AuthStrategy,
+    auth_policy: schematic_define::AuthPolicy,
     env_username: Option<String>,
-    headers: Vec<(String, String)>,
+    headers: schematic_define::Headers,
+    api_key_param: Option<schematic_define::SensitiveString>,
+    // ...
 }
+
+// `Debug` prints only `base_url` and `auth_policy` (`shared::debug_client`);
+// header credentials and the `ApiKeyParam` key are never printed.
 
 impl OpenAI {
     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
@@ -965,10 +974,10 @@ Per-output validators; each takes the whole batch and returns
 
 | Function | Description |
 |----------|-------------|
-| `validate_rust_client(&apis)` | Routes plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, unsent request inputs |
+| `validate_rust_client(&apis)` | Routes plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, request-input names and content types |
 | `validate_openapi(&apis)` | Routes, embedded queries, document file names |
 | `validate_openapi_registry(module, &apis, registry)` | JSON types missing from a module's schema registry |
-| `validate_postman(&apis)` | Routes, embedded queries, collection file names, unsent header/cookie parameters |
+| `validate_postman(&apis)` | Routes, embedded queries, collection file names |
 | `endpoint_uniqueness_key(&endpoint)` | The `(method, normalized path)` identity two endpoints of one API may not share |
 
 ### `inference`
@@ -1205,14 +1214,14 @@ The current test suite verifies:
 3. **Individual generators** - Each generator function has unit tests
 4. **Auth strategies** - All authentication patterns generate correct code
 5. **Response method generation** - E2E tests verify `request_bytes()`/`request_text()`/`request_empty()` generation and emitted `response.bytes()`/`response.text()` calls
-6. **Multi-API compile checks** - Ignored slow tests compile generated output with `cargo check`
+6. **Fresh-output guard** - The `slow_*` tests in `tests/l1/fresh_output_compile.rs` (`just test-fresh-output`, part of `just test`) generate all 18 APIs plus fixture APIs into temporary crates and run `cargo check --offline --locked`; the fixture crate also runs wiremock tests that assert the bytes each request puts on the wire
 
 ### What Tests DO NOT Cover
 
 **Live HTTP behavior is NOT tested!** Specifically:
 
 1. **Provider integration** - No tests exercise real API endpoints
-2. **Network-layer behavior** - No tests cover retries, timeouts, or transport failures against a live/mocked server
+2. **Network-layer behavior** - No tests cover retries, timeouts, or transport failures; request encoding is checked against wiremock only in the fixture crate
 3. **Auth at runtime** - No end-to-end test validates real credential sourcing against external services
 
 ### Known Failure Modes
@@ -1220,8 +1229,8 @@ The current test suite verifies:
 | Scenario | What Goes Wrong | How to Catch It |
 |----------|-----------------|-----------------|
 | Binary endpoint with JSON code | Runtime failure: JSON deserialize of binary data | `grep "request_bytes" generated_file.rs` |
-| Module path mismatch | Compile failure: unresolved import | `cargo check -p schematic-schema` |
-| Shared module missing `request_suffix` | Compile failure: duplicate struct names | `cargo check -p schematic-schema` |
+| Module path mismatch | Compile failure: unresolved import | `just test-fresh-output` |
+| Shared module missing `request_suffix` | Compile failure: duplicate struct names | `just test-fresh-output` |
 
 ### Required Manual Verification
 
@@ -1229,20 +1238,20 @@ When modifying response handling or module generation:
 
 ```bash
 # 1. Generate code
-cargo run -p schematic-gen -- --api elevenlabs --output schematic/schema/src
+cargo run -p schematic-gen -- generate --api elevenlabs --output schematic/schema/src
 
 # 2. Verify correct methods generated for non-JSON endpoints
-grep -n "pub async fn request" schematic/schema/src/elevenlabs.rs
+grep -n "pub async fn request" schematic/schema/src/elevenlabs/client.rs
 # Should see: request<T>, request_bytes, request_text, request_empty (as applicable)
 
 # 3. Verify convenience methods for binary endpoints
-grep -n "pub async fn create_speech\|pub async fn stream_speech" schematic/schema/src/elevenlabs.rs
+grep -n "pub async fn create_speech\|pub async fn stream_speech" schematic/schema/src/elevenlabs/client.rs
 
-# 4. Check it compiles
-cargo check -p schematic-schema
+# 4. Check it compiles (schematic-schema is excluded from the workspace)
+cargo check --manifest-path schematic/schema/Cargo.toml
 
-# 5. Run tests (necessary but not sufficient!)
-cargo test -p schematic-gen
+# 5. Run tests, including the fresh-output guard (necessary but not sufficient!)
+just -f schematic/justfile test
 ```
 
 ### Response Type Method Generation
@@ -1267,9 +1276,8 @@ pub async fn create_speech(&self, req: CreateSpeechRequest) -> Result<bytes::Byt
 
 To close the testing gap, we need:
 
-1. **Runtime behavior tests** - Mock HTTP server returning binary data, verify correct handling
-2. **Multi-API integration tests** - Generate multiple APIs, verify they compile together
-3. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
+1. **Response-side runtime tests** - Mock HTTP server returning binary data, verify correct handling
+2. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
 
 ## Dependencies
 
@@ -1277,12 +1285,25 @@ The generated code requires these runtime dependencies (automatically included i
 
 ```toml
 [dependencies]
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+bytes = "1"
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "rustls"] }
+schematic-define = { version = "0.1.0", path = "..." }
+schematic-definitions = { version = "0.1.0", path = "..." }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.43", features = ["rt", "macros"] }
+tokio = { version = "1.43", features = ["rt", "macros", "sync", "time", "net"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+urlencoding = "2.1"
+
+[dev-dependencies]
+serial_test = "3"
+wiremock = "0.6"
 ```
+
+The template lives in `src/cargo_gen.rs`.
 
 ## License
 

@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | API | Module | Endpoints | Auth | Description |
 |-----|--------|-----------|------|-------------|
 | Anthropic | `anthropic` | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
-| Bitbucket | `bitbucket` | 16 | Basic | Bitbucket Cloud API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | 15 | Basic | Bitbucket Cloud API for repos, PRs, issues, tags |
 | OpenAI | `openai` | 3 | Bearer | Models API (list, retrieve, delete) |
 | HuggingFace Hub | `huggingface` | 28+ | Bearer | Models, datasets, spaces, repos |
 | ElevenLabs | `elevenlabs` | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
@@ -154,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Ollama OpenAI | `ollama` | 4 | None | OpenAI-compatible subset |
 | EMQX Basic | `emqx` | 36 | Basic | MQTT broker REST API |
 | EMQX Bearer | `emqx` | 38 | Bearer | MQTT broker with token auth |
-| GitHub | `github` | 17 | Bearer | GitHub REST API for repos, PRs, issues, releases |
+| GitHub | `github` | 16 | Bearer | GitHub REST API for repos, PRs, issues, releases |
 | GitLab | `gitlab` | 19 | API Key (`PRIVATE-TOKEN`) | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | 16 | API Key (`token`) | Gitea REST API for self-hosted Git forges |
 | Eversolo | `eversolo` | 24 | None | DMP-A8 local HTTP control (device, playback, I/O) |
@@ -433,7 +433,7 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
 - ❌ Integration with real APIs
 - ❌ Runtime behavior of combined shared-module APIs
 
-The guard needs the dependencies of `schema/Cargo.lock` in the local Cargo cache, because it never goes online. If it fails with an offline-resolution error, run `cargo fetch --manifest-path schematic/schema/Cargo.toml` once.
+The guard needs the dependencies of `schema/Cargo.lock` in the local Cargo cache, because it never goes online. If it fails with an offline-resolution error (the failure message then starts with a `hint:` line saying so), run `cargo fetch --manifest-path schematic/schema/Cargo.toml` once from the repository root.
 
 **Before submitting changes:**
 

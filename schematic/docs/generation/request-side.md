@@ -95,6 +95,9 @@ The generated client sends that request as
 Array parameters repeat the key, one pair per element:
 `include=a&include=b`. An array of `serde_json::Value` sends each element's
 JSON text, so a string element arrives quoted (`include=%22a%22`).
+Generation rejects a query parameter whose type is an array of arrays
+(`query-parameter`), since an element that is itself an array has no
+single text value.
 
 ### Path templates that already contain a query
 

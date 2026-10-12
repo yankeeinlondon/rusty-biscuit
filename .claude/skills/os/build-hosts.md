@@ -151,6 +151,17 @@ directly; use your own worktree for ad hoc sessions.
   matches nothing ("0 tests run"). `-E 'test(...)'` breaks the recipe's
   unquoted argument line (a `|` in it is run as a shell pipe); pass several
   name substrings instead, which nextest ORs.
+- **`slow_` tests never run in the default L1 filter**, so schematic's
+  fresh-output guard needs a build flag, which switches every host to plain
+  `cargo nextest run`: `./scripts/cross-check.sh schematic-gen --os all
+  --features terminal-tests 'fresh_output_compile::slow_'`. The guard's child
+  Cargo builds `--offline` against `schematic/schema/Cargo.lock`, so a host
+  whose cache lacks one of its crates fails all four tests with "failed to
+  download `cc v1.2.52` … --offline was specified" (`build-linux`,
+  2026-10-11; `build-win-native` and the WSL guest passed). It is a cache gap,
+  not a code failure: `cargo fetch --manifest-path schematic/schema/Cargo.toml`
+  on that host fills it, as CI's build job does before the guard. A cold
+  first run there takes about 2–3 min.
 - Child-process stderr is not shown by a remote test failure. A probe that
   must be read back can append to `<clone dir>\probe.txt` and be read
   with `ssh "$BUILD_WIN" "Get-Content <clone dir>\probe.txt"`.
