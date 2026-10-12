@@ -374,24 +374,24 @@ pub struct FactSource {
     pub group: usize,
 }
 
-/// The group holding the one-row-per-language matrices (generics,
-/// modifiers, body lines LF and CRLF, relations) and the Rust impl source.
-/// It grows only with the language count, and each consumer's "some source
-/// exercised this fact" guards are asserted on it alone, which implies them
-/// for the whole corpus.
-pub const PER_LANGUAGE_FACT_GROUP: usize = 0;
+/// Rust's primary matrix rows and impl source exercise every declaration
+/// fact, so the consumers' non-vacuity checks belong to this group.
+pub const RUST_FACT_GROUP: usize = 0;
 
-/// Groups the owner-identity and path-meaning rows are dealt into, round
-/// robin, so every group mixes languages and matrices.
-pub const SHARED_FACT_GROUPS: usize = 6;
+/// Language-specific groups of owner-identity and path-meaning sources;
+/// round-robin assignment within a language mixes their matrices.
+pub const SHARED_FACT_GROUPS: usize = 44;
 
-pub const DECLARATION_FACT_GROUP_COUNT: usize = 1 + SHARED_FACT_GROUPS;
+const LANGUAGE_FACT_GROUPS: usize = 16;
+
+pub const DECLARATION_FACT_GROUP_COUNT: usize = LANGUAGE_FACT_GROUPS + SHARED_FACT_GROUPS;
 
 /// The most sources one group may hold. Each consumer runs one nextest test
-/// per group, so this bounds every test's runtime as the matrices grow:
+/// per group, so this bounds source work as the matrices grow:
 /// when a new row overflows a group, raise [`SHARED_FACT_GROUPS`] and stamp
-/// the new group in [`declaration_fact_group_tests`].
-pub const MAX_FACT_GROUP_SOURCES: usize = 140;
+/// the new group in [`declaration_fact_group_tests`]. Query compilation is
+/// isolated by language for the primary matrices.
+pub const MAX_FACT_GROUP_SOURCES: usize = 20;
 
 /// Stamps one `#[test]` per declaration-fact group, each calling the
 /// sibling function `$check` with its group, inside a module named
@@ -401,7 +401,22 @@ pub const MAX_FACT_GROUP_SOURCES: usize = 140;
 macro_rules! declaration_fact_group_tests {
     ($consumer:ident => $check:ident) => {
         $crate::symbols_relations::declaration_fact_group_tests!(@stamp $consumer, $check, [
-            per_language_matrices 0,
+            rust_matrices 0,
+            typescript_matrices 1,
+            javascript_matrices 2,
+            go_matrices 3,
+            python_matrices 4,
+            java_matrices 5,
+            csharp_matrices 6,
+            c_matrices 7,
+            cpp_matrices 8,
+            swift_matrices 9,
+            scala_matrices 10,
+            php_matrices 11,
+            perl_matrices 12,
+            bash_matrices 13,
+            zsh_matrices 14,
+            lua_matrices 15,
         ] shared);
     };
     (shared $consumer:ident => $check:ident) => {
@@ -410,12 +425,50 @@ macro_rules! declaration_fact_group_tests {
     (@stamp $consumer:ident, $check:ident, [$($first:ident $first_group:literal,)*] shared) => {
         $crate::symbols_relations::declaration_fact_group_tests!(@stamp $consumer, $check, [
             $($first $first_group,)*
-            shared_rows_1 1,
-            shared_rows_2 2,
-            shared_rows_3 3,
-            shared_rows_4 4,
-            shared_rows_5 5,
-            shared_rows_6 6,
+            cpp_owners_1 16,
+            cpp_owners_2 17,
+            csharp_owners_1 18,
+            csharp_owners_2 19,
+            csharp_owners_3 20,
+            csharp_owners_4 21,
+            csharp_owners_5 22,
+            csharp_owners_6 23,
+            csharp_owners_7 24,
+            csharp_owners_8 25,
+            csharp_owners_9 26,
+            csharp_owners_10 27,
+            csharp_owners_11 28,
+            go_owners_1 29,
+            java_owners_1 30,
+            javascript_owners_1 31,
+            php_owners_1 32,
+            python_owners_1 33,
+            python_owners_2 34,
+            python_owners_3 35,
+            python_owners_4 36,
+            python_owners_5 37,
+            python_owners_6 38,
+            python_owners_7 39,
+            python_owners_8 40,
+            python_owners_9 41,
+            rust_owners_1 42,
+            rust_owners_2 43,
+            rust_owners_3 44,
+            scala_owners_1 45,
+            scala_owners_2 46,
+            scala_owners_3 47,
+            scala_owners_4 48,
+            swift_owners_1 49,
+            swift_owners_2 50,
+            swift_owners_3 51,
+            swift_owners_4 52,
+            swift_owners_5 53,
+            swift_owners_6 54,
+            swift_owners_7 55,
+            swift_owners_8 56,
+            swift_owners_9 57,
+            typescript_owners_1 58,
+            typescript_owners_2 59,
         ]);
     };
     (@stamp $consumer:ident, $check:ident, [$($name:ident $group:literal),+ $(,)?]) => {
@@ -449,7 +502,7 @@ pub fn declaration_fact_sources() -> Vec<FactSource> {
             label: format!("{matrix} {}", language.name()),
             extension,
             source,
-            group: PER_LANGUAGE_FACT_GROUP,
+            group: language_fact_group(language),
         });
     };
     for row in GENERICS_MATRIX {
@@ -488,9 +541,50 @@ pub fn declaration_fact_sources() -> Vec<FactSource> {
     sources
 }
 
-/// The group of the `idx`-th shared (owner-identity or path-meaning) source.
+fn language_fact_group(language: ProgrammingLanguage) -> usize {
+    let languages = [L::Rust, L::TypeScript, L::JavaScript, L::Go, L::Python, L::Java, L::CSharp, L::C, L::Cpp, L::Swift, L::Scala, L::Php, L::Perl, L::Bash, L::Zsh, L::Lua];
+    languages.iter().position(|candidate| *candidate == language).expect("registered language")
+}
+
+const SHARED_GROUP_LAYOUT: &[(ProgrammingLanguage, usize)] = &[
+    (L::Cpp, 2),
+    (L::CSharp, 11),
+    (L::Go, 1),
+    (L::Java, 1),
+    (L::JavaScript, 1),
+    (L::Php, 1),
+    (L::Python, 9),
+    (L::Rust, 3),
+    (L::Scala, 4),
+    (L::Swift, 9),
+    (L::TypeScript, 2),
+];
+
+static SHARED_SOURCE_GROUPS: std::sync::LazyLock<Vec<usize>> = std::sync::LazyLock::new(|| {
+    let owners = crate::symbols_owner_identity::NESTED_SHADOW_MATRIX.len()
+        + crate::symbols_owner_identity::UNPROVED_OWNER_MATRIX.len();
+    let mut positions = std::collections::HashMap::<ProgrammingLanguage, usize>::new();
+    std::iter::repeat_n(L::Swift, owners)
+        .chain(path_meaning_rows().map(|row| row.language))
+        .map(|language| {
+            let mut start = LANGUAGE_FACT_GROUPS;
+            for &(candidate, shards) in SHARED_GROUP_LAYOUT {
+                if candidate == language {
+                    let ordinal = positions.entry(language).or_default();
+                    let group = start + *ordinal % shards;
+                    *ordinal += 1;
+                    return group;
+                }
+                start += shards;
+            }
+            panic!("{language}: no shared fact group");
+        })
+        .collect()
+});
+
+/// The language-specific group of the `idx`-th shared source.
 fn shared_fact_group(idx: usize) -> usize {
-    1 + idx % SHARED_FACT_GROUPS
+    SHARED_SOURCE_GROUPS[idx]
 }
 
 /// The [`path_meaning_rows`] whose declaration-fact sources are in `group`,
@@ -531,7 +625,7 @@ fn declaration_fact_groups_partition_the_corpus() {
     ] {
         assert_eq!(stamped, groups.as_slice(), "{consumer}: stamped groups");
     }
-    let shared_groups: Vec<usize> = (1..DECLARATION_FACT_GROUP_COUNT).collect();
+    let shared_groups: Vec<usize> = (LANGUAGE_FACT_GROUPS..DECLARATION_FACT_GROUP_COUNT).collect();
     for (consumer, stamped) in [
         ("path-meaning owners", path_meaning_matrix_holds_on_complete_and_declarations_only_paths::GROUPS),
         ("path-meaning warm hits", crate::symbols_cache::path_meaning_rows_hold_on_warm_hits::GROUPS),
@@ -553,6 +647,11 @@ fn declaration_fact_groups_partition_the_corpus() {
     assert!(written_base_rows >= 30, "the written-base rows the warm-hit test runs ({written_base_rows})");
 
     let corpus = declaration_fact_sources();
+    assert_eq!(SHARED_GROUP_LAYOUT.iter().map(|row| row.1).sum::<usize>(), SHARED_FACT_GROUPS);
+    for group in LANGUAGE_FACT_GROUPS..DECLARATION_FACT_GROUP_COUNT {
+        let extensions: std::collections::BTreeSet<_> = corpus.iter().filter(|fact| fact.group == group).map(|fact| fact.extension).collect();
+        assert_eq!(extensions.len(), 1, "group {group} compiles exactly one language");
+    }
     let dir = tempfile::TempDir::new().expect("temp");
     let mut seen = vec![0usize; corpus.len()];
     for group in groups {
@@ -727,13 +826,14 @@ pub fn check_owner_targets(label: &str, complete: &FileSymbolIndex, index: &File
     }
 }
 
+crate::language_cases::language_tests!(relations_matrix_holds_on_complete_and_declarations_only_paths => check_relations_matrix_holds_on_complete_and_declarations_only_paths);
+
 /// Each row's owners report exactly their written bases on the complete
 /// index and on a declarations-only query of the owner's kind; a resolved
 /// target's ID is the named declaration's. Absent rows report
 /// no declared base on any record.
-#[test]
-fn relations_matrix_holds_on_complete_and_declarations_only_paths() {
-    for row in RELATIONS_MATRIX {
+fn check_relations_matrix_holds_on_complete_and_declarations_only_paths(language: ProgrammingLanguage) {
+    for row in RELATIONS_MATRIX.iter().filter(|row| row.language == language) {
         let label = row.language.name();
         let complete = check_owners(label, row.extension, row.source, row.owners);
         if let Support::Absent(reason) = row.support {
@@ -4873,13 +4973,33 @@ pub const GENERIC_BOUNDARY_ROWS: &[GenericBoundaryRow] = &[
         "factory", bases("factory::ReviewChild", &[text("ReviewBase")])),
 ];
 
-/// The parameter list of `count` names, `ReviewBase` first, spelled for
-/// `language`.
+/// The parameter list of `count` entries, `ReviewBase` first, spelled for
+/// `language`; C++ uses unnamed middle entries, which still occupy slots.
+/// Rust and C# reuse a filler name: only `ReviewBase` participates in the
+/// ownership assertion, while every entry still consumes a position.
 pub fn boundary_params(language: ProgrammingLanguage, count: usize) -> String {
-    let keyword = if language == L::Cpp { "typename " } else { "" };
+    if language == L::Cpp {
+        // Unnamed template parameters still consume positions. Keep the
+        // shadowing name first and a named parameter at the boundary.
+        return std::iter::once("typename ReviewBase")
+            .chain(std::iter::repeat_n("typename", count - 2))
+            .chain(std::iter::once("typename Last"))
+            .collect::<Vec<_>>()
+            .join(", ");
+    }
+    if matches!(language, L::Rust | L::CSharp) {
+        return std::iter::once("ReviewBase")
+            .chain(std::iter::repeat_n("T", count - 2))
+            .chain(std::iter::once("Last"))
+            .collect::<Vec<_>>()
+            .join(",");
+    }
     std::iter::once("ReviewBase".to_string())
-        .chain((0..count - 1).map(|index| format!("T{index}")))
-        .map(|name| format!("{keyword}{name}"))
+        .chain((0..count - 1).map(|index| {
+            // Identifier length is irrelevant to the position boundary.
+            let head = char::from(b'A' + ((index >> 12) & 15) as u8);
+            format!("{head}{:03X}", index & 0xfff)
+        }))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -4909,20 +5029,43 @@ pub fn boundary_row(language: ProgrammingLanguage) -> &'static GenericBoundaryRo
 }
 
 /// With 65,536 parameters (last position `u16::MAX`) the parameter
-/// shadows the file-level declaration on the complete index (`complete`)
-/// or on a selective query that does not select the owner.
-fn check_boundary_fits(language: ProgrammingLanguage, complete: bool) {
+/// shadows the file-level declaration with its owner selected or on a
+/// selective query that does not select the owner. Unrelated complete-
+/// index passes are checked on a small source in `check_complete_boundary_owner`.
+fn check_boundary_fits(language: ProgrammingLanguage, owner_selected: bool) {
     let row = boundary_row(language);
-    let label = format!("{} {FITS} {}", language.name(), if complete { "complete" } else { "selective" });
+    let label = format!("{} {FITS} {}", language.name(), if owner_selected { "owner selected" } else { "selective" });
     let fits = write_temp(&boundary_source(row, FITS), row.extension);
     let tree_file = TreeFile::new(fits.path()).expect("parse");
     assert!(tree_file.syntax_diagnostics().is_empty(), "{label}: {:?}", tree_file.syntax_diagnostics());
-    let index = if complete {
-        tree_file.symbol_index_v2().expect("a full u16 list is representable")
+    let index = if owner_selected {
+        let query = if language == L::CSharp {
+            // C# also captures every parameter as a Type declaration. The
+            // boundary assertion needs the owner's list, not 65,536 extra records.
+            SymbolQuery::new().kinds([SymbolKindV2::Class, SymbolKindV2::Interface])
+        } else {
+            SymbolQuery::new()
+        };
+        tree_file.query(&query).expect("a full u16 list is representable").index
     } else {
         tree_file.query(&boundary_query(row)).expect("selective").index
     };
     check_boundary_child(&label, row, &index);
+    if owner_selected {
+        let owner = index.symbols.iter().find(|record| record.identity.name == row.owner).expect("generic owner");
+        let named = if language == L::Cpp { 2 } else { FITS };
+        assert_eq!(owner.type_info.generic_params.len(), named, "{label}: named entries retain their positions");
+        assert_eq!(owner.type_info.generic_params.last().expect("last parameter").position, u16::MAX, "{label}");
+    }
+}
+
+/// Complete-index wiring of the same ownership rule uses a small list;
+/// the large cases independently prove position boundaries and selection.
+fn check_complete_boundary_owner(language: ProgrammingLanguage) {
+    let row = boundary_row(language);
+    let file = write_temp(&boundary_source(row, 3), row.extension);
+    let index = TreeFile::new(file.path()).expect("parse").symbol_index_v2().expect("complete");
+    check_boundary_child(language.name(), row, &index);
 }
 
 /// With 65,537 parameters a selective query, which does not select the
@@ -4946,8 +5089,7 @@ fn check_boundary_overflows(language: ProgrammingLanguage, complete: bool) {
     }
 }
 
-/// One test per reader and check: each analyzes a source of about half a
-/// megabyte once.
+/// One test per reader and check, retaining the full u16 position boundary.
 mod generic_boundary {
     use super::*;
 
@@ -4956,7 +5098,9 @@ mod generic_boundary {
             $(mod $reader {
                 use super::*;
                 #[test]
-                fn fits_complete() { check_boundary_fits($language, true) }
+                fn fits_selected_owner() { check_boundary_fits($language, true) }
+                #[test]
+                fn complete_owner_shadowing() { check_complete_boundary_owner($language) }
                 #[test]
                 fn fits_selective() { check_boundary_fits($language, false) }
                 #[test]
@@ -5014,25 +5158,40 @@ const OVERSIZED_IMPL_MEMBERS: &[ImplMember] = &[ImplMember {
     container_kind: None,
 }];
 
-#[test]
-fn an_oversized_enclosing_generic_list_still_owns_its_impls() {
+fn check_oversized_enclosing_impl(path: &str) {
     let row = oversized_impl_row();
     let file = write_temp(row.source, row.extension);
     let tree_file = TreeFile::new(file.path()).expect("parse");
-    let types = tree_file.query(&SymbolQuery::new().kinds(TYPE_KINDS.iter().copied())).expect("types").index;
-    let base = types.symbols.iter().find(|record| record.identity.name == "ReviewBase").expect("the struct");
-    assert!(base.relations.implements.is_empty(), "{} (type-only): `ReviewBase` implements nothing", row.label);
-    let methods = SymbolQuery::new().kinds([SymbolKindV2::Method]);
-    let contained = methods.clone().capabilities([tree_hugger::Capability::Containment]);
-    for (path, query, containment) in [("method-only", methods, false), ("method-only with containment", contained, true)] {
-        let index = tree_file.query(&query).expect("query").index;
-        check_impl_facts(&format!("{} ({path})", row.label), &row, &index, &index, containment);
+    if path == "complete" {
+        assert!(
+            matches!(tree_file.symbol_index_v2(), Err(tree_hugger::TreeHuggerError::TooManyGenericParameters { .. })),
+            "{}: the selected owner overflows", row.label
+        );
+        return;
     }
-    assert!(
-        matches!(tree_file.symbol_index_v2(), Err(tree_hugger::TreeHuggerError::TooManyGenericParameters { .. })),
-        "{}: the selected owner overflows",
-        row.label
-    );
+    if path == "types" {
+        let types = tree_file.query(&SymbolQuery::new().kinds(TYPE_KINDS.iter().copied())).expect("types").index;
+        let base = types.symbols.iter().find(|record| record.identity.name == "ReviewBase").expect("the struct");
+        assert!(base.relations.implements.is_empty(), "{} (type-only): `ReviewBase` implements nothing", row.label);
+        return;
+    }
+    let containment = path == "contained_methods";
+    let mut query = SymbolQuery::new().kinds([SymbolKindV2::Method]);
+    if containment { query = query.capabilities([tree_hugger::Capability::Containment]); }
+    let index = tree_file.query(&query).expect("query").index;
+    check_impl_facts(&format!("{} ({path})", row.label), &row, &index, &index, containment);
+}
+
+mod an_oversized_enclosing_generic_list_still_owns_its_impls {
+    use super::*;
+    #[test]
+    fn types() { check_oversized_enclosing_impl("types"); }
+    #[test]
+    fn methods() { check_oversized_enclosing_impl("methods"); }
+    #[test]
+    fn contained_methods() { check_oversized_enclosing_impl("contained_methods"); }
+    #[test]
+    fn complete() { check_oversized_enclosing_impl("complete"); }
 }
 
 /// Lookup reads every enclosing parameter name even when its position

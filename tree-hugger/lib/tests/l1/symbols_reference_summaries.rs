@@ -11,7 +11,7 @@ use tree_hugger::{
     SymbolRecord, SymbolRef, TreeFile, TriState, WorkCounters, work_counters,
 };
 
-use crate::symbols_fixtures::{all_fixtures, display_name, primary_fixture};
+use crate::symbols_fixtures::{display_name, primary_fixture};
 use crate::symbols_occurrences::{EVAL_CALL_FORMS, EvalMode, eval_source};
 
 fn counted<T>(work: impl FnOnce() -> T) -> (T, WorkCounters) {
@@ -788,15 +788,16 @@ fn limited_languages_bind_no_edges_but_keep_their_occurrences() {
     assert!(index.occurrences.iter().all(|occurrence| occurrence.confidence != Confidence::Scoped));
 }
 
+crate::language_cases::language_tests!(occurrences_describe_the_whole_file_whatever_kinds_are_selected => check_occurrences_describe_the_whole_file_whatever_kinds_are_selected);
+
 /// For every primary fixture: a kind-narrowed query's occurrences and
 /// coverage equal the complete index's (whole file, possibly naming
 /// unselected declarations), its records equal the complete index's records
 /// of those kinds, `References` alone keeps the edges but no evidence, and
 /// one analysis runs one references query and one resolution.
-#[test]
-fn occurrences_describe_the_whole_file_whatever_kinds_are_selected() {
+fn check_occurrences_describe_the_whole_file_whatever_kinds_are_selected(language: ProgrammingLanguage) {
     let mut named_unselected = 0;
-    for language in ProgrammingLanguage::all() {
+    {
         let path = primary_fixture(language).unwrap_or_else(|| panic!("{language:?}: no primary fixture"));
         let label = display_name(&path);
         let tree_file = TreeFile::new(&path).expect("parse fixture");
@@ -857,15 +858,16 @@ fn occurrences_describe_the_whole_file_whatever_kinds_are_selected() {
             assert!(index.occurrences.is_empty() && index.reference_coverage.is_empty(), "{label}");
         }
     }
-    assert!(named_unselected > 0, "some occurrence names a declaration the query did not select");
+    if language == ProgrammingLanguage::Rust { assert!(named_unselected > 0, "some occurrence names a declaration the query did not select"); }
 }
+
+crate::language_cases::language_tests!(diagnostics_are_unchanged_by_the_shared_references_run => check_diagnostics_are_unchanged_by_the_shared_references_run);
 
 /// Sharing the references run with the occurrences changes no diagnostic:
 /// the complete index's diagnostics equal those of the standalone
 /// diagnostics path for every fixture.
-#[test]
-fn diagnostics_are_unchanged_by_the_shared_references_run() {
-    for path in all_fixtures() {
+fn check_diagnostics_are_unchanged_by_the_shared_references_run(language: ProgrammingLanguage) {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let tree_file = TreeFile::new(&path).expect("parse fixture");
         let index = tree_file.symbol_index_v2().expect("complete index");
         assert_eq!(

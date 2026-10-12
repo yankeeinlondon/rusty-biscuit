@@ -520,10 +520,11 @@ pub fn selection_filter_matrix_languages() -> Vec<ProgrammingLanguage> {
 
 const MARKER: &str = "Flags and metrics";
 
-#[test]
-fn selection_filters_keep_exactly_the_expected_declarations() {
+crate::language_cases::language_tests!(selection_filters_keep_exactly_the_expected_declarations => check_selection_filters_keep_exactly_the_expected_declarations);
+
+fn check_selection_filters_keep_exactly_the_expected_declarations(language: ProgrammingLanguage) {
     let mut failures = Vec::new();
-    for row in SELECTION_FILTER_MATRIX {
+    for row in SELECTION_FILTER_MATRIX.iter().filter(|row| row.language == language) {
         let path = primary_fixture(row.language).expect("primary fixture");
         let label = display_name(&path);
         let mut covered = [false; Predicate::VARIANTS];

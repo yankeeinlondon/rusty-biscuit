@@ -984,34 +984,44 @@ impl<'a> KindAgreement<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProgrammingLanguage;
+
+    use crate::language_cases::language_tests;
+    language_tests!(imports_from_the_definition_run_equal_imported_symbols => check_definition_imports);
 
     /// The imports read from the definition run's captures, with the same
     /// forwarding flags, are exactly the imports of `imported_symbols`' own
     /// run of the query, in every shipped fixture and in grouped and repeated
     /// captures.
-    #[test]
-    fn imports_from_the_definition_run_equal_imported_symbols() {
-        fn same_imports(tree_file: &TreeFile) -> usize {
-            let definitions = tree_file.definitions(&MetadataSelection::ALL).expect("definitions");
-            let from_definitions = tree_file.forwarded_imports_from_nodes(&definitions.import_nodes);
-            let own_run = tree_file.imported_symbols().expect("imports");
-            assert_eq!(format!("{from_definitions:?}"), format!("{own_run:?}"), "{}", tree_file.file.display());
-            from_definitions.len()
-        }
+    fn same_imports(tree_file: &TreeFile) -> usize {
+        let definitions = tree_file.definitions(&MetadataSelection::ALL).expect("definitions");
+        let from_definitions = tree_file.forwarded_imports_from_nodes(&definitions.import_nodes);
+        let own_run = tree_file.imported_symbols().expect("imports");
+        assert_eq!(format!("{from_definitions:?}"), format!("{own_run:?}"), "{}", tree_file.file.display());
+        from_definitions.len()
+    }
 
+    fn check_definition_imports(language: ProgrammingLanguage) {
         let fixtures = biscuit_test_harness::manifest_dir!().join("tests/fixtures");
         let mut pending = vec![fixtures];
         let (mut files, mut imports) = (0, 0);
         while let Some(path) = pending.pop() {
             if path.is_dir() {
                 pending.extend(std::fs::read_dir(&path).expect("fixture dir").map(|entry| entry.expect("entry").path()));
-            } else if let Ok(tree_file) = TreeFile::new(&path) {
+            } else if ProgrammingLanguage::from_path(&path) == Some(language)
+                && let Ok(tree_file) = TreeFile::new(&path)
+            {
                 files += 1;
                 imports += same_imports(&tree_file);
             }
         }
-        assert!(files > 50 && imports > 50, "{files} fixtures, {imports} imports");
 
+        let minimum = crate::language_cases::corpus_minimums(language);
+        assert!(files >= minimum.files && imports >= minimum.imports, "{language}: {files} fixtures, {imports} imports");
+    }
+
+    #[test]
+    fn grouped_and_repeated_imports_equal_the_definition_run() {
         let dir = tempfile::TempDir::new().expect("temp");
         for (file, source) in [
             ("grouped.rs", "use a::{self, *};\nuse b::{c as d, e};\n"),

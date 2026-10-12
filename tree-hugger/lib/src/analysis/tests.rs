@@ -226,10 +226,11 @@ fn scan_export_target(symbols: &[SymbolRecord], export: &ExportRecord) -> Option
     })
 }
 
-#[test]
-fn name_index_selects_the_same_targets_as_a_full_scan() {
+crate::language_cases::language_tests!(name_index_selects_the_same_targets_as_a_full_scan => check_name_index_targets);
+
+fn check_name_index_targets(language: ProgrammingLanguage) {
     let (mut references, mut containers, mut exports) = (0, 0, 0);
-    for path in fixture_files() {
+    for path in fixture_files().into_iter().filter(|path| ProgrammingLanguage::from_path(path) == Some(language)) {
         let label = path.display().to_string();
         let tree_file = TreeFile::new(&path).expect("parse fixture");
         let symbols = tree_file.symbol_records().expect("records");
@@ -277,10 +278,10 @@ fn name_index_selects_the_same_targets_as_a_full_scan() {
             exports += 1;
         }
     }
-    assert!(
-        references > 1000 && containers > 300 && exports > 30,
-        "fixtures exercised too little: {references} references, {containers} containers, {exports} exports"
-    );
+
+    let minimum = crate::language_cases::corpus_minimums(language);
+    assert!(references >= minimum.lookups && containers >= minimum.containers && exports >= minimum.exports,
+        "{language}: {references} lookups, {containers} containers, {exports} exports");
 }
 
 /// Repeated and nested same-named owners, where one file's children share

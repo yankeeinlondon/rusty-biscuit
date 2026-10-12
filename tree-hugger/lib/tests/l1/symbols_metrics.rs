@@ -1011,13 +1011,14 @@ pub fn body_lines_matrix_languages() -> Vec<ProgrammingLanguage> {
     BODY_LINES_MATRIX.iter().map(|row| row.language).collect()
 }
 
+crate::language_cases::language_tests!(body_lines_are_counted_from_the_callables_own_body => check_body_lines_are_counted_from_the_callables_own_body);
+
 /// Each case's `source.body_span` and `metrics.lines` agree, on a
 /// metrics-only query and on the complete index, with LF and with CRLF
 /// line endings.
-#[test]
-fn body_lines_are_counted_from_the_callables_own_body() {
+fn check_body_lines_are_counted_from_the_callables_own_body(language: ProgrammingLanguage) {
     let dir = TempDir::new().expect("temp dir");
-    for row in BODY_LINES_MATRIX {
+    for row in BODY_LINES_MATRIX.iter().filter(|row| row.language == language) {
         for (ending, source) in [("LF", row.source.to_string()), ("CRLF", row.source.replace('\n', "\r\n"))] {
             let path = dir.path().join(format!("body_{:?}_{ending}.{}", row.language, row.extension));
             std::fs::write(&path, &source).expect("write snippet");

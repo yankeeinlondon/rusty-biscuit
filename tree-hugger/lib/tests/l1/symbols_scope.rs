@@ -5,7 +5,7 @@
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolScope};
 
-use crate::symbols_fixtures::{Extracted, all_fixtures, extract_inline, extract_path, extract_primary};
+use crate::symbols_fixtures::{Extracted, extract_inline, extract_path, extract_primary};
 
 use ProgrammingLanguage as L;
 use SymbolScope::{Item, Local, Member};
@@ -301,9 +301,10 @@ fn assert_scope(extracted: &Extracted, name: &str, container: Option<&str>, scop
     );
 }
 
-#[test]
-fn scope_matrix_holds_through_both_paths() {
-    for row in SCOPE_MATRIX {
+crate::language_cases::language_tests!(scope_matrix_holds_through_both_paths => check_scope_matrix_holds_through_both_paths);
+
+fn check_scope_matrix_holds_through_both_paths(language: ProgrammingLanguage) {
+    for row in SCOPE_MATRIX.iter().filter(|row| row.language == language) {
         let extracted = extract_primary(row.language);
         let language = row.language.name();
         for (name, container, scope) in row.cases {
@@ -335,13 +336,14 @@ fn scope_matrix_holds_through_both_paths() {
     }
 }
 
+crate::language_cases::language_tests!(parameters_are_local_and_member_kinds_are_never_items => check_parameters_are_local_and_member_kinds_are_never_items);
+
 /// Over every fixture: a parameter is always `Local`, and a member kind is
 /// never at file level or in a namespace (it is `Member`, or `Local` when a
 /// language captures a local function as a method).
-#[test]
-fn parameters_are_local_and_member_kinds_are_never_items() {
+fn check_parameters_are_local_and_member_kinds_are_never_items(language: ProgrammingLanguage) {
     let mut checked = 0usize;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let extracted = extract_path(&path);
         for symbol in &extracted.symbols {
             let label = format!("{}: {:?} `{}` line {}", extracted.label, symbol.kind, symbol.name, symbol.range.start_line);
@@ -357,7 +359,7 @@ fn parameters_are_local_and_member_kinds_are_never_items() {
             checked += 1;
         }
     }
-    assert!(checked > 500, "only {checked} fixture symbols checked");
+    assert!(checked >= crate::language_cases::corpus_minimums(language).symbols, "{language}: only {checked} fixture symbols checked");
 }
 
 /// Spec cases whose constructs no shared fixture holds: `(source, extension,

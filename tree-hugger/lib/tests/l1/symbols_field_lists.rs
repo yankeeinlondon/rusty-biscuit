@@ -13,7 +13,7 @@ use tree_hugger::{SymbolInfo, SymbolKind, SymbolRecord, TreeFile, TypeMetadata, 
 
 use tree_hugger::ProgrammingLanguage;
 
-use crate::symbols_fixtures::{Extracted, all_fixtures, display_name, extract_inline, extract_primary};
+use crate::symbols_fixtures::{Extracted, display_name, extract_inline, extract_primary};
 
 const PUBLIC: Option<Visibility> = Some(Visibility::Public);
 const PRIVATE: Option<Visibility> = Some(Visibility::Private);
@@ -1039,15 +1039,16 @@ fn primary_fixture_reproductions_are_listed() {
     }
 }
 
+crate::language_cases::language_tests!(every_fixture_member_is_in_its_type_field_list => check_every_fixture_member_is_in_its_type_field_list);
+
 /// The class-level guard over every fixture: a standalone Field, Property or
 /// Constant declared in the body of a type in the same file is an entry of
 /// that type's metadata field list with the same flags, on the records path
 /// `hug classes` reads. Enum owners list variants, not fields, and are
 /// skipped; Rust `impl` members are declared outside the type's body.
-#[test]
-fn every_fixture_member_is_in_its_type_field_list() {
+fn check_every_fixture_member_is_in_its_type_field_list(language: ProgrammingLanguage) {
     let mut checked = 0usize;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let name = display_name(&path);
         let records = TreeFile::new(&path)
             .expect("load fixture")
@@ -1094,5 +1095,5 @@ fn every_fixture_member_is_in_its_type_field_list() {
             checked += 1;
         }
     }
-    assert!(checked > 40, "only {checked} fixture members checked");
+    assert!(checked >= crate::language_cases::corpus_minimums(language).members, "{language}: corpus coverage shrank ({checked})");
 }

@@ -3,6 +3,7 @@
 //! Tests for query provenance, nvim-treesitter inventory, and predicate
 //! compatibility.
 
+use crate::language_cases::language_tests;
 use tree_hugger::ProgrammingLanguage;
 use tree_hugger::queries::{
     GrammarRef, QueryKind,
@@ -19,36 +20,35 @@ use tree_hugger::queries::{
 // Query Compilation with Provenance
 // =============================================================================
 
+language_tests!(all_queries_compile_with_provenance => check_query_provenance);
+
 /// Every supported language must have queries that compile, and every
 /// query must carry a provenance record with a recorded upstream revision.
-#[test]
-fn all_queries_compile_with_provenance() {
-    for language in ProgrammingLanguage::all() {
-        let grammar = language.tree_sitter_language();
-        let grammar_ref = GrammarRef {
-            language,
-            grammar: &grammar,
-            id: language.query_name(),
-        };
+fn check_query_provenance(language: ProgrammingLanguage) {
+    let grammar = language.tree_sitter_language();
+    let grammar_ref = GrammarRef {
+        language,
+        grammar: &grammar,
+        id: language.query_name(),
+    };
 
-        for kind in [
-            QueryKind::Locals,
-            QueryKind::Lint,
-            QueryKind::References,
-            QueryKind::Comments,
-        ] {
-            let query = query_for(grammar_ref, kind);
-            assert!(query.is_ok(), "{language} {kind} query should compile");
+    for kind in [
+        QueryKind::Locals,
+        QueryKind::Lint,
+        QueryKind::References,
+        QueryKind::Comments,
+    ] {
+        let query = query_for(grammar_ref, kind);
+        assert!(query.is_ok(), "{language} {kind} query should compile");
 
-            let prov = query_provenance(language, kind)
-                .unwrap_or_else(|| panic!("{language} {kind} query has no provenance"));
-            assert!(!prov.source_project.is_empty());
-            assert!(!prov.local_path.is_empty());
-            assert!(
-                !prov.upstream_revision.is_empty(),
-                "{language} {kind}: upstream_revision should not be empty"
-            );
-        }
+        let prov = query_provenance(language, kind)
+            .unwrap_or_else(|| panic!("{language} {kind} query has no provenance"));
+        assert!(!prov.source_project.is_empty());
+        assert!(!prov.local_path.is_empty());
+        assert!(
+            !prov.upstream_revision.is_empty(),
+            "{language} {kind}: upstream_revision should not be empty"
+        );
     }
 }
 
@@ -95,36 +95,36 @@ fn capture_parity_for_rust() {
     assert!(highlights.iter().any(|c| c.name == "type" && !c.reused));
 }
 
+language_tests!(every_locals_definition_capture_is_inventoried => check_locals_inventory);
+
 /// Every definition capture a locals query uses is inventoried as reused, so
 /// the inventory changes together with the queries.
-#[test]
-fn every_locals_definition_capture_is_inventoried() {
+fn check_locals_inventory(language: ProgrammingLanguage) {
     let inventory = QueryInventory::new();
     let mut checked = 0;
-    for language in ProgrammingLanguage::all() {
-        let grammar = language.tree_sitter_language();
-        let grammar_ref = GrammarRef {
-            language,
-            grammar: &grammar,
-            id: language.query_name(),
-        };
-        let query = query_for(grammar_ref, QueryKind::Locals).expect("locals query compiles");
-        let locals = inventory
-            .for_language(language)
-            .and_then(|entry| entry.suite_captures(NvimQuerySuite::Locals))
-            .expect("locals inventory");
-        for name in query.capture_names() {
-            if !name.starts_with("local.definition") || name.ends_with(".context") {
-                continue;
-            }
-            assert!(
-                locals.iter().any(|capture| capture.name == *name && capture.reused),
-                "{language}: @{name} is used by the locals query but not inventoried as reused"
-            );
-            checked += 1;
+    let grammar = language.tree_sitter_language();
+    let grammar_ref = GrammarRef {
+        language,
+        grammar: &grammar,
+        id: language.query_name(),
+    };
+    let query = query_for(grammar_ref, QueryKind::Locals).expect("locals query compiles");
+    let locals = inventory
+        .for_language(language)
+        .and_then(|entry| entry.suite_captures(NvimQuerySuite::Locals))
+        .expect("locals inventory");
+    for name in query.capture_names() {
+        if !name.starts_with("local.definition") || name.ends_with(".context") {
+            continue;
         }
+        assert!(
+            locals.iter().any(|capture| capture.name == *name && capture.reused),
+            "{language}: @{name} is used by the locals query but not inventoried as reused"
+        );
+        checked += 1;
     }
-    assert!(checked > 50, "only {checked} captures checked");
+
+    assert!(checked >= crate::language_cases::corpus_minimums(language).captures, "{language}: no definition captures checked");
 }
 
 /// Perl's locals query is Tree Hugger's own work, compiles, and uses only

@@ -389,12 +389,13 @@ fn symbol_info_json_defaults_and_omissions() {
     assert!(parsed.is_static);
 }
 
+crate::language_cases::language_tests!(adapter_agrees_with_extraction_for_every_fixture_symbol => check_adapter_agrees_with_extraction_for_every_fixture_symbol);
+
 /// Both directions agree on every symbol extracted from every fixture; the
 /// matrix tests below pin the expected values.
-#[test]
-fn adapter_agrees_with_extraction_for_every_fixture_symbol() {
+fn check_adapter_agrees_with_extraction_for_every_fixture_symbol(language: ProgrammingLanguage) {
     let mut checked = 0usize;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let name = display_name(&path);
         let tree_file = TreeFile::new(&path).expect("load fixture");
 
@@ -452,7 +453,8 @@ fn adapter_agrees_with_extraction_for_every_fixture_symbol() {
             assert_eq!(has_async(&record), symbol.is_async, "{label}: async");
         }
     }
-    assert!(checked > 100, "only {checked} fixture records checked");
+
+    assert!(checked >= crate::language_cases::corpus_minimums(language).symbols, "only {checked} fixture records checked");
 }
 
 /// Records name the extraction rules that produced them, so a cached record
@@ -487,11 +489,12 @@ fn converted(extracted: &Extracted, name: &str, container: Option<&str>) -> (Sym
     (info, record)
 }
 
+crate::language_cases::language_tests!(kind_matrix_survives_both_conversions => check_kind_matrix_survives_both_conversions);
+
 /// Test 5 with explicit expected values: every kind-matrix row survives
 /// `SymbolRecord -> SymbolInfo` and `SymbolInfo -> SymbolRecord`.
-#[test]
-fn kind_matrix_survives_both_conversions() {
-    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0) {
+fn check_kind_matrix_survives_both_conversions(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, kind, container_kind) in rows {
             let label = format!("{}: `{name}`", extracted.label);
@@ -514,10 +517,11 @@ fn kind_matrix_survives_both_conversions() {
     }
 }
 
+crate::language_cases::language_tests!(visibility_matrix_survives_both_conversions => check_visibility_matrix_survives_both_conversions);
+
 /// Test 5: every visibility-matrix row survives both conversions.
-#[test]
-fn visibility_matrix_survives_both_conversions() {
-    for (language, rows) in rows_by_language(VISIBILITY_MATRIX, |row| row.0) {
+fn check_visibility_matrix_survives_both_conversions(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(VISIBILITY_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, visibility) in rows {
             let label = format!("{}: `{name}`", extracted.label);
@@ -532,10 +536,11 @@ fn visibility_matrix_survives_both_conversions() {
     }
 }
 
+crate::language_cases::language_tests!(static_matrix_survives_both_conversions => check_static_matrix_survives_both_conversions);
+
 /// Test 5: every static-matrix row survives both conversions.
-#[test]
-fn static_matrix_survives_both_conversions() {
-    for (language, rows) in rows_by_language(STATIC_MATRIX, |row| row.0) {
+fn check_static_matrix_survives_both_conversions(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(STATIC_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, is_static, is_static_storage) in rows {
             let label = format!("{}: `{name}`", extracted.label);
@@ -632,14 +637,15 @@ fn metadata_after_round_trip(symbol: &SymbolInfo) -> Option<TypeMetadata> {
     })
 }
 
+crate::language_cases::language_tests!(every_fixture_symbol_round_trips_through_the_record => check_every_fixture_symbol_round_trips_through_the_record);
+
 /// Every fixture symbol survives `SymbolInfo -> SymbolRecord -> SymbolInfo`
 /// unchanged in the fields this fix promises, its signature and its type
 /// metadata (compared in their serialized form).
-#[test]
-fn every_fixture_symbol_round_trips_through_the_record() {
+fn check_every_fixture_symbol_round_trips_through_the_record(language: ProgrammingLanguage) {
     let mut with_metadata = 0usize;
     let mut lossy_aliases = Vec::new();
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let name = display_name(&path);
         for symbol in TreeFile::new(&path).expect("load fixture").symbols().expect("symbols") {
             let label = format!("{name}: {} ({:?})", symbol.name, symbol.kind);
@@ -667,10 +673,13 @@ fn every_fixture_symbol_round_trips_through_the_record() {
             }
         }
     }
-    assert!(with_metadata > 20, "only {with_metadata} symbols carried type metadata");
+
+    assert!(with_metadata >= crate::language_cases::corpus_minimums(language).metadata, "{language}: type metadata corpus shrank");
     assert_eq!(
         lossy_aliases,
-        ["c.c: TagAlias", "c.c: AnonymousStructAlias", "c.c: SameName"],
+        if language == ProgrammingLanguage::C {
+            vec!["c.c: TagAlias", "c.c: AnonymousStructAlias", "c.c: SameName"]
+        } else { Vec::new() },
         "aliases whose v1 field metadata the record cannot carry"
     );
 }
@@ -805,7 +814,7 @@ crate::symbols_relations::declaration_fact_group_tests!(
 /// (and so `lines` and `cyclomatic`: never invented), and every modifier other than `Static`,
 /// `StaticStorage` and `Async` come back empty. Pinned over every
 /// declaration-fact source, one test per corpus group; each loss must
-/// actually occur in the per-language group, so a fixed adapter flips this
+/// actually occur in the Rust group, so a fixed adapter flips this
 /// test.
 fn record_only_facts_are_lost(group: usize) {
     let dir = tempfile::TempDir::new().expect("temp");
@@ -839,7 +848,7 @@ fn record_only_facts_are_lost(group: usize) {
             lost[6] += usize::from(record.metrics.as_ref().is_some_and(|metrics| metrics.cyclomatic.is_some()));
         }
     }
-    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+    if group != crate::symbols_relations::RUST_FACT_GROUP {
         return;
     }
     for (fact, count) in ["generic parameters", "constraints", "relations", "attributes", "lines", "modifiers", "cyclomatic"]

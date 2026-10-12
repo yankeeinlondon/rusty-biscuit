@@ -5,8 +5,13 @@ use biscuit_test_harness::manifest_dir;
 use tempfile::TempDir;
 use tree_hugger::{ProgrammingLanguage, TreeFile, TreeHuggerError};
 
-#[test]
-fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
+crate::language_cases::language_tests!(parses_all_fixtures => check_parse_fixture);
+
+fn check_parse_fixture(language: ProgrammingLanguage) {
+    parse_fixture(language).expect("fixture parse and extraction");
+}
+
+fn parse_fixture(language: ProgrammingLanguage) -> Result<(), TreeHuggerError> {
     let fixtures = vec![
         ("sample.rs", ProgrammingLanguage::Rust, true),
         ("sample.js", ProgrammingLanguage::JavaScript, true),
@@ -26,7 +31,8 @@ fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
         ("sample.lua", ProgrammingLanguage::Lua, true),
     ];
 
-    for (file, language, expect_symbols) in fixtures {
+    assert!(fixtures.iter().any(|row| row.1 == language), "{language}: no fixture row");
+    for (file, language, expect_symbols) in fixtures.into_iter().filter(|row| row.1 == language) {
         let path = fixture_path(file);
         let tree_file = TreeFile::new(&path)?;
         assert_eq!(tree_file.language, language, "language mismatch for {file}");
@@ -2920,8 +2926,9 @@ fn dead_code_is_empty_for_clean_file() {
 // Fallible diagnostics API
 // ============================================================================
 
-#[test]
-fn try_diagnostics_succeeds_for_all_languages() {
+crate::language_cases::language_tests!(try_diagnostics_succeeds_for_all_languages => check_try_diagnostics_succeeds_for_all_languages);
+
+fn check_try_diagnostics_succeeds_for_all_languages(language: ProgrammingLanguage) {
     // Every fixture's analyzer must run end-to-end; a failing query would now
     // surface as an error rather than a silently empty diagnostic list.
     for entry in fs::read_dir(fixture_path("")).unwrap() {
@@ -2929,7 +2936,7 @@ fn try_diagnostics_succeeds_for_all_languages() {
         if !path.is_file() {
             continue;
         }
-        if ProgrammingLanguage::from_path(&path).is_none() {
+        if ProgrammingLanguage::from_path(&path) != Some(language) {
             continue;
         }
 

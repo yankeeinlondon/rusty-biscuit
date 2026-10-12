@@ -4,14 +4,15 @@
 
 use tree_hugger::{ProgrammingLanguage, TreeFile};
 
-use crate::symbols_fixtures::{all_fixtures, display_name, extract_primary};
+use crate::symbols_fixtures::{display_name, extract_primary};
+
+crate::language_cases::language_tests!(every_fixture_record_has_declaration_text => check_every_fixture_record_has_declaration_text);
 
 /// Every record of every fixture carries non-empty declaration text, in the
 /// parse-pass records and in the full index that later passes rebuild.
-#[test]
-fn every_fixture_record_has_declaration_text() {
+fn check_every_fixture_record_has_declaration_text(language: ProgrammingLanguage) {
     let mut checked = 0;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let tree_file = TreeFile::new(&path).expect("parse fixture");
         for (pass, records) in [
             ("symbol_records()", tree_file.symbol_records().expect("records")),
@@ -31,7 +32,8 @@ fn every_fixture_record_has_declaration_text() {
             }
         }
     }
-    assert!(checked > 800, "only {checked} records checked");
+
+    assert!(checked >= 2 * crate::language_cases::corpus_minimums(language).symbols, "only {checked} records checked");
 }
 
 /// The text keeps syntax a visibility level cannot carry and stops at the body.

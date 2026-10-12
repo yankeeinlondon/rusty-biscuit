@@ -228,11 +228,12 @@ pub const KIND_MATRIX: &[KindRow] = &[
     (L::Zsh, "keyword_function", None, K::Function, None),
 ];
 
+crate::language_cases::language_tests!(kind_matrix_holds_through_both_paths => check_kind_matrix_holds_through_both_paths);
+
 /// Tests 2 and 6: every kind-matrix row holds through `TreeFile::symbols()`
 /// and `symbol_index_v2()`.
-#[test]
-fn kind_matrix_holds_through_both_paths() {
-    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0) {
+fn check_kind_matrix_holds_through_both_paths(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(KIND_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, kind, container_kind) in rows {
             extracted.assert_kind(name, *container, *kind, *container_kind);
@@ -623,13 +624,14 @@ fn unnamed_namespaces_and_enums_invent_no_owner() {
     }
 }
 
+crate::language_cases::language_tests!(no_fixture_symbol_reports_an_unknown_kind => check_no_fixture_symbol_reports_an_unknown_kind);
+
 /// Test 6: no symbol of any fixture reports `SymbolKind::Unknown`. An entry
 /// here needs a reason; the list starts empty.
-#[test]
-fn no_fixture_symbol_reports_an_unknown_kind() {
+fn check_no_fixture_symbol_reports_an_unknown_kind(language: ProgrammingLanguage) {
     const ALLOWED_UNKNOWN: &[(&str, &str, &str)] = &[];
     let mut checked = 0;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let extracted = extract_path(&path);
         for symbol in &extracted.symbols {
             checked += 1;
@@ -655,7 +657,7 @@ fn no_fixture_symbol_reports_an_unknown_kind() {
             );
         }
     }
-    assert!(checked > 400, "only {checked} symbols checked");
+    assert!(checked >= crate::language_cases::corpus_minimums(language).symbols, "{language}: only {checked} symbols checked");
 }
 
 /// Groups matrix rows by language, keeping the table's language order.
@@ -898,12 +900,13 @@ fn symbols_and_records_agree_for_every_fixture_symbol() {
     assert!(compared > 400, "only {compared} symbols compared");
 }
 
+crate::language_cases::language_tests!(container_kind_matches_the_containers_standalone_kind => check_container_kind_matches_the_containers_standalone_kind);
+
 /// A container's kind is the kind its own declaration reports, so a type is
 /// never `Class` as a container and `Type` standalone.
-#[test]
-fn container_kind_matches_the_containers_standalone_kind() {
+fn check_container_kind_matches_the_containers_standalone_kind(language: ProgrammingLanguage) {
     let mut checked = 0;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let extracted = extract_path(&path);
         let mut standalone: HashMap<&str, Vec<SymbolKind>> = HashMap::new();
         for symbol in &extracted.symbols {
@@ -935,7 +938,7 @@ fn container_kind_matches_the_containers_standalone_kind() {
             checked += 1;
         }
     }
-    assert!(checked > 100, "only {checked} containers checked");
+    assert!(checked >= crate::language_cases::corpus_minimums(language).matched_containers, "{language}: only {checked} containers checked");
 }
 
 #[test]

@@ -9,7 +9,7 @@
 
 use tree_hugger::{ProgrammingLanguage, SymbolRecord};
 
-use crate::symbols_fixtures::{Extracted, all_fixtures, extract_inline, extract_path, extract_primary};
+use crate::symbols_fixtures::{Extracted, extract_inline, extract_path, extract_primary};
 
 type L = ProgrammingLanguage;
 
@@ -378,10 +378,11 @@ fn find<'a>(
     }
 }
 
-#[test]
-fn keyword_matrix_holds_for_every_language() {
+crate::language_cases::language_tests!(keyword_matrix_holds_for_every_language => check_keyword_matrix_holds_for_every_language);
+
+fn check_keyword_matrix_holds_for_every_language(language: ProgrammingLanguage) {
     let mut failures = Vec::new();
-    for language in ProgrammingLanguage::all() {
+    for language in [language] {
         let rows = rows_for(KEYWORD_MATRIX, language, |row| row.0);
         if rows.is_empty() {
             continue;
@@ -402,10 +403,11 @@ fn keyword_matrix_holds_for_every_language() {
     assert!(failures.is_empty(), "keyword matrix:\n{}", failures.join("\n"));
 }
 
-#[test]
-fn signature_matrix_holds_for_every_language() {
+crate::language_cases::language_tests!(signature_matrix_holds_for_every_language => check_signature_matrix_holds_for_every_language);
+
+fn check_signature_matrix_holds_for_every_language(language: ProgrammingLanguage) {
     let mut failures = Vec::new();
-    for language in ProgrammingLanguage::all() {
+    for language in [language] {
         let rows = rows_for(SIGNATURE_MATRIX, language, |row| row.0);
         if rows.is_empty() {
             continue;
@@ -435,12 +437,13 @@ fn signature_matrix_holds_for_every_language() {
     assert!(failures.is_empty(), "signature matrix:\n{}", failures.join("\n"));
 }
 
+crate::language_cases::language_tests!(every_fixture_signature_is_a_contiguous_part_of_its_declaration_text => check_every_fixture_signature_is_a_contiguous_part_of_its_declaration_text);
+
 /// Every header in every fixture is a trimmed, contiguous part of its
 /// declaration text that stops before the body.
-#[test]
-fn every_fixture_signature_is_a_contiguous_part_of_its_declaration_text() {
+fn check_every_fixture_signature_is_a_contiguous_part_of_its_declaration_text(language: ProgrammingLanguage) {
     let mut checked = 0;
-    for path in all_fixtures() {
+    for path in crate::symbols_fixtures::fixtures_for(language, false) {
         let extracted = extract_path(&path);
         for record in &extracted.records {
             let Some(signature) = record.source.signature_text.as_deref() else {
@@ -465,7 +468,7 @@ fn every_fixture_signature_is_a_contiguous_part_of_its_declaration_text() {
             );
         }
     }
-    assert!(checked > 500, "only {checked} fixture signatures were checked");
+    assert!(checked >= crate::language_cases::corpus_minimums(language).signatures, "{language}: corpus coverage shrank ({checked})");
 }
 
 /// One inline source and the record whose `signature_text` it pins.

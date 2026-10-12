@@ -357,11 +357,12 @@ pub const VISIBILITY_MATRIX: &[VisibilityRow] = &[
     (L::Zsh, "GLOBAL_VARIABLE", None, UNKNOWN),
 ];
 
+crate::language_cases::language_tests!(visibility_matrix_holds_through_both_paths => check_visibility_matrix_holds_through_both_paths);
+
 /// Test 3: every visibility-matrix row holds on `SymbolInfo::visibility` and
 /// `SymbolRecord.visibility.level`.
-#[test]
-fn visibility_matrix_holds_through_both_paths() {
-    for (language, rows) in rows_by_language(VISIBILITY_MATRIX, |row| row.0) {
+fn check_visibility_matrix_holds_through_both_paths(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(VISIBILITY_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, expected) in rows {
             assert_level(&extracted, name, *container, *expected);
@@ -663,12 +664,13 @@ fn unmappable_access_keeps_its_source_text() {
     );
 }
 
+crate::language_cases::language_tests!(field_metadata_agrees_with_the_standalone_fields => check_field_metadata_agrees_with_the_standalone_fields);
+
 /// Field metadata (`hug classes`) carries the same level as the standalone
 /// field, including C#'s compound levels and defaults no keyword states.
-#[test]
-fn field_metadata_agrees_with_the_standalone_fields() {
+fn check_field_metadata_agrees_with_the_standalone_fields(language: ProgrammingLanguage) {
     let mut compared = 0;
-    for language in ProgrammingLanguage::all() {
+    for language in [language] {
         let extracted = extract_primary(language);
         for owner in &extracted.symbols {
             let Some(metadata) = &owner.type_metadata else {
@@ -696,19 +698,8 @@ fn field_metadata_agrees_with_the_standalone_fields() {
             }
         }
     }
-    assert!(compared > 50, "only {compared} field entries compared");
+    assert!(compared >= crate::language_cases::corpus_minimums(language).metadata_fields, "{language}: corpus coverage shrank ({compared})");
 
-    let csharp = extract_primary(ProgrammingLanguage::CSharp);
-    let fields = &csharp
-        .symbol("PublicWidget", Some("Example.Symbols"))
-        .type_metadata
-        .as_ref()
-        .expect("PublicWidget metadata")
-        .fields;
-    let level = |name: &str| fields.iter().find(|field| field.name == name).map(|field| field.visibility);
-    assert_eq!(level("ProtectedInternalField"), Some(PROTECTED_INTERNAL));
-    assert_eq!(level("PrivateProtectedField"), Some(PRIVATE_PROTECTED));
-    assert_eq!(level("UnmarkedField"), Some(PRIVATE));
 }
 
 /// Parameters and locals have no member or module access, even inside a
@@ -1064,4 +1055,20 @@ fn const_object_linkage_matrix_reads_the_outermost_declarator() {
         }
     }
     assert!(failures.is_empty(), "const-object linkage rows failed: {failures:#?}");
+}
+
+#[test]
+fn compound_csharp_field_metadata_levels() {
+    let csharp = extract_primary(ProgrammingLanguage::CSharp);
+    let fields = &csharp
+        .symbol("PublicWidget", Some("Example.Symbols"))
+        .type_metadata
+        .as_ref()
+        .expect("PublicWidget metadata")
+        .fields;
+    let level = |name: &str| fields.iter().find(|field| field.name == name).map(|field| field.visibility);
+    assert_eq!(level("ProtectedInternalField"), Some(PROTECTED_INTERNAL));
+    assert_eq!(level("PrivateProtectedField"), Some(PRIVATE_PROTECTED));
+    assert_eq!(level("UnmarkedField"), Some(PRIVATE));
+
 }

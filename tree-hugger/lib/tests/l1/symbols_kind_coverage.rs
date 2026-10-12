@@ -550,9 +550,10 @@ fn deferred_constructs_are_unsupported_extraction() {
     }
 }
 
-#[test]
-fn kinds_a_language_lacks_never_appear_in_its_fixture() {
-    for row in KIND_COVERAGE_MATRIX {
+crate::language_cases::language_tests!(kinds_a_language_lacks_never_appear_in_its_fixture => check_kinds_a_language_lacks_never_appear_in_its_fixture);
+
+fn check_kinds_a_language_lacks_never_appear_in_its_fixture(language: ProgrammingLanguage) {
+    for row in KIND_COVERAGE_MATRIX.iter().filter(|row| row.language == language) {
         let extracted = extract_primary(row.language);
         for record in &extracted.records {
             assert!(

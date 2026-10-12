@@ -9,12 +9,13 @@ use std::path::Path;
 
 use serde_json::Value;
 use tempfile::TempDir;
+use tree_hugger::ProgrammingLanguage;
 use tree_hugger::{
     AnalysisPass, Capability, MetricsFacet, SourceFile, SymbolId, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
     TreeHuggerError, VisibilityLevel, WorkCounters, work_counters,
 };
 
-use crate::symbols_fixtures::{all_fixtures, display_name, multi_fixtures};
+use crate::symbols_fixtures::{display_name, multi_fixtures};
 use crate::symbols_kinds::deferred_kind_sources;
 
 const FUNCTION_KINDS: [SymbolKindV2; 3] = [
@@ -517,11 +518,12 @@ fn as_values(records: &[SymbolRecord]) -> Vec<Value> {
         .collect()
 }
 
+crate::language_cases::language_tests!(narrow_queries_equal_the_filtered_records_of_a_full_query => check_narrow_queries_equal_the_filtered_records_of_a_full_query);
+
 /// For every fixture of every language, a narrow query returns exactly the
 /// selected kinds' records of a full query with the same capabilities:
 /// identity, spans, container, metadata, relations and semantics alike.
-#[test]
-fn narrow_queries_equal_the_filtered_records_of_a_full_query() {
+fn check_narrow_queries_equal_the_filtered_records_of_a_full_query(language: ProgrammingLanguage) {
     let kind_sets: [(&str, &[SymbolKindV2]); 6] = [
         ("functions", &FUNCTION_KINDS),
         ("types", &TYPE_KINDS),
@@ -539,7 +541,7 @@ fn narrow_queries_equal_the_filtered_records_of_a_full_query() {
     let mut parents_outside_selection = 0;
     let mut classes_fields_with_access = 0;
 
-    for path in all_fixtures().into_iter().chain(multi_fixtures()) {
+    for path in crate::symbols_fixtures::fixtures_for(language, true) {
         let label = display_name(&path);
         let tree_file = TreeFile::new(&path).expect("parse fixture");
         for capabilities in capability_sets {
@@ -597,17 +599,14 @@ fn narrow_queries_equal_the_filtered_records_of_a_full_query() {
         }
     }
 
+    let minimum = crate::language_cases::corpus_minimums(language);
+    assert!(parents_outside_selection >= minimum.parents, "{language}: unselected parents corpus shrank");
+    assert!(classes_fields_with_access >= minimum.fields, "{language}: class fields corpus shrank");
+    if language != ProgrammingLanguage::Rust { return; }
     for ((set_name, _), count) in kind_sets.iter().zip(&compared) {
         assert!(*count > 0, "{set_name}: no fixture record was compared");
     }
-    assert!(
-        parents_outside_selection > 20,
-        "selected methods keep their unselected owners as parents ({parents_outside_selection})"
-    );
-    assert!(
-        classes_fields_with_access > 20,
-        "classes keep field access and `static` without Field/Property/Constant selected ({classes_fields_with_access})"
-    );
+
 }
 
 /// The kinds the deferred declarations report.
@@ -697,18 +696,19 @@ fn distinct_import_references_are_all_kept() {
     assert_eq!(names(&run.relations.dependencies), expected);
 }
 
+crate::language_cases::language_tests!(a_wide_result_narrows_to_exactly_the_uncached_narrow_query => check_a_wide_result_narrows_to_exactly_the_uncached_narrow_query);
+
 /// A wide result narrowed to a query equals that query run uncached, for
 /// every fixture and each command's kind set; a query the wide result does
 /// not cover is refused rather than answered from partial data.
-#[test]
-fn a_wide_result_narrows_to_exactly_the_uncached_narrow_query() {
+fn check_a_wide_result_narrows_to_exactly_the_uncached_narrow_query(language: ProgrammingLanguage) {
     let kind_sets: [(&str, &[SymbolKindV2]); 3] = [
         ("functions", &FUNCTION_KINDS),
         ("types", &TYPE_KINDS),
         ("classes", &CLASS_KINDS),
     ];
     let mut compared = 0usize;
-    for path in all_fixtures().into_iter().chain(multi_fixtures()) {
+    for path in crate::symbols_fixtures::fixtures_for(language, true) {
         let label = display_name(&path);
         let wide_query = SymbolQuery::new().capabilities([Capability::Containment]);
         let wide = SourceFile::read(&path).expect("read").query(&wide_query).expect("wide query");
@@ -749,7 +749,7 @@ fn a_wide_result_narrows_to_exactly_the_uncached_narrow_query() {
             "{label}: a result without diagnostics cannot answer a diagnostics query"
         );
     }
-    assert!(compared > 100, "too few records compared ({compared})");
+    assert!(compared >= crate::language_cases::corpus_minimums(language).symbols, "{language}: too few records compared ({compared})");
 }
 
 /// The declaration facts of one record that the query and capabilities can
@@ -796,7 +796,7 @@ crate::symbols_relations::declaration_fact_group_tests!(
 /// container links and `metrics` as the complete index, under each
 /// capability set; facts a capability set does not compute are absent. The
 /// selected records are exactly the complete index's records of the selected
-/// kinds. The per-language group must exercise every compared fact.
+/// kinds. The Rust group must exercise every compared fact.
 fn narrow_queries_equal_the_complete_index(group: usize) {
     let kind_sets: [(&str, Option<&[SymbolKindV2]>); 4] = [
         ("every kind", None),
@@ -859,7 +859,7 @@ fn narrow_queries_equal_the_complete_index(group: usize) {
         }
     }
     assert!(compared > 0, "group {group}: no record compared");
-    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+    if group != crate::symbols_relations::RUST_FACT_GROUP {
         return;
     }
     assert!(compared > 1000, "too few records compared ({compared})");

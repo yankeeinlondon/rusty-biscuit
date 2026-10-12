@@ -255,9 +255,10 @@ fn assert_qualified(extracted: &Extracted, case: &QualifiedCase) {
     assert_eq!(record.identity.is_namespace_rooted, rooted, "{label}: `{name}` rooted in symbol_index_v2()");
 }
 
-#[test]
-fn qualified_name_matrix_holds_through_both_paths() {
-    for row in QUALIFIED_NAME_MATRIX {
+crate::language_cases::language_tests!(qualified_name_matrix_holds_through_both_paths => check_qualified_name_matrix_holds_through_both_paths);
+
+fn check_qualified_name_matrix_holds_through_both_paths(language: ProgrammingLanguage) {
+    for row in QUALIFIED_NAME_MATRIX.iter().filter(|row| row.language == language) {
         let extracted = extract_primary(row.language);
         let language = row.language.name();
         for case in row.cases {
@@ -297,11 +298,12 @@ fn qualified_name_matrix_holds_through_both_paths() {
     }
 }
 
+crate::language_cases::language_tests!(every_qualified_name_ends_in_its_name_and_ids_are_unique => check_every_qualified_name_ends_in_its_name_and_ids_are_unique);
+
 /// Every qualified name ends in the symbol's own name and is never empty;
 /// IDs are unique within a file.
-#[test]
-fn every_qualified_name_ends_in_its_name_and_ids_are_unique() {
-    for language in ProgrammingLanguage::all() {
+fn check_every_qualified_name_ends_in_its_name_and_ids_are_unique(language: ProgrammingLanguage) {
+    for language in [language] {
         let extracted = extract_primary(language);
         let mut ids = HashSet::new();
         for record in &extracted.records {

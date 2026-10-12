@@ -215,3 +215,11 @@ pub fn extract_inline(source: &str, extension: &str) -> Extracted {
     let tree_file = TreeFile::new(file.path()).expect("parse inline source");
     Extracted::from_tree_file(format!("inline .{extension}"), &tree_file)
 }
+
+/// Every primary/extra fixture for a language, optionally including its multi-tree file.
+pub fn fixtures_for(language: ProgrammingLanguage, include_multi: bool) -> Vec<PathBuf> {
+    let fixtures = all_fixtures().into_iter().chain(if include_multi { multi_fixtures() } else { Vec::new() });
+    let selected: Vec<_> = fixtures.filter(|path| ProgrammingLanguage::from_path(path) == Some(language)).collect();
+    assert!(!selected.is_empty(), "{language}: no fixtures");
+    selected
+}

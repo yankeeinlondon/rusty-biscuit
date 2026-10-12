@@ -38,3 +38,7 @@ pub use package::tree_package::{
 };
 pub use rule_registry::{RuleRegistry, RuleSelector};
 pub use shared::*;
+
+#[cfg(test)]
+#[path = "../tests/support/language_cases.rs"]
+mod language_cases;

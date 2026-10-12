@@ -584,13 +584,14 @@ fn assert_declared(index: &FileSymbolIndex, label: &str, expected: &Declared) {
     );
 }
 
+crate::language_cases::language_tests!(generics_matrix_holds_on_complete_and_declarations_only_paths => check_generics_matrix_holds_on_complete_and_declarations_only_paths);
+
 /// Each row's declarations report exactly their own parameters and
 /// requirements, on the complete index and on a declarations-only query of
 /// the declaration's kind; an absent-construct language reports none on any
 /// record.
-#[test]
-fn generics_matrix_holds_on_complete_and_declarations_only_paths() {
-    for row in GENERICS_MATRIX {
+fn check_generics_matrix_holds_on_complete_and_declarations_only_paths(language: ProgrammingLanguage) {
+    for row in GENERICS_MATRIX.iter().filter(|row| row.language == language) {
         let label = row.language.name();
         let file = write_temp(row.source, row.extension);
         let tree_file = TreeFile::new(file.path()).expect("parse row source");
@@ -621,14 +622,15 @@ fn generics_matrix_holds_on_complete_and_declarations_only_paths() {
     }
 }
 
+crate::language_cases::language_tests!(generics_matrix_holds_on_warm_cache_hits_and_projections => check_generics_matrix_holds_on_warm_cache_hits_and_projections);
+
 /// The same expectations hold through the persistent cache: a complete entry
 /// is served warm as a real `Hit`, and projected to each declarations-only
 /// query, with every parameter's default, bounds, variance and position
 /// intact (an equal-to-uncached comparison alone would pass if both lost one).
-#[test]
-fn generics_matrix_holds_on_warm_cache_hits_and_projections() {
+fn check_generics_matrix_holds_on_warm_cache_hits_and_projections(language: ProgrammingLanguage) {
     let sources = tempfile::TempDir::new().expect("sources");
-    for (row_index, row) in GENERICS_MATRIX.iter().enumerate() {
+    for (row_index, row) in GENERICS_MATRIX.iter().enumerate().filter(|(_, row)| row.language == language) {
         let label = row.language.name();
         let path = sources.path().join(format!("row_{row_index}.{}", row.extension));
         std::fs::write(&path, row.source).expect("write row source");
@@ -653,11 +655,12 @@ fn generics_matrix_holds_on_warm_cache_hits_and_projections() {
     }
 }
 
+crate::language_cases::language_tests!(generics_grammar_limits_hold_for_the_pinned_grammars => check_generics_grammar_limits_hold_for_the_pinned_grammars);
+
 /// Each demonstrated grammar limit still holds for the pinned grammar: the
 /// form is rejected, or parses into the recorded reading.
-#[test]
-fn generics_grammar_limits_hold_for_the_pinned_grammars() {
-    for row in GENERICS_MATRIX {
+fn check_generics_grammar_limits_hold_for_the_pinned_grammars(language: ProgrammingLanguage) {
+    for row in GENERICS_MATRIX.iter().filter(|row| row.language == language) {
         for limit in row.limits {
             let label = format!("{} ({})", row.language.name(), limit.grammar);
             let file = write_temp(limit.snippet, limit.extension);
@@ -683,23 +686,30 @@ fn wide_function(count: usize) -> String {
     format!("fn wide<{}>() {{}}\n", params.join(", "))
 }
 
-/// Positions are `u16`: a list whose last position is `u16::MAX` is read in
-/// full, and one parameter more is an explicit analysis error naming the
-/// declaration, never a truncated list. Only a selected declaration is
-/// read, so a query that does not select it still succeeds.
+/// A list whose last position is `u16::MAX` is read in full. The boundary
+/// needs declarations only, avoiding unrelated passes over 65,536 names.
 #[test]
-fn a_generic_list_beyond_u16_positions_is_an_analysis_error() {
+fn a_generic_list_at_the_u16_boundary_is_read_in_full() {
     let fits = usize::from(u16::MAX) + 1;
     let file = write_temp(&wide_function(fits), "rs");
-    let index = TreeFile::new(file.path()).expect("parse").symbol_index_v2().expect("a full u16 list is representable");
+    let query = SymbolQuery::new().kinds([K::Function]);
+    let index = TreeFile::new(file.path()).expect("parse").query(&query).expect("a full u16 list is representable").index;
     let wide = record_of(&index, "fits", "wide", K::Function);
     assert_eq!(wide.type_info.generic_params.len(), fits);
     let last = wide.type_info.generic_params.last().expect("last parameter");
     assert_eq!((last.name.as_str(), last.position), ("T65535", u16::MAX));
 
+}
+
+/// One parameter past the representable range names the oversized declaration
+/// in an analysis error; a query that does not select it still succeeds.
+#[test]
+fn a_generic_list_beyond_u16_positions_is_an_analysis_error() {
+    let fits = usize::from(u16::MAX) + 1;
+    let query = SymbolQuery::new().kinds([K::Function]);
     let file = write_temp(&format!("{}struct Other;\n", wide_function(fits + 1)), "rs");
     let tree_file = TreeFile::new(file.path()).expect("parse");
-    match tree_file.symbol_index_v2() {
+    match tree_file.query(&query) {
         Err(TreeHuggerError::TooManyGenericParameters { symbol, count, .. }) => {
             assert_eq!((symbol.as_str(), count), ("wide", fits + 1));
         }

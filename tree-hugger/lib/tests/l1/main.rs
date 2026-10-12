@@ -68,3 +68,8 @@ mod symbols_visibility;
 mod test_layout;
 mod tree_file;
 mod tree_package;
+
+#[path = "../support/language_cases.rs"]
+mod language_cases;
+
+use tree_hugger::ProgrammingLanguage;

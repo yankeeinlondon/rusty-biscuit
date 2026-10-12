@@ -516,13 +516,14 @@ fn narrowed_test_flags_follow_the_package_layout() {
     }
 }
 
+crate::language_cases::language_tests!(narrowed_fixture_flags_follow_the_package_layout => check_narrowed_fixture_flags_follow_the_package_layout);
+
 /// Every language's primary fixture, copied under a scratch `tests/`
 /// directory, narrows to a fresh result across every layout change: only
 /// Rust's file-wide rule reads the manifests, and every language's
 /// source-derived flags survive reuse.
-#[test]
-fn narrowed_fixture_flags_follow_the_package_layout() {
-    for row in FLAGS_MATRIX {
+fn check_narrowed_fixture_flags_follow_the_package_layout(language: ProgrammingLanguage) {
+    for row in FLAGS_MATRIX.iter().filter(|row| row.language == language) {
         let path = primary_fixture(row.language).expect("primary fixture");
         for change in LAYOUT_CHANGES {
             let dir = TempDir::new().expect("temp dir");

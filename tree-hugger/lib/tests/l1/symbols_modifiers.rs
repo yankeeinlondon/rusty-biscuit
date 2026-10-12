@@ -437,14 +437,15 @@ fn assert_declared(index: &FileSymbolIndex, label: &str, expected: &Declared) {
     assert_eq!(attributes, wanted, "{label}: `{}` attributes", expected.name);
 }
 
+crate::language_cases::language_tests!(modifiers_matrix_holds_on_complete_and_declarations_only_paths => check_modifiers_matrix_holds_on_complete_and_declarations_only_paths);
+
 /// Each row's declarations report exactly their own modifiers and
 /// attributes, on the complete index and on a declarations-only query of the
 /// declaration's kind (which runs only the parse pass); an absent-construct
 /// language reports no attribute and no modifier beyond `static`/`async` on
 /// any record.
-#[test]
-fn modifiers_matrix_holds_on_complete_and_declarations_only_paths() {
-    for row in MODIFIERS_MATRIX {
+fn check_modifiers_matrix_holds_on_complete_and_declarations_only_paths(language: ProgrammingLanguage) {
+    for row in MODIFIERS_MATRIX.iter().filter(|row| row.language == language) {
         let label = row.language.name();
         let file = write_temp(row.source, row.extension);
         let tree_file = TreeFile::new(file.path()).expect("parse row source");

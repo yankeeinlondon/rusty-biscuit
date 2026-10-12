@@ -9,6 +9,7 @@
 //! owner of a member whose explicit qualification names another owner
 //! (`ABSENT_OWNER_MATRIX`).
 
+use tree_hugger::ProgrammingLanguage;
 use tree_hugger::{SymbolKindV2, SymbolRecord, TreeFile};
 
 use crate::symbols_fixtures::in_file_name;
@@ -278,9 +279,10 @@ fn assert_owned(records: &[SymbolRecord], label: &str, member: &str, owner: &str
     );
 }
 
-#[test]
-fn members_attach_to_their_own_same_named_owner() {
-    for row in OWNER_MATRIX {
+crate::language_cases::language_tests!(members_attach_to_their_own_same_named_owner => check_members_attach_to_their_own_same_named_owner);
+
+fn check_members_attach_to_their_own_same_named_owner(language: ProgrammingLanguage) {
+    for row in OWNER_MATRIX.iter().filter(|row| ProgrammingLanguage::from_extension(row.extension) == Some(language)) {
         let records = records_of(row.source, row.extension);
         for (member, owner) in row.cases {
             assert_owned(&records, row.label, member, owner);

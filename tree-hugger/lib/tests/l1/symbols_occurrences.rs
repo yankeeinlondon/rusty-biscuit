@@ -933,9 +933,10 @@ fn every_language_reports_occurrences_with_an_explicit_state() {
     }
 }
 
-#[test]
-fn owner_target_and_candidate_ids_are_the_complete_index_ids() {
-    for language in ProgrammingLanguage::all() {
+crate::language_cases::language_tests!(owner_target_and_candidate_ids_are_the_complete_index_ids => check_owner_target_and_candidate_ids_are_the_complete_index_ids);
+
+fn check_owner_target_and_candidate_ids_are_the_complete_index_ids(language: ProgrammingLanguage) {
+    for language in [language] {
         let path = primary_fixture(language).expect("fixture");
         let tree_file = TreeFile::new(&path).expect("parse fixture");
         let evidence = tree_file.reference_evidence().expect("evidence");
@@ -964,9 +965,10 @@ fn owner_target_and_candidate_ids_are_the_complete_index_ids() {
     }
 }
 
-#[test]
-fn occurrences_and_coverage_are_in_canonical_order() {
-    for language in ProgrammingLanguage::all() {
+crate::language_cases::language_tests!(occurrences_and_coverage_are_in_canonical_order => check_occurrences_and_coverage_are_in_canonical_order);
+
+fn check_occurrences_and_coverage_are_in_canonical_order(language: ProgrammingLanguage) {
+    for language in [language] {
         let path = primary_fixture(language).expect("fixture");
         let evidence = TreeFile::new(&path).expect("parse").reference_evidence().expect("evidence");
         let spans: Vec<_> = evidence
@@ -996,24 +998,7 @@ fn occurrences_and_coverage_are_in_canonical_order() {
 /// visible bindings in lookup order.
 #[test]
 fn name_only_candidates_are_in_declaration_order_and_distinct() {
-    fn assert_candidate_order(index: &FileSymbolIndex, evidence: &ReferenceEvidence, context: &str) {
-        let key = |id: &SymbolId| {
-            let record = index.symbols.iter().find(|record| &record.id == id).expect("candidate is a record");
-            (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), record.id.0.clone())
-        };
-        for occurrence in &evidence.occurrences {
-            let keys: Vec<_> = occurrence.candidates.iter().map(|candidate| key(candidate.id.as_ref().expect("candidate ID"))).collect();
-            assert!(keys.windows(2).all(|pair| pair[0] < pair[1]), "{context}: {occurrence:#?}");
-        }
-    }
 
-    for language in ProgrammingLanguage::all() {
-        let path = primary_fixture(language).expect("fixture");
-        let tree_file = TreeFile::new(&path).expect("parse");
-        let evidence = tree_file.reference_evidence().expect("evidence");
-        let index = tree_file.symbol_index_v2().expect("index");
-        assert_candidate_order(&index, &evidence, language.name());
-    }
 
     // Every same-named record: each `self` lists every method's `self`.
     let python = Analyzed::new(
@@ -2267,9 +2252,10 @@ const PARAMETER_CAPTURE_MATRIX: &[ParameterCaptureRow] = &[
     ),
 ];
 
-#[test]
-fn parameter_captures_declare_only_their_binding_name() {
-    for &(label, extension, source, records, names, reads) in PARAMETER_CAPTURE_MATRIX {
+crate::language_cases::language_tests!(parameter_captures_declare_only_their_binding_name => check_parameter_captures_declare_only_their_binding_name);
+
+fn check_parameter_captures_declare_only_their_binding_name(language: ProgrammingLanguage) {
+    for &(label, extension, source, records, names, reads) in PARAMETER_CAPTURE_MATRIX.iter().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)) {
         let file = Analyzed::new(source, extension);
         let mut declared: Vec<(&str, u32)> = file
             .index
@@ -3069,9 +3055,11 @@ pub(crate) const DECLARATION_EXCLUSION_MATRIX: &[DeclarationRow] = &[
     ),
 ];
 
-#[test]
-fn declaration_tokens_are_never_occurrences_and_reads_remain() {
-    assert_exclusion_rows(DECLARATION_EXCLUSION_MATRIX);
+crate::language_cases::language_tests!(declaration_tokens_are_never_occurrences_and_reads_remain => check_declaration_tokens_are_never_occurrences_and_reads_remain);
+
+fn check_declaration_tokens_are_never_occurrences_and_reads_remain(language: ProgrammingLanguage) {
+    let rows: Vec<_> = DECLARATION_EXCLUSION_MATRIX.iter().copied().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)).collect();
+    assert_exclusion_rows(&rows);
 }
 
 /// `R7-F2.12a`/`.12b`: a TypeScript dotted namespace declares its prefix
@@ -3626,9 +3614,11 @@ const MARKER_EXCLUSION_MATRIX: &[DeclarationRow] = &[
     ),
 ];
 
-#[test]
-fn contextual_syntax_markers_are_never_occurrences_and_reads_remain() {
-    assert_exclusion_rows(MARKER_EXCLUSION_MATRIX);
+crate::language_cases::language_tests!(contextual_syntax_markers_are_never_occurrences_and_reads_remain => check_contextual_syntax_markers_are_never_occurrences_and_reads_remain);
+
+fn check_contextual_syntax_markers_are_never_occurrences_and_reads_remain(language: ProgrammingLanguage) {
+    let rows: Vec<_> = MARKER_EXCLUSION_MATRIX.iter().copied().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)).collect();
+    assert_exclusion_rows(&rows);
 }
 
 /// Rows `R7-F1.11`–`.13`: three precedence groups (associativity `left`,
@@ -3828,9 +3818,11 @@ const INITIALIZER_READ_MATRIX: &[DeclarationRow] = &[
     ),
 ];
 
-#[test]
-fn bare_identifier_initializers_are_reads_beside_their_declared_names() {
-    assert_exclusion_rows(INITIALIZER_READ_MATRIX);
+crate::language_cases::language_tests!(bare_identifier_initializers_are_reads_beside_their_declared_names => check_bare_identifier_initializers_are_reads_beside_their_declared_names);
+
+fn check_bare_identifier_initializers_are_reads_beside_their_declared_names(language: ProgrammingLanguage) {
+    let rows: Vec<_> = INITIALIZER_READ_MATRIX.iter().copied().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)).collect();
+    assert_exclusion_rows(&rows);
 }
 
 /// Every row's excluded tokens are absent, the checked names' occurrences
@@ -5148,9 +5140,10 @@ const NOT_CALLED_MATRIX: &[NotCalledRow] = &[
     ),
 ];
 
-#[test]
-fn member_accesses_that_are_not_the_callee_are_never_calls() {
-    for &(language, extension, source, checks) in NOT_CALLED_MATRIX {
+crate::language_cases::language_tests!(member_accesses_that_are_not_the_callee_are_never_calls => check_member_accesses_that_are_not_the_callee_are_never_calls);
+
+fn check_member_accesses_that_are_not_the_callee_are_never_calls(language: ProgrammingLanguage) {
+    for &(language, extension, source, checks) in NOT_CALLED_MATRIX.iter().filter(|row| row.0 == language) {
         let file = Analyzed::new(source, extension);
         for &(line, name) in checks {
             let calls = file
@@ -5334,8 +5327,9 @@ fn swift_adjacent_unwrap_operators_are_a_grammar_limit() {
     );
 }
 
-#[test]
-fn invocation_forms_are_calls_in_every_language() {
+crate::language_cases::language_tests!(invocation_forms_are_calls_in_every_language => check_invocation_forms_are_calls_in_every_language);
+
+fn check_invocation_forms_are_calls_in_every_language(language: ProgrammingLanguage) {
     for language in ProgrammingLanguage::all() {
         assert!(
             INVOCATION_MATRIX.iter().any(|row| row.0 == language),
@@ -5343,7 +5337,7 @@ fn invocation_forms_are_calls_in_every_language() {
             language.name()
         );
     }
-    for &(language, extension, source, checks) in INVOCATION_MATRIX {
+    for &(language, extension, source, checks) in INVOCATION_MATRIX.iter().filter(|row| row.0 == language) {
         let file = Analyzed::new(source, extension);
         for &(line, name, nth, kind) in checks {
             let occurrence = file.at(line, name, nth);
@@ -6437,8 +6431,9 @@ const WRITTEN_PATH_MATRIX: &[WrittenPathRow] = &[
     ),
 ];
 
-#[test]
-fn written_paths_keep_every_root_qualifier_and_receiver() {
+crate::language_cases::language_tests!(written_paths_keep_every_root_qualifier_and_receiver => check_written_paths_keep_every_root_qualifier_and_receiver);
+
+fn check_written_paths_keep_every_root_qualifier_and_receiver(language: ProgrammingLanguage) {
     for language in ProgrammingLanguage::all() {
         assert!(
             WRITTEN_PATH_MATRIX.iter().any(|row| row.1 == language),
@@ -6446,7 +6441,7 @@ fn written_paths_keep_every_root_qualifier_and_receiver() {
             language.name()
         );
     }
-    for &(label, _, extension, source, checks) in WRITTEN_PATH_MATRIX {
+    for &(label, _, extension, source, checks) in WRITTEN_PATH_MATRIX.iter().filter(|row| ProgrammingLanguage::from_extension(row.2) == Some(language)) {
         let file = Analyzed::new(source, extension);
         for &(line, name, nth, path, kind) in checks {
             let occurrence = file.at(line, name, nth);
@@ -7171,8 +7166,9 @@ const OPERAND_MEMBER_MATRIX: &[OperandMemberRow] = &[
     ),
 ];
 
-#[test]
-fn operand_position_member_names_match_their_argument_capture() {
+crate::language_cases::language_tests!(operand_position_member_names_match_their_argument_capture => check_operand_position_member_names_match_their_argument_capture);
+
+fn check_operand_position_member_names_match_their_argument_capture(language: ProgrammingLanguage) {
     for language in ProgrammingLanguage::all() {
         if matches!(language, ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh) {
             continue; // no member access
@@ -7183,7 +7179,7 @@ fn operand_position_member_names_match_their_argument_capture() {
             language.name()
         );
     }
-    for &(label, extension, source, checks) in OPERAND_MEMBER_MATRIX {
+    for &(label, extension, source, checks) in OPERAND_MEMBER_MATRIX.iter().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)) {
         let file = Analyzed::new(source, extension);
         for &(line, name, expected) in checks {
             let found: Vec<&Occurrence> =
@@ -8457,9 +8453,10 @@ fn selected_import_provenance_keeps_other_scopes_and_locals_independent() {
     }
 }
 
-#[test]
-fn unsupported_language_occurrences_never_claim_selected_imports() {
-    for language in ProgrammingLanguage::all().into_iter().filter(|language| !matches!(language, ProgrammingLanguage::Rust | ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript)) {
+crate::language_cases::language_tests!(unsupported_language_occurrences_never_claim_selected_imports => check_unsupported_language_occurrences_never_claim_selected_imports);
+
+fn check_unsupported_language_occurrences_never_claim_selected_imports(language: ProgrammingLanguage) {
+    for language in [language].into_iter().filter(|language| !matches!(language, ProgrammingLanguage::Rust | ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript)) {
         let path = primary_fixture(language).expect("primary fixture");
         let index = TreeFile::new(path).expect("tree").symbol_index_v2().expect("index");
         assert!(!index.occurrences.is_empty(), "{language:?}: positive occurrence control");
@@ -8477,4 +8474,25 @@ fn unsupported_language_occurrences_never_claim_selected_imports() {
             }
         }
     }
+}
+
+fn assert_candidate_order(index: &FileSymbolIndex, evidence: &ReferenceEvidence, context: &str) {
+    let key = |id: &SymbolId| {
+        let record = index.symbols.iter().find(|record| &record.id == id).expect("candidate is a record");
+        (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), record.id.0.clone())
+    };
+    for occurrence in &evidence.occurrences {
+        let keys: Vec<_> = occurrence.candidates.iter().map(|candidate| key(candidate.id.as_ref().expect("candidate ID"))).collect();
+        assert!(keys.windows(2).all(|pair| pair[0] < pair[1]), "{context}: {occurrence:#?}");
+    }
+}
+
+crate::language_cases::language_tests!(candidate_order_in_every_fixture => check_fixture_candidate_order);
+
+fn check_fixture_candidate_order(language: ProgrammingLanguage) {
+    let path = primary_fixture(language).expect("fixture");
+    let tree_file = TreeFile::new(&path).expect("parse");
+    let evidence = tree_file.reference_evidence().expect("evidence");
+    let index = tree_file.symbol_index_v2().expect("index");
+    assert_candidate_order(&index, &evidence, language.name());
 }

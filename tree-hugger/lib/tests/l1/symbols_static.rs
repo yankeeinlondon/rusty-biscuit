@@ -175,11 +175,12 @@ pub const STATIC_MATRIX: &[StaticRow] = &[
     (L::C, "public_function", None, false, false),
 ];
 
+crate::language_cases::language_tests!(static_matrix_holds_through_both_paths => check_static_matrix_holds_through_both_paths);
+
 /// Test 4: every static-matrix row holds on the shared flags, the v2
 /// modifiers, and every convenience copy.
-#[test]
-fn static_matrix_holds_through_both_paths() {
-    for (language, rows) in rows_by_language(STATIC_MATRIX, |row| row.0) {
+fn check_static_matrix_holds_through_both_paths(language: ProgrammingLanguage) {
+    for (language, rows) in rows_by_language(STATIC_MATRIX, |row| row.0).into_iter().filter(|(row_language, _)| *row_language == language) {
         let extracted = extract_primary(language);
         for (_, name, container, is_static, is_static_storage) in rows {
             assert_static(&extracted, name, *container, *is_static, *is_static_storage);

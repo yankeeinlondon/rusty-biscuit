@@ -7,6 +7,7 @@
 //! type and default come from their own grammar fields, so a comment beside
 //! a default's `=` neither erases the default nor becomes it.
 
+use tree_hugger::ProgrammingLanguage;
 use tree_hugger::{ParameterInfo, SymbolInfo, SymbolKindData};
 
 use crate::symbols_fixtures::{Extracted, extract_inline};
@@ -428,15 +429,16 @@ fn record_shape(extracted: &Extracted) -> Vec<String> {
         .collect()
 }
 
+crate::language_cases::language_tests!(comments_around_a_default_never_erase_or_supply_it => check_comments_around_a_default_never_erase_or_supply_it);
+
 /// A comment before, after or on both sides of a default's `=` changes
 /// nothing a parameter reports: in every default-capable language and every
 /// callable form, the record keeps the names, types, defaults `1`/`2`/`3`,
 /// optionality, arity and declaration list of the uncommented control, and
 /// the v1 signature the same defaults.
-#[test]
-fn comments_around_a_default_never_erase_or_supply_it() {
+fn check_comments_around_a_default_never_erase_or_supply_it(language: ProgrammingLanguage) {
     let mut failures = Vec::new();
-    for language in DEFAULT_LANGUAGES {
+    for language in DEFAULT_LANGUAGES.iter().filter(|row| ProgrammingLanguage::from_extension(row.extension) == Some(language)) {
         let extension = language.extension;
         let control = extract_inline(&(language.source)(&commented_parameters(language, false, false)), extension);
         for (position, before, after) in COMMENT_POSITIONS {
