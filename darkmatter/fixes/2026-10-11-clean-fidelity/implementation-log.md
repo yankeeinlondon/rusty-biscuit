@@ -70,10 +70,119 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/inline.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_parity.rs
+    - darkmatter/cli/tests/l1/clean_rules.rs
+    - darkmatter/cli/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/benches/clean_hot_paths.rs
+    - darkmatter/lib/fuzz/fuzz_targets/markdown_parser.rs
+    - darkmatter/lib/src/markdown/cleanup/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/markers.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/opaque.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tables.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/escapes.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/tables.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/l1/clean_compose_equivalence.rs
+    - darkmatter/lib/tests/l1/clean_parity.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_4:
+    - darkmatter/lib/README.md
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/tests/l1/clean_real_world_prompt.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.md
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.provenance.yaml
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+docs_updated_during_phase_5:
+    - darkmatter/README.md
+    - darkmatter/lib/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/inline/cleaning.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/structs/Markdown.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/features.md
+docs_created_during_phase_5:
+    - darkmatter/docs/topics/markdown-formatting.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/cleanup.md
+    - .claude/skills/darkmatter/compose.md
 packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-10-11-clean-fidelity (6 phases)
@@ -1025,3 +1134,568 @@ against the frozen library contract and were reviewed afterwards.
   once per text it inspects (input, re-wrap stage, candidate) instead of four
   or five times. The scanners keep compose's `Options::all()` (Phase 1
   lesson 5).
+
+### 4. CLI routes (`md clean`, `md FILE --save`)
+
+- `run_clean` makes one `clean_document` call. `open_argument`, the lazy
+  `schema_config` closure and its document-context derivation are unchanged.
+  `rule_overrides` turns only explicit flags into overrides: `--indent` →
+  `indentation`, `--compact`/`--loose` → `list-item-padding` `none`/`one`,
+  `--fixed-width N` → width (implying unwrap), `--ignore-incidental-newlines`
+  → `unwrap: false` and `fixed-width: false`. `CleanOptions.list_spacing`
+  became `list_item_padding: Option<ListItemPadding>`.
+- Outcomes:
+  - `Changed`/`Unchanged`: print, or `--save` writes only on `Changed`.
+  - `Declined`: the original is printed (`--save` writes nothing), the
+    finding goes to stderr, exit 0. `--json` gives `changed: false`,
+    `applied: []` and the fallback finding, with stderr empty.
+  - `Invalid`: exit 1 with no save. `--json` prints the envelope (now with
+    `applied: []`); human mode keeps the existing YAML error.
+- Human stderr keeps "frontmatter suggestions (not applied)" for
+  non-auto-applied Syntax/Schema findings and adds a "markdown cleanup"
+  section for `clean.invalid-rules` and `clean.fidelity-fallback`, using
+  `Prose`/`UnorderedList`.
+- One addition: under `--save`, when repairs were applied and the body delta
+  is empty, the "No changes" delta report is skipped. Otherwise it would
+  contradict the repair notice, which
+  `test_clean_save_reports_frontmatter_repair_rather_than_no_changes` forbids.
+- **Hook departure (AC 7):** the broken-pass hook is process-global and does
+  not cross into a spawned `md`. The CLI therefore proves the hook in process
+  (`clean_fidelity::broken_pass_refusal_is_never_saved` calls
+  `darkmatter_cli::commands::run_clean` with `save: true`; the file stays
+  byte-identical, and the test fails with the hook removed). The
+  `CliProcessFixture` tests use real declines (an unpaired `::block`) through
+  the binary. Decline handling in the CLI does not depend on the reason.
+  `cli/Cargo.toml` gained a darkmatter dev-dependency with
+  `cleanup-test-hooks`; as a dev-dependency feature it is on in every test
+  build, so no `[package.metadata.ci.tests] features` entry is needed.
+
+### 5. DMLS formatting
+
+- `providers::formatting::formatting(ctx) -> FormattingOutcome { edits,
+  warnings }` runs `clean_document` on the unsaved buffer with the workspace
+  `formatting.markdown`. Only `file:` URIs pass a document path; an untitled
+  buffer gets no trigger discovery. The schema closure builds
+  `CleanSchemaConfig::new` from `ctx.file_context()`. Outcome mapping:
+  - `Changed`: one whole-document edit;
+  - `Unchanged`: nothing;
+  - `Declined`: no edit and one warning, with `fallback.message(line,
+    column)` at the client's negotiated position encoding;
+  - `Invalid` or a repair error: no edit and one warning.
+
+  The provider sends nothing itself.
+- `router.rs` sends each warning as `window/showMessage` (Warning). It also
+  shows `ConfigState::diagnostics()` once after the initial load and once
+  after each `workspace/didChangeConfiguration` (Error and Warning
+  severities), never per formatting request. `dmls/docs/editors/README.md`
+  drops its "planned" marker for that display.
+- No capability changed: no range, on-type, or save formatting.
+- The provider's old `Markdown::cleanup`-equivalence unit tests were replaced
+  by exact-output tests. `lsp_session::formatting_is_byte_equivalent_to_library_cleanup`
+  became `formatting_returns_the_library_clean_transaction_output`.
+
+### 6. Old test triage and consumer updates
+
+- The pre-Phase-4 cleanup tests (`cleanup/tests/{mod,lists,emphasis,escapes,
+  blockquote,brackets,tables,reflow}.rs`, `compose/tests/{rendering,frontmatter}.rs`)
+  were ported. Their helpers (`clean`, `clean_with`, `clean_unwrapped`,
+  `clean_indent`) go through `clean_body`, fail on a decline, assert
+  idempotence, and check that the public wrapper agrees, so an "output equals
+  input" assertion cannot pass on a silent refusal. Seven tests were deleted:
+  - one asserted Normal-mode blank insertion at list level returns;
+  - two became duplicates once assertions were exact;
+  - three exercised the deleted `align_tables_in_stream`, or were covered by
+    the exact table tests;
+  - two wide-marker idempotence tests were merged into one.
+
+  The standalone-helper tests use `strip_then_reflow` in place of
+  `cleanup_to_fixed_width`. No engine defect was found.
+- Expectation updates for documented behavior changes, outside cleanup's own
+  tests:
+  - **Trailing whitespace is no longer stripped.** An empty interpolation
+    leaves its spaces. Affected:
+    - `lib/tests/l1/compose_diagnostic_identity.rs` and its CLI twin;
+    - `lib/tests/l1/literal_token.rs`;
+    - `claudine/lib/src/system_prompt/prepare/tests.rs`, where a leading
+      space is kept.
+  - **No serializer `[` escaping.** Affected:
+    `lib/tests/l1/expression_regression.rs::regression_terminal_in_interpolation`.
+  - **No forced final newline.** Affected: the three
+    `compose::schema_validation::tests::*` that expected `\n`.
+  - **No blank line inserted after a heading.** Affected:
+    `claudine/lib/src/composition/closure/tests.rs::cleans_the_agents_body_and_hashes_the_cleaned_text`
+    and `claudine/cli/src/commands/wrap/inline.rs::inline_completion_cleans_the_agents_body_on_disk`.
+    Both now use an unlabeled fence, which the defaults do change.
+  - The CLI's own clean tests (`clean.rs`, `clean_json.rs`,
+    `clean_frontmatter.rs`) were updated likewise: soft breaks are kept,
+    separate lists are not merged, `1)` is not respelled, and no
+    whitespace-only lines appear.
+
+### 7. Invocation parity (Wave 8)
+
+- `lib/tests/common/clean_parity/mod.rs` holds 13 hand-written cases
+  (literals, so CRLF and BOM bytes survive checkout normalization). Each case
+  has an input, the exact text to emit, and an outcome:
+  - repairable frontmatter;
+  - repair disabled, with valid YAML and with invalid YAML;
+  - unrepairable YAML;
+  - empty frontmatter;
+  - a BOM with and without frontmatter;
+  - CRLF, CRLF frontmatter, and mixed endings;
+  - a missing final newline;
+  - reference definitions (used and unused);
+  - an unpaired directive after repairable frontmatter.
+- The same cases run through `clean_document`
+  (`lib/tests/l1/clean_parity.rs`, including idempotence), through `md clean`
+  printed, `--json` and `--save` (`cli/tests/l1/clean_parity.rs`), and
+  through `textDocument/formatting`
+  (`dmls/tests/l1/formatting_transaction.rs::every_parity_case_matches_through_formatting`).
+  All three agree byte for byte. The CLI and DMLS include the module by
+  `#[path]` plus `include_str!`, and both list it in
+  `[package.metadata.ci.tests] source-inputs`.
+- AC 2: `lib/tests/l1/clean_compose_equivalence.rs` composes A1 (with a fence
+  the defaults label) and B1 with each gate true and false, before and after
+  `clean_document`. Under the defaults the composed bytes are equal. Under
+  `indentation` 2/8, `unwrap`, `fixed-width`, and the explicit padding rules,
+  the composed documents render to the same HTML. **Finding:** byte equality
+  cannot hold under `indentation: 8`, because cleanup's documented
+  parent-marker padding (`1.   first`) survives compose's own cleanup step
+  (indentation 4). That is a spelling change by design, not a structural
+  one. The test asserts a non-empty set of profiles changed each input, so it
+  is not vacuous. Data is fixture-owned, with no shell, network, or captured
+  repository.
+
+### 8. Defects found and fixed in this phase
+
+- **Fallback detail used body-relative line numbers.** Reported by the CLI
+  subagent. With frontmatter present, the message said "at line 7" (a
+  document line) followed by the scanner's "starting at line 4" (a body
+  line). `Protection::scan` now words malformed-region details without line
+  numbers (for example, "`::block when=\"x\"` is never closed by an
+  `::end-block`"); the location is the re-anchored "line L, column C".
+  Regression test:
+  `cleanup::document::tests::a_malformed_region_declines_the_whole_document`,
+  which asserts the exact message.
+- The fallback offset points at the first diverging *inline* (for example, a
+  link), not the start of its paragraph. Both the CLI and DMLS rely on this,
+  and it is more precise than the block start, so it was kept. The tests pin
+  it (`line 5, column 5`, and the UTF-16/UTF-8 columns in DMLS).
+
+### 9. Observations for later phases (not changed here)
+
+- biscuit-file's deterministic `yaml.line-ending` repair converts CRLF to LF
+  only between the frontmatter delimiters. The delimiter lines keep CRLF, so
+  a CRLF document's frontmatter block ends up with mixed terminators. It is an
+  accepted, reported repair (`crlf-frontmatter` parity case), but it is a
+  candidate follow-up fix in biscuit-file.
+- `Markdown`'s frontmatter split drops the body's final newline. The old
+  cleanup re-added one, so composed `Markdown::content()` for documents with
+  frontmatter used to end in `\n` and now does not. `md compose` prints with
+  `println!`, so its stdout still ends in exactly one newline, where the old
+  output also had a trailing blank line.
+- Composition leaves the spaces around an interpolation that evaluates to
+  empty (for example, `A  `). The old serializer stripped them as a side
+  effect. If that matters, it belongs to interpolation, not cleanup.
+
+### Verification
+
+**Requirement-to-test mapping (Phase 4):**
+
+| Requirement | Test(s) |
+| --- | --- |
+| Transaction order, outcomes, discard on refusal, invalid YAML emits nothing, only emitted repairs reported, authored coordinates | `cleanup::document::tests::*` (13 tests), including `a_body_refusal_discards_the_candidate_frontmatter_repair`, `corruption_introduced_by_reflow_is_refused_after_the_rewrap`, `unrepairable_yaml_is_invalid_and_nothing_is_cleaned`, `frontmatter_false_read_from_a_repair_candidate_leaves_invalid_yaml_invalid`, `an_invalid_rule_in_a_repair_candidate_is_reported_at_its_authored_position` |
+| AC 6 precedence, all four levels, and invalid-object fallback | `document::tests::each_rule_resolves_overrides_then_document_then_workspace_then_default`; CLI `clean_rules::*` (7); DMLS `formatting_transaction::workspace_rules_apply_and_the_document_overrides_them`, `providers::formatting::tests::{document_style_markdown_beats_the_workspace, invalid_document_rules_are_ignored_while_workspace_rules_apply}` |
+| AC 5 compact/loose equal to `list-item-padding` none/one; one migration warning per change | CLI `clean_rules::compact_and_loose_match_document_list_item_padding`; DMLS `a_legacy_setting_warns_once_per_configuration_change_not_per_request`, `config_file_findings_are_shown_at_load_with_their_severity` |
+| AC 7 broken pass through consumers, `--save` writes nothing, `--json` fallback, one DMLS warning, refusal after a candidate repair with `applied: []` | CLI `clean_fidelity::{broken_pass_refusal_is_never_saved, declined_clean_*, top_level_save_leaves_a_declined_document_untouched}`; DMLS `an_injected_refusal_reports_a_utf16_column_by_default`, `…_utf8_column_when_negotiated`, `an_unpaired_block_directive_declines_with_one_warning`; library mutation list in `cleanup/tests/guard.rs` (Phase 3) |
+| AC 8 frontmatter parity, `frontmatter: false` | `clean_parity` (library, CLI, DMLS); CLI `disabled_frontmatter_repair_*`; DMLS `frontmatter_false_with_repairable_invalid_yaml_returns_no_edits_and_one_warning` |
+| AC 2 A1/B1 compose equivalence | `lib/tests/l1/clean_compose_equivalence.rs` |
+| AC 12 parse ceilings with separate scanner counts and short-circuits | `cleanup/tests/parse_count.rs`: every wrapper ≤ 2/2; unchanged 1/1; malformed 0 cleanup / 1 scanner; width ≤ 3 with scanner = cleanup; `clean_document` 2/2; standalone helpers 1/1; counters observe repeats |
+| AC 13 source fidelity through public routes | CLI `clean_fidelity::{crlf_terminators_are_kept, byte_order_mark_without_frontmatter_is_kept, empty_frontmatter_block_is_kept, missing_final_newline_is_not_added, every_body_rule_off_returns_the_document_unchanged, stdin_routes_clean_and_report}`; `clean_parity` in all three suites; DMLS `formatting_reads_the_unsaved_buffer_not_the_file` |
+| DMLS: no edits for unchanged/declined/invalid; no range or on-type formatting | DMLS `an_unchanged_document_returns_no_edits_and_no_message`, `unrepairable_frontmatter_returns_no_edits_and_one_warning`, `formatting_is_advertised_without_range_or_on_type_formatting` |
+
+**Gates (macOS):**
+
+- `just test --no-fail-fast` (darkmatter area): 9135 run, 9124 passed,
+  8 failed, 3 timed out, 11 skipped.
+  - **5 failures** are the pre-existing ones from Phases 1–3, all caused by
+    the unparseable `prompts/_reviews/feature-review.md`:
+    `dasherized_identifier_corpus::{shipped_corpus_expressions_all_parse,
+    corpus_walk_reaches_every_present_surface}` and three
+    `feature_review_incident::*`.
+  - **3 failures** were caused by this phase's behavior changes and are
+    fixed (section 6): `compose_diagnostic_identity::one_root_in_two_transcluded_documents_warns_once_per_document`,
+    `literal_token::a_decoded_token_is_data_everywhere_it_flows` and
+    `expression_regression::regression_terminal_in_interpolation`. All three
+    pass after the fix.
+  - **3 timeouts** hit the 30s limit under full-suite load and pass when
+    rerun alone: `serialized_code_neighbors::serialized_neighbors_render_in_every_table_cell_position`
+    (4.9s), and both `entry_point_parity::*_entry_points_agree_on_every_reference`
+    (7.3s and 9.8s). All three were recorded in earlier phases.
+  - The lib unit target alone: 6260 run, 6260 passed after the fixes.
+- `just lint`: **passed**, including the zed-dmls wasm32 check, after fixing
+  two clippy findings in the new parity tests.
+- **Direct consumer, Claudine.**
+  - `cargo nextest run -p claudine`: 4736 passed, after the two
+    expectation updates in section 6.
+  - `cargo nextest run -p claudine-cli`: the cleanup-related failure is fixed
+    (`inline_completion_cleans_the_agents_body_on_disk`). The remaining 17
+    failures are unrelated to cleanup:
+    - **Shipped-prompt drift**:
+      `shipped_prompt_route_drift::{fixture_body_matches_the_shipped_body,
+      shipped_implement_prompts_have_not_drifted_from_their_fixture}` and
+      `shipped_prompts::shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+      The shipped `prompts/_implement/implement-plan.md` has drifted from
+      its fixture and from the asserted mapping.
+    - **Unparseable `feature-review.md`**: three `shipped_prompts`/
+      `shipped_prompt_contract` corpus tests and
+      `feature_review_cli_preserves_numeric_iteration_and_dependent_paths`.
+    - **Missing binary**: ten `codex_app_server::*` tests copy
+      `claudine-fake-codex`, which is not built here (`NotFound`).
+    - **Timing**:
+      `wrap_perf::composition_setup_and_provider_handoff_order_matches_phase_1_baseline`
+      passes alone (0.7s).
+
+**Cross-OS (native Windows, `just cross-check <pkg> --os windows <filter>`):**
+
+| Package | Filter | Result |
+| --- | --- | --- |
+| `darkmatter-cli` | `clean` | 132 run, 132 passed, including CRLF/BOM stdin and file routes and the parity suite |
+| `dmls` | `formatting` | 32 run, 32 passed, including `file:` URIs and the parity suite |
+| `darkmatter` | `clean` | 427 run, 427 passed, including the transaction and parity tests |
+
+Linux and macOS are proven by pull-request CI, and WSL2 by the nightly run;
+nothing here is Linux-specific. A filterset passed through the recipe
+(`-E 'test(/…/)'`) fails with a shell syntax error, so use a plain name
+filter.
+
+**Tier placement.**
+- No new test name or module uses a tier marker.
+- The new lib tests are in the lib unit target (`cleanup/document.rs`) or in
+  the `l1` binary (`clean_compose_equivalence`, `clean_parity`, declared in
+  `lib/tests/l1/main.rs`).
+- The CLI tests are `clean_fidelity`, `clean_rules`, and `clean_parity`,
+  declared in `cli/tests/l1/main.rs`.
+- The DMLS test is `formatting_transaction`, declared in
+  `dmls/tests/l1/main.rs`.
+- `just test` selected and ran all of them.
+
+**Repository state.** While this phase ran, an external process committed
+the in-progress tree as `2be693c89`…`43ff7441a`. The `43ff7441a` commit
+carries the first draft of this section. The same process moved
+`fixes/2026-09-30-file-refs-use-magic` into `_completed`, unstaged. This run
+did neither and touched neither. The edits made after those commits are left
+unstaged:
+
+- the three Claudine test files;
+- `lib/tests/l1/{compose_diagnostic_identity,expression_regression,literal_token}.rs`;
+- this log's sections 4–9 and this verification;
+- the plan check-offs and the frontmatter of the plan, the log and the spec.
+
+## Phase 5
+
+Phase 5 checked cleanup against real documents and rewrote the docs to
+describe what the code now does. The corpus scan turned up one defect, which
+is fixed here (section 3).
+
+### 1. Real-world fixture (AC 10)
+
+- `lib/tests/fixtures/clean/prompts-commit-464e2d90e.md` holds the exact
+  bytes of blob `464e2d90ee389470a3cf198c4ff5a6cf3f50d9cd` (`prompts/commit.md`,
+  retrieved with `git cat-file blob 464e2d90e`). `git rev-parse
+  c5ad95142~1:prompts/commit.md` gives this blob; `c5ad95142` replaced it.
+- The fixture carries no metadata, so it stays byte-identical to the blob.
+  Its provenance (path, blob, retrieval command) is in the sidecar
+  `prompts-commit-464e2d90e.provenance.yaml`, and
+  `clean_real_world_prompt::the_fixture_is_the_recorded_blob_byte_for_byte`
+  hashes the fixture as a Git blob (gix, already a dev-dependency) and
+  compares the result with the sidecar. `.gitattributes` sets `eol=lf`, so a
+  Windows checkout keeps the same bytes.
+- Under the defaults the guard accepts the prompt and changes exactly one
+  line: its one unlabeled fence becomes `text`. No frontmatter repair is
+  applied, every soft break is kept (same line count and the same
+  `SoftBreak` count), and the output is a fixed point
+  (`defaults_accept_the_prompt_and_only_label_its_unlabeled_fence`).
+- `the_cleaned_prompt_composes_to_the_same_bytes_as_the_original` composes
+  the original and the cleaned prompt in a fresh `gix::init` repository in a
+  temporary directory. The two transcluded files are fixture-owned
+  stand-ins. It composes with `message` both absent and set, because
+  `message` gates two `::block` regions, one of them inside a list. The two
+  composed outputs are byte-identical, and no directive line survives
+  composition. No shell runs and nothing is read remotely.
+
+### 2. Corpus scan (AC 11)
+
+**Method.** A throwaway `#[ignore]` probe in the `l1` binary, run once from a
+release build and then deleted (not a CI gate). It runs
+`clean_document` with default overrides, `workspace: None`, and no saving
+on every path `git ls-files -z -- '*.md'` lists. It passes the file's path
+and a schema closure built with `request_support::context_at(<document
+dir>)`, which mirrors `md clean FILE`: a passive context with schema-root
+and trigger discovery. Nothing is composed and no expression or shell runs.
+Panics are caught, and each `Changed` result is cleaned a second time to
+check idempotence. The scan ran twice: once before the section 3 fix and
+once after it. The final numbers are below.
+
+**Counts (final run, 5436 tracked paths):**
+
+| Result | Count | Notes |
+| --- | --- | --- |
+| changed | 3513 | all idempotent; 116 also applied a frontmatter repair |
+| unchanged | 1877 | |
+| declined | 1 | see below |
+| invalid | 23 | frontmatter Darkmatter itself cannot load |
+| error (typed schema error) | 13 | `FrontmatterRepairError::Schema` |
+| unreadable | 9 | tracked paths missing from the worktree |
+| panic | 0 | |
+| non-idempotent | 0 | |
+
+The first run, before the fix, gave changed 3497, unchanged 1873, invalid
+43, and the same declined, error, and unreadable rows.
+
+**Dispositions.**
+
+- **Declined (1): an authored defect, not a regression.**
+  `biscuit-tui/docs/style-guide/_style-guide.md` opens a region with
+  ``::block when="state.name == "Design Language"`` (broken quoting) and
+  closes it with the typo `::endblock`, so the region really is unpaired.
+  The refusal (`MalformedRegion`) is correct. It is the same file the
+  Phase 3 body-only probe found.
+- **Invalid (23): authored defects, unchanged from before this fix.** In
+  each one, Darkmatter's own frontmatter parser, the one `Markdown` and
+  compose use, cannot load the block:
+  - 19 have a duplicate key: 16 `packages` and 3 others. Most are
+    `_completed` plans and reviews.
+  - `claudine/features/_completed/2026-04-17-perf-flag/review-1.md` fails
+    with "mapping values are not allowed".
+  - `biscuit-clipboard/features/2026-05-02-kickoff/plan.md` and
+    `claudine/features/_completed/2026-05-02-flattened-bridge/plan.md`
+    fail with "did not find expected key".
+  - `prompts/_reviews/feature-review.md` is the known unparseable prompt
+    behind the five pre-existing L1 failures.
+- **Error (13): typed schema errors from authored `$schema` values.** The
+  installed pre-change `md` fails on the same files. The spec requires these
+  to stay typed errors and never be replaced by a guessed schema.
+  - Missing schema files: `fix-log.yaml` and `feature-log.yaml` (bare
+    names, in two `_completed` logs), `./_schema.yaml` (the two
+    `claudine/gen` agent-cli fixtures, whose sibling is `_schema.r1.yaml`),
+    and `./implement.yaml` (a DMLS mapping-only corpus fixture).
+  - Six intentionally malformed schema probes under
+    `messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/`.
+  - Two authored grammar errors: `darkmatter/docs/research/parsing/_fleet_future.md`
+    (unknown type `crate`) and
+    `sniff/reviews/_completed/2026-06-29-cross-platform/review-1.md`
+    (boolean values in `$schema`).
+- **Unreadable (9): accounted for, not skipped.** These are the nine files of
+  `darkmatter/fixes/2026-09-30-file-refs-use-magic/`. They are still tracked
+  but deleted from the worktree, because the external process noted in
+  Phase 4 moved them, unstaged, to `_completed/`.
+- **Valid supported syntax that was refused.** The first run found 20
+  documents, including the shipped prompts `prompts/_reviews/cycles.md` and
+  `prompts/_reviews/comprehensive-review.md`. All were fixed in this phase
+  (section 3) and are accepted by the final run. No refusal of valid
+  supported syntax remains, so no `_unscheduled` fix was needed.
+- **Performance observation (not changed).** Body cleanup took milliseconds
+  even on 240 KB documents. The slow cases (up to about 10 s alone in
+  release, for example
+  `claudine/features/2026-09-21-lifecycle-ergonomics/spike/fixtures/variants/lifecycle.md`)
+  are all in the frontmatter schema tier. The installed pre-change `md
+  clean` is equally slow on them (7.6 s), so this predates the fix and is
+  out of its scope.
+- No repository Markdown was rewritten. `git status` shows only this phase's
+  own files.
+
+### 3. Defect fixed: supported frontmatter was reported `Invalid`
+
+- **Symptom.** In the first scan, 20 documents came out `Invalid`. Their
+  frontmatter fails strict YAML but loads in Darkmatter. Through `md clean`
+  that means exit 1 and no cleaning. The installed pre-change `md` exits 0
+  on them; the reproduction below is `prompts/_reviews/cycles.md`. Two
+  shapes cause it:
+  - a bare interpolation value, `review: {{ ctx.area }}/reviews/…`
+    (`cycles.md`, `comprehensive-review.md`);
+  - tab indentation inside a block scalar (`.claude/skills/lsp/*`, the
+    `audio-programming` research docs, and others).
+- **Cause.** The base branch enforced "unrepairable YAML" by building a
+  `Markdown`, whose parser (`parse_yaml_with_fallbacks`) falls back to tab
+  normalization and then to `{{ }}`/`$( )` protection. The Phase 4
+  transaction used strict YAML (`settings_yaml`) as the acceptance test
+  instead, which departed from the "existing error contract" the spec
+  requires to be kept.
+- **Fix.** `frontmatter::load_frontmatter_yaml` (`pub(crate)`) exposes the
+  fallback parse.
+  - `clean_document` now reports `Invalid` only when that parse also fails
+    on the block being emitted.
+  - When only Darkmatter can load the block, it is emitted as authored, no
+    repair is applied, the body is formatted, and the strict-YAML
+    `yaml.parse` finding is still reported as a suggestion.
+  - Document rules are read from Darkmatter's loaded mapping, so
+    `style.markdown` still applies. A `clean.invalid-rules` finding falls
+    within the frontmatter span, because strict-YAML key location is
+    unavailable there.
+  - The module docs and `## Returns` were updated to match.
+- **Tests** (each fails without the fix):
+  - `cleanup::document::tests::frontmatter_only_darkmatter_loads_is_kept_and_its_body_is_cleaned`
+    (the `cycles.md` frontmatter and the `lsp.md` tab shape);
+  - `…::rules_are_read_from_frontmatter_only_darkmatter_loads` (a document
+    rule applies, `frontmatter: false` is not invalid, and an invalid rule
+    is reported within the block);
+  - a new `bare-interpolation-frontmatter` row in the shared parity table,
+    run through `clean_document`, `md clean` (printed, `--json`, `--save`)
+    and DMLS `textDocument/formatting`;
+  - CLI `clean_fidelity::frontmatter_only_darkmatter_loads_is_kept_and_the_body_formatted`
+    (exit 0, stdout, `yaml.parse` on stderr, JSON `changed: true` and
+    `applied: []`, and `--save`).
+  - Duplicate keys and `title: @daily-report`, which Darkmatter rejects too,
+    stay `Invalid`. The existing tests for them still pass.
+- **Observation (not changed).** `area: {{ ctx.area }}` alone is valid YAML,
+  because it reads as a nested flow mapping. An existing frontmatter repair
+  respells it `{{ctx.area}}` and reports that as an applied repair. That
+  behavior predates this fix, and the expression is equivalent, so the
+  parity row uses `cycles.md`'s shape, which strict YAML rejects.
+
+### 4. Documentation (AC 14)
+
+The examples in every page were produced with this branch's `md clean -`.
+None were written by hand.
+
+- **Created** `docs/topics/markdown-formatting.md`, the `style.markdown`
+  topic page, covering:
+  - the five guarantees, with a Mermaid flow of the transaction;
+  - every key with its default and a compact example;
+  - the list-spacing section for a reader new to tight and loose lists: the
+    boundary diagram, what tight and loose render as, and the same input
+    under every value of both padding rules, plus the required-separator
+    example;
+  - precedence as a Mermaid diagram, with the CLI flag mapping;
+  - the invalid-object fallback and quoted-value rejection;
+  - frontmatter that only Darkmatter loads;
+  - why rendering does not read the settings.
+- **Rewrote** `docs/inline/cleaning.md`. It was an empty file. It now
+  describes compose's cleanup step: it shares the engine with `md clean`,
+  takes its settings from `ComposeOptions` rather than the document,
+  defaults `unwrap` on, can be disabled with `.disable(ComposeOperation::Cleanup)`,
+  and produces output with no forced newline and no stripped whitespace.
+- **Updated** `docs/cli/clean.md`:
+  - the overview now states the invariants and that the document's rules
+    drive cleanup;
+  - flag-to-rule mapping, including `--compact` and `--loose`;
+  - both stderr sections;
+  - a new "When Cleanup Declines" section (human, `--json`, `--save`,
+    exit 0, `clean.invalid-rules`);
+  - exit status, including frontmatter that only Darkmatter loads;
+  - a rule-by-rule transformation table that replaces the old list, which
+    described the deleted serializer;
+  - examples. The old fixed-width example was wrong: its first line was 82
+    columns, so it was regenerated.
+- **Updated** `docs/lsp/features.md`: the `textDocument/formatting` row and
+  §4.10 now describe the implemented whole-document transaction and the
+  decline warning. `rangeFormatting` is no longer listed as part of it.
+- **Updated** `dmls/docs/editors/README.md` with a new "Formatting" section:
+  frontmatter repair during formatting, precedence over
+  `[formatting.markdown]`, no range or on-type formatting, and the
+  `window/showMessage` warning when formatting declines. Migration was
+  already documented in Phase 4.
+- **Updated** `dmls/docs/features.md` and the `dmls/README.md` feature row.
+  Both still said formatting was "byte-equivalent to `md clean`" through
+  `Markdown::cleanup`.
+- **Updated** `docs/darkmatter-compose-pipeline.md` (the Cleaning summary),
+  `docs/structs/Markdown.md` (the method table still listed the deleted
+  `cleanup_compact`/`loose`/`with_indent*`), `docs/topics/layouts-and-style.md`
+  (a pointer saying `style.markdown` is not a render style), the area
+  `README.md` topic list, `cli/README.md` (the Document Cleanup prose and
+  examples), and `lib/README.md`. The lib README example claimed cleanup adds
+  a blank line after a heading, which it no longer does.
+- **Code comments:**
+  - `md clean` flag help for `--compact`, `--loose`, and
+    `--ignore-incidental-newlines` now names the rule each one sets. The
+    old help implied the default collapses wrapping.
+  - The `cli/src/commands/clean.rs` module docs, `CleanOutcome::Invalid`,
+    `ParityOutcome::Invalid`, and the `providers/formatting.rs` module docs
+    now say Darkmatter cannot load the frontmatter rather than that it is
+    invalid YAML.
+- **Skills:**
+  - `.claude/skills/darkmatter/cleanup.md` describes the `Invalid`
+    acceptance test, user-doc locations, and how to run a corpus probe.
+  - `.claude/skills/darkmatter/compose.md` updates the compose Cleanup
+    bullet, which described the removed newline stripping.
+- No crate was added or removed, so `docs/dependencies.md` is unchanged.
+- Left alone: `dmls/docs/editors/README.md` already linked to the DMLS
+  feature spec for the full key list, which predates this phase. That link
+  goes against the docs-never-link-to-specs rule; it is noted here for a
+  later docs pass and was not changed in this fix.
+
+### 5. Corpus closure (Wave 10)
+
+- The defect in section 3 changed which documents are `Invalid`, so the
+  first scan's results were stale. Affected fixtures were rerun (the parity
+  suite in all three consumers, plus the CLI and library clean suites), and
+  then the full passive scan was repeated. Section 2 holds the final counts.
+- Every refusal has a disposition. The declined document is an authored
+  defect. The 23 invalid documents are frontmatter Darkmatter itself cannot
+  load. The 13 errors are typed schema errors on authored `$schema` values.
+  The 9 unreadable paths are the moved file-refs-use-magic files. No
+  refusal of valid supported syntax remains, so no `_unscheduled` fix was
+  created.
+- The docs match the accepted behavior, including the section 3 fix.
+- Spec departures: none new. Section 3 is an implementation ruling that
+  restores the spec's "existing error contract" for unrepaired YAML. The
+  contract is decided by Darkmatter's own loader, as on the base branch, not
+  by strict YAML.
+- Checkpoint:
+  - AC 10: `clean_real_world_prompt` (3 tests).
+  - AC 11: sections 2 and 5 of this log.
+  - AC 14: section 4.
+  - No repository Markdown was rewritten.
+
+### Verification
+
+**Requirement-to-test mapping (Phase 5):**
+
+| Requirement | Test(s) / artifact |
+| --- | --- |
+| AC 10 fixture is blob `464e2d90e` byte for byte, provenance recorded | `clean_real_world_prompt::the_fixture_is_the_recorded_blob_byte_for_byte` (Git blob hash = sidecar `blob`) |
+| AC 10 default acceptance, guard passes, every hard wrap kept, idempotent | `clean_real_world_prompt::defaults_accept_the_prompt_and_only_label_its_unlabeled_fence` (exact expected text, `SoftBreak` and line counts, second clean `Unchanged`) |
+| AC 10 cleaned output composes, fixture-isolated | `clean_real_world_prompt::the_cleaned_prompt_composes_to_the_same_bytes_as_the_original` (fresh `gix::init` repo, stand-in transclusions, `message` absent and set, identical composed bytes) |
+| AC 11 corpus counts and dispositions | log sections 2 and 5 (throwaway probe, deleted) |
+| Section 3: frontmatter only Darkmatter loads is kept and the body cleaned | `cleanup::document::tests::frontmatter_only_darkmatter_loads_is_kept_and_its_body_is_cleaned` (original `cycles.md` frontmatter and the `lsp.md` tab shape) |
+| Section 3: rules read from that mapping; `frontmatter: false` is not invalid; invalid rules reported in the block | `cleanup::document::tests::rules_are_read_from_frontmatter_only_darkmatter_loads` |
+| Section 3 through every consumer | parity row `bare-interpolation-frontmatter` in `lib/tests/l1/clean_parity.rs`, `cli/tests/l1/clean_parity.rs`, and `dmls/tests/l1/formatting_transaction.rs` |
+| Section 3, CLI end to end (exit 0, stdout, stderr suggestion, JSON, `--save`) | `cli/tests/l1/clean_fidelity.rs::frontmatter_only_darkmatter_loads_is_kept_and_the_body_formatted` |
+| Section 3 negatives (duplicate key, `@` scalar with repair off) stay `Invalid` | existing `unrepairable_yaml_is_invalid_and_nothing_is_cleaned`, `frontmatter_false_read_from_a_repair_candidate_leaves_invalid_yaml_invalid`, and the `unrepairable-frontmatter` and `repair-disabled-invalid-yaml` parity rows |
+
+The two section 3 unit tests were confirmed to fail with the
+`load_frontmatter_yaml` call removed (2 failed, 13 passed), and to pass with
+it in place.
+
+**Gates (macOS):**
+
+- `just test --no-fail-fast` (darkmatter area): 9141 run, 9136 passed, 5
+  failed, 11 skipped. The 5 failures are the pre-existing ones from Phases
+  1–4, all caused by the unparseable `prompts/_reviews/feature-review.md`:
+  `dasherized_identifier_corpus::{corpus_walk_reaches_every_present_surface,
+  shipped_corpus_expressions_all_parse}` and three
+  `feature_review_incident::*`. No timeouts this run.
+- `just lint`: **passed**, with no warnings, including the zed-dmls wasm32
+  check.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- No consumer outside the darkmatter area calls `clean_document`. A source
+  search found only unrelated names in `claudine/gen` and `messenger`.
+  Claudine is unaffected, because compose's cleanup does not go through
+  `clean_document`.
+
+**Cross-OS:** `just cross-check darkmatter --os windows clean_real_world_prompt`
+ran 3 tests and all 3 passed on native Windows. That covers the blob-hash
+check under a Windows checkout, where `.gitattributes` `eol=lf` keeps the
+bytes. The section 3 change is OS-neutral text logic, and its parity row runs
+in every CI environment. Linux and macOS are proven by pull-request CI, and
+WSL2 by the nightly run.
+
+**Tier placement.**
+- `clean_real_world_prompt` is declared in `lib/tests/l1/main.rs`.
+- The new unit tests are in the lib target.
+- The CLI test is in the declared `clean_fidelity` module.
+- The parity row is in the shared `#[path]` module, which both the CLI and
+  DMLS list in `source-inputs`.
+- No name uses a tier marker. `just test` selected and ran all of them.
+- The fixture and its sidecar are read through `include_str!`, which CI can
+  index.

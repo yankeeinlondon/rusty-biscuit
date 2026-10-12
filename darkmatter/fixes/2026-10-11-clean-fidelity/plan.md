@@ -3,7 +3,7 @@ area: darkmatter
 fix: 2026-10-11-clean-fidelity
 total_phases: 6
 created: 2026-10-11
-phase: 3
+phase: 5
 agent: "codex/gpt-6.1-sol"
 yolo: true
 source_files_during_phase_1: []
@@ -73,10 +73,119 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/inline.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_parity.rs
+    - darkmatter/cli/tests/l1/clean_rules.rs
+    - darkmatter/cli/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/providers/formatting.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/benches/clean_hot_paths.rs
+    - darkmatter/lib/fuzz/fuzz_targets/markdown_parser.rs
+    - darkmatter/lib/src/markdown/cleanup/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/src/markdown/cleanup/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/markers.rs
+    - darkmatter/lib/src/markdown/cleanup/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/opaque.rs
+    - darkmatter/lib/src/markdown/cleanup/perf_profile.rs
+    - darkmatter/lib/src/markdown/cleanup/protect.rs
+    - darkmatter/lib/src/markdown/cleanup/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/cleanup/tables.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/blockquote.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/brackets.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/escapes.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/guard.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/lists.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/reflow.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/source_fidelity.rs
+    - darkmatter/lib/src/markdown/cleanup/tests/tables.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/l1/clean_compose_equivalence.rs
+    - darkmatter/lib/tests/l1/clean_parity.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_4:
+    - darkmatter/lib/README.md
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/cleanup.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/lib/src/markdown/cleanup/body.rs
+    - darkmatter/lib/tests/l1/clean_real_world_prompt.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/common/clean_parity/mod.rs
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.md
+    - darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.provenance.yaml
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/dmls/src/providers/formatting.rs
+docs_updated_during_phase_5:
+    - darkmatter/README.md
+    - darkmatter/lib/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/inline/cleaning.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/structs/Markdown.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/dmls/docs/editors/README.md
+    - darkmatter/dmls/docs/features.md
+docs_created_during_phase_5:
+    - darkmatter/docs/topics/markdown-formatting.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/cleanup.md
+    - .claude/skills/darkmatter/compose.md
 packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Clean Fidelity Implementation Plan
@@ -460,7 +569,7 @@ library result contract and transaction behavior pass Wave 6.
 
 ### Wave 6 — Sequential transaction assembly
 
-- [ ] **Finalize cleanup transaction**
+- [x] **Finalize cleanup transaction**
   - Assemble raw-source repair preparation, one-time rule resolution, protected
     body transforms/reflow, original-byte frontmatter reconstruction, and one
     final comparison. Body comparison is independent of YAML repair proof.
@@ -476,7 +585,7 @@ library result contract and transaction behavior pass Wave 6.
 
 ### Wave 7 — Parallel consumer adapters
 
-- [ ] **Wire CLI routes**
+- [x] **Wire CLI routes**
   - Replace CLI repair/body orchestration with the raw library transaction.
     Retain `open_argument` and document-context derivation. Convert only explicit
     flags into overrides; compact/loose map to none/one, and ignore-incidental-
@@ -488,7 +597,7 @@ library result contract and transaction behavior pass Wave 6.
   - Use `CliProcessFixture` to prove stdin/JSON/save behavior, schema overrides,
     ordinary changes, and injected fallback including empty `applied`.
 
-- [ ] **Wire DMLS formatting**
+- [x] **Wire DMLS formatting**
   - Use raw current unsaved buffer and existing document/schema context in the
     provider. Return edits only for changed outcomes, no edits for unchanged,
     declined, or invalid. Keep library code free of protocol side effects.
@@ -501,7 +610,7 @@ library result contract and transaction behavior pass Wave 6.
 
 ### Wave 8 — Sequential consumer parity
 
-- [ ] **Verify invocation parity**
+- [x] **Verify invocation parity**
   - Run normal CLI and DMLS protocol fixtures on identical raw input/options:
     repairable malformed frontmatter, repair disabled, empty frontmatter, BOM,
     CRLF/mixed endings, missing final newline, references, and unpaired directives.
@@ -519,7 +628,7 @@ docs/skill files. Coordinate any discovered behavior departure before docs close
 
 ### Wave 9 — Parallel corpus and documentation work
 
-- [ ] **Validate repository corpus**
+- [x] **Validate repository corpus**
   - Retrieve `prompts/commit.md` from blob `464e2d90e` with a non-interactive
     read-only Git command and check its exact bytes into a cleanup fixture.
     Verify default acceptance, preserved wraps, and successful fixture-isolated
@@ -534,7 +643,7 @@ docs/skill files. Coordinate any discovered behavior departure before docs close
     refusal as a defect; do not count fail-closed output as successful formatting.
     This is local acceptance evidence, not a new CI gate.
 
-- [ ] **Document formatting rules**
+- [x] **Document formatting rules**
   - Add a `docs/` topic for every `style.markdown` key with compact examples,
     invariants, defaults, and a Mermaid precedence diagram. Explain tight/loose
     rendering for newcomers; include the boundary diagram and same-input output
@@ -549,7 +658,7 @@ docs/skill files. Coordinate any discovered behavior departure before docs close
 
 ### Wave 10 — Sequential corpus closure
 
-- [ ] **Close corpus findings**
+- [x] **Close corpus findings**
   - After fixes, rerun affected fixtures and repeat the passive scan only when
     changed behavior makes the prior results stale. Finish counts and refusal
     dispositions; reconcile docs with accepted behavior and log spec departures.

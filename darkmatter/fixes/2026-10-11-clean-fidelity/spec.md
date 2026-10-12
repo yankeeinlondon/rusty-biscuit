@@ -36,35 +36,36 @@ related:
 human_review: false
 implemented: false
 message_to_agent: |-
-    Phase 3 is done; read implementation-log.md "## Phase 3" before starting. What Phase 4 builds on:
-    - Engine: `markdown::cleanup::clean_body(body, &ResolvedMarkdownRules) -> BodyCleanup { text, outcome,
-      diagnostics, fallback }`. Body only (no frontmatter); strips and restores a BOM itself; never returns
-      `Invalid`. On `Declined`, `fallback: Some(Fallback)`; re-anchor into a whole document with
-      `fallback.diagnostic(document, body_offset)` (whole-document span, message names line and column).
-    - Test seam: `cleanup::test_hooks::{install_broken_pass, BrokenPass}` under `cfg(test)` or the new
-      `cleanup-test-hooks` lib feature (off by default). CLI/DMLS suites must enable that feature as a
-      dev-dependency feature, and confirm it is in their `[package.metadata.ci.tests] features` so CI compiles it.
-      The pass is process-global (a Mutex), so tests that install it must not run concurrently in one process
-      with other cleanup tests that expect normal output; nextest's process-per-test model makes this safe.
-    - NOT done yet (Wave 6 owns it): every `cleanup_content*`, `cleanup_to_fixed_width`, `Markdown::cleanup*`,
-      `md clean`, DMLS formatting, compose `ComposeOperation::Cleanup`, `cli/src/commands/render.rs`, and
-      Claudine still run the old serializer pipeline (`lists`, `emphasis`, `brackets`, `blockquote`, `tables`,
-      `opaque`, `perf_profile`). Reroute them to `clean_body` and delete that pipeline and its tests together;
-      many old tests in `cleanup/tests/{mod,lists,emphasis,reflow,blockquote,brackets,tables,escapes}.rs` assert
-      old serializer behavior (blank line after headings, forced final newline, `1,1,1` renumbering) and must
-      be rewritten or deleted per the Phase 1 pass-disposition table (log section 3).
-    - Scanner parses are not yet counted separately (AC 12). `Protection::scan` calls `scan_block_pairs`,
-      `scan_disclosures`, `scan_darkmatter_directives`, `quoted_shell_lines`, and `ExpressionFinder`, each of
-      which may reach the uncounted `find_code_regions`. Compute code regions once per text and add a separate
-      scanner count, as Phase 1 lesson 5 planned. Counted cleanup parses for `clean_body` are already pinned at
-      1 (unchanged) / 2 (changed) / at most 3 (width re-wrap after edits) by `parse_count::guarded_body`.
-    - `PREFER_ITALICS` restyling and the public `EmphasisStyle` enum are removed; the context-construction
-      guard no longer allowlists an env read in `cleanup/emphasis.rs`.
-    - Corpus probe (all tracked *.md bodies, 18 profiles): 0 panics, 0 non-idempotent, 1 decline
-      (`biscuit-tui/docs/style-guide/_style-guide.md`, genuinely unpaired `::block`/`::endblock`).
-    - Pre-existing failures, not caused by this fix: 5 L1 tests (`dasherized_identifier_corpus::*` x2,
-      `feature_review_incident::*` x3) fail because `prompts/_reviews/feature-review.md` has unparseable
-      frontmatter.
+    Phase 5 is done; read implementation-log.md "## Phase 5" before starting Phase 6.
+    - Corpus scan (AC 11) is final and recorded: 5436 tracked .md files; 3513 changed (all idempotent),
+      1877 unchanged, 1 declined (authored unpaired ::block in biscuit-tui's style guide), 23 invalid
+      (frontmatter Darkmatter itself cannot load: duplicate keys etc.), 13 typed schema errors on authored
+      $schema values (the installed pre-change `md` fails the same way), 9 unreadable (the tracked
+      2026-09-30-file-refs-use-magic files an external process moved, unstaged). No refusal of valid syntax
+      remains, so no _unscheduled fix was filed. Do not rerun the scan unless behavior changes again.
+    - One defect was fixed in Phase 5 (log section 3): `clean_document` reported `Invalid` (md clean exit 1)
+      for frontmatter strict YAML rejects but Darkmatter loads (bare `key: {{ ctx.area }}/x`, tab
+      indentation), including the shipped prompts/_reviews/cycles.md and comprehensive-review.md. It now
+      uses `frontmatter::load_frontmatter_yaml` (the `Markdown` loader's fallbacks) as the acceptance test;
+      such blocks are kept as authored with no repair and the body is cleaned. Parity row
+      `bare-interpolation-frontmatter` covers library, CLI and DMLS.
+    - AC 10 lives in lib/tests/l1/clean_real_world_prompt.rs with fixture
+      lib/tests/fixtures/clean/prompts-commit-464e2d90e.md (+ .provenance.yaml sidecar; a test checks the
+      Git blob hash). AC 14 docs are written: new docs/topics/markdown-formatting.md; rewritten
+      docs/cli/clean.md and docs/inline/cleaning.md (was empty); DMLS docs; skills cleanup.md/compose.md.
+    - Gates at the end of Phase 5 (macOS): `just test` 9141 run, 9136 passed, the same 5 pre-existing
+      failures caused by prompts/_reviews/feature-review.md (dasherized_identifier_corpus x2,
+      feature_review_incident x3); `just lint` clean; check-tier-coverage 0 stranded. Windows:
+      `just cross-check darkmatter --os windows clean_real_world_prompt` 3/3. Phase 4's Windows runs cover
+      the clean/formatting suites; Phase 6 still owns Linux/WSL2 evidence or reuse per the plan.
+    - `just cross-check <pkg> --os windows <name-filter>` works; an `-E 'test(...)'` filterset breaks the
+      recipe's argument quoting.
+    - Candidate follow-ups still open (not fixed, recorded in the Phase 4/5 logs): biscuit-file's
+      `yaml.line-ending` repair leaves CRLF delimiter lines around LF YAML; `Markdown`'s frontmatter split
+      drops the body's final newline; an empty interpolation leaves its surrounding spaces; an existing
+      repair respells a valid `area: {{ ctx.area }}` as `{{ctx.area}}`; the frontmatter schema tier is slow
+      on some large documents (pre-existing, up to ~10 s release).
+    - The external move of fixes/2026-09-30-file-refs-use-magic to _completed is still unstaged; leave it.
 ---
 
 # Clean Fidelity and Formatting Rules
