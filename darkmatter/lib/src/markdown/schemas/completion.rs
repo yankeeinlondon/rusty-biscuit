@@ -548,10 +548,7 @@ fn discriminant_json(atom: &PropertyAtom) -> Value {
 
 fn add_keys(keys: &mut Vec<AlternativeKey>, shape: &SchemaShape, arm: usize) {
     for (name, def) in &shape.properties {
-        let required = match def {
-            PropertyDef::Single(atom) => atom.is_required(),
-            PropertyDef::Union(atoms) => atoms.iter().any(PropertyAtom::is_required),
-        };
+        let required = def.is_required();
         match keys.iter_mut().find(|key| key.name == *name) {
             Some(key) => {
                 key.required &= required;

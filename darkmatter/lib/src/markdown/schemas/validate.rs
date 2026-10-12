@@ -416,7 +416,7 @@ fn schema_uses_lookaround(schema: &Value) -> bool {
 /// `match()`. An absolute path needs none, so it is judged as a context-bound
 /// validator judges it: it must exist, and `match()` judges its full path.
 /// Nothing reads the process's directory, home, or environment.
-pub(super) fn build_structural_validator(schema: &Value) -> Result<Validator, SchemaError> {
+pub(crate) fn build_structural_validator(schema: &Value) -> Result<Validator, SchemaError> {
     build_validator_with(schema, &FileValues::Syntax)
 }
 

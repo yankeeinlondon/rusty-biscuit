@@ -86,16 +86,12 @@ fn requires_presence(expr: &super::grammar::MatchExpr) -> bool {
             non_present < *count
         }
         // A property condition is presence-requiring iff it is a gate
-        // (`required`). A guard (no `required`) can be satisfied by absence.
-        MatchExpr::Property { atom, .. } => is_gate(atom),
+        // (effectively `required`). A guard, including `unknown(required)` and
+        // `null(required)`, can be satisfied by absence.
+        MatchExpr::Property { atom, .. } => atom.is_required(),
         // `$path` is inherently a gate (the path always exists).
         MatchExpr::Path(_) => true,
     }
-}
-
-fn is_gate(atom: &crate::markdown::schemas::simplified::PropertyAtom) -> bool {
-    use crate::markdown::schemas::simplified::Constraint;
-    atom.constraints.iter().any(|c| matches!(c, Constraint::Required))
 }
 
 #[cfg(test)]
@@ -221,5 +217,33 @@ mod tests {
             of: vec![required_prop("a"), guard_prop("b")],
         }]);
         assert!(matches!(lint(&arms), Err(SchemaError::TriggerVacuousArm)));
+    }
+
+    #[test]
+    fn null_admitting_required_condition_is_a_guard_but_a_required_list_is_a_gate() {
+        for ty in [SimplifiedType::Unknown, SimplifiedType::Null] {
+            let arms = MatchArms(vec![MatchExpr::Property {
+                name: "steps".into(),
+                atom: PropertyAtom {
+                    ty: TypeExpr::Primitive(ty),
+                    is_array: false,
+                    constraints: vec![Constraint::Required],
+                    array_constraints: vec![],
+                    description: None,
+                },
+            }]);
+            assert!(matches!(lint(&arms), Err(SchemaError::TriggerVacuousArm)), "{ty:?}");
+        }
+        let list = MatchArms(vec![MatchExpr::Property {
+            name: "steps".into(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::Unknown),
+                is_array: true,
+                constraints: vec![],
+                array_constraints: vec![Constraint::Required],
+                description: None,
+            },
+        }]);
+        assert!(lint(&list).is_ok(), "`unknown[](required)` is a gate");
     }
 }

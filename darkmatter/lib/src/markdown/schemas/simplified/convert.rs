@@ -34,6 +34,7 @@
 
 use serde_json::{Map, Value, json};
 
+use super::alphanumeric::AlphanumericOptions;
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr,
@@ -44,6 +45,7 @@ use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_
 use crate::markdown::schemas::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
+    DARKMATTER_SHELL_FORMAT, DARKMATTER_TYPE_ANNOTATION,
     DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
 
@@ -198,15 +200,20 @@ fn union_property_to_schema(
     container: Option<&PropertyAtom>,
 ) -> Result<(Value, bool), SchemaError> {
     // Union requiredness must be known *before* building arms: a required
-    // union (any arm carries `required`) gets neither the property-level
-    // `null` arm nor the optional-`file` empty-string tolerance. Deciding
-    // this up front lets each arm be built with empty-`file` suppression so a
-    // required union containing an otherwise-optional `file` arm still rejects
-    // the `""` sentinel.
-    let required = container.map_or_else(
-        || arms.iter().any(PropertyAtom::is_required),
-        PropertyAtom::is_required,
+    // union (any arm carries `required`, and no arm admits null) gets neither
+    // the property-level `null` arm nor the optional-`file` empty-string
+    // tolerance. Deciding this up front lets each arm be built with
+    // empty-`file` suppression so a required union containing an
+    // otherwise-optional `file` arm still rejects the `""` sentinel.
+    let admits_null = container.map_or_else(
+        || arms.iter().any(PropertyAtom::admits_null),
+        PropertyAtom::admits_null,
     );
+    let required = !admits_null
+        && container.map_or_else(
+            || arms.iter().any(PropertyAtom::marks_required),
+            PropertyAtom::marks_required,
+        );
     // `generated` is a property-level ownership semantic: if any arm is
     // host-supplied, the static `required` entry is suppressed (spec point 1).
     let any_generated = container.map_or_else(
@@ -233,7 +240,9 @@ fn union_property_to_schema(
         union_schema.insert("x-darkmatter-generated".into(), Value::Bool(true));
     }
 
-    let schema = if required {
+    // A union with a `null` or `unknown` arm already accepts null, so it needs
+    // no extra `null` arm.
+    let schema = if required || admits_null {
         Value::Object(union_schema)
     } else {
         // Lift the null arm into the existing anyOf array so the output
@@ -308,6 +317,12 @@ fn wrap_optional_null(inner: Value) -> Value {
 fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), SchemaError> {
     let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true)?;
     let generated = atom.is_generated();
+
+    // `null` and `unknown` already accept null and are never required, so they
+    // lower bare: `{"type": "null"}` and `{}`.
+    if atom.admits_null() {
+        return Ok((fragment, false));
+    }
 
     // Non-nullable atoms (those carrying `Required`) are emitted unchanged.
     // Optional atoms are wrapped so that JSON `null` validates as "absent".
@@ -1042,15 +1057,29 @@ fn type_fragment(
         SimplifiedType::Schema => {
             semantic_type_fragment(name, "schema", DARKMATTER_SCHEMA_KEYWORD, constraints)
         }
-        SimplifiedType::Any => any_fragment(name, constraints),
+        SimplifiedType::Unknown => unknown_fragment(name, constraints),
+        SimplifiedType::Null => null_fragment(name, constraints),
+        SimplifiedType::Alphanumeric => alphanumeric_fragment(name, constraints),
+        SimplifiedType::Shell => shell_fragment(name, constraints),
     }
 }
 
 fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    string_fragment_with_base(name, "string", None, constraints)
+}
+
+/// A string fragment whose value must also match `base_pattern`, which stays
+/// separate from every authored pattern.
+fn string_fragment_with_base(
+    name: &str,
+    type_label: &str,
+    base_pattern: Option<String>,
+    constraints: &[Constraint],
+) -> Result<Value, SchemaError> {
     let mut m = Map::new();
     m.insert("type".into(), Value::String("string".into()));
     let mut length = Bounds::default();
-    let mut patterns: Vec<String> = Vec::new();
+    let mut patterns: Vec<String> = base_pattern.into_iter().collect();
     for c in constraints {
         match c {
             Constraint::Required
@@ -1080,7 +1109,7 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                 push_unique(&mut patterns, r"\S");
             }
             Constraint::Pattern(p) => push_unique(&mut patterns, p),
-            other => return Err(invalid_constraint(name, "string", other)),
+            other => return Err(invalid_constraint(name, type_label, other)),
         }
     }
     length.emit(name, &mut m, "minLength", "maxLength", |n| json!(n))?;
@@ -1406,9 +1435,137 @@ fn expression_default_source(value: &Value) -> String {
     }
 }
 
-fn any_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
-    reject_unsupported(name, "any", constraints, &[])?;
+fn unknown_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "unknown", constraints, &[])?;
     Ok(Value::Object(Map::new()))
+}
+
+/// Lowers `null` to `{ "type": "null" }`. A default must itself be null.
+fn null_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "null", constraints, &[])?;
+    if let Some(default) = constraints.iter().find_map(|c| match c {
+        Constraint::Default(value) if !value.is_null() => Some(value),
+        _ => None,
+    }) {
+        return Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!("`default({default})` is not valid on `null`; a `null` default must be null"),
+        });
+    }
+    Ok(json!({ "type": "null" }))
+}
+
+/// Lowers `alphanumeric` to a string matching its canonical options' regex
+/// beside every authored string constraint. The type and its canonical
+/// options are recorded as non-validating annotations so a JSON consumer can
+/// recover the type identity.
+fn alphanumeric_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    let options = constraints
+        .iter()
+        .filter_map(|c| match c {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>()
+        .canonical();
+    let rest: Vec<Constraint> = constraints
+        .iter()
+        .filter(|c| !matches!(c, Constraint::Options(_)))
+        .cloned()
+        .collect();
+    let mut fragment =
+        string_fragment_with_base(name, "alphanumeric", Some(options.pattern()), &rest)?;
+    check_alphanumeric_values(name, &fragment, &rest)?;
+    if let Value::Object(map) = &mut fragment {
+        map.insert(
+            DARKMATTER_TYPE_ANNOTATION.into(),
+            json!(SimplifiedType::Alphanumeric.as_keyword()),
+        );
+        map.insert(
+            "x-darkmatter-options".into(),
+            Value::Array(options.keywords().map(|keyword| json!(keyword)).collect()),
+        );
+    }
+    Ok(fragment)
+}
+
+/// Fails the load when an `alphanumeric` `default(…)` or `suggest(…)` value is
+/// not itself a valid value of the type, judged by the lowered fragment (the
+/// option pattern plus every authored string constraint) without coercion.
+///
+/// Unlike other types' advisory suggestions, which are only linted, an invalid
+/// `alphanumeric` suggestion is a schema error.
+fn check_alphanumeric_values(
+    name: &str,
+    fragment: &Value,
+    constraints: &[Constraint],
+) -> Result<(), SchemaError> {
+    let mut values = Vec::new();
+    for constraint in constraints {
+        match constraint {
+            Constraint::Default(value) => values.push(("default", value.clone())),
+            Constraint::Suggest(candidates) => values.extend(
+                candidates
+                    .iter()
+                    .map(|candidate| ("suggest", candidate.interpreted.clone())),
+            ),
+            _ => {}
+        }
+    }
+    if values.is_empty() {
+        return Ok(());
+    }
+    let mut target = fragment.clone();
+    if let Value::Object(map) = &mut target {
+        map.remove("default");
+        map.remove("x-darkmatter-suggest");
+    }
+    let validator = super::super::validate::build_structural_validator(&target)?;
+    match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {
+        Some((keyword, value)) => Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!("`{keyword}({value})` is not a valid `alphanumeric` value for this type"),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Lowers `shell` to `{ "type": "string", "format": "darkmatter-shell" }`.
+/// Constraint applicability mirrors `expression`. A `default(…)` must be a
+/// valid `shell` value after the text conversion supplied values receive: a
+/// boolean or number default becomes its text, and a structured or null
+/// default fails to load.
+fn shell_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "shell", constraints, &[])?;
+    for c in constraints {
+        let Constraint::Default(value) = c else {
+            continue;
+        };
+        let text = match value {
+            Value::String(text) => text.clone(),
+            Value::Bool(flag) => flag.to_string(),
+            Value::Number(number) => number.to_string(),
+            Value::Null | Value::Array(_) | Value::Object(_) => {
+                return Err(SchemaError::Convert {
+                    property: name.to_string(),
+                    message: format!(
+                        "`default({value})` is not valid on `shell`; a `shell` default must be text"
+                    ),
+                });
+            }
+        };
+        if text.chars().all(char::is_whitespace) {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "`default({value})` is not a valid `shell` value; a command needs a \
+                     non-whitespace character"
+                ),
+            });
+        }
+    }
+    Ok(json!({ "type": "string", "format": DARKMATTER_SHELL_FORMAT }))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -2228,6 +2385,8 @@ config: "{ host: string }(required)"
             ("time(required)", vec!["type", "format"]),
             ("email(required)", vec!["type", "format"]),
             ("any(required)", vec![]),
+            ("unknown(required)", vec![]),
+            ("null(required)", vec!["type"]),
             (
                 "string(pattern(^[a-z]+$))[](min(1); max(5); unique; required)",
                 vec!["type", "items", "minItems", "maxItems", "uniqueItems"],
@@ -2259,7 +2418,6 @@ config: "{ host: string }(required)"
             "datetime",
             "time",
             "email",
-            "any",
             "string(pattern(^[a-z]+$))[](min(1); max(5); unique)",
         ] {
             let v = optional_atom_value(input);
@@ -2408,24 +2566,49 @@ config: "{ host: string }(required)"
     }
 
     #[test]
-    fn optional_any_accepts_null_and_required_any_is_presence_only() {
-        // Compatibility preservation: `any` already includes every JSON value,
-        // so the optional wrapper adds null and the required wrapper is only
-        // a presence check.
-        let schema = convert("opt: any");
+    fn unknown_accepts_null_and_omission_whatever_its_presence_marker() {
+        // `required` has no effect on `unknown`/`any`: absence, null, and
+        // every native value validate, and the key never enters `required`.
+        for declaration in ["opt: any", "opt: unknown", "opt: 'any(required)'", "opt: 'unknown(required)'"] {
+            let schema = convert(declaration);
+            assert_eq!(schema["properties"]["opt"], json!({}), "{declaration}");
+            assert!(schema.get("required").is_none(), "{declaration}");
+            let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
+            assert!(v.is_valid(&json!({})), "{declaration}: absent");
+            assert!(v.is_valid(&json!({ "opt": null })), "{declaration}: null");
+            assert!(v.is_valid(&json!({ "opt": { "nested": [1, null, "x"] } })), "{declaration}");
+        }
+    }
+
+    #[test]
+    fn null_admitting_properties_lower_bare_and_never_enter_required() {
+        for (declaration, expected) in [
+            ("p: 'null'", json!({ "type": "null" })),
+            ("p: 'null(required)'", json!({ "type": "null" })),
+            ("p: 'null(eager; required)'", json!({ "type": "null" })),
+            ("p: 'unknown(generated; required)'", json!({ "x-darkmatter-generated": true })),
+        ] {
+            let schema = convert(declaration);
+            assert_eq!(schema["properties"]["p"], expected, "{declaration}");
+            assert!(schema.get("required").is_none(), "{declaration}");
+        }
+
+        // A union with a null arm is optional and gains no second null arm;
+        // constraints on its other arms still apply to non-null values.
+        let schema = convert("p:\n  - 'string(required; min(3))'\n  - 'null'");
+        assert!(schema.get("required").is_none());
+        assert_eq!(schema["properties"]["p"]["anyOf"].as_array().unwrap().len(), 2);
         let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})));
-        assert!(v.is_valid(&json!({ "opt": null })));
-        assert!(v.is_valid(&json!({ "opt": { "nested": [1, 2, 3] } })));
+        assert!(v.is_valid(&json!({ "p": null })));
+        assert!(v.is_valid(&json!({ "p": "abc" })));
+        assert!(!v.is_valid(&json!({ "p": "ab" })));
 
-        let required_schema = convert("req: 'any(required)'");
-        let v_req =
-            crate::markdown::schemas::validate::build_structural_validator(&required_schema).unwrap();
-        assert!(!v_req.is_valid(&json!({})), "required any rejects absent");
-        assert!(
-            v_req.is_valid(&json!({ "req": null })),
-            "required any accepts null (presence only)"
-        );
+        // Item and child nullability leave the container required.
+        for declaration in ["p: 'null[](required)'", "p: 'unknown[](required)'", "p: '{ c: null }(required)'"] {
+            let schema = convert(declaration);
+            assert_eq!(schema["required"], json!(["p"]), "{declaration}");
+        }
     }
 
     #[test]

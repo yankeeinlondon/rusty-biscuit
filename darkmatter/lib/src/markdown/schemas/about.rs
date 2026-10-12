@@ -124,10 +124,28 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
     },
     SchemaTypeDescriptor {
-        keyword: "any",
-        description: "Anything. Useful when you only care that a property exists.",
+        keyword: "unknown",
+        description: "Every value, including null, or omission; `required` has no effect. `any` is an equivalent alias; `unknown` is the canonical spelling.",
         accepted_constraints: "eager, required",
         json_schema_effect: "{} (empty schema)",
+    },
+    SchemaTypeDescriptor {
+        keyword: "null",
+        description: "Only an explicit null value, or omission; `required` has no effect. Written unquoted (`null`, `~`, or an empty value) or as the string `\"null\"` at a property, union-arm, or named-type position.",
+        accepted_constraints: "eager, default(null), required, generated",
+        json_schema_effect: "{ \"type\": \"null\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "alphanumeric",
+        description: "A string of ASCII letters and digits. Options written before the first `;` widen or narrow the character set and are part of the type's identity; redundant options are dropped from its canonical form.",
+        accepted_constraints: "<options>; min, max, not-empty, pattern(re), suggest, eager, default, required, generated",
+        json_schema_effect: "{ \"type\": \"string\", \"pattern\": <regex of the canonical options>, \"x-darkmatter-type\": \"alphanumeric\", \"x-darkmatter-options\": [ ... ] }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "shell",
+        description: "A string holding a shell command: at least one non-whitespace character. Passive: never parsed as shell syntax, approved, or executed.",
+        accepted_constraints: "eager, default, required, generated",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-shell\" }",
     },
 ];
 
@@ -246,6 +264,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1",
         description: "The single scalar value the property must equal. Typed like YAML: bare `true`/`false` → boolean, bare numberlike → number, quoted or any other bare token → string. Exactly one value; use `enum(...)` for a set.",
         json_schema_effect: "const set to the typed value",
+    },
+    SchemaConstraintDescriptor {
+        name: "<options>",
+        keyword: "<options>",
+        form: "alphanumeric(opt, ...)",
+        target_types: "alphanumeric",
+        argument_arity: "0+",
+        description: "The `alphanumeric` type options, written before the first `;`: allow-dashes, allow-underscores, allow-slashes, allow-periods, allow-whitespace, block-double-periods, block-leading-dash, block-leading-slash, leading-alpha. Options are part of the type's identity; a list without `;` and without an option keyword is constraints only.",
+        json_schema_effect: "selects the base `pattern` and the `x-darkmatter-options` annotation",
     },
     // ── file ───────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -556,6 +583,7 @@ pub fn trigger_grammar_descriptors() -> &'static [TriggerGrammarDescriptor] {
 pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = &[
     MatchSafeConstraintDescriptor { keyword: "required", description: "Requires the property to be present." },
     MatchSafeConstraintDescriptor { keyword: "<members>", description: "Restricts `enum` to literal members." },
+    MatchSafeConstraintDescriptor { keyword: "<options>", description: "Selects the `alphanumeric` character set." },
     MatchSafeConstraintDescriptor { keyword: "pattern", description: "Matches a string against a regular expression." },
     MatchSafeConstraintDescriptor { keyword: "min", description: "Checks a minimum value, length, or item count." },
     MatchSafeConstraintDescriptor { keyword: "max", description: "Checks a maximum value, length, or item count." },
@@ -764,7 +792,10 @@ mod tests {
             SimplifiedType::Expression,
             SimplifiedType::TypeDefinition,
             SimplifiedType::Schema,
-            SimplifiedType::Any,
+            SimplifiedType::Unknown,
+            SimplifiedType::Null,
+            SimplifiedType::Alphanumeric,
+            SimplifiedType::Shell,
         ] {
             implemented.insert(ty.as_keyword());
         }
@@ -821,6 +852,7 @@ mod tests {
             Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
             Constraint::LiteralValue(serde_json::Value::Null),
+            Constraint::Options(Vec::new()),
             Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),
@@ -984,6 +1016,7 @@ mod tests {
             Constraint::Pattern(String::new()),
             Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
+            Constraint::Options(Vec::new()),
             Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),

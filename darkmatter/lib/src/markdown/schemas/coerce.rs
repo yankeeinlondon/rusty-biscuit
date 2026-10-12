@@ -23,9 +23,10 @@ use jsonschema::Validator;
 use serde_json::{Map, Value};
 
 use super::format::{
-    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_DEFINITION_KEYWORD,
-    DARKMATTER_YAML_FORMAT,
+    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_ANNOTATION,
+    DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
+use super::simplified::SimplifiedType;
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, ValidatorCache, error_top_level_key};
 
@@ -197,6 +198,15 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
         // native value to that format's string form; every other string type
         // (including `file`, `email`, `url` formats) keeps the plain
         // scalar→string coercion.
+        // An `alphanumeric` value must already be a YAML string: a native
+        // number or boolean is a type mismatch, never converted text. The
+        // lowering's type annotation names the type.
+        "string"
+            if obj.get(DARKMATTER_TYPE_ANNOTATION).and_then(Value::as_str)
+                == Some(SimplifiedType::Alphanumeric.as_keyword()) =>
+        {
+            None
+        }
         "string" => match obj.get("format").and_then(Value::as_str) {
             Some(DARKMATTER_YAML_FORMAT) => Some(CoercionTarget::ToYamlString),
             Some(DARKMATTER_JSON_FORMAT) => Some(CoercionTarget::ToJsonString),
@@ -210,7 +220,8 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
             Some(CoercionTarget::Array(Box::new(inner)))
         }
         "object" => inline_object_target(obj),
-        // "any" and anything else fall outside the matrix.
+        // `unknown` (`{}`, no `type`) and anything else fall outside the
+        // matrix, so their native values are preserved.
         _ => None,
     }
 }

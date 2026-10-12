@@ -244,6 +244,11 @@ fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
     if !value_matches_type(&atom.ty, value) {
         return false;
     }
+    if let Some(options) = atom.alphanumeric_options()
+        && !value.as_str().is_some_and(|text| options.accepts(text))
+    {
+        return false;
+    }
     for constraint in &atom.constraints {
         if !constraint_holds(constraint, value) {
             return false;
@@ -272,18 +277,16 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                         let v = map.get(name);
                         match v {
                             None => {
-                                // Guard/pass if none required; a union with a required
-                                // atom needs the key present.
-                                let any_required = arms.iter().any(is_required);
-                                if any_required {
+                                // Guard/pass unless the union is effectively
+                                // required (a marked arm and no null-admitting arm).
+                                if def.is_required() {
                                     return false;
                                 }
                                 continue;
                             }
                             Some(val) => {
                                 if val.is_null() {
-                                    let any_required = arms.iter().any(is_required);
-                                    if any_required {
+                                    if def.is_required() {
                                         return false;
                                     }
                                     continue;
@@ -375,7 +378,14 @@ fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
         SimplifiedType::Schema => serde_yaml_ng::to_value(value)
             .ok()
             .is_some_and(|yaml| parse_schema_declaration(&yaml).is_ok()),
-        SimplifiedType::Any => true,
+        SimplifiedType::Unknown => true,
+        SimplifiedType::Null => value.is_null(),
+        // The character set lives in the atom's options; `scalar_conforms`
+        // checks it.
+        SimplifiedType::Alphanumeric => value.is_string(),
+        SimplifiedType::Shell => value
+            .as_str()
+            .is_some_and(|text| text.chars().any(|ch| !ch.is_whitespace())),
     }
 }
 
@@ -483,11 +493,11 @@ fn array_constraints_hold(atom: &PropertyAtom, items: &[Value]) -> bool {
     true
 }
 
-/// A union type's arms count, because an arm's `required` hoists to the
-/// property that holds the union.
+/// The shared effective presence ([`PropertyAtom::is_required`]): a marker
+/// after `[]` counts, a union type's arms count, and a whole value that admits
+/// null (`null`, `unknown`, or a union with such an arm) is never required.
 fn is_required(atom: &PropertyAtom) -> bool {
-    atom.constraints.iter().any(|c| matches!(c, Constraint::Required))
-        || atom.union_arms().is_some_and(|arms| arms.iter().any(is_required))
+    atom.is_required()
 }
 
 fn regex_match(pattern: &str, input: &str) -> bool {
@@ -865,4 +875,37 @@ mod tests {
         assert!(matches(&expr, &frontmatter(&[("when", json!("is_agent()"))]), &PathSubject::detached()));
         assert!(!matches(&expr, &frontmatter(&[("when", json!(3))]), &PathSubject::detached()));
     }
+
+    #[test]
+    fn presence_follows_the_shared_effective_calculation() {
+        let detached = PathSubject::detached();
+        // `unknown(required)` and `null(required)` are satisfied by absence.
+        for ty in [SimplifiedType::Unknown, SimplifiedType::Null] {
+            let expr = prop("p", ty, vec![Constraint::Required]);
+            assert!(matches(&expr, &frontmatter(&[]), &detached), "{ty:?} absent");
+            assert!(matches(&expr, &frontmatter(&[("p", Value::Null)]), &detached), "{ty:?} null");
+        }
+        // A `required` written after `[]` is a gate; a present non-list fails.
+        let steps = MatchExpr::Property {
+            name: "steps".into(),
+            atom: PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::Unknown),
+                is_array: true,
+                constraints: vec![],
+                array_constraints: vec![Constraint::Required],
+                description: None,
+            },
+        };
+        assert!(matches(&steps, &frontmatter(&[("steps", json!([]))]), &detached));
+        assert!(matches(&steps, &frontmatter(&[("steps", json!([1, "a", null]))]), &detached));
+        for value in [Value::Null, json!("oops"), json!({ "a": 1 }), json!(5)] {
+            assert!(!matches(&steps, &frontmatter(&[("steps", value.clone())]), &detached), "{value}");
+        }
+        assert!(!matches(&steps, &frontmatter(&[]), &detached), "absent");
+        assert_eq!(
+            first_defeat(&steps, &frontmatter(&[]), &detached).as_deref(),
+            Some("`steps` is required but absent")
+        );
+    }
 }
+

@@ -9,6 +9,7 @@
 //! This file glues them together with a YAML-shape layer that walks a
 //! `serde_yaml_ng::Value` and produces a [`SimplifiedSchema`].
 
+mod alphanumeric;
 pub mod convert;
 mod cursor;
 pub mod grammar;
@@ -17,9 +18,12 @@ pub mod query;
 mod serialize;
 mod source;
 mod standalone;
+mod subtype;
 pub mod types;
 pub mod yaml_scalar;
 
+pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
+pub use subtype::is_subtype;
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use cursor::{
     SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
@@ -314,6 +318,10 @@ fn parse_property_definition_at_depth(
 ) -> Result<PropertyDef, SchemaError> {
     match value {
         YamlValue::String(s) => Ok(PropertyDef::Single(grammar::parse_type_expr(name, s)?)),
+        // The YAML null scalar (`null`, `Null`, `NULL`, `~`, or an empty
+        // value) at a type position is the `null` type, as is the string
+        // `"null"`. A root `$schema` or root-union arm never reaches here.
+        YamlValue::Null => Ok(PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Null))),
         // A YAML mapping at a property position lowers to an inline object
         // shape: each entry's value is recursively parsed through the same
         // property-definition entry point, so nested mappings, sequence unions, and
@@ -334,6 +342,7 @@ fn parse_property_definition_at_depth(
                     YamlValue::String(s) => {
                         arms.push(grammar::parse_type_expr(name, s)?);
                     }
+                    YamlValue::Null => arms.push(PropertyAtom::bare(SimplifiedType::Null)),
                     // A mapping arm lowers to an inline object shape, so a
                     // sequence union may mix type-expression strings with
                     // nested mapping object shapes (spec rule 4).
@@ -349,7 +358,7 @@ fn parse_property_definition_at_depth(
                         return Err(SchemaError::Grammar {
                             property: name.to_string(),
                             message: format!(
-                                "property-level union arm[{idx}] must be a string type expression or a nested mapping object, got {}",
+                                "property-level union arm[{idx}] must be a string type expression, a nested mapping object, or null, got {}",
                                 describe_yaml(other)
                             ),
                             span: 0..0,
@@ -385,7 +394,7 @@ fn parse_property_definition_at_depth(
         other => Err(SchemaError::Grammar {
             property: name.to_string(),
             message: format!(
-                "property value must be a string type expression, a nested mapping object, or a sequence of expressions, got {}",
+                "property value must be a string type expression, a nested mapping object, null, or a sequence of expressions, got {}",
                 describe_yaml(other)
             ),
             span: 0..0,
