@@ -238,7 +238,7 @@ fn scanner_output_reads_identified_as_read_does() {
 #[test]
 fn god_files_paths_are_relative_to_any_spelling_of_the_root() {
     let dir = TempDir::new().expect("temp dir");
-    let body: String = (0..1000).map(|line| format!("value_{line} = {line}\n")).collect();
+    let body = "print(1)\n".repeat(tree_hugger::god_files::constants::MODERATE_MIN_SLOC);
     std::fs::write(dir.path().join("big.py"), body).expect("write");
     std::fs::create_dir(dir.path().join("sub")).expect("sub");
 
