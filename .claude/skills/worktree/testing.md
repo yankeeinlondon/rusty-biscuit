@@ -26,6 +26,12 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
   `EnvGuard`-scoped test, and the config never touches the real user's file.
   Library tests reach the resolver through `config::resolve_with(wt,
   config_path, probe)`, so only precedence tests mutate the environment.
+- **A `wt create` child must `env_remove("WT")`** unless the test sets it. The
+  developer's shell usually exports a real `WT`, which outranks the fixture's
+  `~/.worktree.json`, so a hand-run or forgotten child creates a real worktree
+  under it. `cli/tests/base_dir_fixture` does this and closes stdin; with a
+  closed stdin `wt create` never runs setup, so the setup loop is tested
+  in-process through `choose_base_dir` and a scripted `SetupPrompt`.
 - Inside tmux `wt` cannot query the background: pass `COLORFGBG` (`15;0` dark,
   `0;15` light), or the row highlight follows the host's appearance.
 
