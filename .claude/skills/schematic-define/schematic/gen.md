@@ -210,6 +210,10 @@ impl Default for MyApi {
 and writes only outputs with no error; one output's failure never blocks the
 others, and any failure exits 1. Diagnostics print to stderr as
 `severity=… api=… endpoint=… feature=… output=…: message`; warnings never fail.
+Grouped OpenAPI documents are built in memory for every module before any is
+written (`export::openapi::build_openapi_grouped`); a later group member's
+clashing `operationId` gets its API-name prefix, and the final
+`operation_id_diagnostics` scan rejects any duplicate that remains.
 Full rules: `schematic/docs/generation/validation.md`.
 
 ```bash
@@ -247,10 +251,28 @@ for diagnostic in validate_rust_client(&[&api]) {
 }
 generate_and_write(&api, Path::new("schema/src"), false)?;
 
-// Multiple APIs
+// Full generation: `apis` is the whole crate; obsolete generated modules go
 let apis = vec![&api1, &api2, &api3];
 generate_and_write_all(&apis, output_dir, dry_run)?;
+
+// Partial generation: regenerate the selected APIs' complete module groups,
+// keep every other module of the existing output byte-for-byte
+use schematic_gen::output::{RustOutputRequest, Selection, prepare_rust_output};
+let prepared = prepare_rust_output(&RustOutputRequest {
+    registry: &all_apis,                 // every API, registry order
+    selection: Selection::Apis(&[&api]), // or Selection::All
+    output_dir,
+    manifest_dir: Some(schema_dir),      // writes Cargo.toml too
+})?;                                     // nothing written yet
+prepared.plan.publish()?;                // reports completed/pending on I/O failure
 ```
+
+Preparation checks ownership of every path it would write or delete (the
+generated `.rs` header, the `Cargo.toml` marker line, export artifact names;
+symlinks never followed) and, for a partial run, the existing inventory
+(`lib.rs`/`prelude.rs` parse and match current definitions; `shared.rs` and
+`ws_shared.rs` unchanged while modules are retained). See
+`schematic/docs/generation/partial-generation.md`.
 
 ## Error Types
 
@@ -263,6 +285,12 @@ pub enum GeneratorError {
     ConfigError(String),
     // An output's validator reported errors; nothing of it was written.
     Validation { output: Output, diagnostics: Vec<ValidationDiagnostic> },
+    // An existing output cannot be updated safely; nothing was changed.
+    UnsafeOutput { root: String, problems: Vec<String>, remedy: String },
+    // A partial run would change shared runtime under retained modules.
+    RequiresFullGeneration { root: String, changed: Vec<String>, retained: Vec<String> },
+    // A write or deletion failed after publication started.
+    PublicationFailed { root: String, failed: String, completed: Vec<String>, pending: Vec<String>, source: Box<GeneratorError> },
     // A generate run where at least one requested output failed.
     OutputsFailed { succeeded: Vec<Output>, failed: Vec<Output> },
 }

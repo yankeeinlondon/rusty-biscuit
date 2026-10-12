@@ -68,7 +68,7 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
           request_suffix: Some("OaiRequest".to_string()), ... }
 ```
 
-The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`). The generator automatically combines shared-module APIs into a single output file and cleans up stale files.
+The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`). The generator automatically combines shared-module APIs into a single output file; generating one member (`generate --api ollama-native`) regenerates the whole shared module and keeps every other module. Full generation (`--api all`) deletes obsolete generator-owned modules.
 
 OpenAPI and Postman artifacts use the same resolved module name as generated
 Rust files. Shared-module APIs emit one grouped artifact, e.g.

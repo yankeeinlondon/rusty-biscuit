@@ -19,17 +19,20 @@ You can:
 
 ```mermaid
 flowchart TD
-    A[Select APIs: one, or all] --> R[Validate batch for Rust]
+    A[Select APIs: one module group, or all] --> R[Validate batch for Rust]
     A --> O[Validate batch for OpenAPI]
     A --> P[Validate batch for Postman]
     R --> RE{Any error?}
     O --> OE{Any error?}
     P --> PE{Any error?}
-    RE -->|No| RW[Write Rust crate and Cargo.toml]
+    RE -->|No| RW[Prepare and publish the Rust crate and Cargo.toml]
     RE -->|Yes| RS[Write nothing for Rust]
-    OE -->|No| OW[Write OpenAPI documents]
+    OE -->|No| OB[Build every module document in memory: merge members, make operationIds unique, scan]
     OE -->|Yes| OS[Write nothing for OpenAPI]
-    PE -->|No| PW[Write Postman collections]
+    OB --> OBE{Any module failed?}
+    OBE -->|No| OW[Publish OpenAPI documents]
+    OBE -->|Yes| OS
+    PE -->|No| PW[Publish Postman collections]
     PE -->|Yes| PS[Write nothing for Postman]
     RW --> S[Print one OK or FAILED line per output]
     RS --> S
@@ -42,10 +45,14 @@ flowchart TD
     X -->|No| Z[Exit 0]
 ```
 
-The outputs run in the order Rust, OpenAPI, Postman. A write failure in one
-output (for example, the OpenAPI directory path is a file) is reported the
-same way as a validation failure: that output fails, and the next output is
-still attempted.
+The outputs run in the order Rust, OpenAPI, Postman. Selecting one API
+selects its whole module group, separately for each output. After validation,
+each output is prepared in memory and its paths are checked before anything
+is written; a refused or failed publication (for example, the OpenAPI
+directory path is a file) is reported the same way as a validation failure:
+that output fails, and the next output is still attempted. How preparation,
+ownership checks, and partial runs work is described in
+[partial-generation.md](partial-generation.md).
 
 ```text
 $ schematic-gen generate --api gitea --openapi-out ./not-a-dir ...
@@ -120,6 +127,9 @@ The same fields are available to code as
 | `invalid-type-syntax`: a body, response, or form JSON type is not a Rust type | ✓ | | | error |
 | `generated-name-collision`: two generated items, fields, or client methods share a name | ✓ | | | error |
 | `incomplete-schema-registry`: a JSON type has no schema in the module's registry | | ✓ | | error |
+| `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
+| `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
+| `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
 | `text-request-body`, `binary-request-body`: the client cannot send this body yet | ✓ | | | error |
 | `api-key-param`: an API key sent as a query parameter or cookie | ✓ | | | error |
 | `header-parameter`, `cookie-parameter`: a declared parameter the output does not send | ✓ | | ✓ | error if `required`, warning otherwise |
@@ -154,6 +164,46 @@ Across the APIs of one module group (for example `OllamaNative` and
 allowed: their request suffixes keep the generated Rust names apart. Only an
 actual collision of generated names is an error.
 
+### OpenAPI documents of a module group
+
+The APIs of one module group become one OpenAPI document (`ollama.json`
+holds `OllamaNative` and `OllamaOpenAI`). Some problems only exist in that
+merged document, so `schematic-gen` builds **every** module's document in
+memory before it writes **any** of them; a failure in one module leaves the
+whole OpenAPI directory untouched.
+
+- **Same route, same operation:** when two members declare an operation that
+  is identical apart from its authentication (EMQX Basic and EMQX Bearer),
+  the document keeps one operation and both security alternatives.
+- **Same route, different operations:** an OpenAPI path holds one operation
+  per method, so this is a `duplicate-method-path` error for the OpenAPI
+  output only. The Rust client and Postman collection are still written.
+- **Same `operationId`, different routes:** every `operationId` in a document
+  must be unique, so a clash is renamed rather than rejected.
+
+The rename rule walks the operations in a fixed order: member APIs in
+registry order, each API's paths in declaration order, and methods in the
+order GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE. The first
+operation to declare an id keeps it. A later operation with a taken id gets
+its own API's name prefixed (PascalCase). If that name is taken too, or is
+any operation's original id, a number from 2 upward is appended:
+
+```text
+OllamaNative  POST /api/embeddings  Embeddings  ->  Embeddings
+OllamaOpenAI  POST /v1/embeddings   Embeddings  ->  OllamaOpenAIEmbeddings
+```
+
+Original ids are reserved before any rename, so a rename never takes an id
+that a later operation already declares: if `FooC` declares `FooBList`, the
+renamed `List` of `FooB` becomes `FooBList2`. An OpenAPI link that names an
+`operationId` is updated together with the operation it pointed to in its own
+API's document; the same id in another API's link is left alone. Per-API
+documents are not renamed. Both kinds of document then pass one final scan,
+`export::openapi::operation_id_diagnostics`, which reports any id still
+declared twice (`duplicate-operation-id`) and any link naming no operation
+(`unresolved-link-operation`). The Rust client and Postman collections keep
+the original endpoint ids.
+
 ### Repeated path segments
 
 A repeated segment such as `/api/api/items` is never an error by itself: a
@@ -183,15 +233,18 @@ for diagnostic in validate_rust_client(&batch) {
 ```
 
 `validate_openapi_registry(module, apis, registry)` adds the schema-registry
-check for one module. `pipeline::generate_batch` runs every validator, writes
-the outputs that pass, and returns a `GenerationReport` naming the succeeded
-and failed outputs.
+check for one module. `pipeline::generate_batch` runs every validator,
+publishes the outputs that pass, and returns a `GenerationReport` naming the
+succeeded and failed outputs.
 
 The public writers keep the same boundary when called directly:
-`output::generate_and_write_all`, `export::openapi::write_openapi[_grouped]`,
+`output::prepare_rust_output`, `output::generate_and_write_all`,
+`export::openapi::write_openapi[_grouped]`,
 and `export::postman::write_postman[_grouped]` return
 `GeneratorError::Validation` and write nothing when their output's validator
-reports an error.
+reports an error. `export::openapi::build_openapi_grouped` returns a module's
+finished document without writing it, after the group checks above;
+`write_openapi_document` writes a built document.
 
 WebSocket validation is expected to report through the same
 `ValidationDiagnostic`, `Severity`, `Feature`, and `Output` types rather than

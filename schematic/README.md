@@ -288,7 +288,7 @@ When the output path is `schema/src`, OpenAPI and Postman artifacts are generate
 # Generate all three artifact types (default behavior)
 just -f schematic/justfile generate
 
-# Generate a single API with all artifacts
+# Regenerate one API's module group in all artifacts; every other module is kept
 just -f schematic/justfile generate-one openai
 
 # Only OpenAPI specs

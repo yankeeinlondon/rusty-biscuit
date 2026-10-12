@@ -140,7 +140,9 @@ prevents silently incorrect OpenAPI output.
 
 - `Endpoint.path` maps to OpenAPI `paths` entries
 - `Endpoint.method` maps to the corresponding operation
-- `operationId`: `Endpoint.id`
+- `operationId`: `Endpoint.id` (in a module-group document, a later member
+  whose id is already taken is renamed; see [Generation
+  Validation](../generation/validation.md#openapi-documents-of-a-module-group))
 - `description`: `Endpoint.description`
 
 ### Path Parameters
@@ -347,11 +349,21 @@ module fails generation so incomplete OpenAPI artifacts are not written. Use
 
 APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that merge:
 
-- **Paths** — Union of all endpoints from all APIs
-- **Security schemes** — Union keyed by scheme name
-- **Per-operation security** — From the originating API's auth strategy
-- **Servers** — Deduplicated union of base URLs
-- **Info** — Module name as title, concatenated descriptions
+- **Paths** — Union of all endpoints from all APIs. An operation that two
+  members declare identically apart from authentication appears once; two
+  different operations on one method and path fail the OpenAPI output.
+- **operationId** — Unique across the document. The first member in registry
+  order keeps an id; a later clash is prefixed with its API name
+  (`OllamaOpenAIListModels`), with a numeric suffix if that is taken too.
+- **Security schemes** — Union keyed by scheme name; a same-named scheme with
+  different content is renamed `<scheme>_<api_snake>` for the later API
+- **Security** — Union of every member's document-level requirements
+- **Servers, external docs, info** — From the first member, with the module
+  name as `info.title`
+- **`x-schematic-grouped-from`** — Every contributing API name
+
+The full rule, including link updates and the final duplicate scan, is in
+[Generation Validation](../generation/validation.md#openapi-documents-of-a-module-group).
 
 ## Schema Registries
 

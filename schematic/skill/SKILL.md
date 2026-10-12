@@ -63,8 +63,13 @@ We use the `just` runner to provide the most common operations you'll need when 
 - `just test-fresh-output` - the part of `just test` that generates client crates outside the checkout and compiles them offline (all 18 APIs plus fixture APIs); CI runs it on the build job
 - `just lint {args}` - will use the clippy linter to look for non-idiomatic code
 - `just gen` - will generate the API definitions in `schematic-definitions` into API clients in `schematic-schema`
-    - generation validates the whole batch separately for the Rust client, OpenAPI, and Postman (`schematic_gen::validation`); an output with an `error` diagnostic is not written, the other outputs still are, and the run exits 1. Warnings (`query-in-path`, `duplicate-method-path`, optional header parameters) never fail. Rules: `schematic/docs/generation/validation.md`
+    - generation validates the whole batch separately for the Rust client, OpenAPI, and Postman (`schematic_gen::validation`); an output with an `error` diagnostic is not written, the other outputs still are, and the run exits 1. Warnings (`query-in-path`, same-API `duplicate-method-path`, optional header parameters) never fail. Rules: `schematic/docs/generation/validation.md`
+    - a module group (`ollama`, `emqx`) is one OpenAPI document, built for every module before any is written: two members' different operations on one method+path fail OpenAPI only; a shared `operationId` on different routes is renamed for the later member in registry order (`ListModels` → `OllamaOpenAIListModels`), so never hand-edit ids in `openapi/*.json`
     - `cargo run -p schematic-gen -- validate --api <name>` prints every diagnostic without writing
+- `just generate-one <api>` - regenerates that API's whole module group (e.g. `ollama-native` also regenerates `OllamaOpenAI`) in all three outputs and keeps every other module byte-for-byte; `lib.rs`/`prelude.rs` are rebuilt from the kept + regenerated groups
+    - every output is prepared in memory (`output::prepare_rust_output` → `MutationPlan::publish`) and never overwrites or deletes a file without the generated header (`Cargo.toml`: the manifest marker line); symlinks are never followed
+    - a partial run refuses (nothing changed) an output it cannot account for — missing/corrupt/hand-written `lib.rs` or `prelude.rs`, missing or unknown modules, prelude exports that no longer match the definitions — and a changed `shared.rs`/`ws_shared.rs` while other modules are kept requires `--api all`
+    - a mid-write I/O failure reports completed and pending mutations; rules and examples: `schematic/docs/generation/partial-generation.md`
 
 All packages in **Schematic** are written in Rust and use the 2024 edition.
 

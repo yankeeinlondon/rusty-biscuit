@@ -32,8 +32,11 @@ cargo build -p schematic-gen --release
 The CLI provides three subcommands: `generate`, `validate`, and `import`.
 
 ```bash
-# Generate code for the OpenAI API
+# Regenerate the OpenAI API's module group; every other module is kept
 schematic-gen generate --api openai --output schematic/schema/src
+
+# Regenerate every API (full generation)
+schematic-gen generate --api all --output schematic/schema/src
 
 # Generate with OpenAPI spec export
 schematic-gen generate --api openai --output schematic/schema/src --openapi-out specs/
@@ -82,6 +85,23 @@ schematic-gen --api openai --output schematic/schema/src
 | `-v, --verbose` | Increase verbosity level |
 
 When the output path ends with `schema/src`, OpenAPI and Postman output directories default to `openapi/` and `postman/` (sibling to `schema/`). Use `--no-openapi` or `--no-postman` to suppress.
+
+### Partial Generation
+
+`--api <name>` regenerates that API's whole module group (selecting
+`ollama-native` also regenerates `OllamaOpenAI`, which shares the `ollama`
+module) and keeps every other module, OpenAPI document, and Postman
+collection byte-for-byte. `lib.rs` and `prelude.rs` are rebuilt from the kept
+and regenerated groups. `--api all` regenerates everything and deletes
+generated modules no API produces.
+
+Before writing, each output checks the paths it would change: it never
+overwrites or deletes a file the generator did not write, and a partial run
+refuses an existing crate it cannot account for (a corrupt or hand-edited
+`lib.rs`, a missing or unknown module, exports that no longer match the
+definitions, or a changed `shared.rs`) without changing anything. If a write
+fails midway, the error lists completed and pending writes and deletions.
+See [`docs/generation/partial-generation.md`](../docs/generation/partial-generation.md).
 
 ### Import Options
 
@@ -223,10 +243,10 @@ The generator follows a multi-phase pipeline:
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Phase 5: Output                               │
-│  - Atomic file writes (temp + rename)                            │
-│  - Create parent directories                                     │
+│  - Check every planned path's ownership before the first write   │
+│  - Atomic per-file writes; lib.rs last                           │
 │  - Generate Cargo.toml for schema package                        │
-│  - Clean up stale .rs files                                     │
+│  - Delete obsolete generator-owned paths                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -254,8 +274,9 @@ schema/src/
 
 APIs sharing a `module_path` are automatically combined into a single output file.
 Each API in the combined file gets its own client struct, request enum, and request
-suffix to avoid naming collisions. Stale `.rs` files from previous generations are
-automatically cleaned up.
+suffix to avoid naming collisions. Full generation deletes generated modules
+that no API produces any more; files without the generated header are never
+deleted or overwritten.
 
 ## Generator Conventions & Assumptions
 
@@ -833,8 +854,11 @@ Assembly, validation, and file writing:
 | `assemble_lib_rs(&apis)` | Generates lib.rs with module declarations |
 | `assemble_shared_module()` | Generates shared.rs with common types |
 | `assemble_prelude(&apis)` | Generates prelude.rs with convenient re-exports |
-| `generate_and_write(&api, &dir, dry_run)` | Full pipeline: generate, validate, format, write (single API) |
-| `generate_and_write_all(&apis, &dir, dry_run)` | Full pipeline for multiple APIs |
+| `generate_and_write(&api, &dir, dry_run)` | Full generation of one API (the API is the whole crate) |
+| `generate_and_write_all(&apis, &dir, dry_run)` | Full generation: `apis` is the whole crate; obsolete generated modules are deleted |
+| `prepare_rust_output(&RustOutputRequest)` | Validates, assembles, and checks a full (`Selection::All`) or partial (`Selection::Apis`) run; returns a `RustOutputPlan` without writing |
+| `expand_selection(&registry, selection)` | The registry APIs a selection regenerates (complete module groups) |
+| `MutationPlan::publish()` | Applies a prepared plan; on I/O failure reports completed and pending mutations |
 | `generate_and_write_standalone(&api, &dir, dry_run, has_types)` | Generates standalone code for imported OpenAPI specs |
 | `validate_code(&tokens)` | Validates generated code with `syn` |
 | `format_code(&file)` | Formats code with `prettyplease` |
@@ -1082,6 +1106,9 @@ produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
 |----------|-------------|
 | `write_openapi(&api, &registry, &options, &dir)` | Export a single API definition to an OpenAPI spec file named from its resolved module |
 | `write_openapi_grouped(&apis, &module_name, &registry, &options, &dir)` | Export all APIs in a shared module to one module-named OpenAPI spec file |
+| `build_openapi_grouped(&apis, &module_name, &registry, &options)` | Build a module's merged OpenAPI document (unique `operationId`s) without writing it |
+| `write_openapi_document(&doc, &file_stem, format, &dir)` | Write a built OpenAPI document |
+| `operation_id_diagnostics(&doc, &apis)` | Report duplicate `operationId`s and links to undeclared operations in a document |
 
 ### Module Reference: `postman_output`
 
