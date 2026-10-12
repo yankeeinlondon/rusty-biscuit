@@ -1,7 +1,8 @@
-# CLI Contracts: Shell Wrapper, Exit Codes, Name Resolution
+# CLI Contracts: Shell Wrapper, Exit Codes, Base Directory, Name Resolution
 
 Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
-`cli/src/exit.rs`, or how `wt` resolves a worktree name.
+`cli/src/exit.rs`, `lib/src/config.rs`, base-directory error rendering, or how
+`wt` resolves a worktree name.
 
 ## Shell wrapper protocol
 
@@ -55,6 +56,48 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
   message names the processes) are escaped with `Prose::escape_text`.
 - `env::is_interactive()` means stdin **and** stderr are terminals and `CI` is
   unset or empty. Stdout is never consulted.
+
+## Base directory
+
+User rules are in `worktree/docs/base-directory.md`; these are the code
+contracts behind them.
+
+- **Precedence:** `WT` (read with `var_os`), then `~/.worktree.json`. Unset and
+  exactly empty `WT` both mean "no override"; any other `WT` (whitespace,
+  relative, foreign, non-Unicode, missing) is a hard error and **never falls
+  back** to a valid config.
+- **Validation order:** `config::validate_base_dir(raw, origin)` (pure, no
+  filesystem) → metadata probe (follows symlinks: missing → `NotFound`, file →
+  `NotDirectory`, other I/O → `BaseDirectoryUnreadable` keeping the cause) →
+  `.git` directly inside (file or folder; root-only, deeper paths allowed).
+  Spelling is checked first so a foreign value can never touch the disk.
+- **Acceptance is the host's `Path::is_absolute()`.** The foreign-syntax helper
+  only labels a rejection. **WSL is POSIX:** `b:\wt` is a relative file name
+  there, and `//server/share/wt` is absolute on POSIX. Never trim, unquote,
+  expand `~`/`$VAR`, or join to the cwd; only typed prompt text is trimmed.
+- **Origin:** every error carries `BaseDirSource` (`Env`, `ConfigFile(path)`,
+  `Prompt`) under the field name `origin`, never `source` (thiserror reserves
+  it). Remedy text is per origin and uses `config::example_base_dir()`.
+- **Config parsing:** read bytes, then decode (invalid UTF-8 →
+  `ConfigInvalidFormat`; real I/O keeps its cause). The derived deserializer
+  rejects a **duplicate `base_dir`** (`ConfigInvalidFormat`, not last-wins).
+- **Writer:** `save_config` checks `to_str` and syntax before opening the file
+  and creates no directories; a bad value leaves the old config byte-for-byte.
+- **Setup** runs only for `BaseDirectoryNotConfigured` **and**
+  `env::is_interactive()`. `choose_base_dir` validates suggested and typed
+  choices before any `create_dir_all`/`save_config`; value errors re-ask
+  (`can_choose_again`), I/O errors stop (exit 1), cancel exits 0.
+- **Rendering:** `create::run` returns every other resolution error; `main`
+  renders it once with `commands::base_dir_error_markup` (exit 1 via
+  `exit.rs`'s `_ => FAILURE`, stderr, no `cd:` line). Do not render in the
+  command and also return the error.
+- **WSL hint:** `config::wsl_drive_hint(value, runtime)` is pure;
+  `detect_runtime_environment()` is called only in the `ForeignPath` arm, so a
+  valid resolution pays no discovery cost.
+- **Home isolation:** only `config_path()` and `considered_dirs()` use
+  biscuit-file's `home_dir()` (`HOME`, `USERPROFILE` on Windows). The user
+  cache, stores, and `~/.wt.json` (`api_preference`) still use `dirs`; see
+  [testing.md](testing.md) for fixture consequences.
 
 ## Name resolution
 

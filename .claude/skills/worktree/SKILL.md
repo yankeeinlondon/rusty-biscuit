@@ -13,6 +13,7 @@ The `worktree` package area has two crates:
 | `worktree-cli` | `worktree/cli/` | The `wt` binary, plus rendering, the shell wrapper, and the refresh worker |
 
 User-facing behavior is documented in `worktree/README.md`,
+`worktree/docs/base-directory.md`,
 `worktree/docs/cli/list.md`, `worktree/docs/cli/remove.md`,
 `worktree/docs/git-graph.md`, and
 `worktree/docs/performance-testing.md`. The pages below hold implementation
@@ -22,7 +23,7 @@ facts and traps, not user docs.
 
 | You are touching | Load |
 | ---------------- | ---- |
-| Shell wrapper (`--completions`, `WT_SHELL_WRAPPER`, `cd:` protocol), exit codes, interactivity, worktree name resolution | [cli-contracts.md](cli-contracts.md) |
+| Shell wrapper (`--completions`, `WT_SHELL_WRAPPER`, `cd:` protocol), exit codes, interactivity, the base directory (`WT`, `~/.worktree.json`, setup), worktree name resolution | [cli-contracts.md](cli-contracts.md) |
 | `wt create`, fork-origin records, `.worktreeinclude`, include copying and copy records | [create-and-include.md](create-and-include.md) |
 | `wt remove`: inventory fingerprint, safety tiers, handoff, `--force-remote` endpoint checks | [remove.md](remove.md) |
 | `wt list` local pipeline, comparison cache, caption, table, columns, `--ff`, `--ignore-api` | [list.md](list.md) |
