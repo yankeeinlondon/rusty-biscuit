@@ -27,16 +27,30 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 added one variant beyond the plan's list:
-  `WorktreeError::BaseDirectoryUnreadable { value, origin, #[source] cause: std::io::Error }`
-  for metadata failures other than NotFound; use it in the Phase 2 resolver
-  (and the setup loop's genuine I/O failures) instead of inventing another.
-  `BaseDirectoryIsGitRepo` is now `{ value: String, origin: BaseDirSource }`
-  (was a tuple); `ConfigBaseDirIsGitRepo { config_path, dir }` is unchanged in
-  shape. Error messages are origin-aware via private helpers in
-  `lib/src/error.rs` (`remedy`, `home_hint`, host/foreign style) and are pinned by
-  `error::tests` — if Phase 2/3 changes wording, update those tests.
-  `BaseDirSource` lives in `worktree::config` (not re-exported at crate root).
+  Phase 2 (library) is done. What Phase 3 needs to know:
+  - `worktree::config::validate_base_dir(raw, origin)` is public and pure.
+    `save_config(&Path)` keeps its signature; it now rejects non-Unicode and
+    invalid syntax (origin = `ConfigFile(actual path)`) before writing, and
+    still creates no directories. The setup loop should validate with
+    `BaseDirSource::Prompt` itself first so the user sees prompt-origin text.
+  - `resolve_base_dir()` can now also return `BaseDirectoryEmpty`,
+    `BaseDirectoryForeignPath`, `BaseDirectoryNotAbsolute`,
+    `BaseDirectoryNotDirectory`, `BaseDirectoryInvalidEncoding`,
+    `BaseDirectoryUnreadable`; `ConfigBaseDirIsGitRepo` is still the config
+    repo-root error and `BaseDirectoryIsGitRepo` the `WT` one.
+  - `config_path()`/`considered_dirs()` use biscuit-file `home_dir()`
+    (env-first: `HOME`; `USERPROFILE` on Windows). CLI integration tests must
+    set BOTH `HOME` and `USERPROFILE` for the child.
+  - A duplicate `base_dir` key is rejected as `ConfigInvalidFormat` (serde's
+    derived struct refuses repeated fields), not last-wins as Ruling 4
+    assumed; Phase 4 docs should say so.
+  - `BaseDirectoryUnreadable` (added in Phase 1) is what the resolver uses for
+    non-NotFound metadata errors; reuse it for the setup loop's I/O checks.
+  - The `wsl_drive_hint` helper is not written yet (planned for Phase 3, in
+    the lib config module).
+  - The path table's Windows column passes natively on build-win-native
+    (`just cross-check worktree --os windows config::tests`; a `-E '…'`
+    filterset breaks that recipe's quoting, use a plain name filter).
 ---
 
 # Valid base-directory paths

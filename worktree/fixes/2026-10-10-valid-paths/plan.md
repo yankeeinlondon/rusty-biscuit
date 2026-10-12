@@ -12,6 +12,14 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - Cargo.lock
+  - worktree/lib/Cargo.toml
+  - worktree/lib/src/config.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/testing.md
 packages:
   - worktree
   - worktree-cli
@@ -193,13 +201,13 @@ surface and no behavior change yet beyond compiled-in variants.
 
 Wave 2 (two independent tasks, parallelizable):
 
-- [ ] **Dependency wiring**
+- [x] **Dependency wiring**
     - `worktree/lib/Cargo.toml`: add `features = ["file-reference"]` to the
       existing `biscuit-file` dependency (keeping `default-features =
       false`); add `test-toolkit` as a dev-dependency for `EnvGuard`.
     - Verify the workspace still resolves one `gix` copy (both crates pin
       `=0.84.0`) and `cargo check -p worktree` succeeds.
-- [ ] **Pure validator**
+- [x] **Pure validator**
     - Private `PathStyle` (`Posix`/`Windows`) plus a private pure helper that
       recognizes foreign syntax: for nonabsolute POSIX input, an ASCII letter
       followed by `:` or an initial backslash pair (including `\\?\` and
@@ -221,7 +229,7 @@ Wave 2 (two independent tasks, parallelizable):
 
 Wave 3 (single task; reworks the same file as Wave 2's validator):
 
-- [ ] **Resolver rework**
+- [x] **Resolver rework**
     - Read `WT` with `var_os`: absent or exactly empty OsStr → fall through;
       non-Unicode → `BaseDirectoryInvalidEncoding`; otherwise validate
       syntax, then metadata (`fs::metadata`, which follows symlinks —
@@ -252,7 +260,7 @@ Wave 3 (single task; reworks the same file as Wave 2's validator):
 
 Wave 4 (single task; completes the config module and the matrix):
 
-- [ ] **Writer hardening and matrix**
+- [x] **Writer hardening and matrix**
     - `save_config`: `to_str` the path first (unrepresentable →
       `BaseDirectoryInvalidEncoding` with no write), validate syntax before
       serializing or opening the destination, use the actual config path as
@@ -298,7 +306,7 @@ never a parser's return value.
 
 Wave 5 (single task; one coherent rework of the create path):
 
-- [ ] **Create command rework**
+- [x] **Create command rework**
     - Gate setup on `crate::env::is_interactive()`; when it fails, return
       `BaseDirectoryNotConfigured` whose rendered instructions work for
       scripts (exit 1, no prompt, no `cd:` line).
