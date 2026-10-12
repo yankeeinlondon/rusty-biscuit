@@ -1016,6 +1016,49 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
     );
 }
 
+/// Schematic's fresh-output guard compiles generated client crates with a child
+/// Cargo, which archive consumers do not have, so the build owner runs it
+/// before producing the archive. Consumers leave the guard out only because its
+/// tests are `slow_` and schematic-gen keeps the default L1 contract: declaring
+/// `l1-include-slow` would put them into every consumer's executed and expected
+/// listings, where they cannot run.
+#[test]
+fn the_build_owner_runs_the_schematic_fresh_output_guard_before_archiving() {
+    let build = job_block("ci.yml", "  build:");
+    let guard = build
+        .find("just -f schematic/justfile test-fresh-output")
+        .expect("the build owner must run the schematic fresh-output guard");
+    let produce = build
+        .find("bash scripts/ci/produce-owner.sh")
+        .expect("the build owner produces the archives");
+    assert!(guard < produce, "the guard must run before the archive is produced");
+    assert!(
+        build.contains("name: fresh-output-schematic-gen-"),
+        "the guard's JUnit report must be kept as an artifact"
+    );
+
+    let justfile = read("schematic/justfile");
+    let recipe = justfile
+        .lines()
+        .skip_while(|line| !line.starts_with("test-fresh-output "))
+        .nth(1)
+        .expect("schematic/justfile defines test-fresh-output");
+    assert!(
+        recipe.contains("cargo nextest run -p schematic-gen --test l1")
+            && recipe.contains(r"-E 'test(/(^|::)slow_/)'"),
+        "test-fresh-output must select exactly schematic-gen's slow_ L1 tests: {recipe}"
+    );
+    assert!(
+        recipe.contains("--no-tests=fail"),
+        "an empty guard selection must fail rather than pass: {recipe}"
+    );
+    let manifest = read("schematic/gen/Cargo.toml");
+    assert!(
+        !manifest.contains("l1-include-slow"),
+        "schematic-gen must not put its Cargo-invoking slow_ tests on archive consumers"
+    );
+}
+
 /// The executable text of one `case` branch of the gate step's script, with
 /// `#` comments removed.
 ///

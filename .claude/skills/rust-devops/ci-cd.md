@@ -186,6 +186,17 @@ producer that cannot publish its proof fails. Check and lint jobs call
 `completion.py` with no manifest. The WSL2 guest does all three itself, because
 its reports, listing, and plan are on guest ext4 (the `os` skill's `wsl.md`).
 
+**One suite runs on the build owner, outside every cell.** Schematic's
+fresh-output guard (`just -f schematic/justfile test-fresh-output`) compiles
+generated crates with a child Cargo, so `ci.yml`'s `build` job runs it before
+`produce-owner.sh` whenever its plan builds `schematic-gen`, and uploads the
+JUnit as `fresh-output-schematic-gen-<producer>`. Consumers skip it only because
+the guard's tests are `slow_` and `schematic-gen` keeps `l1-include-slow` off;
+`completion.py` accepts no other per-test exclusion. No completion record
+covers the guard, so a red guard surfaces as a failed `build` job, and a reused
+`schematic-gen` runs it nowhere. `ci_workflow_contracts` pins the step order and
+the selection.
+
 **The audit reads the record, not the tests** (result document **5**). Every
 cell the plan executes — check and lint included — carries a `completion`:
 `ci-rollup rollup` finds `completion-<package>-<gate>-<environment>`, requires

@@ -675,6 +675,37 @@ jobs:
           cargo build --release \
             -p repo-deps \
             --no-default-features --features build-tools --bin ci-build
+      # Schematic's fresh-output guard compiles freshly generated client crates
+      # with a child Cargo, which archive consumers do not have. Its tests are
+      # schematic-gen's `slow_` L1 tests: the L1 filter already leaves them out
+      # of every consumer's executed and expected listings, so this owner runs
+      # them before producing the archive whenever its plan builds
+      # schematic-gen. A failure fails the job.
+      - name: Run the schematic fresh-output guard
+        id: fresh_output
+        shell: bash
+        env:
+          PRODUCER: ${{ matrix.build }}
+        run: |
+          set -euo pipefail
+          if ! jq -e --arg producer "$PRODUCER" \
+            'any(.builds[]; .producer == $producer and .package == "schematic-gen")' \
+            ci-artifacts/ci-resolved-plan/resolved-plan.json >/dev/null; then
+            echo "This owner does not build schematic-gen; the guard does not apply."
+            echo "ran=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ran=true" >>"$GITHUB_OUTPUT"
+          # The guard builds offline against the generated crate's lockfile.
+          cargo fetch --manifest-path schematic/schema/Cargo.toml
+          just -f schematic/justfile test-fresh-output
+      - name: Keep the fresh-output guard report
+        if: ${{ always() && steps.fresh_output.outputs.ran == 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: fresh-output-schematic-gen-${{ matrix.build }}
+          path: target/nextest/ci/test-results.xml
+          if-no-files-found: error
       - name: Produce the archives
         id: produce
         shell: bash
