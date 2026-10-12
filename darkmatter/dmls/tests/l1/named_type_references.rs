@@ -633,6 +633,42 @@ fn an_unsupported_union_postfix_is_reported_at_the_reference_with_its_definition
 }
 
 #[test]
+fn an_unsupported_union_postfix_inside_a_referenced_schema_points_into_that_file() {
+    let workspace = LspWorkspace::new();
+    let wrapper = write(
+        &workspace,
+        "wrapper.yaml",
+        "$schema:\n  choice: [string, number]\n  p: choice(max(10))\n",
+    );
+    let document = write(&workspace, "doc.md", "---\n$schema: ./wrapper.yaml\n---\n\nBody\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    let named = named_type_diagnostics(&diagnostics);
+    assert_eq!(named.len(), 1, "{diagnostics:?}");
+    assert_eq!(named[0]["range"], range_of(&document.text, "./wrapper.yaml", 0));
+    let message = named[0]["message"].as_str().unwrap();
+    assert!(message.contains("`max`") && message.contains("union-typed"), "{message}");
+    let wrapper_uri = canonical_uri(&wrapper.path);
+    let related: Vec<Value> = named[0]["relatedInformation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|related| related["location"].clone())
+        .collect();
+    assert_eq!(
+        related,
+        vec![
+            json!({ "uri": wrapper_uri, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } } }),
+            json!({ "uri": wrapper_uri, "range": range_of(&wrapper.text, "choice", 1) }),
+            json!({ "uri": wrapper_uri, "range": range_of(&wrapper.text, "[string, number]", 0) }),
+        ]
+    );
+    fixture.shutdown();
+}
+
+#[test]
 fn an_array_of_a_union_reference_prepares_without_schema_diagnostics() {
     let workspace = LspWorkspace::new();
     write(&workspace, "types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n");

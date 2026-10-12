@@ -138,6 +138,7 @@ const VALUE: u64 = 12;
 
 #[test]
 fn the_overlay_prepares_an_array_of_a_union_and_hover_lists_its_alternatives() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let workspace = LspWorkspace::new();
     let mut fixture = session(&workspace, shipped, &[]);
@@ -162,6 +163,7 @@ fn the_overlay_prepares_an_array_of_a_union_and_hover_lists_its_alternatives() {
 
 #[test]
 fn hover_on_an_item_names_the_alternative_only_for_a_unique_match() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let workspace = LspWorkspace::new();
     let mut fixture = session(&workspace, shipped, &[]);
@@ -206,6 +208,7 @@ fn hover_on_an_item_names_the_alternative_only_for_a_unique_match() {
 
 #[test]
 fn completion_in_an_item_combines_alternatives_unless_a_literal_tag_selects_one() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let workspace = LspWorkspace::new();
     let mut fixture = session(&workspace, shipped, &[]);
@@ -249,6 +252,7 @@ fn completion_in_an_item_combines_alternatives_unless_a_literal_tag_selects_one(
 
 #[test]
 fn a_problem_inside_an_item_is_published_as_the_library_reports_it() {
+    let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let workspace = LspWorkspace::new();
     let declaration = format!("$schema:\n  content_policy: '{CONTENT_POLICY_LIST}'\n");
