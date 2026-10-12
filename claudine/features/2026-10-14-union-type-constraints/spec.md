@@ -31,16 +31,27 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 is complete. Read the implementation log's Phase 1 section first. It has the 21 compile-forced `TypeExpr` match sites, the walker audit, and the representation decision.
+    Phase 3 is complete. Read the implementation log's "## Phase 3" section first; it has the per-walker changes, the per-site audit, and the findings.
 
-    - Representation: add `TypeExpr::Union(Vec<PropertyAtom>)`. With `is_array: true` it is the only array-of-union encoding. With `is_array: false` it carries a use-site marker or description on a union reference (`U(required)`, `U -> text`). A bare `U` stays today's `PropertyDef::Union`, which keeps existing lowering byte-identical. A working prototype of the resolver, lowering, and stub arms is in `spike/union-array-representation.patch`. It applies cleanly with `git apply`. Treat it as a starting point, not production code: its error messages say SPIKE, and its errors are untyped.
-    - Grammar fact: a named reference has one constraint list. `U(c)[]` is a parse error. After `[]`, the grammar stores the list in `atom.constraints`, so the resolver must move it to the container's `array_constraints`.
-    - Adding the variant breaks compile in `claudine` (`composition/schema/classify.rs` x2) and `claudine-gen` (`gen/src/schema_compat.rs`). Phase 2 must update those as well as darkmatter, DMLS, and the darkmatter CLI. Check them with `cargo check -p claudine -p claudine-gen --all-targets`.
-    - Marker hoisting should be computed (the `is_required`/generated/eager queries also consult union arms), not copied onto the container. Arms stay verbatim, so an item lowers exactly like the same arm in a property union.
-    - The input matrix probe found no loader gap. Duplicate keys, trailing documents, and invalid YAML already fail through the real loaders. Load documents with `Markdown::try_from(path)` or `try_from_content`. Never use `Markdown::from(&str)`: it silently treats a bad frontmatter block as absent.
-    - Shared fixtures live in `darkmatter/lib/tests/union_fixtures/mod.rs`. Each test must keep its own `include_str!` of the shipped content-policy schema.
-    - Byte-identity baseline: `baseline/lowered-corpus.blake3` (347 entries) and `baseline/capture_lowering.rs` (rerun instructions in its doc).
-    - For Phase 3 (clean): acceptance criterion 4 says a repairable sibling is still repaired. Clean's auto-repair is gated on exactly one raw problem, and `schema_quoting_safety::multiple_problems_block_auto_apply` pins that gate on purpose. Keep the gate and see the log's recommended test split.
+    - Public API added this phase, which you can use in CLI tests and docs:
+        - `schemas::flattened_alternatives(def)` and `Alternative { atom, arm, is_array }` list every leaf alternative.
+        - In `schemas::completion`: `alternative_accepts(atom, value)` judges a value structurally against one alternative as a present value, so `null` matches only an arm that accepts null. Also `for_list_item`, `for_property_value`, `alternatives_for_def`, and `AlternativeCompletion`.
+        - `validate::resolve_problem_description` now takes the instance.
+    - Behavior changes the CLI pipeline tests must expect:
+        - Union items now coerce: exactly one validating candidate, specialized boolish/numberlike first. Validation coerces a working copy first, so `body: 1` against a string arm validates.
+        - Eager rewriting now covers object arms with nested `file(eager)` fields. It also covers optional union properties (`one: asset`), which were silently skipped before. This is a deliberate bug fix.
+        - Discriminated narrowing applies at items and nested fields, and only where a problem already exists.
+        - A missing field in an untagged object item (`{action: archive}`) is reported at the item with the generic anyOf message. `action: delete` is narrowed to the enum problem.
+    - Clean (AC 4) departure is recorded: the single-problem auto-apply gate was kept. The sibling repair is proven in a document whose union list is valid. Carry this into the Phase 5 acceptance audit as a departure, not a failure.
+    - `md schema about` takes no schema. It is a fixed catalog, which now has "Array of a named union" and "Marked union reference" descriptors. Test about through that catalog output.
+    - Docs:
+        - Already partly updated: `definition.md` (discriminated narrowing at items, union-item coercion, "Completing inside a union value"), `docs/inline/schema-validation.md`, and DMLS `hover.md`/`autocomplete.md`.
+        - Still stale: `definition.md` around line 888 says union postfixes are rejected. Also stale: `dmls-schema-support.md`, the darkmatter skill, and the shipped content-policy schema comment. Leave the schema itself unchanged.
+        - `default([...])` is still a string in the grammar, so do not document array defaults as working.
+    - Findings not fixed, which you can mention in the docs or leave:
+        - Content Policy's `suggest` list is linted against its `^Evergreen$` arm only, so only `Evergreen` is offered.
+        - Claudine's `classify.rs` treats item `eager` as property timing; darkmatter phase does not. This predates the feature.
+        - The trigger gate may not see `x[](required)`. Not verified.
 pipeline_step: 4
 depends-on:
     - 2026-10-13-named-type-presence-and-local-names

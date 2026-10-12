@@ -10,8 +10,78 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/gen/src/schema_compat.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_rewrite.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-gen
 ---
 
 # Implementation Log for 2026-10-14-union-type-constraints (5 phases)
@@ -464,3 +534,522 @@ decision.
 - **State:** Phase 1 complete. Phase 2 may proceed. `human_review: false`,
   because nothing here needs a ruling before Phase 2. The AC 4 clean finding
   is addressed to Phase 3 through `message_to_agent`.
+
+## Phase 2
+
+### Wave 3 — what was built
+
+Started from `spike/union-array-representation.patch` (source files only;
+the spike test was not applied) and replaced every `SPIKE` marker with
+production code.
+
+**Typed model (`simplified/types.rs`).**
+
+- `TypeExpr::Union(Vec<PropertyAtom>)` is documented as resolver-only: the
+  one array-of-union encoding with `is_array`, and the carrier of use-site
+  markers/description over a union without it.
+- Shared accessors for later phases:
+  - `PropertyAtom::union_arms()` returns the arms of a `TypeExpr::Union`
+    (item alternatives when `is_array`).
+  - `PropertyDef::alternatives()` returns property-level alternatives
+    whichever way they were written: `PropertyDef::Union(arms)`, or a
+    non-array `Single(atom)` whose type is a union. It returns `None` for an
+    array of a union.
+- `PropertyAtom::is_required`, the new `is_generated`, and `has_default`
+  read through union arms. Nothing is copied onto the container.
+
+**Resolver (`resolve.rs`).**
+
+- `apply_import_postfix` gained a `definition: &SchemaReferenceSite`
+  (target namespace source plus `root.property(name)`), built in
+  `expand_import`. A union-typed base goes to the new `apply_union_postfix`.
+- Without `[]`: only `required`/`generated`/`eager` are accepted. Anything
+  else, including `default`, `min`, `max`, `pattern`, and `unique`, is
+  rejected by keyword.
+- With `[]`: the reference's one constraint list belongs to the container.
+  Accepted: the three markers plus `min`/`max` (already `MinItems`/`MaxItems`
+  at the array level), `unique`, `default`, and `example`, which mirrors
+  `convert::apply_array_constraints`. Anything else is rejected with
+  `array_level: true`.
+- `[]` over a flattened arm whose outer value is an array is rejected, looking
+  through nested postfixed union arms. Arrays inside an object arm are fine.
+- Arm defaults under `[]` lift to the container only when they are JSON
+  arrays, merging under the prerequisite's equal-value rule through
+  `merge_constraints`. Any other arm default is rejected.
+- Container constraints merge through `merge_constraints`, so contradictory
+  bounds produce the existing `ConstraintConflict { kind: Bounds }`.
+- Multi-hop scope, dependency edges, cycle detection, and `MAX_IMPORT_DEPTH`
+  are untouched. Arms are still expanded by `expand_union_arms` in their
+  defining namespace.
+
+**Structured error.** The new variant is
+`SchemaError::UnionReference { name, rejection: Box<SchemaUnionRejection>, site, definition: Box<SchemaReferenceSite> }`.
+
+- `SchemaUnionRejection` lives in `simplified/source.rs` beside
+  `SchemaConstraintConflictKind` and is re-exported from `schemas`. Its
+  variants:
+  - `Constraint { keyword, array_level }`.
+  - `ArrayArm { arm }`.
+  - `ScalarDefault { arm, value }`.
+- Display example: `p: constraint `max` cannot apply to a union-typed type (named type `choice`)`.
+- It has a `BlockError` status block.
+- The two fields are boxed because clippy's `result_large_err` failed every
+  function returning `Result<_, SchemaError>` once the variant reached 160
+  bytes.
+- Downstream code matches on the fields, never on the message.
+
+**Lowering (`simplified/convert.rs`).**
+
+- The per-arm loop and default hoisting moved out of
+  `union_property_to_schema` into `union_arm_fragments`. Two callers use it:
+  - the property union;
+  - the `TypeExpr::Union` branch of `atom_fragment_without_null_wrap`, used
+    for items and for a union nested as an arm.
+- `union_property_to_schema` takes `container: Option<&PropertyAtom>`. A
+  non-array union atom (`U(required)`, `U -> text`) lowers as a property
+  union, with the container's markers and its description placed at the
+  union level.
+- Items get no null wrapper and no optional-empty-file arm. The optional
+  wrapper goes only on the enclosing property, through `atom_to_schema`.
+- A default that reached an item union would be a converter error. The
+  resolver prevents it.
+- `atom_is_generated` was replaced by `PropertyAtom::is_generated`, which is
+  identical for non-union atoms.
+
+**Other `simplified/` sites.**
+
+- `lint.rs` lints each union arm's `suggest` with its arm index. The resolved
+  schema is linted too, so returning early would have hidden arm candidates.
+- `query.rs::atoms_of` descends union alternatives, including item arms.
+- `serialize.rs` documents that the bracketed `[arm, arm][]` form is display
+  only and that only passively parsed atoms round-trip.
+
+**Compile-forced sites outside the lib.** Each is a deliberate branch, not a
+wildcard.
+
+- CLI `assignment.rs`: a union prefers string if any arm does, matching
+  `PropertyDef::Union`.
+- DMLS:
+  - `named_types.rs` and `suggestions.rs` recurse into, or explicitly skip,
+    union arms. These walk passive schemas only.
+  - `frontmatter.rs` hover labels a union `union`/`union[]`.
+  - `inline_object_shape` returns `None` for a union.
+- `claudine-gen` `describe_atom` labels a union `union`/`union[]`.
+- Claudine `classify.rs`:
+  - The label is `union`/`union[]`.
+  - `interactive_shape_for_atom` returns `None` (no single widget).
+  - `is_required`/`is_eager` now go through `any_atom_constraint`, which
+    reads union arms. Without that, Claudine would treat `U[]` with an
+    inherited `required` as optional.
+
+**DMLS error projection (`diagnostics/named_types.rs`, `overlay/mod.rs`).**
+
+- `UnionReference` is a schema-definition error
+  (`dm.schema.invalid_type_definition`), ranged on the reference name.
+- Its `relatedInformation` points at the union's definition, through the new
+  `definition_location`, which works for the current buffer or a file.
+- Both sources are dependency edges.
+
+### Departures and findings
+
+- **`default([...])` is a string in today's grammar.** `arg_to_json` reads
+  `[a]` as the string `"[a]"`. A probe confirmed `string[](default([a]))`
+  lowers to `default: "[a]"`. `definition.md`'s array table nevertheless
+  says "`default([...])` — Default array". This is pre-existing drift and
+  was not changed here. Consequences:
+  - An arm can never carry an array default, so every inherited arm default
+    under `U[]` is rejected as `ScalarDefault`, including
+    `string(default([a]))` (value `"[a]"`).
+  - The lift-and-merge path the spec requires is implemented but cannot be
+    reached through the current grammar, so no public test covers it.
+  - A use-site default on `U[]` lowers exactly as on any other array
+    (asserted by parity).
+  - Phase 4's docs owner should not document array defaults as working.
+- **The prerequisite's rejection test changed.**
+  `schemas_named_type_merge::union_postfix_and_already_array_suffix_remain_rejected`
+  asserted `choice(required)` and `choice -> described` fail. Those are now
+  this feature's accepted forms, so it was renamed
+  `already_array_suffix_remains_rejected` and keeps only the
+  `list: string[]` / `list[]` row. The accepted forms are covered in
+  `schemas_union_postfix`.
+- **Nested postfixed union arms stay nested** (`[pair(required), boolean]`
+  lowers to `items.anyOf: [{anyOf: [...]}, {boolean}]`), as Phase 1 decided.
+  The nested arm's `required` hoists through both levels.
+- **Left for later phases:**
+  - `query.rs::suggestions_for_def` reports `is_array` from the arm, so
+    suggestions on an array-of-union item report `is_array: false` (Phase 3
+    completion owner).
+  - DMLS hover shows `union[]` rather than the alternatives (Phase 3).
+  - Problem paths below an item are already reported at depth
+    (`/p/0/tags`), but description/node lookup through `items.anyOf` is
+    Phase 3's `validate.rs` work.
+- **Stale until Phase 4:** `definition.md`, the shipped content-policy
+  schema comment ("a union-typed reference cannot take constraints today"),
+  and the darkmatter skill still describe the old rejection. The plan
+  assigns them to Phase 4, and the shipped schema stays unchanged by rule.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| AC 1: Content Policy list (all 10 data cases), file unchanged after validation | `schemas_union_postfix::content_policy_list_validates_the_acceptance_cases` |
+| AC 3: lowering `type: array`, `minItems: 1`, `items.anyOf` with 9 flattened arms, arm descriptions, `rule` required with no null arm, simplified atom shape | `schemas_union_postfix::content_policy_list_lowers_to_an_array_of_the_flattened_arms` |
+| AC 2: `U(required)` requires, no null arm; missing/null fail | `required_union_reference_requires_the_property_without_a_null_arm` |
+| AC 2: `U(max(10))` and other value constraints, with and without `[]`, rejected by keyword with provenance | `value_constraints_on_a_union_reference_are_rejected_by_name` |
+| AC 2/7: array arm rejected, including behind a cross-file import and a nested postfixed union; usable without `[]` | `an_array_arm_rejects_the_array_suffix_even_behind_an_import` |
+| Bare `U` unchanged | `union_reference_without_a_postfix_still_inlines_the_union` |
+| Descriptions: use-site on union and array; arm descriptions kept | `a_described_union_reference_keeps_the_arm_descriptions` |
+| Inherited `required`/`generated` hoist; arm min stays `minLength`; item/property parity | `inherited_markers_hoist_to_the_property_and_arms_lower_as_in_a_property_union` |
+| `eager` on union/array never makes a lazy file arm eager; `file(eager)` keeps its check | `eager_on_the_union_does_not_make_lazy_file_arms_eager` |
+| Bare, `@this`, and cross-file forms agree | `bare_this_and_cross_file_references_lower_identically` |
+| Forward references | `a_forward_reference_resolves_regardless_of_declaration_order` |
+| Multi-hop scope, import edges, item validation paths | `a_multi_hop_union_keeps_its_defining_scope` |
+| Nested union flattening vs. nested postfixed arm | `a_bare_nested_union_flattens_and_a_postfixed_one_stays_one_arm` |
+| Object arm containing an array | `an_object_arm_may_contain_an_array` |
+| Independent items choose different arms; `[null]` and scalar fail; null property passes | `independent_items_select_different_arms_and_null_items_fail` |
+| `min`/`max`/`unique` on the container, boundary values, arm constraints stay on items | `container_constraints_apply_to_the_array_and_value_constraints_stay_on_arms` |
+| Contradictory bounds give `ConstraintConflict` with origins | `contradictory_container_bounds_fail_with_their_origins` |
+| Defaults: container parity, `ScalarDefault` with provenance, property-union hoisting without `[]` | `container_defaults_match_plain_arrays_and_arm_defaults_are_rejected` |
+| Cross-file error provenance (inline site, file definition) | `a_cross_file_rejection_names_both_sources` |
+| Cycles and the depth limit through union postfixes | `cycles_and_depth_limits_still_apply_through_union_postfixes` |
+| YAML schema-surface matrix (5 columns × every row, control first) | `schemas_union_schema_matrix::{imported_kind_cells, imported_types_cells, imported_policy_definition_cells, document_schema_cells, document_content_policy_declaration_cells}` |
+| Error rendering | `errors::tests::union_reference_names_the_rejection_the_reference_and_the_definition` (lib unit) |
+| DMLS projects the same error at the reference, with related definition (file and inline) | `dmls named_type_references::an_unsupported_union_postfix_is_reported_at_the_reference_with_its_definition` |
+| DMLS: accepted `U[]` / `U(required)` gives no schema diagnostics | `named_type_references::an_array_of_a_union_reference_prepares_without_schema_diagnostics` |
+| Claudine reads presence/timing through union arms | `claudine composition::schema::tests::presence_and_timing_read_through_a_resolved_union_reference` |
+| The corpus guard treats `UnionReference` as a named-type failure | `shipped_schema_corpus` (helper `is_named_type_error` extended) |
+
+**Input Robustness Matrix (schema surfaces) — implemented outcomes.** Every
+cell also asserts that neither file changed.
+
+| Cell | `kind` | `types` | `types.policy` | `$schema` | `$schema.content_policy` |
+|---|---|---|---|---|---|
+| Control | valid | valid | valid | valid | valid |
+| Absent | prepare fails | prepare fails | `UnknownNamedType policy` | valid (no schema) | valid (no declaration) |
+| Null (`null` and empty value) | prepare fails | prepare fails | prepare fails | prepare fails (both) | prepare fails (both) |
+| Wrong whole type | prepare fails | prepare fails | prepare fails | prepare fails | prepare fails |
+| One wrong element | prepare fails | prepare fails | prepare fails | prepare fails | prepare fails |
+| Every element wrong | prepare fails | prepare fails | prepare fails | prepare fails | prepare fails |
+| Empty | `''` fails | `{}` gives `UnknownNamedType` | `[]` fails; `{}` gives invalid data under `/content_policy` | `{}` valid; `[]` fails | `''`/`[]` fail; `{}` gives invalid data |
+| Duplicate key | prepare fails | prepare fails | prepare fails | load fails | load fails |
+| Trailing / invalid | extra document and invalid YAML fail | both fail | both fail | invalid frontmatter fails loading (body is a normal Markdown link) | unterminated quote fails loading |
+
+A deliberately wrong expectation was injected once to confirm the harness
+fails, then reverted. The smell grep over this phase's production diff
+(`serde(default)`, `unwrap_or_default`, `.ok()`, `filter_map(.. as_str())`)
+found nothing.
+
+### Gates and evidence (macOS unless noted)
+
+| Check | Result |
+|---|---|
+| Byte identity (AC 6 checkpoint): reran `baseline/capture_lowering.rs` on this tree | 347/347 manifest entries identical to `baseline/lowered-corpus.blake3` (`diff` clean). Scratch module removed afterwards. |
+| `darkmatter/` `just test` | 9331 passed, 11 skipped |
+| `darkmatter/` `just lint` | exit 0 (after boxing the error fields and one clippy pattern fix) |
+| `claudine/` `just test` | 8684 passed, 9 skipped (run before and after the boxing change) |
+| `claudine/` `just lint` | exit 0. The only warning is the known macOS `__eh_frame` linker note. |
+| `just cross-check darkmatter --os windows union` | 165 passed |
+| `just cross-check darkmatter --os linux union` | 165 passed |
+| `just cross-check dmls --os windows named_type_references` | 13 passed |
+
+- WSL2 was not run. The new tests are tempdir-based and compare paths only
+  against `canonicalize_simplified` roots, which native Windows exercised.
+- All new tests are L1 with no process spawns, terminals, or browsers. The
+  only repository read is the per-test
+  `include_str!("../../../../content-policy/schemas/content-policy.yaml")`.
+  No CI cells, dependencies, or features were added.
+- Nothing was skipped. No pre-existing failure was seen.
+- `cargo fmt` was not run. Nothing was staged or committed.
+- **Skills:** the `claudine` skill needs no update; Claudine's change is a
+  local reading of union arms in `classify.rs`. The `darkmatter` skill is
+  scheduled for Phase 4.
+- **State:** Phase 2 complete. The core API and file ownership are stable for
+  the parallel Phase 3 consumers.
+
+## Phase 3
+
+### How the phase was run
+
+- New L1 modules were registered up front, before any parallel work, so no
+  two agents edited a `main.rs`:
+  - lib: `schemas_union_{report,coerce,rewrite,clean,completion,typed_consumers}`;
+  - DMLS: `union_item_editor`.
+  - `test_layout` passed with the placeholders.
+- Wave 4 (four walkers) and the two library tasks of Wave 5 ran in parallel,
+  each owning disjoint files. DMLS ("Adapt Editor Surfaces") ran after them,
+  because it consumes the selection and completion contracts they published.
+  - **Departure:** the plan orders Wave 5 after the Wave 4 checkpoint. The
+    Wave 5 library tasks overlapped it instead, since their files were
+    disjoint and nothing they depend on was being changed.
+- Every new branch was proved load-bearing: each agent temporarily broke its
+  fix, saw the named tests fail, then restored the source. Evidence is per
+  task below.
+
+### Wave 4 — Library walkers
+
+**Report union items (`validate.rs`; `discriminant.rs` unchanged).**
+
+- `resolve_problem_description(root, problem, instance)` now takes the
+  instance. The new `schema_nodes_at` walks the schema along the problem
+  path:
+  - At each step it looks through `anyOf`. A nullable wrapper becomes its
+    single arm. A genuine union (property, `items.anyOf`, or a nested
+    postfixed arm) becomes the arm the literal tag selects, or every non-null
+    arm when no tag selects one.
+  - Arms without the next segment drop out.
+  - When several arms reach the path with different descriptions, it returns
+    `None` rather than guessing.
+- `narrow_discriminated_union_problems` replaces
+  `narrow_property_union_problems`, which handled only top-level properties.
+  - `collect_discriminated_arms` finds every tagged union location: through
+    nullable wrappers, object fields, array indices, and selected arms.
+  - Narrowing revalidates against a stand-in schema that holds only the
+    selected arm at that location, so problem paths keep their normal
+    `/k/0/...` form.
+  - A location is narrowed **only if it already has a problem**, so anyOf
+    acceptance is unchanged: a value another arm accepts stays valid.
+- `select_literal_discriminant_arm` already took any arm slice, so its
+  callers (`frontmatter_shape.rs`, DMLS) are untouched.
+- Also touched: `schemas/mod.rs`, where the call sites changed.
+
+**Coerce union items (`coerce.rs`).**
+
+- New `CoercionTarget::ItemUnion(Vec<Value>)` for `items: {anyOf}`. The array
+  branch is now `coercion_target(items).or_else(|| item_union_target(items))`:
+  - `boolish[]` and `numberlike[]` keep their specialized targets first.
+  - Each other item goes through the existing `coerce_property_union`
+    candidate rule: exactly one validating candidate, judged from the
+    original item.
+- **Behavior note:** `coerce_property_union` now returns `None` when the one
+  accepted candidate equals the original value. It used to report
+  `changed: true` with an identical value. Values are unchanged; only the
+  flag differs, and it now agrees with `coerce_value`.
+- **Interaction:** validation coerces a working copy before checking it. So
+  a union item such as `body: 1` against a `string` arm now validates, as a
+  property union already did.
+
+**Rewrite union items (`rewrite.rs`).**
+
+- Scalar `file(eager)` arms in `U[]` items were already rewritten. Two cases
+  were not, and both are fixed:
+  1. **Object arm with an eager file field.** Only arms whose top level was
+     `format: darkmatter-file` counted, so a nested `path: file(eager)` was
+     never rewritten. This applied to items and properties alike.
+  2. **Optional union property, a pre-existing bug.** The eager arm lowers as
+     `{anyOf: [{const: ""}, {format: darkmatter-file}]}`, which was not
+     recognized, so values like `one: asset` were never rewritten. Items have
+     no such wrapper, so items and properties disagreed.
+- **New rule for both:** an arm qualifies when it contains an eager-file
+  marker anywhere (`contains_eager_file_fragment`) and its validator accepts
+  the value.
+  - With exactly one qualifying arm, it recurses through `rewrite_property`,
+    so an object arm rewrites only its own eager fields.
+  - With zero or several, the value is left alone.
+  - The captured request context is used, as before.
+- **Behavior change to note for review:** existing optional
+  `[file(eager), …]` property unions are now normalized, where before they
+  were silently left as written.
+
+**Preserve cleanup safety (`clean.rs`, comments only).**
+
+- The existing code was already safe. `schema_requires_string` and
+  `nearest_declared_key` stop at an `items.anyOf` wrapper. `arm_index` only
+  ever refers to a root union. Cleanup has no key-deletion repair; its only
+  automatic repair quotes a bool or number scalar.
+- The comments now state that this safety is deliberate.
+- **AC 4 departure (Phase 1 finding, gate kept):**
+  - AC 4 asks for the repairable non-union sibling to be repaired in the same
+    document as the invalid union items. Cleanup auto-applies its proven
+    quoting repair only when the raw query finds exactly one problem
+    (`analyze_frontmatter`, pinned by
+    `schema_quoting_safety::multiple_problems_block_auto_apply`).
+  - A document with an invalid union item and a repairable sibling has two or
+    more raw problems. So the sibling is reported but not auto-applied
+    (`repairable_sibling_beside_invalid_union_item_is_reported_not_applied`).
+  - The sibling repair is proven instead in a document whose union lists are
+    present and valid (`repairable_sibling_beside_valid_union_items_is_quoted`).
+  - The invalid items are proven unrepaired both together and each alone,
+    with the single-problem gate open.
+  - **Limit:** the extra-key tests pin the outcome but cannot fail under a
+    walker break, because cleanup has no deletion path to break.
+    `mistyped_scalar_inside_union_item_is_not_quoted` is the walker-sensitive
+    test.
+
+### Wave 5 — Typed consumers
+
+**Complete item alternatives (`completion.rs`, `simplified/query.rs`).**
+
+- `flattened_alternatives(def)` lists every leaf alternative with its arm
+  index and whether it sits in an array. It is now **public** and re-exported
+  from `schemas`, with `Alternative`.
+  - `suggestions_for_def` takes `is_array` from it, which fixes the Phase 2
+    gap.
+  - `suggestions_for_path` and `suggest_atom_in_def` look through union
+    references.
+- New public API in `completion`:
+  - `for_list_item`, `for_property_value`, and
+    `alternatives_for_def(def, AlternativeSite, value)`, returning
+    `AlternativeCompletion { is_array, selected_arm, keys, values }`.
+  - Alternatives are filtered by the JSON kind of the value.
+  - They narrow only through `select_literal_discriminant_arm`.
+  - They are passive.
+- Added during orchestration: `completion::alternative_accepts(atom, value)`.
+  - It judges a value structurally against one alternative, as a *present*
+    value with no optional-null wrapper, so `null` matches only an
+    alternative that accepts null.
+  - It exists so DMLS does not keep its own acceptance logic (see the editor
+    task below).
+
+**Describe typed arrays.** Per-site audit:
+
+| Site | Outcome |
+|---|---|
+| `about.rs` shape catalog | Added the descriptors "Array of a named union" (`step[](min(1); unique) -> …`) and "Marked union reference" (`choice(required) -> …`). Neither uses anonymous `(A \| B)[]` syntax. `md schema about` renders them through its existing list, with no CLI change. `md schema about` takes no schema argument, so AC 5's "renders the array-of-union type" is met by the catalog plus a test of the resolved model against the fixture. |
+| `phase.rs` `project_atom` | **Bug fixed.** Union arms were never projected: `choice[]` with a `string(required)` arm was required at Launch. Arm markers now hoist once to the container, object arms project as shapes, and `eager` on arms (including `file(eager)`) is untouched. |
+| `phase.rs` `atom_has_property_eager` | `U(eager)` counts an eager arm, as a property union does. For `U[]`, only `[](eager)` sets property timing, matching the documented `file(eager)[]` rule. |
+| `frontmatter_shape.rs` | **Bug fixed.** `U(required)`/`U[]` were opaque. The new `alternatives_of` flattens arms for classification and descent. `arm_discriminant_json`'s `_ =>` is now explicit. `U[]` items merge their object arms; frontmatter-shape key paths carry no index, so there is no per-item tag narrowing, the same as for `{…}[]`. |
+| `triggers/matcher.rs` | `type_conforms` already handled `U[]`. **Gap fixed:** `is_required` now reads through arms, so an inherited required arm makes a gate. |
+| `detect.rs` | Unchanged. Detection builds only primitive atoms. A doc note on `schema_to_yaml` was added. |
+| `compose/context/catalog.rs` | The `Union` branch is split out, with the reason: the base schema is parsed passively. |
+| `file_match.rs`, `compose/expression/catalog/parser.rs` | Unchanged, with evidence: a union is not `File`; the parser never resolves. |
+
+**Adapt editor surfaces (DMLS `providers/frontmatter.rs`, `overlay/schema.rs`).**
+
+- `array_item_def`:
+  - The item of `U[]` becomes the union of its alternatives.
+  - The container's markers, bounds, and description stay off the item.
+- `descend`, `inline_object_shape`, `declares_constraint`, and
+  `value_completions` read through union arms.
+- Property hover:
+  - The old `union`/`union[]` label is replaced by "array, each item one of:"
+    (or "one of:").
+  - One line follows per alternative, with its type, keys, and description.
+- Item hover (`union_item`):
+  - It names an alternative only when exactly one accepts the item.
+  - A missing, invalid, or multiply-matching item lists every alternative.
+  - A field inside an object item uses the matching alternative's
+    definition, or falls back to tag-select-or-merge.
+- Item completion:
+  - It calls `completion::alternatives_for_def(…, AlternativeSite::Item, value)`.
+  - It combines alternatives unless a literal tag selects one.
+  - Keys already present are excluded.
+  - It covers block-style `- ` items only.
+- `overlay/schema.rs`: `meta_schema_kinds` and `merged_inline_shape` see
+  `U(required)` object arms.
+- **Orchestrator correction:** the DMLS agent first added a local copy of
+  the library's flattening and its own acceptance check. That is the
+  editor-specific union interpretation the plan forbids. Both copies were
+  deleted:
+  - DMLS now imports `schemas::flattened_alternatives` and
+    `completion::alternative_accepts`.
+  - The library acceptance check differs from the deleted copy in one way: it
+    judges a *present* value, so a `null` item is "invalid" rather than
+    "matches every alternative". Hover lists the alternatives in both cases.
+- DMLS still shows no `problem.description` in diagnostics (pre-existing).
+  Item line/column positioning remains out of scope.
+
+### Docs touched by owners (ahead of Phase 4)
+
+These are user-facing statements of the behavior each task changed. Phase 4
+still owns the full rewrite.
+
+- `darkmatter/docs/topics/schemas/definition.md`:
+  - discriminated-union narrowing at items;
+  - coercion of union items;
+  - "Completing inside a union value".
+- `darkmatter/docs/inline/schema-validation.md`: union items in eager
+  rewriting and coercion.
+- `darkmatter/dmls/docs/hover.md` and `darkmatter/dmls/docs/autocomplete.md`:
+  union items.
+- **Still stale, for Phase 4:**
+  - `definition.md` ~888 still says union postfixes are rejected;
+  - `dmls-schema-support.md`;
+  - the darkmatter skill;
+  - the shipped content-policy schema comment.
+
+### Findings (not fixed here)
+
+- **Content Policy suggestions.** The shipped schema's `suggest(...)` list
+  sits on the `^Evergreen$` arm. The suggestion lint checks each candidate
+  against that arm only, so only `Evergreen` is ever offered. This was true
+  before and after this phase. Either the lint should check candidates
+  against the whole union, or the schema should move each candidate onto its
+  own arm. The schema change belongs to `2026-10-17-content-policy-base-schema`.
+- **Darkmatter and Claudine disagree on list `eager`.** Claudine's
+  `classify.rs::any_atom_constraint` treats item-level `eager`
+  (`file(eager)[]`, and now `U[]` arms) as property timing. Darkmatter phase
+  treats only `[](eager)` as property timing. This predates this feature for
+  plain arrays.
+- **Possible trigger gap.** The matcher's gate reads `constraints`, so
+  `x[](required)` on a trigger may act as a guard rather than a gate. Not
+  verified.
+- **Inconsistent reports for an untagged object item.** A missing field
+  (`{action: archive}`) is reported at the item with the generic anyOf
+  message, while `action: delete` is narrowed. Closest-arm reporting is still
+  root-only. A property union behaves the same way.
+- **Unclear path wording.** `schema-validation.md` describes stored eager
+  values as an "absolute native path", while `rewrite.rs` writes
+  document-relative portable paths. This predates this feature.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| AC 4 validate: description/node lookup at `/content_policy/1/rule`, item/property parity | `schemas_union_report::{content_policy_rule_lookup_reads_the_union_inside_the_object_arm, an_item_union_reports_like_the_same_union_used_as_a_property}`; lib unit `resolve_missing_field_looks_through_item_alternatives`, `resolve_item_field_uses_the_discriminated_arm_and_refuses_to_guess` |
+| AC 4 discriminant: a literal-tagged item narrows; AC 7 missing, unknown, duplicate, conflicting tags, overlapping arms, independent items | `schemas_union_report::{a_literal_tag_narrows_each_item_to_its_own_arm, missing_unknown_duplicate_and_conflicting_tags_keep_ordinary_union_reporting, overlapping_item_arms_accept_either_shape_and_report_a_field_once, an_item_another_arm_accepts_stays_valid_despite_its_tag}` |
+| AC 4 coerce: a boolish/numberlike arm in an item; AC 7 zero/multiple candidates unchanged, nested object, mixed items, parity; composition writes back | `schemas_union_coerce::{boolish_and_numberlike_arms_coerce_inside_a_union_item, composition_writes_back_a_coerced_union_item, an_item_no_arm_accepts_is_left_unchanged_beside_one_that_coerces, an_item_several_arms_accept_is_left_unchanged_beside_one_that_coerces, object_arm_candidates_coerce_their_nested_fields, independent_items_select_different_arms, a_union_item_coerces_exactly_as_the_same_union_property}`; lib unit `boolish_items_stay_boolean_and_other_item_unions_are_item_unions` |
+| AC 4 rewrite: an unambiguous eager file arm in an item; lazy preserved under `eager`; ambiguous unchanged; nested object file field; idempotence; validation read-only | `schemas_union_rewrite::{eager_file_arm_in_union_item_is_rewritten_like_the_property, required_union_array_without_null_wrapper_is_rewritten, lazy_file_arm_is_preserved_under_union_and_container_eager, nested_file_field_of_selected_object_arm_is_rewritten, ambiguous_item_and_property_unions_are_left_unchanged, overlapping_object_arms_still_rewrite_when_only_one_validates}` |
+| AC 4 clean: untagged and tagged extra-key items unchanged and reported; sibling repaired (departure above) | `schemas_union_clean::{union_items_with_extra_keys_are_reported_and_left_unchanged, union_item_with_extra_key_alone_keeps_its_key, mistyped_scalar_inside_union_item_is_not_quoted, repairable_sibling_beside_valid_union_items_is_quoted, repairable_sibling_beside_invalid_union_item_is_reported_not_applied}` |
+| AC 5 completion: object-arm keys and scalar-arm values for a list item; tag narrowing; overlapping; neighboring indices; `is_array`; parity; no effects | `schemas_union_completion::{content_policy_item_offers_object_keys_and_scalar_values, missing_invalid_and_partial_items_offer_their_applicable_alternatives, a_literal_tag_narrows_each_item_independently, unknown_and_duplicate_tags_keep_the_combined_choices, overlapping_arms_combine_without_choosing, scalar_arms_offer_enum_suggest_and_literal_values, is_array_is_reported_for_items_suggestions_and_shell_completion, a_union_property_completes_like_a_union_item, completion_reads_and_writes_no_files, alternative_accepts_judges_each_item_against_every_flattened_alternative}` |
+| AC 5 `md schema about` and the descriptor catalog; typed consumers | `schemas_union_typed_consumers::{about_model_exposes_every_content_policy_alternative_and_the_container, about_catalog_describes_named_union_references_without_anonymous_syntax, about_catalog_union_examples_resolve_to_what_they_describe}`; lib unit `descriptor_shape_examples_parse` (extended) |
+| frontmatter_shape, phase, trigger matcher, detect, ctx catalog | `schemas_union_typed_consumers::{frontmatter_shape_narrows_a_marked_union_by_its_literal_tag, frontmatter_shape_descends_into_the_item_alternatives_of_an_array_of_a_union, frontmatter_shape_finds_an_expression_alternative_of_a_marked_union, inherited_required_on_a_list_of_a_union_waits_for_completion_unless_the_list_is_eager, an_eager_alternative_times_a_marked_union_but_only_the_items_of_a_list, nested_object_fields_in_union_items_keep_their_own_presence_and_timing, eager_on_a_list_of_file_alternatives_is_timing_and_lazy_arms_stay_lazy, a_list_of_a_union_matches_when_every_item_matches_some_alternative, an_inherited_required_alternative_makes_the_condition_a_gate, detection_never_produces_a_union_type_and_its_yaml_parses_back, the_ctx_catalog_projects_no_union_type}` |
+| AC 5/8 DMLS: parser/overlay, hover (unique match vs. alternatives), completion (combined vs. tagged), schema errors | `dmls union_item_editor::{the_overlay_prepares_an_array_of_a_union_and_hover_lists_its_alternatives, hover_on_an_item_names_the_alternative_only_for_a_unique_match, completion_in_an_item_combines_alternatives_unless_a_literal_tag_selects_one, a_problem_inside_an_item_is_published_as_the_library_reports_it}`; DMLS unit `a_required_union_reference_activates_authoring_in_its_object_arm`; the unsupported-postfix error is covered by the existing `named_type_references::an_unsupported_union_postfix_is_reported_at_the_reference_with_its_definition` |
+
+**Load-bearing evidence (each break was temporary and has been restored):**
+
+- **validate:** with `validate.rs` reverted, 6 of 6 report tests failed.
+- **coerce:** with the array branch reverted, 7 of 7 failed. A first-match
+  variant without the exactly-one check failed the zero-match,
+  several-match, and parity tests.
+- **rewrite:**
+  - item `anyOf` disabled: 4 tests failed;
+  - first arm wins: the ambiguous and overlapping tests failed;
+  - lazy treated as eager: the lazy test and the AC 4 test failed;
+  - old direct-arm rule: 3 tests failed.
+- **clean:**
+  - `items.anyOf` read as its first arm: the mistyped-scalar test failed;
+  - refusing every union: both sibling tests failed.
+- **completion:** five separate breaks failed 1 to 8 tests each. Removing the
+  present-value rule from `alternative_accepts` failed
+  `alternative_accepts_judges_…` ("items get no null wrapper").
+- **typed consumers:**
+  - original phase, frontmatter_shape, and matcher restored: 6 of 13 tests
+    failed;
+  - eager `||`→`&&`: 1 test failed;
+  - descriptor renamed: 2 tests failed.
+- **DMLS:** six separate breaks, each of which failed its targeted test.
+
+### Gates and evidence (macOS unless noted)
+
+| Check | Result |
+|---|---|
+| `darkmatter/` `just test` | 9387 passed, 11 skipped (33.3 s) |
+| `darkmatter/` `just lint` | exit 0; zed-dmls wasm32-wasip2 check passed |
+| `claudine/` `just test` | 8684 passed, 9 skipped (71.4 s) |
+| `claudine/` `just lint` | exit 0. The only warning is the known macOS `__eh_frame` linker note. |
+| `cargo nextest run -p dmls --test l1 --lib` | 828 passed, 6 skipped |
+| `just cross-check darkmatter --os windows union` | 214 passed |
+| `just cross-check darkmatter --os linux union` | 214 passed |
+| `just cross-check dmls --os windows union_item_editor` | 4 passed |
+
+- WSL2 was not run. The new tests are tempdir-based and compare paths
+  through `canonicalize_simplified`, which native Windows exercised.
+- All new tests are L1. They use no process spawn, terminal, or browser. The
+  only repository read is the per-test `include_str!` of the shipped
+  content-policy schema. No CI cells, dependencies, or features were added.
+- Nothing was skipped. No pre-existing failure was seen.
+- `cargo fmt` was not run. One agent ran `rustfmt` on its own new test file
+  only. Nothing was staged or committed.
+- **Skills:** the `claudine` skill needs no update, because Claudine code was
+  not changed this phase. The `darkmatter` skill update is Phase 4's.
+- **State:** Phase 3 is complete. Phase 4 may proceed.

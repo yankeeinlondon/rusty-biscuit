@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-11
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -11,8 +11,78 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/gen/src/schema_compat.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_union_report.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_rewrite.rs
+    - darkmatter/lib/tests/l1/schemas_union_clean.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-gen
 ---
 
 # Union-Typed Named-Type Constraints Implementation Plan
@@ -141,18 +211,18 @@ requires recording every other cell in that row and column.
 
 ### Wave 3 — Core Implementation (Sequential)
 
-- [ ] **Extend Typed Model**
+- [x] **Extend Typed Model**
   - Implement the Wave 2 representation and its passive parsing, serialization, namespace, and origin retention. Update required/default/generated/eager queries and all exhaustive matches sufficiently to keep affected packages compiling; consumer semantics are completed in later waves.
   - Preserve existing property unions and ordinary arrays. Keep anonymous union array syntax rejected; display/catalog descriptions must explain alternatives without claiming to be round-trippable expressions.
-- [ ] **Apply Union Postfixes**
+- [x] **Apply Union Postfixes**
   - Extend `resolve.rs::apply_import_postfix` and its callers for bare, `@this`, and cross-file unions; retain multi-hop definition scope, dependency tracking, cycle errors, and expansion limits.
   - Accept `required`, `generated`, `eager`, descriptions, and `[]`. Reject non-array value constraints by name. Reject any resolved/flattened arm whose outer value is already an array; permit arrays inside an object arm.
   - Keep inherited arm constraints and descriptions; hoist property markers without moving string bounds to array bounds. Apply existing container applicability/merge rules, including contradictory bounds, `unique`, and equal/conflicting defaults.
   - Extend structured errors to carry the property, named definition, rejected constraint/array arm/default, and available definition/use-site provenance. Do not rely on message parsing downstream. Review changed symbols' docs/comments, including the blanket-rejection comment.
-- [ ] **Lower Item Unions**
+- [x] **Lower Item Unions**
   - Update `simplified/convert.rs` to emit the array separately from its flattened ordered `items.anyOf`; keep arm annotations/descriptions, enclosing description, marker semantics, and array constraints at the proper levels.
   - Apply optional-property null wrapping to the enclosing property only; do not wrap items. Confirm inherited scalar defaults fail and array-compatible defaults preserve existing validation and merge semantics without runtime insertion.
-- [ ] **Verify Core Boundaries**
+- [x] **Verify Core Boundaries**
   - Add resolver/lowering tests covering all three reference forms, forward/local/multi-hop references, hidden array arms, nested object arrays, cycles and depth limits, marker combinations, descriptions, pre/post-array constraints, bounds, uniqueness, defaults, and structured errors.
   - Implement the YAML schema-surface matrix through public preparation/validation. Register new L1 modules in the existing consolidated targets.
   - Checkpoint: the mixed Content Policy fixture prepares; lowering contains the expected `items.anyOf`; `[null]` fails; required union properties behave correctly; unchanged baseline corpus bytes still match. Core API/file ownership is stable before parallel consumers begin.
@@ -161,17 +231,17 @@ requires recording every other cell in that row and column.
 
 ### Wave 4 — Library Walkers (Parallel)
 
-- [ ] **Report Union Items**
+- [x] **Report Union Items**
   - Own `schemas/validate.rs` and `discriminant.rs`. Traverse nullable container wrappers, array indices, item alternatives, and nested object fields for problem descriptions and schema-node lookup, including `/content_policy/1/rule`.
   - Reuse the shared literal-discriminant selector. Missing, unknown, duplicate, conflicting, and overlapping tags retain ordinary union reporting; any matching arm still validates. Closest-arm explanations must not authorize effects.
   - Test independent items selecting different arms and item/property parity for the same union; verify failure paths and descriptions through public reports.
-- [ ] **Coerce Union Items**
+- [x] **Coerce Union Items**
   - Own `schemas/coerce.rs`. Preserve specialized boolish/numberlike recognition before generic `anyOf` handling and apply the property-union rule separately to each item.
   - Evaluate candidates from the original item independently; commit only one validating candidate. Test zero/multiple candidates remaining unchanged, nested object candidates, mixed-item choices, and item/property parity.
-- [ ] **Rewrite Union Items**
+- [x] **Rewrite Union Items**
   - Own `schemas/rewrite.rs`. Reuse the unambiguous eligible eager-file rule for scalar items and nested object-arm file fields, with the existing captured request context.
   - Test successful normalization using fixture files, lazy-file preservation under union/container `eager`, ambiguous alternatives without rewriting or new probes, and repeated normalization idempotence. Validation-only entry points remain read-only.
-- [ ] **Preserve Cleanup Safety**
+- [x] **Preserve Cleanup Safety**
   - Own `schemas/clean.rs`. Descend through arrays but leave genuine union items unrepaired, including literal-tagged items that fail every closed object arm because of an extra key.
   - Assert tagged and untagged invalid items remain unchanged, no key disappears, their problems are reported, and a repairable non-union sibling still changes as before. Preserve specialized non-genuine-union handling.
 
@@ -182,14 +252,14 @@ reporting owner publishes any necessary interface changes.
 
 ### Wave 5 — Typed Consumers (Parallel)
 
-- [ ] **Complete Item Alternatives**
+- [x] **Complete Item Alternatives**
   - Own `schemas/completion.rs` and its typed query helpers. Offer object-arm keys and scalar-arm values for incomplete list items, combining applicable alternatives and narrowing only with an unambiguous literal tag.
   - Test missing/invalid/partial items, overlapping arms, different choices at neighboring indices, advisory suggestions, and no effectful evaluation.
-- [ ] **Describe Typed Arrays**
+- [x] **Describe Typed Arrays**
   - Own `schemas/about.rs`, `frontmatter_shape.rs`, `phase.rs`, `detect.rs`, `triggers/matcher.rs`, and `compose/context/catalog.rs`. Audit each new representation branch for item traversal versus container metadata rather than adding blind wildcard fallbacks.
   - Verify descriptors expose all alternatives and descriptions, nested presence/timing remains scoped, launch/completion behavior retains the existing marker contract, and passive detection/matching/catalog inspection performs no effects.
   - Test `about`'s model and descriptor catalog output without unsupported anonymous syntax; use existing terminal components for any rendered output changes.
-- [ ] **Adapt Editor Surfaces**
+- [x] **Adapt Editor Surfaces**
   - Own DMLS `overlay/schema.rs`, `providers/frontmatter.rs`, and delegated parser/hover/diagnostic walkers. Consume the canonical library representation and error tree, not an editor-specific union interpretation.
   - Hover shows an arm only for a unique valid match; missing, invalid, or multiply matching values show alternatives. Completion retains combined choices unless a literal tag selects one arm.
   - Add L1 parser, hover, completion, and schema-error tests through existing editor APIs/protocol fixtures. Verify use-site and definition related information where available; do not add item line/column support.
