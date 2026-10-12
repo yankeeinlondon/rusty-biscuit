@@ -14,6 +14,7 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 | `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `Headers`, `ApiRequest`, `ApiResponse` |
 | `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
+| `schematic-runtime` | Hand-written request runtime: managed `Client<A>` (built from an `ApiDefinition` through `ClientBuilder`, optional `SharedTransport`, redirects never followed by the HTTP library) and its typed `send(request, &CallOptions)`; `Response` envelope, `ApiError`/`ErrorKind`, `TransportError`, redacted `RequestMeta`/`ResponseMeta` (`SecretNames`); `AuthConfig`/`CredentialPlacement`/`EnvFallback` and `Credential` (per call → client → first non-empty env var → anonymous); `Deadline`; codecs `Json`, `Text`, `Binary`, `Empty`; the `EndpointSpec` and `Decode` contracts. Generated clients do not use it yet (planned) |
 | `schematic-schema` | Generated clients (auto-generated, do not edit) |
 
 ## CLI Commands

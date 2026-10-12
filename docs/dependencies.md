@@ -7,6 +7,18 @@
 
 ## Recent Dependency Notes
 
+- `schematic-runtime` joins the workspace at `schematic/runtime/`
+  (2026-10-12): the hand-written request runtime that generated REST clients
+  will share. Its dependencies (`bytes`, `futures-core`, `http`, `tokio` with
+  `time`, `url`) and dev-dependencies (`futures-util`, `trybuild`, and
+  `tokio`'s `test-util`) were already in the graph, so the lockfile gains no
+  package. See `schematic/docs/dependencies.md`.
+- `schematic-runtime` adds managed sends (2026-10-12): production
+  dependencies `reqwest` 0.13 (`rustls` only), `rustls` 0.23 (error type
+  only), `base64` 0.22, `futures-util`, `serde`, and `serde_json`, and
+  dev-dependencies `wiremock`, `rcgen`, and `tokio-rustls` for local HTTP and
+  TLS mocks. All were already in the workspace graph and in
+  `schematic/schema/Cargo.lock`; the lockfile gains no package.
 - `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
   `default-features = false` (2026-10-03). It was already in the graph through
   `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
@@ -373,6 +385,7 @@ This is a Rust workspace with the following modules:
 - `schematic/define/Cargo.toml` - REST API definition primitives
 - `schematic/definitions/Cargo.toml` - Pre-built API definitions
 - `schematic/gen/Cargo.toml` - REST API code generator CLI (`schematic-gen`)
+- `schematic/runtime/Cargo.toml` - Request runtime shared by generated REST clients
 - `schematic/schema/Cargo.toml` - Generated REST API clients (auto-generated)
 - `sniff/lib/Cargo.toml` - System discovery (OS, hardware, network, programs)
 - `sniff/cli/Cargo.toml` - System discovery CLI (`sniff`)
@@ -597,6 +610,12 @@ This is a Rust workspace with the following modules:
     _Code generator for REST API client code from schematic definitions._
 
     _Tags: workspace, cli, codegen_
+
+- [schematic-runtime](./schematic/runtime) _v0.1.0_
+
+    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs._
+
+    _Tags: workspace, library, api, http_
 
 - [schematic-schema](./schematic/schema) _v0.1.0_
 
