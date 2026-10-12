@@ -77,6 +77,7 @@ mod schema_union_matrix_cells;
 mod schema_union_pipeline;
 mod schema_validate;
 mod schema_validate_baseline;
+mod schema_validate_core_types;
 mod schema_validate_phase;
 mod spawn_site_guard;
 mod test_layout;
