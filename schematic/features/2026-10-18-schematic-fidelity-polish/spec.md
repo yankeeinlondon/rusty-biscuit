@@ -223,6 +223,22 @@ Restated in full so the implementer need not open the parent. Provenance:
   derives on `RestApi`/`Endpoint`/`EndpointParams`/`ParamDef`, with JSON
   definition snapshots from spec 4a. No credential resolves means anonymous
   (D56-1).
+- **D57 (rulings on the second child-spec review; items 12, 19, 21 to 24
+  apply here).** Item 12: container registrations such as `Vec<Commit>` are
+  dropped (spec 4a); containers reuse the element's registration and export
+  inline. Item 19: inbound WebSocket messages declare selectors on existing
+  wire fields (`.matches(field, value)`), with at most one `.fallback()`
+  message per direction (spec 6); the AsyncAPI exporter serializes the
+  selectors. Item 21: WebSocket heartbeats are caller-managed (spec 6); this
+  spec keeps the `HeartbeatHints` metadata on export. Item 22: only the auth
+  details standard OpenAPI cannot express (a bearer header override, an
+  API-key value prefix) are carried in the versioned `x-schematic` extension;
+  `securitySchemes` stays authoritative for everything else. Item 23: Postman
+  exports each GraphQL operation as a runnable `POST` with
+  `{query, variables, operationName}`; OpenAPI skips it with a diagnostic;
+  this spec owns the Postman form. Item 24: the WebSocket endpoint role
+  (`Client`, `Host`, `Both`) from spec 6 is exported as `x-schematic-role` on
+  the AsyncAPI channel and is part of R27's equality.
 - **D36 (consumed here).** Same-address endpoints that differ by a body
   selector merge into one OpenAPI operation listing both content types. This
   spec's exporter changes must not regress that.
@@ -322,6 +338,16 @@ added it uses `just test-l2` and must never take window focus.
   shipped registries. If spec 4a's typed registration already registers nested
   types automatically, the test asserts the closure holds and the log records
   that the check is now a backstop.
+- **R53. Containers export inline, never as named components (D57 item 12).**
+  Spec 4a drops container registrations such as `Vec<Commit>` and lists the
+  removal in its R24 JSON comparison. The OpenAPI export reuses the element's
+  registration and writes the container inline (for example
+  `{"type":"array","items":{"$ref":"#/components/schemas/Commit"}}`); no
+  component key names a container or contains `<`. The R5 scan and the R7
+  closure walk treat such inline arrays like any other schema. Validated by:
+  an L1 export test over an endpoint returning `Vec<T>` (inline array with an
+  element `$ref`, no container component), plus an assertion over the 18
+  registries' exported `components.schemas` keys.
 
 ### Required constant headers (D46, recommendation 7)
 
@@ -391,12 +417,29 @@ added it uses `just test-l2` and must never take window focus.
 - **R15. The two dead extension structs are deleted or wired.**
   `SchematicSchemaExtension` and `AuthExtension` are either wired into the
   export and import (and covered by R10) or deleted with their rustdoc and
-  public re-exports. Default: delete unused structs after resolving authentication preservation
-  in Open Questions; required metadata may instead live in the document extension. Every doc, comment, and file that
+  public re-exports. `AuthExtension` is not wired as a whole (D57 item 22);
+  the auth details it would have carried that OpenAPI cannot express live in
+  the versioned extension instead (R54). Default: delete both unused structs
+  once that mapping is in place. Every doc, comment, and file that
   claims a round trip is made accurate for the supported subset (the three
   files named in the parent: `extensions.rs`, `export/mod.rs`, and
   `schematic/docs/io/openapi-extensions.md`). Validated by: L1 compile check
   (the symbols are absent or used), and a grep recorded in the log.
+- **R54. Auth details OpenAPI cannot express round-trip in `x-schematic`
+  (D57 item 22).** `securitySchemes` and operation `security` stay
+  authoritative for the auth method, credential location, name, and scopes.
+  Only two details are carried in the versioned `x-schematic` extension: a
+  bearer header override (a bearer token sent in a header other than
+  `Authorization`) and an API-key value prefix. No other auth field, and no
+  credential value, is written to the extension. These details are part of
+  R10's definition equality, not excluded from it. A conflict between the
+  extension and the standard scheme follows R12 (standard wins, WARN); a
+  malformed value follows R13. Proposed: the details sit at the level where
+  the auth is declared (document level for the API's auth, operation level
+  for an endpoint override). Validated by: L1 round-trip tests over fixtures
+  with an API-key value prefix (the prefix survives export and import) and a
+  bearer header override; a conflicting fixture (standard wins, WARN); and an
+  assertion that the extension holds no auth field beyond these two.
 
 ### Import fidelity (recommendation 9 context; ledger row 17)
 
@@ -468,6 +511,21 @@ added it uses `just test-l2` and must never take window focus.
   exclusions. Disable optional parameters unless an explicit example/default
   supplies a value. Validate combined cookies, optional values, and collisions
   using L1 fixtures.
+- **R55. GraphQL operations export to Postman and are skipped by OpenAPI (D57
+  item 23).** Spec 5 places typed GraphQL operations inside `RestApi`; this
+  spec owns their Postman form. Postman exports each operation as a runnable
+  `POST` to the resolved GraphQL URL whose JSON body is
+  `{query, variables, operationName}`, with the authored document as
+  `query`. The OpenAPI exporter skips each GraphQL operation and emits a
+  diagnostic naming it; it does not present operations as separate HTTP
+  paths and adds no GraphQL extension. GraphQL operations are therefore
+  outside the OpenAPI round-trip subset (R10) and listed as such. Proposed:
+  `variables` is an example built per P10-c from the operation's variables
+  schema where one is registered, otherwise `{}`. Validated by: L1 tests in
+  `schematic-gen` over a fixture with GraphQL operations: one Postman request
+  per operation with the expected method, URL, and body keys; the OpenAPI
+  document contains no path for them and the export reports one diagnostic
+  per skipped operation.
 
 ### AsyncAPI (D47)
 
@@ -488,14 +546,45 @@ added it uses `just test-l2` and must never take window focus.
   definition/catalog, diagnostics, and absence of dry-run writes.
 - **R27. Export then import is semantically equal.** For each of the five
   WebSocket APIs, exporting then importing yields a `WebSocketApi` equal in
-  meaning (channels, messages, directions, message schemas, auth, parameters)
-  to the original, within the supported subset (P10-a). Validated by: L1
-  round-trip test per API; differences outside the subset are listed in the log.
+  meaning (channels, messages, directions, message schemas, inbound message
+  selectors and the fallback message (R56), endpoint role (R57), auth,
+  parameters) to the original, within the supported subset (P10-a).
+  Validated by: L1 round-trip test per API, including a fixture whose
+  messages have overlapping payloads distinguished only by selectors and
+  fixtures for each role (`Client`, `Host`, `Both`); differences outside the
+  subset are listed in the log.
 - **R28. A generate recipe and committed artifacts.** A `just generate-asyncapi`
   recipe in `schematic/justfile` (modeled on `generate-openapi` and
   `generate-postman`) writes the documents to `schematic/asyncapi/` (P10-a
   default) and an artifact-drift test (modeled on `artifact_drift.rs`) fails
   when committed files differ from fresh output. Validated by: L1 drift test.
+- **R56. Inbound message selectors are exported and re-imported (D57 item
+  19).** Spec 6 has each message declare selectors on existing wire fields
+  (`.matches("kind", "resp").matches("msg", "pong")`), with at most one
+  `.fallback()` message per direction; untagged declaration-order decoding is
+  not used. The AsyncAPI exporter serializes every message's selectors and
+  its fallback marker, and the importer reads them back so the re-imported
+  definition selects the same message for the same frame. Proposed: a
+  Schematic extension on the message (for example `x-schematic-selectors`, a
+  list of field/value pairs, and `x-schematic-fallback: true`); the name and
+  shape are logged. An imported document with more than one fallback message
+  in a direction is a diagnostic, never a silent pick. Validated by: L1
+  round-trip tests (part of R27) over a fixture with overlapping payloads,
+  and an importer test for the duplicate-fallback diagnostic.
+- **R57. The endpoint role is exported and re-imported (D57 item 24).** The
+  role spec 6 introduces (`Client`, `Host`, `Both`) is exported as
+  `x-schematic-role` on the AsyncAPI channel and read back by the importer;
+  it is part of R27's equality. The document still describes the client
+  application for every role (P10-a); a host role is not exported from the
+  server's view. Validated by: L1 round-trip tests (part of R27) with one
+  fixture per role.
+- **R58. Heartbeat hints are kept on export (D57 item 21).** Heartbeats are
+  caller-managed (spec 6), but a definition's `HeartbeatHints` metadata is
+  written to the AsyncAPI document rather than dropped. Proposed: a Schematic
+  extension on the channel or message where the hint is declared, read back
+  by the importer and compared by R27; if read-back is not built, the loss is
+  listed in the log as an R27 difference. Validated by: an L1 export test
+  over a fixture declaring `HeartbeatHints`.
 
 ### Generated crate packaging (D18, D46, recommendation 10, 11)
 
@@ -713,17 +802,19 @@ repo-relative. Symbol names marked Proposed are illustrative.
 
 | Symbol or file | Package | What it does | Status |
 |---|---|---|---|
-| Schemars-to-OpenAPI bridge, `registry/conversion.rs` | `schematic-definitions` | Converts type arrays, `enum`/`const`, `oneOf`/`anyOf`/`allOf`, `additionalProperties`; keeps genuine free-form as `Any` (R1 to R4) | Decided (D18, rec. 8): the fixes. Proposed: structure |
+| Schemars-to-OpenAPI bridge, `registry/conversion.rs` | `schematic-definitions` | Converts type arrays, `enum`/`const`, `oneOf`/`anyOf`/`allOf`, `additionalProperties`; keeps genuine free-form as `Any` (R1 to R4); exports containers inline with an element `$ref` (R53) | Decided (D18, rec. 8): the fixes; containers inline (D57 item 12). Proposed: structure |
 | `classify_any(...)` and a lost-versus-deliberate scan test | `schematic-definitions` | Tells deliberate free-form from lost constraint (R5, R6) | Proposed |
 | `validate_completeness`, `registry/mod.rs` | `schematic-definitions` | Walks the transitive `$ref` closure (R7) | Decided (ledger row 7): the need. Proposed: the walk |
 | Constant-header parameter mapping, `define/src/openapi/export/` | `schematic-define` | Emits required constant headers as `in: header` single-value-enum parameters, endpoint over API (R8, R9) | Decided (D46, rec. 7) |
 | `SchematicDocExtension`, `SchematicOpExtension`, `extensions.rs` | `schematic-define` | Gain a document-level version and field defaults; read by the importer (R10 to R14) | Decided (D18, rec. 9): read or strike. Proposed: the version field |
-| `SchematicSchemaExtension`, `AuthExtension` | `schematic-define` | Deleted, or wired (R15) | Decided: "delete or wire". Proposed: delete |
+| `SchematicSchemaExtension`, `AuthExtension` | `schematic-define` | Deleted, or wired (R15) | Decided: "delete or wire"; `AuthExtension` not wired as a whole (D57 item 22). Proposed: delete |
+| Auth details in the versioned extension (bearer header override, API-key value prefix) | `schematic-define` | Carries only what `securitySchemes` cannot express (R54) | Decided (D57 item 22). Proposed: placement level |
 | Import pipeline: extension reader, path-item parameter merge, multipart mapping, strict-mode severity rule, `define/src/openapi/import/` | `schematic-define` | R10 to R18 | Decided (rec. 9; ledger rows 13, 14, 17): the defects. Proposed: structure |
 | Postman exporter, `gen/src/export/postman/` (examples, environment, saved responses, OAuth2, bodies, parameters) | `schematic-gen` | R19 to R24; receives the schema registry | Decided (D18): the items. Proposed: structure |
+| Postman GraphQL operation export; OpenAPI skip diagnostic | `schematic-gen` (Postman), `schematic-define` (OpenAPI exporter) | Runnable `POST` with `{query, variables, operationName}`; OpenAPI skips with a diagnostic (R55) | Decided (D57 item 23). Proposed: `variables` example source |
 | `ExampleValueSource`-style generator | `schematic-gen` | Builds a JSON value from a schema, deterministic (R19, P10-c) | Proposed |
-| AsyncAPI exporter, new `gen/src/export/asyncapi/` | `schematic-gen` | Exports a `WebSocketApi` to AsyncAPI (R25) | Decided (D47): existence. Proposed: module layout |
-| `asyncapi_import.rs` | `schematic-gen` | Persists the already-returned definition and catalog (R26) | Decided (parent section 8) |
+| AsyncAPI exporter, new `gen/src/export/asyncapi/` | `schematic-gen` | Exports a `WebSocketApi` to AsyncAPI (R25), with message selectors and fallback (R56), `x-schematic-role` on each channel (R57), and heartbeat hints (R58) | Decided (D47): existence; selectors serialized (D57 item 19); `x-schematic-role` (D57 item 24); hints kept (D57 item 21). Proposed: module layout, selector and hint extension names |
+| `asyncapi_import.rs` | `schematic-gen` | Persists the already-returned definition and catalog (R26); reads back selectors, fallback, and role (R56, R57) | Decided (parent section 8); read-back of selectors and role (D57 items 19, 24) |
 | `just generate-asyncapi`, `schematic/asyncapi/`, drift test | `schematic` (justfile), `schematic-gen` | Writes and guards the documents (R28) | Proposed |
 | Manifest generation, `gen/src/cargo_gen.rs` | `schematic-gen` | Emits per-API features, optional deps, default = all (R29, R32) | Decided (D18): per-API flags. Proposed: granularity (P10-d) |
 | Single registration inventory, with `apis_by_module()` derived from it | `schematic-definitions` (source), consumers in `schematic-gen` | Replaces the six runtime lists and the test tables (R33 to R35) | Decided (D46): one generated list. Proposed: mechanism (P10-e) |
@@ -743,10 +834,10 @@ green whenever generation changed.
    enumerate the API lists (R33); verify the stale tree is gone (R50); measure
    the emqx docs loss (R51); write the reproduction test for row
    14 (R14); record baselines in the log. No behavior change.
-2. **Schemars bridge and nested `$ref` check.** R1 to R7. Regenerate OpenAPI
+2. **Schemars bridge and nested `$ref` check.** R1 to R7, R53. Regenerate OpenAPI
    artifacts; review the diff is only intended type recovery.
 3. **Constant headers.** R8, R9. Regenerate OpenAPI artifacts.
-4. **Importer and `x-schematic`.** R10 to R18. Delete or wire the dead
+4. **Importer and `x-schematic`.** R10 to R18, R54. Delete or wire the dead
    structs; fix docs that claim a round trip.
 5. **Single API list and the completeness gate.** R33 to R35. Mechanical, but
    done before the module-path and feature-flag work, which both enumerate APIs.
@@ -754,8 +845,8 @@ green whenever generation changed.
 7. **Per-API feature flags.** R29 to R32. Regenerate `schematic-schema`;
    build every dependent crate.
 8. **Generated-docs honesty pass.** R38 to R41, R51. Regenerate.
-9. **Postman.** R19 to R24. Regenerate collections.
-10. **AsyncAPI.** R25 to R28 after spec 6's WebSocket types are confirmed.
+9. **Postman.** R19 to R24, R55. Regenerate collections.
+10. **AsyncAPI.** R25 to R28 and R56 to R58 after spec 6's WebSocket types are confirmed.
 11. **README doctests and verifications.** R42; verify R43 (no vendor-named
     pagination constructor, no shared preset layer) and R52 (`?` error in
     force, no `?` path remains).
@@ -767,7 +858,7 @@ green whenever generation changed.
 
 Done means all of the following, with evidence in `implementation-log.md`:
 
-- Every requirement R1 to R52 is met, or listed in the log as a deviation or
+- Every requirement R1 to R58 is met, or listed in the log as a deviation or
   accepted gap with a reason.
 - The build and tests pass on macOS, Linux, native Windows, and WSL2 per the
   repository rules. The implementer runs what the current host can run and uses
@@ -786,6 +877,17 @@ Done means all of the following, with evidence in `implementation-log.md`:
 - Every dependent crate builds and passes its tests: sniff, biscuit-speaks,
   model-citizen, `homelab/lib`, `eversolo-integration`, `arcam-amp-integration`,
   `sony-receiver-integration`, `unfolded-integration-helper`.
+- AsyncAPI export and re-import keep each endpoint's role and each inbound
+  message's selectors and fallback marker (R56, R57, D57 items 19 and 24);
+  heartbeat hints appear in the exported document (R58, D57 item 21).
+- An OpenAPI round trip keeps an API-key value prefix and a bearer header
+  override, and the `x-schematic` extension carries no other auth field
+  (R54, D57 item 22).
+- Each GraphQL operation exports to Postman as a runnable `POST` with
+  `{query, variables, operationName}`, and the OpenAPI export skips it with a
+  diagnostic (R55, D57 item 23).
+- No exported OpenAPI component names a container; containers export inline
+  with an element `$ref` (R53, D57 item 12).
 - The README, `schematic/docs/` topic pages, and affected skills in
   `.claude/skills/` are updated for changed behavior (R48), and the
   comment/docs drift pass is done (R49).
@@ -900,7 +1002,8 @@ use.
 - Create `schematic/asyncapi/`, `schematic/docs/` pages, and the new justfile
   recipe.
 - Delete `SchematicSchemaExtension` and `AuthExtension` if P10-b's default is
-  taken.
+  taken (`AuthExtension` is not wired as a whole, D57 item 22; R54 carries the
+  two auth details it cannot lose).
 - Edit `schematic-definitions` source files to adopt the single API list
   (R34). No vendor pagination preset moves (R43 is verification). This is *not* a
   rewrite of the roughly 519 endpoint literals; if a change would touch more than
@@ -967,29 +1070,38 @@ its recommended option as the default (D51 item 5).
   `servers` (from the base URL and protocol, with the security scheme),
   `channels` (one per endpoint path, with address and parameters), `operations`
   (send and receive, from message direction), `components.messages`,
-  `components.schemas` (from the model catalog), and `components.securitySchemes`
-  for the auth policy. Not exported: bindings beyond WebSocket query and
-  headers, traits, and correlation/heartbeat hints (the parent notes the hints
-  have zero users). Output directory `schematic/asyncapi/`, one file per API
+  `components.schemas` (from the model catalog), `components.securitySchemes`
+  for the auth policy, inbound message selectors and the per-direction
+  fallback marker (R56, D57 item 19), the endpoint role as `x-schematic-role`
+  on each channel (R57, D57 item 24), and `HeartbeatHints` metadata (R58, D57
+  item 21; the hints are kept on export even though the client does not
+  schedule heartbeats). Not exported: bindings beyond WebSocket query and
+  headers, traits, and correlation hints (the parent notes the hints have
+  zero users). Output directory `schematic/asyncapi/`, one file per API
   derived from the unified resolver (R36). The importer must add a genuine
   3.0 reader: the current `schematic-gen`
   [AsyncAPI importer](../../gen/src/asyncapi_import.rs) reads 2.x `url` and
   `publish`/`subscribe`, not 3.0 `host`/`pathname` and operations. Preserve
   existing 2.x imports and reject unsupported versions explicitly. Export
   describes the client application: client messages use `send`, server
-  messages use `receive`, bidirectional messages appear in both. Preserve
+  messages use `receive`, bidirectional messages appear in both; this holds
+  for every endpoint role, which travels in `x-schematic-role` (D57 item 24).
+  Preserve
   handshake URL assembly without duplicating base-path segments. Security is
   derived from applied server/operation declarations, not merely the first
   component scheme. See the [AsyncAPI 3.0 contract](https://www.asyncapi.com/docs/reference/specification/v3.0.0).
   Local references remain self-contained; imports never fetch remote schemas.
-  The importer is only required to read back this subset in 3.0.
+  The importer is only required to read back this subset in 3.0; selectors,
+  the fallback marker, and the role are part of it (R27).
 - **P10-b. `x-schematic` supported subset and version handling (D18).**
   Default if not ruled before planning: the subset is what the exporter writes
   and OpenAPI cannot express, **refreshed to include everything written by
   specs 2, 4a, 4b and 5**: rate limit, `deprecated`, auth override, endpoint
   `cross_origin`, request-id, the error table, `x-schematic-selector`, response
   shapes (including the D56 end-marker `keep` modifier and the `Bytes`
-  framing), and secret markers, in addition to the earlier document level
+  framing), secret markers, and the two auth details OpenAPI cannot express
+  (a bearer header override and an API-key value prefix; R54, D57 item 22),
+  in addition to the earlier document level
   (`module_path`, `request_suffix`, `env_mapping`, `headers`) and operation
   level (`request` where it carries more than OpenAPI shows, such as
   `FormField` detail; `response` kind and content type where standard fields
@@ -1002,10 +1114,12 @@ its recommended option as the default (D51 item 5).
   major) to the document-level extension and read an absent version as 1.
   Standard OpenAPI fields win on conflict (R12). `deprecated`, scopes, and
   expressible auth alternatives use standard fields; extensions retain only
-  additional semantics. Authentication preservation is the Open Questions
-  decision below: do not treat deletion of `AuthExtension` as permission to
-  lose custom headers/prefixes or credential-placement metadata. Delete unused
-  extension structs only after the supported field mapping is settled. If an earlier spec removed or renamed
+  additional semantics. Authentication preservation is ruled (D57 item 22):
+  `securitySchemes` is authoritative, and the extension carries only the
+  bearer header override and the API-key value prefix (R54); deleting
+  `AuthExtension` must not lose either. GraphQL operations are outside the
+  subset; OpenAPI skips them with a diagnostic (R55, D57 item 23). Delete
+  unused extension structs only after the supported field mapping is settled. If an earlier spec removed or renamed
   an extension field, the subset follows the current struct. The claim "full
   round trip" is replaced with "semantic round trip for the supported subset"
   everywhere.
@@ -1112,56 +1226,14 @@ than matching REST grouping. Validate shared-module filenames and preserve 2.x
 import fixtures. A schema validation gap may be recorded, but writing 2.x fields
 under a 3.0 version is a defect, not an accepted validation shortcut.
 
-### Authentication details beyond OpenAPI security schemes
+### Ruled since this spec was written
 
-In `schematic-define`, [AuthStrategy](../../define/src/auth.rs) describes how
-credentials are placed on requests. Standard security schemes cannot express
-all custom bearer headers or API-key value prefixes. The proposed extension
-struct deletion conflicts with definition equality when these facts disappear.
-
-1. **Preserve only missing placement metadata — recommended.** Keep standard
-   security authoritative for methods, locations, names, and scopes; carry
-   additional placement/prefix details in the document or operation extension.
-   Pros: restores supported definitions without maintaining two full auth
-   descriptions; contains no credential values. Cons: requires an explicit
-   field-by-field standard/extension mapping and conflict tests.
-2. **Exclude nonstandard authentication from definition equality.** Pros:
-   smallest implementation. Cons: re-imported clients can send credentials
-   incorrectly; every exclusion must be prominently documented and diagnosed.
-3. **Wire the full existing authentication extension.** Pros: retains the
-   complete strategy. Cons: duplicates standard fields, enlarges conflict
-   handling, and risks reviving removed legacy fields.
-
-Recommend the minimal placement metadata. Before implementation, the supported
-subset table must name every included field, its source, conflict behavior, and
-normalization. Compare projected definitions, not raw structs; document excluded
-fields explicitly. A standard/extension conflict is a warning and standard
-values win, but compatible framing, selector identity, and prefix metadata are
-retained. Malformed data is a diagnostic, never an importer panic.
-
-### GraphQL operations added by the response-model work
-
-The preceding specification places typed GraphQL operations inside `RestApi`.
-The refresh note currently treats export treatment as optional, which could
-silently omit generated operations from an otherwise complete collection.
-
-1. **Runnable Postman operations and explicit OpenAPI limits — recommended.**
-   Postman sends the authored GraphQL document, variables, and optional
-   operation name as the defined JSON POST body at the resolved GraphQL URL.
-   OpenAPI export explicitly diagnoses GraphQL operations outside its supported
-   subset; it does not pretend separate operations are separate HTTP paths.
-   Pros: preserves a usable external artifact without inventing GraphQL parsing
-   or expanding the standard. Cons: full OpenAPI definition equality excludes
-   these operations until an extension contract is agreed.
-2. **Carry GraphQL operations in versioned OpenAPI metadata too.** Pros: extends
-   round-trip coverage to the whole API. Cons: adds a new public extension
-   contract and fixtures for operation identity, variables, data, and error policy.
-3. **Exclude GraphQL from both exporters with diagnostics.** Pros: smallest
-   scope. Cons: Postman remains incomplete despite known typed operations.
-
-Recommend runnable Postman export and explicit OpenAPI exclusions. The author
-must decide whether full GraphQL extension fidelity belongs in this change;
-no document parser, new GraphQL transport, or provider calls are required.
+- Authentication details beyond OpenAPI security schemes: ruled in D57 item
+  22; see R54 and P10-b.
+- GraphQL operations added by the response-model work: ruled in D57 item 23;
+  see R55.
+- WebSocket endpoint role on round trip: ruled in D57 item 24; see R57 and
+  R27.
 
 ## Risks and failure modes
 
@@ -1190,6 +1262,12 @@ no document parser, new GraphQL transport, or provider calls are required.
   WebSocket types more than expected, the exporter shape and P10-a change;
   see Refresh notes. The AsyncAPI JSON Schema validation may be unavailable
   offline (unverified).
+- **Schematic-only AsyncAPI metadata.** Selectors, the fallback marker, the
+  role, and heartbeat hints (R56 to R58, D57 items 19, 21, 24) live in
+  Schematic extensions that third-party AsyncAPI tools ignore, so those tools
+  see overlapping messages with no way to tell them apart. Mitigation: the
+  AsyncAPI topic page states this; the round trip through Schematic's own
+  importer is the guarantee.
 - **Round-trip claims overreach.** Counter: the supported subset is explicit
   and anything outside it is listed, not silently accepted.
 - **README doctests take long or need network.** Use `no_run` or `ignore` with
@@ -1203,7 +1281,7 @@ no document parser, new GraphQL transport, or provider calls are required.
 - **A cross-platform trap.** Case-insensitive file systems (macOS default,
   Windows) can collide stems that differ only by case after the resolver
   change; assert stem uniqueness case-insensitively.
-- **Time and size.** The scope is wide (52 requirements). If a phase
+- **Time and size.** The scope is wide (58 requirements). If a phase
   cannot be completed without a decision, the implementer takes the default,
   logs it, and continues; it does not stop the run for a human.
 
@@ -1258,7 +1336,8 @@ occurs, for the author's review 1.
 8. The supported `x-schematic` subset as built, re-derived from the actual
    extension structs and refreshed for specs 2, 4a, 4b and 5, the version
    rule, the conflict rule, and anything dropped from the round trip (R10 to
-   R15).
+   R15), including where the bearer header override and API-key value prefix
+   are placed (R54, D57 item 22).
 9. Which extension structs were deleted or wired.
 10. The strict-mode default and behavior change (R16, P10-i): strict fails on
     WARN and ERROR, never INFO, as it changes what users of `strict` observe.
@@ -1270,7 +1349,9 @@ occurs, for the author's review 1.
 14. The Postman example values for three representative endpoints, so the
     author can judge them; any endpoint whose body could not be generated.
 15. The AsyncAPI round-trip results per API, with differences (R27), and
-    whether schema validation of the output was possible.
+    whether schema validation of the output was possible; the extension names
+    and shapes chosen for selectors, the fallback marker, and heartbeat hints,
+    and whether hints are read back (R56 to R58, D57 items 19, 21, 24).
 16. The ledger disposition table (R45), the full accepted-gap list (optional
     auth (Ollama), auth dual-source cleanup, invented HuggingFace stub shapes,
     orphaned types, typed convenience methods) with reasons, and every row
@@ -1290,6 +1371,10 @@ occurs, for the author's review 1.
 24. The `x-schematic` subset's coverage of the `keep` modifier and `Bytes`
     framing, the deletion of the `oauth_scopes` copy, and which spec 4a JSON
     snapshots the round trip and definition-serialization tests build on.
+25. The GraphQL operations exported to Postman, the `variables` example
+    source, and the OpenAPI skip diagnostics (R55, D57 item 23).
+26. The container-component check over the 18 registries (R53, D57 item 12),
+    with any container component still found.
 
 ## Refresh notes
 
@@ -1316,19 +1401,22 @@ review 1 and their implementation logs:
   subset in the plan.
 - **Spec 4a (definition API) and 4b (definition vocabulary).** Typed registration and whether nested types are
   auto-registered (R7); the shape of API-level constructors that the single
-  list touches (R34); the per-API strategy functions and the `?` hard error
+  list touches (R34); the removal of container registrations and its R24
+  listing (R53, D57 item 12); the per-API strategy functions and the `?` hard error
   and migration (R43, R52); the `oauth_scopes` removal and `auth_policy`
   builder form (decided, D56-6), reflected in the `x-schematic` subset
   (P10-b) and the OpenAPI `security` mapping; serializable definitions and
   JSON snapshots (which may let `x-schematic` carry more); the typed path parameters, `deprecated`, and rate limit
   vocabulary that the exporters and importer must now read or write.
 - **Spec 5 (response model v2 and GraphQL).** Success/error/stream shapes and
-  selector-merged operations in the exporters (R2 to R4, R21); the GraphQL operations added to `RestApi` and the export treatment
-  selected in Open Questions; the extension's `response`
+  selector-merged operations in the exporters (R2 to R4, R21); the GraphQL operations added to `RestApi`, whose export treatment
+  is ruled (R55, D57 item 23), and whether spec 5 R42's skip wording names
+  this spec as the Postman owner; the extension's `response`
   field type (P10-b).
 - **Spec 6 (WebSocket).** The final `WebSocketApi` model, the typed message
   enums, the explicit response link, and the reused REST types (R25 to R27, and
-  the P10-a subset).
+  the P10-a subset); the final selector, fallback, role, and `HeartbeatHints`
+  shapes (R56 to R58, D57 items 19, 21, 24).
 - **sniff's own spec.** Whether `FocusedProviderClient` is already retired (R47).
 - **Counts.** Refresh the API count (18 REST, 5 WebSocket), the endpoint
   literal count (about 519), the API-list inventory (six runtime lists plus

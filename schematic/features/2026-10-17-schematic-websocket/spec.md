@@ -59,6 +59,13 @@ not substitutes for the behavior stated here.
 > choices that need an author decision before the affected implementation.
 > It withdraws one draft default as unsafe (declaration-order decoding);
 > its recommendations are proposals, not decisions.
+>
+> *Update, 2026-10-11 (D57).* The author ruled the three Open Questions by
+> adopting the recommended options: declared message selectors (D57 item 19),
+> a typed setup callback for message-based authentication (D57 item 20), and
+> caller-managed heartbeats documented in rustdoc, without a
+> generation warning (D57 item 21, as revised). The rulings are
+> written into R3, R10, R13 and Design below.
 
 ## Problem
 
@@ -235,6 +242,19 @@ the parent spec named in the frontmatter, section 15 unless noted.
   `EndpointSpec`. (c) Any per-call override that tightens a shared setting
   uses the simple subset rule (D56-2). (d) Under a deadline, per-request time
   is `min(remaining, per-request timeout)` (D56-3).
+- **D57 (author rulings, 2026-10-11), as they apply here.** (19) Inbound
+  messages are selected by selectors declared on existing wire fields
+  (`.matches("kind", "resp").matches("msg", "pong")`), with at most one
+  `.fallback()` message per direction; untagged declaration-order decoding is
+  not used, and the AsyncAPI exporter serializes the selectors. (20) An
+  endpoint with a challenge flow takes a typed setup callback
+  (`connect_with_setup(opening, |session| async { .. })`) that runs on every
+  dial, including redials, before the client reports `Ready`. (21) Heartbeats
+  are caller-managed and documented in the generated client's rustdoc (no
+  generation warning), and the exporter keeps the metadata.
+  (24) The endpoint role (`Client`, `Host`, `Both`) introduced here is exported
+  as `x-schematic-role` on the AsyncAPI channel and is part of the round-trip
+  equality owned by `2026-10-18-schematic-fidelity-polish`.
 - **D39.** The shared runtime lives in a hand-written package (working name
   `schematic-runtime`; spec 2 fixes the final name, which this spec uses
   verbatim). Generated clients depend on it and stay thin.
@@ -284,7 +304,8 @@ redials does stop it, and the connection state becomes `Closed`.
 Validated by: L1 mock-server test in `schematic-schema`
 (`schematic/schema/tests/ws_runtime.rs` or a sibling file).
 
-**R3. The lifecycle open message is re-sent on every reconnect.** If an
+**R3. The lifecycle open message and setup callback are re-run on every
+reconnect.** If an
 endpoint declares a lifecycle open message, the supervisor sends it after each
 successful redial and before publishing state `Ready`. If the open message
 cannot be written, the attempt counts as a failed attempt (R2 semantics), the
@@ -294,11 +315,28 @@ connect call takes the endpoint's typed opening payload when one is declared,
 retains its serialized form privately, and reuses it on redial. It never
 constructs an arbitrary default payload. Endpoints without an opening message
 need no payload. A later explicit opening-message helper does not silently
-replace the retained payload or cause an extra automatic send. Authentication
-ordering is addressed in Open Questions.
+replace the retained payload or cause an extra automatic send.
+**Message-based authentication (D57 item 20).** An endpoint with a challenge
+flow takes a typed setup callback, `connect_with_setup(opening, |session|
+async { .. })`, that runs on every dial, the initial one and each redial,
+before the client reports `Ready`. `Ready` therefore means the protocol
+session is usable, not only that the upgrade completed. Credentials are
+resolved by the shared runtime (R5) before the callback runs, and the whole
+setup (opening write and callback) is bounded by the same per-attempt timeout.
+Flows stay per endpoint. A rejection reported by the callback is terminal,
+with no alternative-key or anonymous fallback; a transient setup failure counts
+against the R2 budget. Missing credentials still permit an anonymous upgrade
+(R6); a subsequent protocol rejection is reported, not bypassed. An opening
+payload containing an auth field must not become a second independent
+credential source; the plan states whether that field is filled from the
+resolved credential or rejected on conflict, and logs the choice.
 Validated by: L1 mock-server test: the server records the first text frame
 after each of three connections and asserts it is the open message each time;
-a second case where the server closes during the open write.
+a second case where the server closes during the open write; a
+challenge-success-redial test in which, after a forced redial, the setup
+callback runs again and completes its exchange before `Ready` is observed; a
+challenge-failure test (terminal, one exchange, no retry or anonymous
+fallback); and a setup stall bounded by the attempt timeout.
 
 **R4. The Bearer host template compiles.** The generated host module for a
 Bearer-authenticated WebSocket API compiles and its auth check returns
@@ -417,7 +455,7 @@ variant per `MessageSchema` named after `MessageSchema.name` and carrying the
 payload type that the message's `Schema` names. The generated client's primary
 surface becomes typed: `send(outbound)` and `next_event()` yielding the
 inbound enum (a decode failure yields an error event carrying the raw text;
-the connection continues; see the decoding question below). The untyped surface remains as an explicit escape
+the connection continues). The untyped surface remains as an explicit escape
 hatch (`send_value(serde_json::Value)`, `next_value_event()`). The name
 deliberately differs from REST `send_raw` (D45), which has different semantics
 (it returns status, headers and bytes); the names are a Proposed default. Lifecycle messages (open, close, keepalive) remain
@@ -433,12 +471,29 @@ JSON text and JSON binary framing remain distinct. Unsupported raw-binary or
 mixed framing must produce a named generation diagnostic under the shared
 validation rules rather than silently encode bytes as JSON. Binary decode
 errors retain bytes instead of claiming to retain text.
+**Message selection (D57 item 19).** Messages declare selectors on existing
+wire fields, for example `.matches("kind", "resp").matches("msg", "pong")`,
+with at most one `.fallback()` message per direction. An inbound frame is
+matched against the selectors once, before its payload is decoded, and is
+decoded only as the message its selector names; a frame matching no selector
+goes to the direction's fallback, or, with no fallback, yields the
+decode-failure error event. Untagged declaration-order decoding is not used,
+and no new wire tag is added. Validation (Error): more than one fallback in a
+direction; conflicting selectors in a direction (at least identical ones);
+in a direction with more than one inbound message, a non-fallback message with
+no selector. Selectors are part of the definition's serialized form so the
+AsyncAPI exporter in `2026-10-18-schematic-fidelity-polish` can export them.
 Validated by: L1 generated-output assertions in `schematic-gen` (variant
 names and directions); L1 compile-fail test (trybuild or the repo's existing
 compile-fail pattern) that sending a value of the wrong type does not
 compile; L1 mock-server test decoding every inbound message type of each of
-the five definitions from a recorded fixture frame; L1 test that a malformed
-frame yields the error event with raw text and does not close the connection.
+the five definitions from a recorded fixture frame and asserting the selected
+variant, not only that decoding succeeded; L1 test that overlapping fixtures
+(for example a Core pong that would also decode as the generic response)
+decode to the variant their selectors name, and that a frame matching no
+selector reaches the fallback; L1 plan tests for each selector Error; L1 test
+that a malformed frame yields the error event with raw text and does not
+close the connection.
 
 **R11. An explicit `responds_with` link replaces the string match.**
 `MessageSchema` gains `responds_with: Option<String>`: on a request message
@@ -498,13 +553,21 @@ with `HeartbeatHints` where the protocol has one. The ElevenLabs *definition* al
 uses `schematic_define::WebSocketApi`. Its payload structs remain ordinary
 Serde payload types, just as the other APIs' payloads do; register or resolve
 them through the shared schema mechanism without making them definition types.
-Declaring hints is not evidence that the generated runtime honors them:
-authentication and heartbeat consumption need the choices in Open Questions.
+Declaring hints is not evidence that the generated runtime honors them. The
+challenge exchange itself is performed by the setup callback (R3, D57 item
+20), not driven by the hints. Application heartbeats are caller-managed (D57
+item 21): declared `HeartbeatHints` are kept as metadata (the AsyncAPI
+exporter keeps them on export) but the client does not schedule them and no
+generation warning is produced. The generated client's rustdoc states each
+declared heartbeat (interval and expected message) so callers know to send it. The receive timeout (R8) and control-frame pongs are
+unaffected.
 Validated by: L1 definition-conformance test in `schematic-definitions`
 iterating all five and asserting the rules mechanically (no prose-only auth
 flow; every `responds_with` resolves; assert each role and message direction
 against a per-definition expected table kept in the test; do not try to infer
-author intent solely from `Bidirectional` values).
+author intent solely from `Bidirectional` values); L1 plan test that a
+definition declaring `HeartbeatHints` generates with no warning and its
+client rustdoc names the heartbeat interval and message.
 
 **R14. The generated host carries no Unfolded Circle assumptions.** The host
 module's event hub is named from the API (`{ApiName}EventHub`, where
@@ -580,12 +643,14 @@ Marked **Decided** only where the parent decided it; everything else is
 | [`ConnectionParam`, `ParamType`](../../define/src/websocket/params.rs) | `schematic-define` | Removed from the public API. | Decided (D8) |
 | `ParamDef` serde | `schematic-define` | `ParamDef`, `QueryParamType`, `ParamStyle` derives are owned by spec 4a (they derived no serde traits when checked). This spec only asserts they exist (compile-time or unit check) because `WebSocketApi` derives `Serialize`/`Deserialize`; it does not add them. | Owned by 4a; assertion Proposed |
 | `MessageSchema::responds_with` | `schematic-define` | Optional name of the answering message (R11). | Link: Decided (D8). Name and shape: Proposed |
-| `CorrelationHints`, `RequestIdType`, `HeartbeatHints`, `AuthFlowHints` | `schematic-define` | Existing hint types; correlation is consumed, and authentication/heartbeat behavior requires the Open Questions decisions. Unsupported declarations warn or error under the shared validation rules. | Proposed |
+| Message selectors (`.matches(field, value)`, `.fallback()`) | `schematic-define` | Declared on existing wire fields; at most one fallback per direction; serialized with the definition (R10). | Decided (D57 item 19). Validation details: Proposed |
+| `CorrelationHints`, `RequestIdType`, `HeartbeatHints`, `AuthFlowHints` | `schematic-define` | Existing hint types; correlation is consumed. The challenge exchange runs in the setup callback, not from the hints (D57 item 20). `HeartbeatHints` are kept, not scheduled, and documented in the client rustdoc with no warning (D57 item 21). Other unsupported declarations warn or error under the shared validation rules. | Heartbeat documentation: Decided (D57 item 21). Rest: Proposed |
 | `WsDiagnostic`, `WsSeverity` | `schematic-gen` | Existing; gain an `api` field (API name) if needed, and are mapped onto the generation-integrity spec's diagnostics format. No WebSocket-specific format. | Proposed |
 | `lower_to_plan` | `schematic-gen` | Collects all diagnostics (not only the first error), returns them with the plan or the failure. | Proposed |
 | `ws_modules` assembler | `schematic-gen` | Propagates `Err`; reports diagnostics through the shared mechanism; reuses the generation-integrity spec's two-phase writer and per-output validation. | Proposed |
-| Message enum emitters | `schematic-gen` (`ws_codegen/client.rs`) | Emit `{Endpoint}ServerMessage` and `{Endpoint}ClientMessage`, decode according to the message-selection decision in Open Questions, with the raw frame retained for the error path. | Proposed |
-| Supervisor loop template | `schematic-gen` (`ws_codegen/client.rs`) | Reset-on-success counter, open replay before `Ready`, idle receive timeout. | Behavior: Decided (D8 defect list). Details: Proposed |
+| Message enum emitters | `schematic-gen` (`ws_codegen/client.rs`) | Emit `{Endpoint}ServerMessage` and `{Endpoint}ClientMessage`, select by declared selectors before decoding (D57 item 19), with the raw frame retained for the error path. | Selection: Decided (D57 item 19). Rest: Proposed |
+| Supervisor loop template | `schematic-gen` (`ws_codegen/client.rs`) | Reset-on-success counter, open replay and setup callback before `Ready`, idle receive timeout. | Behavior: Decided (D8 defect list; setup callback D57 item 20). Details: Proposed |
+| `connect_with_setup(opening, \|session\| async { .. })` | `schematic-gen` (`ws_codegen/client.rs`) | Typed setup callback for endpoints with a challenge flow; runs on every dial, including redials, before `Ready` (R3). Ownership and cancellation of the session handle: Proposed. | Decided (D57 item 20) |
 | Handshake credential resolution | `schematic-gen` (`client.rs`) emitting calls into `schematic-runtime` | Resolve once with D11 precedence, place per `AuthStrategy`, report `AuthMethod`. | Rules: Decided (D11, D48). Reuse of runtime functions: Proposed |
 | Bearer host template | `schematic-gen` (`ws_codegen/shared.rs`) | Remove the trailing `;` defect; add a compile test. | Decided (fix); test shape Proposed |
 | Host module | `schematic-gen` (`ws_codegen/host.rs`) | Event hub named `{ApiName}EventHub`; `WsHandler` gains `on_authenticated` hook returning an optional endpoint-specific server message; no fixed envelope. | Proposed |
@@ -604,9 +669,9 @@ Notes for the implementer:
   D44) if spec 4 extended that to `MessageSchema`; otherwise keep today's
   name-based resolution and log the gap.
 - Enum decoding has no declared discriminator today (the parent models none).
-  The former default of untagged decoding in declaration order is withdrawn.
-  See the message-selection question below; fixtures must assert the chosen
-  variant, not just that deserialization succeeds.
+  The former default of untagged decoding in declaration order is withdrawn;
+  selection uses declared selectors (R10, D57 item 19). Fixtures must assert
+  the chosen variant, not just that deserialization succeeds.
 
 ### Contracts needed to make the requirements implementable
 
@@ -624,6 +689,10 @@ second transport architecture.
   server messages are host output. Add a fixture with `Both` and accurate
   one-way directions proving that a host is still emitted. Update the AsyncAPI
   importer to set the role explicitly where known or retain the client default.
+  The role is part of the definition's serialized form: the AsyncAPI exporter
+  in `2026-10-18-schematic-fidelity-polish` exports it as `x-schematic-role`
+  on the channel and includes it in round-trip equality (D57 item 24), so keep
+  the role names stable.
 - **Parameters and URL assembly (URL and shared-vocabulary requirements).**
   `schematic-define`'s [ParamDef](../../define/src/params/param_def.rs)
   carries no parameter location today, and neither does the old
@@ -697,8 +766,9 @@ second transport architecture.
 
 
 The supervisor's intended state flow is shown below. "Setup" includes the
-opening write and any protocol authentication selected by the author; completing
-the HTTP upgrade alone does not prove the application session is ready.
+opening write and, for an endpoint with a challenge flow, the setup callback
+(R3, D57 item 20); completing the HTTP upgrade alone does not prove the
+application session is ready.
 
 ```mermaid
 stateDiagram-v2
@@ -710,7 +780,7 @@ stateDiagram-v2
     Connecting --> Disconnected: transient attempt failure
     Setup --> Disconnected: transient setup failure
     Connecting --> Closed: rejected authentication or redirect
-    Setup --> Closed: rejected protocol authentication
+    Setup --> Closed: setup callback reports rejection
     Disconnected --> Closed: budget exhausted or deadline expired
     Ready --> Closing: manual close
     Closing --> Closed
@@ -723,111 +793,15 @@ same consecutive-failure budget as failed dials.
 
 ## Open Questions
 
-These choices change public behavior or require information the existing
-hints cannot express. Where a question states the scope that applies until
-the author rules, the implementer uses it and logs it. The message-selection
-question has no safe draft default; until it is ruled, independent work can
-proceed, but the unresolved choice remains an explicit limit on completion and
-is not permission to claim an unsupported feature works.
+All three questions this section held were ruled by the author on 2026-10-11
+by adopting the recommended option; the ruled behavior is in the requirements.
 
-### How should an inbound frame select its typed message?
-
-The proposed declaration-order decoder is unsafe. In `schematic-definitions`,
-[Core payloads](../../definitions/src/unfolded_circle/core_ws/types.rs) use
-broad enums for `kind` and `msg`; several specialized messages can deserialize
-as a generic envelope or as another specialized message. A successful decode
-alone does not establish its meaning. The fixture must assert the variant.
-
-1. **Declare selectors using existing wire fields — recommended.** Add optional
-   message match rules in `schematic-define` for field/value checks, with an
-   explicit generic fallback. For example a specialized pong matches
-   `kind=resp` and `msg=pong`; the generic response is the fallback for other
-   response names. Select once before decoding its payload. Pros: respects
-   the actual protocol, handles overlapping shapes, and avoids trying every
-   payload parser. Cons: adds definition vocabulary and validation, and its
-   serialization must remain usable by the later AsyncAPI exporter. Reject
-   conflicting selectors and keep unknown message names on the fallback.
-2. **Constrain payload types to disjoint shapes.** Use literal-valued
-   discriminators or custom Serde decoding in the definitions. Pros: less
-   generator vocabulary and decoding can remain untagged. Cons: changes
-   public payload types, may duplicate routing rules, and broad envelopes
-   still need explicit precedence over specialized types.
-3. **Detect multiple successful decodes and return ambiguity.** Pros: no new
-   wire selector contract and no silent wrong variant. Cons: tries multiple
-   payload parsers and rejects legitimate overlapping protocol messages.
-
-Recommend declared selectors because the existing wire tags already provide
-the missing information. Do not add a new wire tag or solve this only by
-reordering variants. The declaration-order default is withdrawn from the
-typed-message requirement and planning item 10; no replacement is decided
-until the author rules.
-
-### Who performs message-based authentication on each connection?
-
-In `schematic-gen`, [the planner](../../gen/src/ws_codegen/plan.rs) records an
-endpoint's authentication hints at API scope, but
-[the client template](../../gen/src/ws_codegen/client.rs) does not consume
-those hints. In `schematic-define`,
-[AuthFlowHints](../../define/src/websocket/hints.rs) names messages and schemas
-but has no credential field placement or precise success predicate. Merely
-adding those hints cannot make reconnects protocol-ready.
-
-1. **An endpoint-scoped typed setup callback — recommended.** Resolve
-   credentials with the shared runtime, then let a protocol adapter perform
-   the challenge exchange and opening write on each initial connection and
-   redial, before `Ready`. Bound the complete setup by the same attempt
-   timeout. Pros: supports real device flows without baking protocol field
-   names into generic templates. Cons: adds a callback API, must define its
-   ownership and cancellation, and needs shipped adapters and mock tests.
-2. **Extend declarative authentication hints.** Add credential placement,
-   exact success/failure matching, and ordering relative to the opening
-   payload. Pros: self-contained definitions and reusable generated flows.
-   Cons: larger vocabulary and validation; existing hints are insufficient
-   and the design must account for protocol-specific challenge data.
-3. **Require callers to authenticate after transport connection.** Pros: a
-   smaller transport API. Cons: moves replay and ordering onto every caller,
-   requires a separate transport-connected state instead of premature
-   `Ready`, and changes the goal of automatic protocol recovery.
-
-Recommend the callback because it can support the actual payloads while
-keeping the transport generic. Any selected design must keep flows per
-endpoint, repeat authentication on redial, and make rejection terminal with
-no alternative-key or anonymous fallback. Missing credentials still permit
-an anonymous upgrade as already decided; subsequent protocol rejection is
-reported rather than bypassed. An opening payload containing an auth field
-must not become a second independent credential source. Specify whether it
-is filled by the resolved credential or rejected on conflict. Include a
-challenge-success-redial test, a challenge-failure test, and a setup stall.
-Until the author rules, planning item 6 applies: no challenge exchange is
-automated, and `Ready` means the upgrade and any opening write completed.
-
-### Does heartbeat metadata start an automatic heartbeat?
-
-In `schematic-define`, [HeartbeatHints](../../define/src/websocket/hints.rs)
-provides intervals, but not the payload or response-matching contract for an
-application heartbeat. The client template does not consume it. An inbound
-idle timeout and protocol ping/pong support do not implement these hints.
-
-1. **Keep application heartbeat caller-managed, with diagnostics — recommended.**
-   Preserve declared metadata for later export, warn that automatic scheduling
-   is unsupported, and document how callers send their protocol heartbeat.
-   Pros: keeps this fix focused and makes the limitation visible. Cons: callers
-   own scheduling and the acceptance goal must explicitly allow this boundary.
-2. **Support automatic WebSocket control-frame pings only.** Pros: needs no
-   JSON payload and works for transport liveness. Cons: cannot represent an
-   application heartbeat; needs an explicit declaration that separates those
-   meanings and cannot silently reinterpret existing hints.
-3. **Add application-heartbeat callbacks or complete declarations.** Pros:
-   automatic scheduling and protocol response handling. Cons: expands the
-   supervisor work to timer ownership, missing-response policy, and per-device
-   payloads, contrary to the current transport scope.
-
-Recommend caller-managed application heartbeats for this specification. This
-narrows the design table's claim that every existing hint is consumed: unused
-heartbeat declarations produce a Warning rather than a false promise. The
-receive-timeout requirement still applies and control-frame pongs still work.
-The author must accept this scope boundary or choose automatic behavior before
-the normalization requirement can be declared complete.
+- How an inbound frame selects its typed message: ruled in D57 item 19
+  (declared selectors; see R10).
+- Who performs message-based authentication on each connection: ruled in D57
+  item 20 (typed setup callback; see R3).
+- Whether heartbeat metadata starts an automatic heartbeat: ruled in D57 item
+  21 (caller-managed, documented in rustdoc, no warning; see R13).
 
 ## Suggested phases
 
@@ -893,6 +867,16 @@ the following hold and are recorded in `implementation-log.md`:
   spec; behavior decided but unbuilt is marked **planned**.
 - A comments and docs drift pass covers every symbol whose behavior changed
   (code wins over comment; drift found and how it was resolved is logged).
+- Overlapping fixtures decode to the variant their selectors name, and a
+  definition violating the selector rules (two fallbacks in a direction,
+  conflicting selectors) fails validation (R10, D57 item 19).
+- After a forced redial the setup callback runs again before `Ready` is
+  reported; a callback rejection is terminal (R3, D57 item 20).
+- A definition declaring `HeartbeatHints` generates with no warning, its
+  client rustdoc names the heartbeat interval and message, and the metadata is
+  retained in the definition (R13, D57 item 21).
+- Each endpoint's role (`Client`, `Host`, `Both`) is explicit and survives a
+  `WebSocketApi` serde round trip, so the exporter can carry it (D57 item 24).
 - Ledger rows 3 and 9 to 12 are each recorded closed with the test that
   proves it, or recorded as an accepted gap with a reason (parent D20 requires
   this).
@@ -948,15 +932,18 @@ specifics are listed below.
   parameter, auth and header types this spec reuses.
 - **Followed by** the fidelity-and-polish spec, whose AsyncAPI exporter
   exports the five definitions in the shape this spec leaves. Anything this
-  spec renames or removes is that spec's input.
+  spec renames or removes is that spec's input. That exporter serializes the
+  message selectors (D57 item 19), keeps `HeartbeatHints` (D57 item 21), and
+  exports the endpoint role as `x-schematic-role` within its round-trip
+  equality (D57 item 24), all owned by
+  `2026-10-18-schematic-fidelity-polish`.
 - Sniff's retirement of its hand-written provider client (D20) does not
   depend on this spec.
 
 ## Planning-time details assigned to this spec
 
 Routine items below have defaults adopted and logged unless the author rules
-otherwise. The message-selection choice in Open Questions has no default and
-requires an author decision before typed decoding is implemented.
+otherwise. Message selection is ruled (D57 item 19) and is not a default.
 
 1. **Shape and name of the explicit response link (P10).** *Default if not
    ruled before planning:* `MessageSchema.responds_with: Option<String>` on the
@@ -980,10 +967,12 @@ requires an author decision before typed decoding is implemented.
    dial and open-message write; incremented on each failed dial or failed open
    write; `max_attempts` bounds consecutive failures.
 6. **Where the open message is replayed.** *Default:* after the dial succeeds
-   and before `Ready`; replay of an `AuthFlowHints` challenge exchange after a
-   reconnect is **not** added, because the existing client does not handle
-   challenges (**verified** 2026-10-11). Whether to automate message-based
-   authentication is the authentication question in Open Questions.
+   and before `Ready`. **Decided (D57 item 20):** an endpoint with a challenge
+   flow runs its typed setup callback on every dial, including redials, before
+   `Ready`; the challenge exchange is the callback's, not generated from
+   `AuthFlowHints`. *Default:* the order of the opening write relative to the
+   callback, and the ownership and cancellation of the callback's session
+   handle, are chosen at planning and logged.
 7. **Missing credential behavior (R6).** **Decided (D56):** when no credential
    resolves, connect proceeds anonymously and reports `Anonymous` (D11
    literally), the same as REST. There is no fail-before-dialing rule and no
@@ -999,9 +988,10 @@ requires an author decision before typed decoding is implemented.
    frame; expiry is an error event then the reconnect policy.
 10. **Typed enum naming and decoding.** *Default:* `{Endpoint}ServerMessage`
     and `{Endpoint}ClientMessage`; variants named by `MessageSchema.name`;
-    `Bidirectional` messages appear in both. Message selection is unresolved
-    pending Open Questions; declaration order is not a safe default. Decode
-    failure yields an error event retaining the original text or bytes.
+    `Bidirectional` messages appear in both. **Decided (D57 item 19):**
+    selection uses declared selectors with at most one fallback per direction;
+    declaration order is not used. Decode failure yields an error event
+    retaining the original text or bytes.
 11. **Untyped surface.** *Default:* keep `send_value(Value)` and
     `next_value_event()` as explicit escape hatches; the unsuffixed names become
     typed. `send_raw` is not used because D45 gives that name to the REST
@@ -1058,9 +1048,9 @@ requires an author decision before typed decoding is implemented.
 ## Risks and failure modes
 
 - **Overlapping payload shapes break untagged decoding.** A message may decode
-  as the wrong variant. The message-selection choice in Open Questions must
-  be settled before typed decoding is implemented; logging ambiguity alone
-  does not satisfy correctness.
+  as the wrong variant. Declared selectors (D57 item 19) settle the mechanism;
+  the remaining risk is a missing or wrong selector in a definition, which the
+  overlapping-fixture tests in R10 must catch.
 - **Spec 4 or 5 may have moved the REST types.** `ParamDef`, `EnvMapping`,
   `AuthPolicy` names and serde support may differ from the tree today. See
   "Refresh notes".
@@ -1083,7 +1073,9 @@ requires an author decision before typed decoding is implemented.
   and gated, R4 could pass by not running. The log records the command and
   result of the compile run.
 - **Scope creep into the exporter.** Renames made here change what the
-  AsyncAPI exporter (next spec) reads. Keep names stable once chosen.
+  AsyncAPI exporter (next spec) reads, now including selectors and the
+  endpoint role (D57 items 19 and 24). Keep names stable once chosen; this
+  spec does not write the exporter.
 
 ## Process
 
@@ -1106,9 +1098,8 @@ decision the implementer needs (above); every remaining planning-time detail
 has a default flagged "Default if not ruled before planning", which the
 implementer adopts and logs; and the implementer records the items in the
 agenda below in `implementation-log.md` **as they occur**, not at the end. For routine details, adopt the safest reading, log the choice, and continue.
-For the major choices in Open Questions, continue independent work and record
-the affected behavior as unresolved until the author settles it; do not
-silently turn a recommendation into an approved design.
+The former Open Questions are ruled (D57 items 19 to 21); do not silently
+turn any other recommendation into an approved design.
 
 ## Human review agenda
 
@@ -1121,9 +1112,12 @@ The implementer logs each of these in `implementation-log.md` for review 1:
 3. Every deviation from this spec or the parent's decisions, and the reason.
 4. Every open question found, with the evidence and the safest reading used.
 5. Specifically (anonymous upgrade behavior, refusal to follow redirects,
-   and the runtime trait name are already ruled and are not review items): the
-   response-link shape (planning item 1) and the message-selection,
-   authentication, and heartbeat choices described in Open Questions, the `send_value` / `next_value_event` naming (item 11), TLS
+   and the runtime trait name are already ruled and are not review items, nor
+   are message selection, the setup callback, heartbeat ownership, and role
+   export, ruled in D57 items 19 to 21 and 24): the response-link shape
+   (planning item 1), the selector-conflict rule (R10), the setup callback's
+   ordering, ownership and cancellation and the opening-payload auth field
+   (R3, item 6), the `send_value` / `next_value_event` naming (item 11), TLS
    for `wss://` (item 16), the retained `auth_policy` integration (item 12), the Samsung
    correlation decision (item 17), the corrected device paths and their
    evidence (item 4), and the ElevenLabs finding (definition uses

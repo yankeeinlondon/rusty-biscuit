@@ -131,7 +131,9 @@ not required reading.
   with SSE or NDJSON framing and an item type; each has an optional content
   type. The generated success type is a plain type for the common case, or a
   small generated enum when several success shapes exist. Declared error bodies
-  decode on demand from the error. This replaces the type of `Endpoint::response`
+  decode on demand from the error; per D57 item 10 this means the runtime decodes
+  them when the response arrives, into `ErrorKind::Declared(E)`, with the raw body
+  kept on the envelope, and the caller performs no decode. This replaces the type of `Endpoint::response`
   and is breaking for both exporters, the importer, and all endpoint definitions.
 - **D3 and D7 (context from earlier specs).** Every send returns
   `Result<Response<T, E>, TransportError>`; `T` is the declared success type and
@@ -204,6 +206,21 @@ not required reading.
   `Anonymous` (D56-1); no `MissingCredential` path exists. (4) Per-request time under a
   deadline is `min(remaining, per-request timeout)` (D56-3). The runtime trait is
   `EndpointSpec`. Pager-managed inputs are exempt from "required" (D55-5).
+- **D57 (author rulings, 2026-10-11).** Items that apply here: (9) the client-global
+  `pre_response_json` hook runs only on successful JSON bodies and is skipped for
+  non-2xx, text, binary, and stream bodies; GraphQL wire bodies are JSON and are seen
+  by it. (10) Declared error bodies are decoded when the response arrives, into
+  `ErrorKind::Declared(E)`, with the raw body kept. (14) For streams the per-request
+  timeout bounds time to headers and, after headers, is an idle bound between items;
+  a shared `Deadline` still bounds the whole stream. (15) GraphQL requests send
+  `Accept: application/json` only; every non-2xx reply takes the REST error path.
+  (16) A success shape may optionally declare exact statuses (`.status(202)`);
+  without them, selection uses media type plus the 204-empty rule. (17) SSE and
+  NDJSON enforce a per-frame byte limit, 16 MiB by default, settable on the managed
+  builder; `Bytes` framing is unaffected. (18) Provider error events inside an HTTP
+  200 stream are typed item variants. (23) Postman exports each GraphQL operation as
+  a runnable `POST`, owned by `2026-10-18-schematic-fidelity-polish`; OpenAPI skips
+  it with a diagnostic.
 - **D50 and D51.** This is spec 5 of 8 (1 generation integrity, 2 runtime envelope,
   3 pagination, 4a definition API, 4b definition vocabulary, 5 this spec, 6
   websocket, 7 fidelity polish). It depends on spec 4b, which depends on 4a, whose
@@ -253,13 +270,26 @@ and raw bytes retained. This proposed runtime error-kind addition applies only t
 multi-shape selection; it does not restore the removed response-kind guard.
 
 A single-shape endpoint keeps the earlier runtime's status and decoding behavior:
-no content-type check, and an undecodable success is `MalformedSuccess`. Distinct
-JSON schemas selected by status alone are not representable yet; the success-status
-mapping question in “Open Questions” records the proposed extension rather than
-silently introducing it here.
+no content-type check, and an undecodable success is `MalformedSuccess`.
+
+**R3a. Optional success statuses (D57 item 16).** A success shape may optionally
+declare one or more exact 2xx statuses (`.status(202)`). A shape without declared
+statuses is selected exactly as in R3 (media type plus the 204-empty rule); an
+endpoint that declares no statuses behaves as before. When some shapes declare
+statuses, a reply whose status one of them declares chooses among those shapes by
+the R3 media-type rule; any other 2xx status chooses among the status-less shapes
+(Proposed). A 2xx status that selects no shape is `UnexpectedContentType` with
+status, headers, and raw bytes retained (Proposed). Two shapes declaring the same
+status with the same effective media type, or a declared status outside 200-299,
+fail validation. On a single-shape endpoint declared statuses are documentation and
+export data only and do not change the runtime behavior above (Proposed). This makes
+distinct JSON schemas selectable by status (for example a 200 record and a 202 job
+receipt).
 *Validated by:* L1 local mock-server tests covering JSON plus stream, JSON plus 204,
-media-type parameters and case, and missing or conflicting content types; validation
-tests cover default-media-type collisions.
+media-type parameters and case, and missing or conflicting content types; a
+multi-shape endpoint with a 200 JSON shape and a 202 JSON shape of different types
+selecting each by status; validation tests cover default-media-type collisions and
+duplicate or out-of-range declared statuses.
 
 **R4.** Binary and text shapes record a content type that the OpenAPI exporter
 reports (R27) and the importer preserves (R28). A declared content type is
@@ -333,16 +363,20 @@ mock finishes sending.
 
 **R11a.** A stream inherits the call's shared deadline (**Decided**, D56-3: per-request
 time under a deadline is `min(remaining, per-request timeout)`); neither a new item nor
-a new poll extends the shared deadline. Whether the per-request timeout (default 30 s)
-also bounds the stream body after headers, and if so as a total lifetime or as an idle
-gap between items, is not settled by D56-3 and is an open question (see “Open
-Questions”). Expiry after headers yields one terminal stream error, preserving the
-distinction between shared-deadline expiry and per-request timeout, then ends. It
-never becomes a new outer `TransportError` after the envelope has been returned.
-Before headers, the earlier runtime's transport-error rules apply.
+a new poll extends the shared deadline. For a stream the per-request timeout (default
+30 s) bounds time to headers, and after headers it is an idle bound between items:
+`next()` waiting longer than the timeout since the previous item (or since headers,
+for the first item) yields a terminal timeout (**Decided**, D57 item 14, extending
+D56-3). It is not a total lifetime, so a healthy stream that keeps producing items
+runs past it; only the shared `Deadline` bounds the whole stream. Expiry after headers
+yields one terminal stream error, preserving the distinction between shared-deadline
+expiry and per-request timeout, then ends. It never becomes a new outer
+`TransportError` after the envelope has been returned. Before headers, the earlier
+runtime's transport-error rules apply.
 *Validated by:* L1 local mock-server tests for expiry before headers and during a
-stream under a shared deadline, plus the per-request-timeout case the author's
-ruling on the open question selects.
+stream under a shared deadline; a stream producing an item every second that
+outlives a 2 s per-request timeout; and a stream silent for longer than the
+per-request timeout that ends with a terminal timeout error (D57 item 14).
 
 **R11b. Framing and ownership.** HTTP chunks are not item boundaries. SSE decoding
 handles split UTF-8 and split delimiters, CR/LF line endings, comments, and joined
@@ -362,14 +396,30 @@ a missing field does not match. Raw chunks preserve byte order but have no stabl
 size. Streams own the body, deliver on caller polling, and retain no complete-body
 copy or background queue. Dropping one releases that body without spawning work;
 it need not close a shared HTTP/2 connection. This bounds retention by the pending
-frame and delivered item; the maximum frame-size policy remains an open question.
-Raw malformed-item bytes live on the item error. Stream failures after headers
+frame and delivered item. SSE and NDJSON framing enforce a per-frame byte limit,
+**16 MiB** by default and settable on the managed builder (**Decided**, D57 item 17);
+a pending frame that exceeds it yields one terminal limit-exceeded stream error that
+keeps only bounded diagnostic bytes, then the stream ends. `Bytes` framing assembles
+no frame and is unaffected. Raw malformed-item bytes live on the item error. Stream failures after headers
 cannot rewrite the previously returned envelope. Buffered HTTP failures still keep
 their raw bodies as the earlier runtime requires.
 *Validated by:* L1 framing fixtures split at awkward byte boundaries, end-condition
-validation, clean and interrupted EOF, and a local test that dropping a stream stops
-consumption without an application background task. No provider or multi-host
-performance benchmark is required.
+validation, clean and interrupted EOF, a local test that dropping a stream stops
+consumption without an application background task, and a mock-server test in which
+an unterminated SSE event over the frame limit (set low on the builder) ends with a
+limit error (D57 item 17). No provider or multi-host performance benchmark is
+required.
+
+**R11c. Provider error events (D57 item 18).** A provider error event sent inside an
+HTTP 200 stream is a typed variant of the stream's registered item type, delivered as
+`Ok(item)`; it is not a terminal transport or envelope failure and not a
+`StreamError`. For the migrated providers (R30-R33), every documented error event is
+included in the item type or recorded in the implementation log as unsupported; none
+is silently ignored. Without an explicit terminator, a subsequent close follows the
+existing stream-end rule. User-facing docs distinguish "stream item decoded" from
+"provider operation succeeded".
+*Validated by:* L1 mock-server test in which an SSE stream sends an error event after
+HTTP 200 and the caller receives it as the typed error variant of the item.
 
 **R12.** Spec 2 owns the hook mechanism (a marker trait implemented by
 JSON-decoded endpoints). The `ResponseKind` guard is removed by spec 2, so nothing here
@@ -378,12 +428,15 @@ builds against it. This spec only extends that mechanism to the new codecs: the 
 stream endpoint is a compile error in the generated client, not a silent no-op; the
 `GraphQl<D>` codec implements it per R41. A multi-shape codec supports a typed
 JSON mutator only when every alternative is JSON; otherwise registering that
-mutator is a compile error. The client-global JSON hook follows the runtime
-specification’s policy for non-JSON responses. Any existing definition among the four
+mutator is a compile error. The client-global `pre_response_json` hook runs only on
+successful (2xx) JSON bodies and is skipped for every other response, including
+non-2xx, text, binary, and stream bodies (D57 item 9); in a multi-shape endpoint it
+runs only when the selected alternative is JSON. Any existing definition among the four
 migrated APIs that has such a hook is fixed (D-26).
 *Validated by:* compile-fail test (trybuild) in the runtime package or
 `schematic-gen`; an L1 search-based test that no definition in
-`schematic-definitions` carries such a hook.
+`schematic-definitions` carries such a hook; an L1 mock-server test that the global
+hook is not called for a stream or non-2xx reply.
 
 ### Same-address endpoints (D36)
 
@@ -449,8 +502,9 @@ and the overlapping statuses.
 `schematic-define`.
 
 **R19.** At run time, lookup uses the merged table and the exact-then-narrower-range
-precedence above. API-level defaults are entries, not a third fallback match kind. The matched body decodes to the entry's shape and
-arrives as `Declared(E)`. A body that does not decode as the matched shape is kind
+precedence above. API-level defaults are entries, not a third fallback match kind. The matched body decodes to the entry's shape when the
+response arrives and is delivered as `Declared(E)`; the caller performs no decode
+(D57 item 10). A body that does not decode as the matched shape is kind
 `MalformedError` with the raw body. A status matched by nothing, or any status on an
 opted-out endpoint, is kind `Undeclared` with status, headers, and raw body. In every
 case the raw body is kept.
@@ -519,7 +573,8 @@ them. Reading it back is out of scope (the round trip
 is `2026-10-18-schematic-fidelity-polish`).
 *Validated by:* L1 serialization test in `schematic-define`.
 
-**R27.** The OpenAPI exporter emits, per operation: one response object per success status (`200` for body-bearing shapes, `204`
+**R27.** The OpenAPI exporter emits, per operation: one response object per success status (a shape's declared statuses when it has
+them, R3a and D57 item 16; otherwise `200` for body-bearing shapes, `204`
 for empty), merging every media type under that object rather than overwriting it, a `content` entry per
 shape's content type (`application/json` default for JSON, `text/event-stream` for
 SSE, `application/x-ndjson` for NDJSON, the declared type for text and binary,
@@ -549,8 +604,9 @@ Without a usable item schema, SSE/NDJSON items use `serde_json::Value` and
 connection-close termination, with a diagnostic; content type alone never proves
 a provider-specific terminator. Imported 204/no-content responses become empty.
 Deduplicate identical success shapes across statuses; if different success schemas
-share a media type, report an unsupported success-status mapping instead of silently
-picking one. OpenAPI `default`, 1xx/3xx response schemas, and multiple error media
+share a media type under different 2xx statuses, import them as shapes declaring
+those exact statuses (R3a, D57 item 16; Proposed mapping) instead of silently picking
+one. OpenAPI `default`, 1xx/3xx response schemas, and multiple error media
 types that require different schemas cannot be represented by the current table:
 report each with API, operation, feature, and import target. Do not pretend `default`
 means success or an API-wide default error. If an operation has no representable
@@ -636,16 +692,18 @@ variables type; L1 validation test for the unregistered data type.
 client crate as the REST endpoints, sent through the same generic send, with the same
 credentials, cross-origin rule, deadline, and envelope. When no credential resolves, the
 operation is sent anonymously and the envelope reports `Anonymous` (D56-1), as for REST.
-Queries and mutations use POST with `Content-Type: application/json`. The default
-`Accept` header is an open question (see “Open Questions”). The
+Queries and mutations use POST with `Content-Type: application/json` and
+`Accept: application/json` only (**Decided**, D57 item 15); the client does not
+negotiate `application/graphql-response+json`. The
 [GraphQL-over-HTTP draft](https://http-spec.graphql.org/draft/#sec-POST)
 is the transport reference; this spec does not claim complete conformance to that
 evolving draft. The wire body is
 `{"query": <document>, "variables": <typed variables>}` (and `operationName` only when
 the author sets one; Default D-21). The document is sent exactly as written; the
 generator does not parse it.
-*Validated by:* L1 mock-server test asserting the recorded request body; a test that a
-syntactically invalid document is sent unchanged.
+*Validated by:* L1 mock-server test asserting the recorded request body and the
+`Accept: application/json` header; a test that a syntactically invalid document is
+sent unchanged.
 
 **R37.** Decode the JSON wrapper before attempting typed data. On a 2xx response,
 a valid non-empty `errors` array always produces a declared GraphQL failure, even
@@ -661,10 +719,8 @@ distinguish execution data from request errors.
 
 A non-2xx reply takes the REST error path (R19) using the operation’s effective
 HTTP error table. Redirect refusal and body interruption retain the earlier
-runtime’s classifications. Whether a non-2xx `application/graphql-response+json`
-reply carrying GraphQL errors should instead be a declared GraphQL failure is an
-open question (see “Open Questions”); until it is ruled, no non-2xx body is decoded
-as a GraphQL wrapper.
+runtime’s classifications. Every non-2xx reply takes this REST path and no non-2xx
+body is decoded as a GraphQL wrapper, whatever its media type (D57 item 15).
 
 The generated failure type can hold both `GraphQlFailure<D>` and the effective HTTP
 error type: proposed `GraphQlOperationError<D, H> { GraphQl(GraphQlFailure<D>),
@@ -729,8 +785,9 @@ compile-fail test that an unauthored knob is not callable.
 **R41.** Hooks on a GraphQL operation run on the typed `data`, not on the
 `{data, errors}` wrapper: a response mutator receives the decoded data type, and the
 client-global pre-response JSON hook is documented as seeing the wire body (the wrapper)
-for GraphQL. The global hook runs once before decoding/classification on a
-2xx wire wrapper. A successful-data mutator runs only after a failure-free typed
+for GraphQL (D57 item 9: GraphQL wire bodies are JSON). The global hook runs once
+before decoding/classification on a 2xx wire wrapper and is skipped for non-2xx
+replies. A successful-data mutator runs only after a failure-free typed
 data decode; it never mutates partial data or erases an errors array. Hook failures
 use the earlier runtime’s hook error and preserve original bytes. HTTP-failure
 replies and stream alternatives follow the earlier runtime’s hook policy.
@@ -740,7 +797,10 @@ that the wire-level hook sees the wrapper.
 **R42.** GraphQL operations are not emitted by the OpenAPI or Postman exporters in this
 spec. Each export that skips an operation produces a diagnostic identifying the API,
 the operation, the feature ("GraphQL operation"), and the target output; the diagnostic
-does not fail the run (D10 backstop).
+does not fail the run (D10 backstop). The OpenAPI skip is permanent (D57 item 23). The
+Postman skip is interim: `2026-10-18-schematic-fidelity-polish` owns the Postman form,
+which exports each operation as a runnable `POST` with `{query, variables,
+operationName}` (D57 item 23), and removes this spec's Postman diagnostic when it lands.
 *Validated by:* L1 test in `schematic-gen` exporting an API that has an operation and
 asserting the diagnostic.
 
@@ -800,7 +860,7 @@ flowchart TD
     Frame -->|Malformed item| Malformed[Yield error and resume at next frame]
     Malformed --> Poll
     Frame -->|Declared end or allowed clean close| Done[Finish stream]
-    Frame -->|Early close, interruption, or expiry| Terminal[Yield one terminal error]
+    Frame -->|Early close, interruption, expiry, or frame limit| Terminal[Yield one terminal error]
     Terminal --> Done
 ```
 
@@ -818,7 +878,8 @@ difference.
   `Text`, `Binary`, `Empty`, `Stream { framing: StreamFraming, end: StreamEnd }` with
   registered item descriptors held by SSE/NDJSON framing only. The existing public
   `Success` builder from the definition-API draft is widened in place, with a stored `SuccessShape { shape: ResponseShape, content_type:
-  Option<String> }` if a separate stored form is needed;
+  Option<String>, statuses: Vec<u16> }` if a separate stored form is needed (empty
+  `statuses` means none declared; builder form `.status(202)`, D57 item 16);
   an endpoint holds a non-empty `Vec<SuccessShape>`. `StreamFraming` is `Sse`,
   `Ndjson`, and (Default D-17, **Decided** D56-8, extension of D6) `Bytes`, which carries a
   declared content type; the framing set stays non-exhaustive.
@@ -860,7 +921,12 @@ difference.
   Spec 2 may already have created `Json`, `Text`, `Binary`, `Empty`; check first and
   extend rather than duplicate (Default D-22).
 - **`StreamError` (Proposed).** Item errors for a stream: `Malformed { raw }`,
-  `EndedEarly`, `Interrupted` (a body break mid-stream), and timeout/deadline expiry.
+  `EndedEarly`, `Interrupted` (a body break mid-stream), timeout/deadline expiry
+  (the per-request idle bound and the shared deadline, D57 item 14), and frame limit
+  exceeded with bounded diagnostic bytes (D57 item 17). Provider error events are item
+  variants, not `StreamError` (D57 item 18).
+- **Frame limit setting (Proposed name; Decided by D57 item 17).** A managed-builder
+  setting for the SSE/NDJSON per-frame byte limit, default 16 MiB.
   Interrupted errors preserve pending frame bytes and safe structured causes;
   do not store HTTP-library error strings that may contain credentials.
 - **`GraphQlFailure<D>` and `GraphQlError` (Proposed names; shape Decided by D29).**
@@ -958,6 +1024,11 @@ The spec is "implementation complete, ready for review" when all of these hold:
    every item of the Human review agenda.
 9. The agent makes no commits without an explicit user instruction, and never moves this spec
    to `_completed`.
+10. The D57 stream checks pass: a stream producing an item every second outlives a 2 s
+    per-request timeout; one silent for longer than the timeout ends with a timeout error;
+    an unterminated SSE event over the frame limit ends with a limit error (R11a, R11b;
+    D57 items 14 and 17). The other D57 rulings that apply here (items 9, 10, 15, 16, 18,
+    and 23) have the checks named in R3a, R11c, R12, R19, R36, R37, and R42.
 
 ## Pre-authorizations
 
@@ -1033,8 +1104,9 @@ are not decisions until the author confirms them in review 1.
   `.ends_when_field("done", true)`, and the implicit default.
 - **Default D-5 (the "ended early" item and item errors).** *Default if not ruled before
   planning:* the stream yields `Result<Item, StreamError>`; `StreamError` is
-  `#[non_exhaustive]` with `Malformed { raw }`, `EndedEarly`, `Interrupted`, and timeout/deadline expiry. After
-  `EndedEarly` or `Interrupted` or expiry the stream ends; after `Malformed` it continues, except
+  `#[non_exhaustive]` with `Malformed { raw }`, `EndedEarly`, `Interrupted`, timeout/deadline expiry, and
+  frame limit exceeded (D57 item 17). After
+  `EndedEarly` or `Interrupted` or expiry or the frame limit the stream ends; after `Malformed` it continues, except
   when the malformed frame was a retained terminator.
 - **Default D-6 (range syntax).** *Default if not ruled before planning:* `Exact(u16)` and
   inclusive `Range(lo..=hi)` with a `class(n)` shorthand (`class(4)` is `400..=499`);
@@ -1077,7 +1149,7 @@ are not decisions until the author confirms them in review 1.
 - **Default D-14 (multi-shape selection).** Parent is silent. *Default if not ruled before
   planning:* effective Content-Type match, with HTTP 204 selecting the empty
   alternative first. Indistinguishable non-empty media types fail validation.
-  Additional success-status dispatch remains an open design question.
+  Optional declared success statuses (D57 item 16) refine this as R3a states.
 - **Default D-15 (multi-shape enum naming).** *Default if not ruled before planning:*
   `<EndpointId>Response` with variants named after the shape (`Json`, `Text`, `Binary`,
   `Empty`, `Stream`), or after the content type when two shapes share a kind
@@ -1119,112 +1191,22 @@ are not decisions until the author confirms them in review 1.
   the variables type serializes to an omitted `variables` field.
 - **Default D-28 (sniff-facing checks).** See R43: a test-only parity definition, no sniff
   edit.
-- **Default D-29 (GraphQL in exporters).** See R42: skip with a diagnostic.
+- **Default D-29 (GraphQL in exporters).** See R42: skip with a diagnostic. OpenAPI
+  skips permanently; the Postman form is owned by `2026-10-18-schematic-fidelity-polish`
+  (D57 item 23).
 - **Default D-30 (error `Debug` and redaction).** *Default if not ruled before planning:*
   error bodies follow D22 (stored metadata and `Display` are credential-free; a decoded
   error body prints as received in `Debug`); GraphQL `errors` are not redacted.
 
 ## Open Questions
 
-These choices affect public behavior and deserve author review before widening the
-implementation. Each question states the current bounded scope so an unattended
-implementer need not invent an answer. Recommended extensions are not accepted
-requirements merely because they appear below.
+All five earlier open questions were ruled in D57:
 
-### Should success shapes declare HTTP statuses?
-
-The current proposal selects body-bearing alternatives by media type and reserves
-204 for empty. It cannot distinguish a 200 JSON record from a 202 JSON job receipt,
-and cannot preserve a provider’s documented 201 status on export. The importer must
-report such limitations rather than choose an arbitrary schema.
-
-1. **Add optional exact success statuses — recommended.** A shape can declare
-   `.status(202)`; unspecified single-shape definitions keep their current behavior.
-   Multi-shape selection uses status before media type. **Pros:** represents common
-   APIs and avoids information loss in import/export without rewriting existing
-   builders. **Cons:** requires explicit rules for unmatched statuses, status-less
-   fallbacks, and overlap validation, plus tests and serialization changes.
-2. **Keep media-type selection and the 204 exception.** **Pros:** smallest change,
-   adequate for the named streaming migrations. **Cons:** different JSON replies by
-   status stay unsupported, and exported success status documentation remains coarse.
-3. **Select JSON alternatives by schema trial decoding.** **Pros:** needs no declared
-   status. **Cons:** overlapping schemas make results order-dependent, decoding may be
-   repeated, and the documented HTTP statuses still cannot be preserved.
-
-Recommend optional exact statuses because HTTP already supplies an unambiguous
-signal. Until the author adopts that extension and its dispatch rules, option 2
-is the implementation scope, with the stated importer diagnostics. This is an
-intentional limit, not a claim of complete OpenAPI response fidelity.
-
-### What limit should protect incomplete stream frames?
-
-Incremental delivery avoids retaining the whole response, but one SSE event or
-NDJSON line without a delimiter can still grow indefinitely. A timeout alone does
-not bound those bytes. Raw byte framing does not need to assemble such a frame.
-
-1. **Configurable per-frame byte limit — recommended.** Reuse an existing runtime
-   response-size setting if its semantics fit; otherwise add a framing limit with a
-   terminal limit-exceeded error retaining only bounded diagnostic bytes. **Pros:**
-   bounds memory even when the caller keeps polling, without buffering the entire
-   stream. **Cons:** the default value and override surface need agreement; large
-   legitimate events can be rejected.
-2. **Keep unrestricted frame size.** **Pros:** no new configuration and no event-size
-   compatibility change. **Cons:** a malformed or hostile stream can exhaust memory
-   before its timeout.
-3. **Spill unfinished frames to disk.** **Pros:** accommodates large frames with less
-   resident memory. **Cons:** introduces filesystem cleanup, I/O, and platform behavior
-   into a network decoder, and eventual JSON decoding can still require large memory.
-
-Recommend option 1. The author should select the default and configuration surface
-in the plan before adding a limit; this review does not invent a threshold. Existing
-runtime limits must not be bypassed. If none exists and no new limit is adopted,
-record unrestricted frame size as an unresolved risk rather than claiming bounded
-stream memory. No performance spike or extra host is needed to answer this question.
-
-### How should provider errors inside a successful HTTP stream reach callers?
-
-A provider may send an error event after HTTP 200. That is distinct from invalid
-JSON or a broken connection. The HTTP status-to-error table cannot classify it,
-and the response envelope has already been returned.
-
-1. **Preserve provider error variants in the typed item — recommended for this scope.**
-   Model those documented events in the registered item enum and document how the
-   caller recognizes them. **Pros:** preserves provider payloads and fits the existing
-   `Result<Item, StreamError>` without a new error-mapping language. **Cons:** `Ok(item)`
-   means successful decoding, not provider success; callers must inspect the item.
-2. **Add declarative event-error mapping to `StreamError<E>`.** **Pros:** provider
-   failures appear on the error side and can have explicit terminal behavior.
-   **Cons:** expands the public stream/error vocabulary, serializer, generator, and
-   provider-specific mapping rules beyond the current HTTP error design.
-3. **Convert named error events to untyped terminal stream failures.** **Pros:** simple
-   for one SSE provider. **Cons:** loses typed detail and does not generalize to NDJSON
-   or providers whose errors are represented in data fields.
-
-Recommend option 1 now and option 2 only as an explicitly designed extension. For the
-migrated providers, include every documented error event in the item type or report
-it as unsupported; do not silently ignore it. Without an explicit terminator, a
-subsequent close follows the existing stream-end rule. “Stream item decoded” and
-“provider operation succeeded” must be distinguished in the user-facing docs.
-
-### Does the per-request timeout bound a stream after headers?
-
-D56-3 sets per-request time under a deadline to `min(remaining, per-request timeout)`
-with a 30 s default, but does not say whether a stream's body is part of that
-"request". An Ollama generation or model pull can stream for minutes. Options: the
-timeout bounds the whole stream from send start; it bounds only time to headers; or
-it becomes an idle bound between items. The shared deadline bounds the stream in
-every option. Not ruled; the plan must not proceed past the stream phase without a
-ruling.
-
-### Should GraphQL requests negotiate `application/graphql-response+json`?
-
-The original reply rule sends every non-2xx reply down the REST error path. Servers
-that follow the GraphQL-over-HTTP draft and receive an `Accept` naming
-`application/graphql-response+json` may answer request errors with HTTP 4xx and a
-GraphQL errors body. Options: send no special `Accept` and keep the REST path for all
-non-2xx replies; send `application/json` only; or send the newer media type first and
-classify a non-2xx reply in that media type with a valid errors array as a declared
-GraphQL failure. Not ruled; until it is, the REST path applies to every non-2xx reply.
+- Success-shape statuses: ruled in D57 item 16 (see R3a).
+- Stream frame-size limit: ruled in D57 item 17 (see R11b).
+- Provider error events inside a successful stream: ruled in D57 item 18 (see R11c).
+- Per-request timeout on a stream after headers: ruled in D57 item 14 (see R11a).
+- GraphQL `Accept`: ruled in D57 item 15 (see R36 and R37).
 
 ## Risks and failure modes
 
@@ -1311,9 +1293,9 @@ what was chosen, the alternatives considered, and why:
 3. **Every deviation** from a requirement, a decision, or a parent criterion, with the
    test that stands in for it. Known candidate: expanding non-class ranges on export
    (D-25).
-4. **Every open design question found**, including the success-status mapping,
-   stream-frame limit, provider error-event, stream timeout, and GraphQL `Accept`
-   choices in “Open Questions,” plus:
+4. **Every open design question found**, including the Proposed details of the D57
+   rulings (R3a's status-less fallback and unmatched-status kind, the importer's status
+   mapping in R28, and the frame-limit setting's name), plus:
    - **`UnexpectedContentType` (R3):** this spec's PROPOSED addition to the
      `#[non_exhaustive]` `ErrorKind`, for multi-shape selection only; spec 2 adds none.
    - **Malformed stream item (R10):** a malformed item yields an error item and the stream
@@ -1325,8 +1307,8 @@ what was chosen, the alternatives considered, and why:
      non-JSON bodies are rejected.
    - Also: how the ElevenLabs
    `output_format` query parameter relates to the declared audio content type; whether a
-   stream's `elapsed` should mean time to headers; what GraphQL batching would need;
-   whether GraphQL operations should eventually appear in OpenAPI and Postman output.
+   stream's `elapsed` should mean time to headers; what GraphQL batching would need.
+   (Whether GraphQL operations appear in exporter output is ruled in D57 item 23; see R42.)
 5. **The inventory results** of phase 1 and **the final list of changed public types** (R24),
    plus every dependent call site edited (R34).
 6. **Unverified provider facts** assumed in the migrations (Ollama, LM Studio, Anthropic,

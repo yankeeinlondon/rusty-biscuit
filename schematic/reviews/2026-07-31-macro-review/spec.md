@@ -1132,6 +1132,20 @@ Each is phrased so a test could decide it. Mock servers are local; nothing here 
 - **JSON snapshot (spec 4a).** `RestApi`, `Endpoint`, `EndpointParams`, and `ParamDef` derive `Serialize` and `Deserialize`; every definition serializes to a committed JSON snapshot taken before the literal rewrite; after the rewrite the JSON is equal, except for the intentional changes listed in the spec (the nine endpoints and removed fields). There is no Debug-text snapshot. Validation: the snapshot test fails on an unintended change.
 - **Required versus pager (specs 3 and 4a).** A pagination-managed parameter never appears in a request's `new()`. A definition whose provider requires such a parameter but whose strategy carries no default fails validation. The pager sends the parameter on every page. Validation: three small tests.
 
+### Criteria for D57 (added 2026-10-11)
+
+- **Compile check placement (spec 1).** The CI build job runs the fresh-output compile tests before archiving, and no hosted archive job runs or silently skips them.
+- **`deny` stays closed (spec 2).** Building a client with `same_origin` over a `deny` definition is a construction error; `same_origin` over `same_origin` or `allow` succeeds.
+- **Failed hop (spec 2).** A mock 302 to a refused port yields `RedirectFailed` with the 302's status and `Location` kept; a policy refusal still yields `RedirectRefused`.
+- **Shared transport (spec 2).** Two clients attached to one `SharedTransport` reuse a connection; attaching and also setting a per-client proxy is a construction error.
+- **Close failure (spec 3).** A mock that fails the session close after a complete fetch yields `SessionError` whose outcome holds every item.
+- **One page (spec 3).** `fetch_page()` sends exactly one request carrying the given cursor and page size.
+- **Aliases (spec 4a).** An alias registration emits the alias's Rust path; a misspelled `rust_path!` fails to compile (trybuild).
+- **`Default` (spec 4b).** A request with a required query field has no `Default` impl (compile-fail); an all-optional request keeps it.
+- **Stream timeouts and limits (spec 5).** A stream producing an item every second outlives a 2 s per-request timeout; one silent for longer than the timeout ends with a timeout error; an unterminated SSE event over the frame limit ends with a limit error.
+- **WebSocket (spec 6).** Overlapping fixtures decode to the variant their selectors name; after a forced redial the setup callback runs again before `Ready`.
+- **Round trip (spec 7).** AsyncAPI export and re-import keep endpoint role and selectors; an OpenAPI round trip keeps an API-key value prefix.
+
 ### Spike notes on the criteria (2026-10-11)
 
 Evidence from the two prototypes (reported, not re-run by this review) sharpens these criteria. None changes a decision.
@@ -2256,6 +2270,68 @@ These were the "Items for review 1" collected from the child-spec drafts; the au
 **Consequences:** the `MissingCredential` kind and its criterion (section 14, D24) are replaced by an anonymous-send criterion; sniff's "auth required" branch now reads the 401 from the wrapper rather than a `TransportError` kind; the section 14 criteria for D13, D28, D37, D6, and D49 change as noted there; the end-condition vocabulary gains `keep`; the stream framing set gains `Bytes`; `ResponseKind` and `oauth_scopes` are gone from the generated client and the definition respectively.
 
 **Open details:** the exact name of the `keep` modifier and of the `Bytes` framing form (planning, spec 5); the WebSocket error kind for a 3xx upgrade response (planning, spec 6).
+
+#### D57. Rulings on the second child-spec review (confirmed by the author, 2026-10-11)
+
+A second inline review of the eight child specs, followed by a per-spec verification pass, surfaced 24 questions the existing decisions did not settle. The author ruled on all of them. Items 1-10 were ruled one by one; for items 11-24 the author adopted the recommended option.
+
+**Decided:**
+
+1. **Fresh-output compile check in CI (spec 1).** The isolated compile check (D49 item 1, spec 1 R16) runs on the CI build job, which already holds the toolchain, before the test archive is produced; archive-only test jobs skip it. This narrow CI change is pre-authorized for spec 1.
+2. **Partitions sharing a rotating session handle (spec 3).** The latest observed handle wins across partitions, as designed (Elasticsearch PIT with slices). The out-of-order risk is logged, not validated against.
+3. **Single-page customization after adoption (spec 3; closes parent agenda item 10).** Adopted fields stay removed from the request (R7). One page is fetched through the pager: `client.pager(req).after(c).page_size(n).fetch_page()` returns a `Page<T>`.
+4. **OpenAI pagination authoring (specs 3 and 4a).** The importer emits a call to a hand-written overlay module (`openai_pagination::apply(api)`), which the importer never writes. The importer gains a generic overlay hook, not an OpenAI-specific branch.
+5. **Failed session close (spec 3; refines D27).** `with_session` returns `Err(SessionError { outcome, close })`: the closure's outcome is kept intact (including a fully fetched `Ok`) and the close failure is attached.
+6. **`same_origin` over a `deny` definition (spec 2; amends D56 item 2).** A caller may choose `same_origin` under any definition **except `deny`**; requesting it over `deny` is rejected at client construction (`BuildError` naming both policies). D28's "never loosen" holds without exception.
+7. **Redirect hop failing before a response (spec 2; extends D26 and D32).** A new `ErrorKind::RedirectFailed { target, category }` carries the earlier 3xx response as evidence. `RedirectRefused` stays a policy refusal. Spec 3 R21 maps `RedirectFailed` as it maps `TransportError`.
+8. **Shared pool versus per-client TLS and proxy (spec 2; amends D31).** Shared connection state is a `SharedTransport` built once with its proxy and TLS settings; clients attach with `.transport(&t)` (replacing `.pool(..)`). A client attached to a shared transport that also sets a conflicting per-client proxy or TLS option is rejected at construction. Clients without a shared transport keep per-client settings.
+9. **Client-global `pre_response_json` (specs 2 and 5).** It runs only on successful JSON bodies and is skipped for every other response, including non-2xx, text, binary, and stream bodies (today's behavior). GraphQL wire bodies are JSON and are seen by it.
+10. **Reading of D6 "decode on demand" (specs 2 and 5).** Declared error bodies are decoded when the response arrives, into `ErrorKind::Declared(E)`; the raw body stays on the envelope. "On demand" means the caller does not perform the decode. Spec 2 R13 is retitled to match.
+11. **Rust names for aliases, re-exports, and external types (spec 4a; settles D44's mechanism).** `ctx.register::<T>()` covers the common case with no names written. Aliases and foreign types use `ctx.register_as::<T>(rust_path!(path::Alias))`, where `rust_path!` fails to compile on an unresolvable path, with an optional `.schema_name("..")` component override.
+12. **Container-named components (specs 4a and 7).** Container registrations such as `Vec<Commit>` are dropped. Containers reuse the element's registration and export inline (`{"type":"array","items":{"$ref":"#/components/schemas/Commit"}}`); the removal is a listed, explained change in spec 4a's R24 JSON comparison.
+13. **`Default` on generated request structs (spec 4b; refines D55 item 5).** A request struct that has a required non-pager query field or a typed path field does not derive `Default`; a struct whose fields are all optional keeps it.
+14. **Per-request timeout on streams (specs 5 and 2; extends D56 item 3).** For stream bodies the per-request timeout bounds time to headers, and after headers it is an idle bound between items: `next()` waiting longer than the timeout since the previous item yields a terminal timeout. A shared `Deadline` still bounds the whole stream.
+15. **GraphQL `Accept` (spec 5).** GraphQL requests send `Accept: application/json` only. Every non-2xx reply takes the REST error path (spec 5 R37 unchanged).
+16. **Success-shape statuses (spec 5).** A success shape may optionally declare exact statuses (`.status(202)`); without them, selection uses media type plus the 204-empty rule.
+17. **Stream frame-size limit (spec 5).** SSE and NDJSON framing enforce a per-frame byte limit, **16 MiB** by default, settable on the managed builder. Exceeding it is a terminal error that keeps only bounded diagnostic bytes. `Bytes` framing assembles no frame and is unaffected.
+18. **Provider error events inside an HTTP 200 stream (spec 5).** They are typed item variants of the stream's item type, not a terminal transport or envelope failure.
+19. **Inbound WebSocket message selection (specs 6 and 7).** Messages declare selectors on existing wire fields (`.matches("kind", "resp").matches("msg", "pong")`), with at most one `.fallback()` message per direction. Untagged declaration-order decoding is not used. Spec 7's AsyncAPI exporter serializes the selectors.
+20. **WebSocket message-based authentication (spec 6).** An endpoint with a challenge flow takes a typed setup callback (`connect_with_setup(opening, |session| async { .. })`) that runs on every dial, including redials, before the client reports `Ready`.
+21. **WebSocket heartbeats (specs 6 and 7).** Caller-managed, with no generation warning. The generated client's rustdoc states each declared heartbeat (interval and expected message) so the caller knows to send it; spec 7 keeps the metadata on export. *Revised the same day by the author:* the first form of this item warned on every declaration, which would have warned permanently for every shipped definition with heartbeat hints.
+22. **Auth details OpenAPI cannot express (spec 7).** Only the details standard OpenAPI cannot express (a bearer header override, an API-key value prefix) are carried in the versioned `x-schematic` extension; `securitySchemes` stays authoritative for everything else.
+23. **GraphQL operation export (specs 7 and 5).** Postman exports each operation as a runnable `POST` with `{query, variables, operationName}`; OpenAPI skips it with a diagnostic. Spec 5 R42's skip-in-both-exporters wording names spec 7 as the owner of the Postman form.
+24. **WebSocket endpoint role on round trip (specs 7 and 6).** The endpoint role (`Client`, `Host`, `Both`) introduced by spec 6 is exported as `x-schematic-role` on the AsyncAPI channel and is part of spec 7 R27's equality.
+
+**Rationale (this review's reading):** (1) the build job is the only CI place that can already answer "does fresh output compile"; (2) Elasticsearch documents "use the most recent PIT id", and rejecting the combination would block the only partitioned session pattern; (3) one place to set pagination inputs whether fetching one page or all; (5) neither loses complete data nor hides a leaked server-side session; (6) `deny` is a security statement by the definition author; (7) a policy refusal and a network failure call for different handling; (8) matches the HTTP library, where pool, proxy, and TLS are one object; (9)-(10) preserve today's behavior and the settled downstream shapes; (11) no strings in the common case and compile-checked paths elsewhere; (12) D44 literally, and `Vec<...>` is not a valid OpenAPI component key; (13) keeps `new()` honest without taking `Default` from all-optional structs; (14) long, healthy LLM streams must not die at 30 s while hung streams stay bounded; (15) the simplest negotiation that keeps request errors typed on legacy-compatible servers; (19) declaration order silently picks the wrong variant for overlapping Core payloads; (20) `Ready` must mean the protocol session is usable after every redial.
+
+**Options offered and rejected:**
+
+- (1) Give test jobs a toolchain (rejected); local only with a recorded gap (rejected).
+- (2) Reject the combination (rejected); serialize partition requests (rejected); one session per partition (rejected).
+- (3) Keep the fields with pager override (rejected); a generated per-endpoint option struct (rejected).
+- (4) Wrap the imported module (rejected); infer pagination at import (rejected).
+- (5) `Ok(SessionOutcome { items, close })` (rejected); the close error replaces the outcome (rejected); `Ok` plus a log line (rejected).
+- (6) The literal D56 item 2 (rejected); silently intersecting policies (rejected).
+- (7) Reuse `RedirectRefused` (rejected); `TransportError` with optional prior evidence (rejected).
+- (8) First client's settings win (rejected); pool as a hint only (rejected).
+- (9) Remove the global hook (rejected); a runtime error on non-JSON sends (rejected).
+- (10) Lazy `err.decode::<E>()` (rejected).
+- (11) A `SchemaIdent` trait (rejected); canonical names plus a compatibility map (rejected).
+- (12) A compatibility registration keeping the components (rejected); deferring removal to spec 7 (rejected).
+- (13) Keep `Default` everywhere (rejected); drop it on all request structs (rejected).
+- (14) Total lifetime from send start (rejected); time to headers only (rejected).
+- (15) No special `Accept` (rejected); prefer `application/graphql-response+json` with a non-2xx exception (rejected).
+- (19) Disjoint payload types (rejected); ambiguity detection as the design (rejected); declaration order with per-fixture assertions (rejected).
+- (20) Declarative auth hints (rejected); a `TransportReady` state with caller re-authentication (rejected); `Ready` meaning transport only (rejected).
+- (21) Automatic control-frame pings (rejected); application heartbeat callbacks (rejected); a generation warning for unscheduled hints (rejected: permanent, unfixable noise); no longer declaring heartbeats (rejected).
+- (22) Exclude the details from definition equality (rejected); wire the whole `AuthExtension` (rejected).
+- (23) An `x-schematic-graphql` OpenAPI extension (rejected); skip in both exporters (rejected).
+- (24) Exclude role from equality as an accepted gap (rejected); export host roles from the server's view (rejected).
+- (16)-(18) The other options listed in spec 5's Open Questions (rejected).
+
+**Consequences:** spec 1's "not pre-authorized" list loses the build-job change; spec 2 gains `RedirectFailed`, `SharedTransport`, and the `deny` exception, and its R13 title changes; spec 3 gains `fetch_page()`, `SessionError`, and the overlay hook, and R21 maps `RedirectFailed`; spec 4a fixes the alias mechanism and lists container-component removal in R24; spec 4b ties `Default` to required fields; spec 5 gains the stream idle bound, the frame limit, typed error-event items, optional success statuses, and `Accept: application/json`, and its open questions close; spec 6 gains selectors, the setup callback, and heartbeat documentation in rustdoc; spec 7 carries selectors, role, and the limited auth extension, and owns the Postman GraphQL export.
+
+**Open details:** none.
 
 ### Spike results (2026-10-11)
 

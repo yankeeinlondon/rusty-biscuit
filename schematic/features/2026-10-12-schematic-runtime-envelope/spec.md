@@ -59,7 +59,8 @@ change to typed sends and managed transport. It clarifies evidence retention,
 credential handling, deadlines, and test requirements. “Open Questions” records
 major choices that still need the author's review, with conservative defaults
 for an unattended implementation. Those defaults are recommendations, not new
-author rulings.
+author rulings. *Update, 2026-10-11:* D57 (author) ruled every question that
+section raised; the rulings are written into the requirements below.
 
 ## Problem
 
@@ -254,11 +255,12 @@ the headers arrived is a Failure inside the envelope, kind `BodyInterrupted`,
 with status, headers, and the partial bytes, plus `is_interrupted()`.
 **Governing rule: an envelope exists if and only if an HTTP response head
 (status line and headers) was received. The outer `TransportError` means no
-response head arrived.** Applied to redirects (Proposed, this spec's reading of
-D26 and D32): a logical send includes every redirect hop, so if a later hop
-fails before its head arrives, the last received redirect response is retained
-and the failure is reported inside its envelope, not misreported as the target
-server's response; see “Open Questions: Failure after following a redirect.”
+response head arrived.** Applied to redirects (**D57 item 7**, author,
+2026-10-11, extending D26 and D32): a logical send includes every redirect hop,
+so if a later hop fails before its head arrives, the last received redirect
+response is retained and the failure is reported inside its envelope as kind
+`RedirectFailed { target, category }`, not misreported as the target server's
+response. `RedirectRefused` stays a policy refusal.
 
 **D32 (refused redirect or link).** One test: did this call receive an HTTP
 response? A redirect refused by the policy (a 3xx was received) is a Failure
@@ -301,9 +303,11 @@ the policy but never loosen it beyond the definition. **D56 (author,
 2026-10-11), amending D28: tighten-only is one simple rule.** A caller may
 choose `deny`, `same_origin`, or an `allow_origins` list that is a subset of
 the definition's own list; every other choice is rejected at client
-construction. This literal rule conflicts with “never loosen” when the
-definition is `deny`. See “Open Questions: Keeping a deny policy effective”;
-until the author rules, the literal rule applies.
+construction. **D57 item 6 (author, 2026-10-11), amending D56 item 2:** the
+one exception is a `deny` definition, over which only `deny` may be chosen;
+requesting `same_origin` over `deny` is rejected at client construction with a
+`BuildError` naming both policies. D28's “never loosen” holds without
+exception.
 Credentials attach only to allowed origins. Because policies require
 Schematic to follow redirects itself, the HTTP client is built with redirects
 disabled and Schematic follows them hop by hop: hop limit, per-hop origin
@@ -319,7 +323,12 @@ shareable connection pool, and a base URL for tests. Author ruling after the
 evidence note: the builder also gains an explicitly named, opt-in "accept
 invalid certificates" setting for local devices (the Samsung TV with a
 self-signed certificate on a home network). The two homelab call sites are
-migrated in this spec.
+migrated in this spec. **D57 item 8 (author, 2026-10-11), amending D31:**
+shared connection state is a `SharedTransport` built once with its proxy and
+TLS settings; clients attach with `.transport(&t)` (replacing `.pool(..)`). A
+client attached to a shared transport that also sets a conflicting per-client
+proxy or TLS option is rejected at construction. Clients without a shared
+transport keep per-client settings.
 
 **D13 (shared deadline).** Opt-in. A caller sets one overall deadline for an
 operation (all requests it spans) on a monotonic clock. Each request gets the
@@ -331,13 +340,27 @@ error reports the completed requests and elapsed time. Dropping the call
 cancels in-flight work and spawns no detached tasks. The 30 s per-request
 default is unchanged for callers who do not opt in. Example: a 120-second
 deadline whose first request hangs: that request times out at 30 s, leaving
-90 s of budget.
+90 s of budget. **D57 item 14 (author, 2026-10-11), extending D56 item 3:** for
+stream bodies the per-request timeout bounds time to headers, and after headers
+it is an idle bound between items: `next()` waiting longer than the timeout
+since the previous item yields a terminal timeout. A shared `Deadline` still
+bounds the whole stream.
 
 **D39 (runtime home).** A new hand-written package (working name
 `schematic-runtime`) holds the envelope and metadata, `TransportError`,
 redirect-following and cross-origin logic, the shared deadline, the pager (spec
 3), and redaction. Generated clients depend on it and stay thin. Author-stated
 cost: one more package and coordinated versions with the generator.
+
+**D6 as read by D57 item 10 (author, 2026-10-11).** Declared error bodies are
+decoded when the response arrives, into `ErrorKind::Declared(E)`; the raw body
+stays on the envelope. “Decode on demand” means the caller does not perform
+the decode; there is no lazy `err.decode::<E>()`.
+
+**D57 item 9 (client-global `pre_response_json`).** The client-global hook
+runs only on successful JSON bodies and is skipped for every other response,
+including non-2xx, text, binary, and stream bodies (today's behavior). GraphQL
+wire bodies are JSON and are seen by it.
 
 **D45 (`send_raw`).** A clearly named `send_raw` returns status, headers, and
 bytes (with a JSON convenience) through the same credentials, cross-origin
@@ -510,9 +533,11 @@ with no declared error body, a `Declared` error value cannot be constructed
 kind `Undeclared` with status, headers, and raw body. Validated by:
 compile-fail plus L1, both in `schematic-runtime`.
 
-**R13. Declared failures decode on demand (D6 groundwork, D7).** For a
-fixture endpoint whose failure type is a real struct, a declared 4xx body
-decodes into `Declared(E)` with status and headers; an undecodable body for a
+**R13. Declared failures decode when the response arrives (D6 groundwork, D7,
+D57 item 10).** For a fixture endpoint whose failure type is a real struct, a
+declared 4xx body is decoded by the runtime when the response arrives, into
+`Declared(E)` with status and headers, and the raw body stays on the envelope;
+the caller performs no decode step. An undecodable body for a
 declared status yields kind `MalformedError` with the raw body kept. (No
 shipped definition declares an error body until spec 5; this requirement
 proves the trait path with a runtime-test fixture.) Validated by: L1 in
@@ -554,15 +579,23 @@ are absent from the public API of `schematic-schema` and `schematic-runtime`.
 Validated by: compile-fail test; and a generation test asserting the generator
 no longer emits those names.
 
-**R18. Builder surface (D31).** The managed builder supports: base URL (for
+**R18. Builder surface (D31, D57 item 8).** The managed builder supports: base URL (for
 tests), per-request timeout (default 30 s), connect timeout, proxy, extra TLS
-root certificates, user agent, default headers, a shareable connection pool,
-and a named opt-in accept-invalid-certificates setting. Each is observed by a
+root certificates, user agent, default headers, attachment to a
+`SharedTransport` (`.transport(&t)`, replacing `.pool(..)`),
+and a named opt-in accept-invalid-certificates setting. A `SharedTransport` is
+built once with its proxy and TLS settings, always by Schematic with redirects
+disabled. A client attached to one that also sets a conflicting per-client
+proxy or TLS option is rejected at construction with a typed `BuildError`; a
+client without a shared transport keeps per-client settings. Each is observed by a
 local mock: a proxy setting routes through a mock proxy; a custom root
 certificate lets a local TLS mock be reached and its absence fails; the
 timeouts, user agent, and default headers are observed by the mock; two
-clients built from one pool share a connection (the mock counts accepted
-connections); a test base URL redirects calls to the mock; accepting invalid
+clients attached to one `SharedTransport` reuse a connection (sequential, fully
+drained HTTP/1.1 requests to a keep-alive mock that counts accepted
+connections; reuse across different origins is not expected); attaching a
+shared transport and also setting a per-client proxy fails construction; a
+test base URL redirects calls to the mock; accepting invalid
 certificates reaches a self-signed local TLS mock and the default does not.
 Validated by: L1 in `schematic-runtime` (local TLS and proxy mocks are
 dev-dependencies; see PD33).
@@ -634,22 +667,38 @@ drop the body and body headers; 307 and 308 preserve method and body (PD4). A
 redirect with no `Location`, or an unparsable one, is an envelope Failure
 kind `RedirectRefused`. Each followed hop re-decides whether the
 already-resolved credential is attached for the new URL (D11: credentials are
-resolved once per request, not once per hop). Validated by: L1 in `schematic-runtime` (one case per status).
+resolved once per request, not once per hop). A followed hop that fails before
+its response head arrives (connection refused, TLS failure, timeout, or
+deadline expiry) is an envelope Failure of kind
+`RedirectFailed { target, category }` (D57 item 7) describing the last
+received 3xx: its status, headers including `Location`, and URL stay in the
+metadata; `target` is the redacted URL of the failed hop and must not replace
+the URL describing the last received response; `category` is a sanitized
+failure category. The last response's body is retained if it was read; if
+reading it fails first, the result is `BodyInterrupted`. A policy,
+invalid-`Location`, or hop-limit refusal stays `RedirectRefused`. Validated by: L1 in `schematic-runtime` (one case per status;
+a mock 302 to a refused port yields `RedirectFailed` with the 302's status and
+`Location` kept, and a policy refusal of the same 302 still yields
+`RedirectRefused`).
 
-**R25. Tighten-only override (D28, D56). Decided: D56 (author, 2026-10-11).** A
+**R25. Tighten-only override (D28, D56, D57 item 6). Decided: D56 and D57 item 6
+(author, 2026-10-11).** A
 caller may set the policy to `deny`, to `same_origin`, or to an `allow_origins`
-list that is a subset of the definition's own `allow_origins` list. Every other
+list that is a subset of the definition's own `allow_origins` list, except that
+over a `deny` definition only `deny` may be chosen. Every other
 choice (any value when the definition's value is not `allow_origins` and the
 choice is not `deny` or `same_origin`; an `allow_origins` list containing an
-origin the definition does not list; `allow_without_credentials`; `allow_any`)
+origin the definition does not list; `allow_without_credentials`; `allow_any`;
+`same_origin` over a `deny` definition)
 is rejected at client construction with a typed `BuildError`, and no request is
-sent. Whether `same_origin` over a `deny` definition is accepted is open
-(“Open Questions: Keeping a deny policy effective”); until the author rules,
-the literal rule applies and the case is logged. A choice equal to the definition's own value passes only if it is one of
+sent. The `BuildError` for `same_origin` over `deny` names both policies. A
+choice equal to the definition's own value passes only if it is one of
 the three allowed forms. Validated by: L1 table test in `schematic-runtime`
 (each allowed form takes effect; each rejected form fails construction with zero
 requests at the mock; `allow_origins` subset accepted, superset and disjoint
-list rejected).
+list rejected; `same_origin` over `deny` is a construction error naming both
+policies, while `same_origin` over `same_origin` and over `allow_*`
+definitions succeeds).
 
 ### Deadline, raw, hooks, guard
 
@@ -661,8 +710,10 @@ managed builder. Across N requests to a mock that delays each response, a
 deadline smaller than the sum stops the operation: no request is sent after the
 deadline and a `DeadlineExceeded` `TransportError` reports the completed
 request count and elapsed time when no head arrived during that send.
-If a head has arrived, expiry produces `BodyInterrupted`, or a
-redirect-following failure when between hops, inside the envelope. Worked example: a 120-second deadline and a
+If a head has arrived, expiry produces `BodyInterrupted`, or
+`RedirectFailed` when between hops (D57 item 7), inside the envelope; for a
+stream body, expiry after headers is a terminal stream-item timeout (D57
+item 14). Worked example: a 120-second deadline and a
 first request to a mock that hangs: the first request times out at 30 s before any head arrives
 (`Timeout`), leaving 90 s of budget for the next request (the test uses scaled
 short controlled durations and checks that the per-request timeout leaves
@@ -701,10 +752,18 @@ type. A typed mutator registered on a text, binary, or empty endpoint is a compi
 error (today it is silently never run); the mechanism is a marker trait
 implemented only by the JSON codec, which spec 5 extends to the stream and
 GraphQL codecs. A hook that fails yields kind `Hook` with the original bytes retained.
-The client-global hook has no endpoint type at registration; its applicability
-is settled in “Open Questions: Client-global JSON hooks.” It cannot promise a
-compile-time error for individual non-JSON sends.
-Validated by: L1 and compile-fail in `schematic-runtime`; existing generated
+The client-global hook has no endpoint type at registration, so the
+compile-error promise covers typed mutators only. **Decided (D57 item 9):** the
+client-global hook runs only on successful JSON bodies and is skipped for every
+other response, including non-2xx, text, binary, and stream bodies (today's
+behavior); GraphQL wire bodies are JSON and are seen by it. Ordering, as
+today: JSON body, then client-global hook, then success decode, then typed
+mutator. Declared-error decoding and raw sends bypass both hooks. JSON parse
+failures remain `MalformedSuccess` or `MalformedError`; hook failures are
+`Hook`, with raw evidence preserved and safe `Display` text.
+Validated by: L1 and compile-fail in `schematic-runtime` (including a
+registered global hook that runs on a 2xx JSON body and is not run for a 4xx
+JSON error body or a text endpoint's body); existing generated
 hook tests in `schematic-schema` still pass or are migrated and listed in the
 log.
 
@@ -712,7 +771,10 @@ log.
 trait detail is the spike's recommendation, not a parent decision.** The `Decode` trait
 receives the live response (not a pre-buffered body) and returns a success
 value of an arbitrary associated type, so a stream of items and a generated
-multi-shape enum are expressible. Validated by: L1 in `schematic-runtime` with
+multi-shape enum are expressible. The decoder receives the expiration state
+that D57 item 14 needs for stream bodies (per-request timeout as an idle bound
+between items after headers, shared `Deadline` over the whole stream).
+Validated by: L1 in `schematic-runtime` with
 two test-only decoders (an incremental line stream where the first item is
 observed before the mock finishes sending, and a two-shape enum). No SSE,
 NDJSON, or GraphQL codec ships in this spec.
@@ -804,7 +866,7 @@ location are Proposed (PD11).
 | `Response<T, E>` { `meta`, `outcome` } | The envelope; `data()`, `error()`, `into_result()`, `into_parts()`, `is_decode_failure()`, `is_interrupted()`. | Decided (D7, D25, D26); `into_parts` Proposed |
 | `Outcome<T, E>` = `Success(T)` / `Failure(ApiError<E>)` | Inner enum. | Decided (D7) |
 | `ApiError<E>` { `kind`, `body: Bytes` } | Failure with raw body always kept. | Decided (raw body, D7); shape Proposed |
-| `ErrorKind<E>` (`#[non_exhaustive]`) | `Declared(E)`, `Undeclared`, `MalformedError`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused`, `RedirectFailed`, `Hook`. | `Declared`, `Undeclared`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused` Decided (D25, D26, D32, D48); `MalformedError`, `Hook`, `RedirectFailed`, `#[non_exhaustive]` Proposed (S17 unratified); spec 5 may add `UnexpectedContentType` (this spec adds none; D56) |
+| `ErrorKind<E>` (`#[non_exhaustive]`) | `Declared(E)`, `Undeclared`, `MalformedError`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused`, `RedirectFailed { target, category }`, `Hook`. | `Declared`, `Undeclared`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused` Decided (D25, D26, D32, D48); `RedirectFailed` Decided (D57 item 7); `MalformedError`, `Hook`, `#[non_exhaustive]` Proposed (S17 unratified); spec 5 may add `UnexpectedContentType` (this spec adds none; D56) |
 | `NoDeclaredError` | Uninhabited placeholder failure type. | Decided (D48); name Proposed |
 | `ResponseMeta` / `RequestMeta` | Metadata fields of D21/D48, all redacted, plus `endpoint_id`. | Decided (field set); struct layout Proposed |
 | `AuthMethod` | `PerCall`, `ClientLevel`, `EnvVar(name)`, `Anonymous`. | Decided (D48) |
@@ -812,6 +874,7 @@ location are Proposed (PD11).
 | Redaction module | Union of built-ins (D48), definition-marked names, and auth-strategy names; produces `[redacted]`; builds the Display text of D23. | Decided |
 | `Credential` and `CallOptions` | Client-level and per-call programmatic credentials, caller ordered env list, per-call deadline, explicit anonymous mode. Policy tightening is builder-only in this spec. | Decided (D11, D13, D28); names and explicit anonymous mode Proposed (PD28) |
 | `ClientBuilder` / `Client` | Managed transport; redirects disabled in the HTTP client; follows redirects itself. | Decided (D31); surface Proposed (PD8) |
+| `SharedTransport` | Shared connection state built once with its proxy and TLS settings; clients attach with `.transport(&t)`; a conflicting per-client proxy or TLS option on an attached client is a construction error. | Decided (D57 item 8); builder detail Proposed (PD8) |
 | `OriginPolicy` | Runtime form of the five-value policy plus `check_link`. | Values Decided; runtime type and `check_link` Proposed (PD29, PD30) |
 | `ABI` constant | `pub const ABI: u32` checked by generated code and read by spec 1's partial-generation check. | Proposed (PD11) |
 | `Deadline` | Monotonic (`Instant`) shared deadline handle. | Decided (D13); form Proposed |
@@ -823,8 +886,9 @@ API identity refines typed-send checks; credential construction refines
 precedence and migration; redirect evidence refines the origin and failure
 checks; deadline ownership refines timeout/decoder checks; raw completeness
 refines `send_raw`. Include their representative cases in those existing
-suites rather than creating separate test campaigns. Proposed defaults from
-“Open Questions” must be reported for author review.
+suites rather than creating separate test campaigns. The former “Open
+Questions” defaults were ruled by D57 (items 6 to 9) and are written in as
+decided.
 
 ### Request construction, credentials, and API identity
 
@@ -933,7 +997,10 @@ deadline is present. Redirects, response-head waits, and buffered body reads
 all consume this same budget; a hop never restarts it. Before any head,
 expiration is `DeadlineExceeded` if the shared deadline is limiting, otherwise
 `Timeout`. After a head, body-read expiration is `BodyInterrupted`; expiration
-between redirects follows the redirect-failure rule in Open Questions.
+between redirects is `RedirectFailed` (D57 item 7, R24). Stream bodies differ
+after the head (D57 item 14): the per-request timeout becomes an idle bound
+between items rather than part of this single budget, and only the shared
+deadline, when present, still bounds the whole stream.
 
 `Deadline` clones share the same monotonic expiration and a thread-safe
 completed-request counter. Count one completed logical send after its outcome
@@ -959,7 +1026,10 @@ a misleading content-type header alone does not reject valid JSON.
 A test-only streaming decoder returns an owned stream carrying the response,
 cancellation, and expiration state; it cannot borrow a soon-to-be-dropped
 `send` stack frame. Later read failures are stream-item errors because the
-envelope has already been returned. Stream-item shape and provider error
+envelope has already been returned. Its expiration state follows D57 item 14:
+`next()` waiting longer than the per-request timeout since the previous item
+yields a terminal timeout item, and a shared `Deadline` bounds the whole
+stream. Stream-item shape and provider error
 selection are deferred to the later response-model spec. In this spec prove
 ownership and first-item delivery without defining an SSE/NDJSON protocol.
 
@@ -970,7 +1040,7 @@ flowchart TD
     Start[Start a logical send] --> Head{Any HTTP head received?}
     Head -->|No, send failed| Transport[TransportError with request metadata]
     Head -->|Yes| Follow{Redirect followed?}
-    Follow -->|Next hop fails| Redirect[Last redirect envelope with failure evidence]
+    Follow -->|Next hop fails| Redirect[Last redirect envelope with RedirectFailed]
     Follow -->|Final response| Body{Body read and decoded?}
     Body -->|Yes| Outcome[Success or declared/undeclared HTTP failure]
     Body -->|Read interrupted| Interrupted[Envelope with BodyInterrupted and partial bytes]
@@ -980,7 +1050,8 @@ flowchart TD
 ### Raw response contract
 
 `RawResponse` has one metadata record, bytes, and a completion disposition:
-complete, body interrupted, redirect refused, or redirect following failed.
+complete, body interrupted, redirect refused, or redirect following failed
+(the raw form of `RedirectFailed`, D57 item 7).
 Do not maintain independent status/header fields that can disagree with
 `meta`; expose convenience accessors instead. HTTP 4xx/5xx remain complete raw
 responses, with no status-based decode classification. The other dispositions
@@ -1136,6 +1207,14 @@ The spec is done ("implementation complete, ready for review") when all hold:
 9. `implementation-log.md` exists in this directory with the Human review
    agenda (below) filled in. The agent does not move the spec to `_completed`
    and does not run `just complete`.
+10. The D57 cases hold (parent criteria for D57, spec 2): building a client
+    with `same_origin` over a `deny` definition is a construction error, while
+    `same_origin` over `same_origin` or an `allow_*` definition succeeds
+    (R25); a mock 302 to a refused port yields `RedirectFailed` with the
+    302's status and `Location` kept, and a policy refusal still yields
+    `RedirectRefused` (R24); two clients attached to one `SharedTransport`
+    reuse a connection, and attaching while also setting a per-client proxy
+    is a construction error (R18).
 
 ## Pre-authorizations
 
@@ -1205,9 +1284,9 @@ amending D28.** A caller may choose `deny`, `same_origin`, or an `allow_origins`
 list that is a subset of the definition's own list; everything else is rejected
 at client construction as a typed `BuildError` (the definition's policy is
 data, so a compile error is not feasible). There is no reach or
-credential-target partial order. The `deny`-definition case is open (“Open
-Questions: Keeping a deny policy effective”); until the author rules, the
-literal rule applies.
+credential-target partial order. **D57 item 6 (author, 2026-10-11):** over a
+`deny` definition only `deny` may be chosen; `same_origin` over `deny` is a
+`BuildError` naming both policies.
 
 **PD2. `deny` and same-origin next-page links (P1; R23).** Default if not ruled
 before planning: `deny` still follows same-origin next-page links (it forbids
@@ -1253,11 +1332,12 @@ pre-send case needs it (D56). A timeout after a response head is `BodyInterrupte
 **PD8. Managed builder surface and names (P3; R18).** Default if not ruled
 before planning, on `schematic_runtime::ClientBuilder`: `base_url`, `timeout` (the per-request timeout, default 30 s; D56),
 `connect_timeout`, `proxy`, `add_root_certificate` (PEM or DER bytes),
-`user_agent`, `default_header`, `pool(&SharedPool)` with a configured shared
-transport (see “Open Questions: Sharing connections without sharing unrelated
-configuration”),
+`user_agent`, `default_header`, `transport(&SharedTransport)` (D57 item 8;
+replaces the earlier `pool(&SharedPool)`),
 `danger_accept_invalid_certificates()`, `credentials`, `cross_origin`,
-`env_order`. Each generated client exposes `Client::builder()` pre-seeded from
+`env_order`. `SharedTransport` has its own builder carrying the proxy and TLS
+settings (`proxy`, `add_root_certificate`,
+`danger_accept_invalid_certificates()`); those builder names are Proposed. Each generated client exposes `Client::builder()` pre-seeded from
 the definition and `Client::new()` for the all-defaults case.
 
 **PD9. Accept-invalid-certificates form (P3; R18).** Default if not ruled
@@ -1307,10 +1387,11 @@ convenience for complete bodies only. The richer completion disposition
 clarifies the earlier proposed boolean, which could not distinguish an
 interrupted body from a refused redirect. Record this change for author review.
 
-**PD15. Client-global `pre_response_json` (P5; S14).** Default if not ruled
-before planning: keep it client-global, run on every successful JSON response body
-before success decode, document that it sees the raw JSON of every endpoint, and note
-that spec 5 must scope it for GraphQL wire bodies.
+**PD15. Client-global `pre_response_json` (P5; S14). Decided: D57 item 9
+(author, 2026-10-11).** It stays client-global and runs only on successful JSON
+response bodies, before success decode; it is skipped for non-2xx, text,
+binary, and stream bodies. Document that it sees the raw JSON of every
+endpoint's successful response, including GraphQL wire bodies.
 
 **PD16. Stream responses `Clone`/`Sync` (P5; S15).** Default if not ruled
 before planning: accepted as not `Clone` and not `Sync`; documented.
@@ -1427,103 +1508,14 @@ the number is kept so that PD references stay stable.
 
 ## Open Questions
 
-These choices affect public behavior and need author review before the spec is
-finalized. The stated unattended defaults keep the runtime safe and usable;
-the implementation log must identify each as a proposal, not an author ruling.
+None remain. D57 (author, 2026-10-11) ruled each question this section raised;
+the ruled behavior is written into the requirements:
 
-### Keeping a deny policy effective
-
-The related review's literal override rule accepts `same_origin` for every
-definition, but that enables same-origin redirects when the definition says
-`deny`. That contradicts the promise that a caller can only tighten policy.
-
-- **Keep the literal rule.** Pro: exactly follows the author's latest wording.
-  Con: callers can enable redirects forbidden by the definition; documentation
-  must stop promising that overrides never loosen policy.
-- **Add a deny exception (recommended).** Permit only `deny` when the definition
-  is `deny`; retain the author's simple allowed forms for other definitions.
-  Pro: preserves the security guarantee with one understandable exception.
-  Con: changes the author's literal ruling and needs confirmation.
-- **Intersect definition and override behavior.** Pro: mathematically prevents
-  loosening. Con: a requested policy may silently behave differently from its
-  name and adds complexity the author explicitly sought to avoid.
-
-Unattended default: the literal rule (D56 item 2 is settled authority), with
-the `deny` → `same_origin` case logged for the author's ruling at review 1. If
-the author adopts the deny exception, `deny` → `same_origin` becomes a typed
-construction error. No override leaves
-the definition's policy intact, including `allow_any` and
-`allow_without_credentials`; an explicit builder override still follows the
-restricted allowed forms. This spec has no per-call policy override.
-
-### Failure after following a redirect
-
-A → B can receive A's 302 and then fail connecting to B. Returning an outer
-transport error would discard an HTTP head that the governing rule requires
-retaining, while calling this `BodyInterrupted` would misdescribe the failure.
-
-- **Return the last redirect envelope with `RedirectFailed` (recommended).**
-  Carry a sanitized failure category and rejected/failed target URL alongside
-  the last status, headers, and retained bytes. Pro: preserves evidence and
-  the response-head rule. Con: introduces an additional public failure kind.
-- **Use `RedirectRefused` for all unsuccessful following.** Pro: fewer kinds.
-  Con: cannot distinguish a policy refusal from a connection or timeout failure.
-- **Return a transport error with optional prior-response evidence.** Pro:
-  identifies the target connection failure naturally. Con: changes the author's
-  envelope-versus-transport contract and complicates every caller.
-
-Unattended default: `RedirectFailed` in typed errors and raw completion
-reports. A policy/invalid-Location/hop-limit refusal stays `RedirectRefused`.
-Retain the last response body if read; if reading that body fails first,
-return `BodyInterrupted`. A later failure's target URL is separately redacted
-and must not replace the URL describing the last received response.
-
-### Sharing connections without sharing unrelated configuration
-
-The managed builder promises a shared connection pool, but TLS trust, proxy,
-and connection settings are transport-wide. Independently building two HTTP
-clients does not demonstrate pool sharing, and using one transport for two
-incompatible settings can weaken TLS checks or route through the wrong proxy.
-
-- **Configure a shared transport before creating API clients (recommended).**
-  A Schematic-managed pool builder owns proxy/TLS/connect/pool settings; API
-  clients sharing it set request-level timeout, headers, credentials, and base
-  URL. Pro: actual connection reuse with one clear owner for transport policy.
-  Con: requires a pool-builder form beyond the draft's `SharedPool::new()`.
-- **Use the first client configuration and reject incompatible later clients.**
-  Pro: preserves most builder syntax. Con: behavior depends on construction
-  order and needs equality rules for certificates and proxy settings.
-- **Treat the pool as a hint and create independent transports.** Pro: easy to
-  implement. Con: fails the stated connection-sharing requirement.
-
-Unattended default: the first option. A client attaching a configured pool
-cannot also set conflicting transport options; return a typed build error.
-The shared transport is always Schematic-built with redirects disabled.
-Prove connection reuse with sequential, fully drained HTTP/1.1 requests and a
-keep-alive mock, plus rejection of incompatible configuration; do not expect
-reuse across different origins. Update the proposed builder names to match
-this ownership, and record them for review.
-
-### Client-global JSON hooks
-
-A global hook is registered without naming an endpoint, so it cannot fail to
-compile merely because the same client also has text or binary endpoints.
-The existing JSON send path applies hooks to success bodies after checking
-status; applying them to provider error bodies would be a behavior change.
-
-- **Keep the global hook for successful JSON bodies only (recommended).**
-  Pro: preserves existing behavior and mixed-response clients. Con: it is
-  skipped for non-JSON bodies, so the draft's universal compile-error promise
-  must be narrowed to typed mutators.
-- **Replace it with per-endpoint typed hooks.** Pro: compile-time applicability
-  and clear scope. Con: expands this breaking change and removes global use.
-- **Reject non-JSON sends at runtime when the hook is registered.** Pro: easy
-  to detect. Con: makes unrelated endpoints unusable after registration.
-
-Unattended default: the first option, with JSON → pre-hook → success decode →
-typed mutator ordering. Declared-error decoding and raw sends bypass these
-hooks. JSON parse failures remain `MalformedSuccess` or `MalformedError`;
-hook failures are `Hook`, with raw evidence preserved and safe Display text.
+- Keeping a deny policy effective: ruled in D57 item 6 (R25, PD1).
+- Failure after following a redirect: ruled in D57 item 7 (R24, R26).
+- Sharing connections without sharing unrelated configuration: ruled in D57
+  item 8 (R18, PD8).
+- Client-global JSON hooks: ruled in D57 item 9 (R29, PD15).
 
 ## Risks and failure modes
 
@@ -1541,9 +1533,15 @@ hook failures are `Hook`, with raw evidence preserved and safe Display text.
   no wrapper per endpoint (R31); log compile time of `schematic-schema` before
   and after on this host (one sample each; no benchmark campaign).
 - **Redirect-following is new, security-sensitive code.** Risks: credential
-  leakage on a hop, method/body mishandling, a loop. Mitigation: R22 to R24
+  leakage on a hop, method/body mishandling, a loop, a failed hop misreported
+  as the target's response or as a policy refusal. Mitigation: R22 to R24
   matrix with zero-request assertions on the refused origin; credential
-  stripping asserted for all forms.
+  stripping asserted for all forms; `RedirectFailed` and `RedirectRefused`
+  asserted as distinct kinds (D57 item 7).
+- **Shared transport misconfiguration.** Attaching clients with conflicting
+  proxy or TLS settings to one transport could weaken TLS checks or route
+  through the wrong proxy. Mitigation: the conflict is a construction error
+  (D57 item 8, R18).
 - **`Debug` credential leak through decoded error bodies** remains by D22;
   documented, not mitigated.
 - **A 2xx on the failure side surprises callers** (D25: `into_result()` is
@@ -1557,8 +1555,9 @@ hook failures are `Hook`, with raw evidence preserved and safe Display text.
 - **Version skew between generator and runtime** (R32) if the ABI marker is
   forgotten on a breaking runtime change; mitigated by the doctored-marker test.
 - **Interaction with later specs.** Spec 3 consumes `check_link`,
-  `InvalidArgument`, `Deadline`, and the `page` slot; spec 5 consumes `Decode`
-  and `ErrorKind`; spec 4a needs the secret and request-id facilities to take a
+  `InvalidArgument`, `Deadline`, and the `page` slot, and maps `RedirectFailed`
+  as it maps `TransportError` (D57 item 7); spec 5 consumes `Decode`,
+  `ErrorKind`, and the stream expiration state (D57 item 14); spec 4a needs the secret and request-id facilities to take a
   builder form. Changes here that break those are flagged in Refresh notes.
 - **Landing size (P11).** Landing 1 is the largest landing (specs 1 to 3);
   this spec is the largest spec in it. If the run cannot finish, stop at the
@@ -1612,8 +1611,16 @@ Record in `implementation-log.md`, for review 1, as they occur:
     Proposed item, not a decision). Ruled by D56 (author, 2026-10-11) and so
     not on this list: tighten-only (PD1), deadline arithmetic (PD23), the
     `ResponseKind` guard removal (PD26), the `EndpointSpec` name, and the
-    no-credential rule (R36, PD35 withdrawn):
+    no-credential rule (R36, PD35 withdrawn). Ruled by D57 (author,
+    2026-10-11) and so not on this list either: the `deny` exception (item 6;
+    R25, PD1), `ErrorKind::RedirectFailed` (item 7; R24), `SharedTransport`
+    (item 8; R18, PD8), the client-global hook's scope (item 9; R29, PD15),
+    decoding declared errors on arrival (item 10; R13), and the stream idle
+    bound (item 14; R26, R30):
     - PD14: `send_raw` signature and the interrupted-body result.
+    - The `SharedTransport` builder names and whether connect timeout belongs
+      to the shared transport or stays per-client (PD8; D57 item 8 names only
+      proxy and TLS).
     - The hook mechanism by name: a marker trait implemented by the JSON
       codec, extended by spec 5 (R29, PD10).
     - Proposed items that the parent does not decide: the hook types,
