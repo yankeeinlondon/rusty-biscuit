@@ -175,3 +175,27 @@ fn long_form_without_rule_is_not_flagged_by_the_schema() {
 
     assert!(report.valid, "problems: {:?}", report.problems);
 }
+
+/// Problems from the shipped schema point at the authored node: a nested
+/// enum failure at its flow value, and a long-form entry missing `action` at
+/// its flow mapping. `validate_entries` writes the two `$schema` property
+/// lines, then one line per entry.
+#[test]
+fn shipped_schema_problems_report_their_authored_positions() {
+    let report = validate_entries(
+        include_str!("../../../../content-policy/schemas/content-policy.yaml"),
+        &["{rule: Evergreen, action: delete}", "{rule: 'ValidFor(3mo)'}"],
+    );
+
+    let at = |path: &str| {
+        let problem = report
+            .problems
+            .iter()
+            .find(|problem| problem.path == path)
+            .unwrap_or_else(|| panic!("no problem at {path}: {:?}", report.problems));
+        (problem.line, problem.column)
+    };
+    assert_eq!(problem_paths(&report), ["/p0/action", "/p1"], "{:?}", report.problems);
+    assert_eq!(at("/p0/action"), (Some(5), Some(31)));
+    assert_eq!(at("/p1"), (Some(6), Some(5)));
+}

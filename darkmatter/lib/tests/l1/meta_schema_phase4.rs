@@ -140,7 +140,8 @@ fn semantic_keyword_failures_are_structured_and_distinguishable() {
         assert_eq!(problem.path, "/candidate");
         assert_eq!(problem.instance_path.segments(), &["candidate"]);
         assert_eq!(problem.line, Some(4));
-        assert_eq!(problem.column, Some(1));
+        // The value after `candidate: `.
+        assert_eq!(problem.column, Some(12));
         let schema_path = problem.schema_path.as_ref().expect("keyword schema path");
         assert_eq!(
             schema_path.segments().last().map(String::as_str),

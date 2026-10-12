@@ -27,6 +27,8 @@ mod image_test_support;
 mod layout_matrix_support;
 #[path = "../request_support/mod.rs"]
 mod request_support;
+#[path = "../position_fixtures/mod.rs"]
+mod position_fixtures;
 #[path = "../union_fixtures/mod.rs"]
 mod union_fixtures;
 
@@ -49,6 +51,7 @@ mod cutover_reference;
 mod debug_test;
 #[cfg(windows)]
 mod declined_path_transclusion;
+mod diagnostic_positions;
 mod disclosure_render_targets;
 mod disclosure_transclusion_integration;
 mod effects_integration;
