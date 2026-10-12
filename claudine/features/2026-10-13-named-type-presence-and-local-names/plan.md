@@ -8,7 +8,48 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - darkmatter
+    - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Named-Type Presence and Local Names Implementation Plan
@@ -60,7 +101,7 @@ Depends on Phase 1. Establish contracts before separate agents edit their consum
 
 ### Wave 2 — Establish Shared Contracts
 
-- [ ] **Model Contracts**
+- [x] **Model Contracts**
   - Implement the agreed provenance representation in shared schema types/source maps and typed schema errors. Preserve individual bound origins through stricter-bound selection, and retain enough use-site information for consuming-reference diagnostics.
   - Define the local-reference representation, built-in collision predicate, and grouped file-match API/annotation shape. Prefer reusing the existing import expansion representation for a local target rather than adding a second resolver.
   - Assign one owner to `simplified/types.rs`, public exports, and shared constructors. Update compile-required call sites without introducing new semantics in consumers. Record the API and file ownership for subsequent waves.
@@ -70,13 +111,13 @@ Depends on Phase 1. Establish contracts before separate agents edit their consum
 
 ### Wave 3 — Implement Independent Front Ends
 
-- [ ] **Local Grammar**
+- [x] **Local Grammar**
   - Owner: `simplified/grammar.rs`, `source.rs`, `cursor.rs`, `query.rs`, `serialize.rs`, and their dedicated tests. Parse a non-keyword identifier as a local reference with its authored span; keep the existing identifier and terminal-`@` grammar.
   - Support forward references, descriptions, inline objects, union arms, arrays, and value/container postfixes wherever explicit references support them. Defer applicability and numeric-versus-length interpretation until the target resolves.
   - Teach source projection and cursor/reference discovery about bare names, including documents with no `@`. Meta-type parsing stays passive and accepts reference syntax without requiring a definition or executing expressions.
   - Round-trip bare and explicit references, built-in collisions, descriptions, and external targets. Test plain, quoted, and block source presentations and source-aware edits without whole-document rewriting.
 
-- [ ] **Grouped Match Model**
+- [x] **Grouped Match Model**
   - Owner: `schemas/file_match.rs` and dedicated model tests. Replace single-list queries/preparation with a representation preserving each group's positives and exclusions and requiring every group to admit a candidate.
   - Reuse `GlobReference` and captured `FileResolutionContext`; preserve value/caller origin, prepared roots, file-name matching, symlink filtering, and existing missing/partial-value behavior. Reuse `FileReference` for resolution, without recapturing ambient state.
   - Preserve the per-group validity rules and prove that constructing an empty intersection performs no file walk. Do not flatten groups into one OR list or add another glob implementation.
@@ -90,7 +131,7 @@ Depends on Phase 2. Resolver and converter tasks may run together against the es
 
 ### Wave 4 — Implement Semantic Pipelines
 
-- [ ] **Constraint Resolution**
+- [x] **Constraint Resolution**
   - Owner: `schemas/resolve.rs`, resolution-related lint/query integration, and resolver tests. Delete `strip_top_level_presence` and its call and replace the stale explanation that describes stripping as intentional.
   - Expand bare references through the existing named-import path with the complete defining-file table, request-scoped namespace cache, file policy, cycle stack, and depth limit. Fix import detection/fast paths so bare-only files are expanded; local references add no external dependency.
   - Make `apply_import_postfix` merge constraints by resolved target and scope. Preserve existing array item/container constraints, descriptions, required/generated flags, target identity, enum members, and literals. Check object bounds from both `$constraints` and postfixes together.
@@ -98,7 +139,7 @@ Depends on Phase 2. Resolver and converter tasks may run together against the es
   - Produce typed missing-name and contradiction errors with original authored locations. Preserve imported-error wrappers and mixed bare/explicit cycle chains. Retain all union-postfix and already-array rejection paths.
   - Assert scalar, expression-in-mapping, optional-object/required-inner-field, arrays, union-arm, and multi-hop behavior through resolved schemas and authored/effective validation, not only internal AST values.
 
-- [ ] **Conjunctive Lowering**
+- [x] **Conjunctive Lowering**
   - Owner: `simplified/convert.rs`, validation keyword consumers, and converter/validation tests. Lower repeated patterns and `not-empty` as conjunctions, retaining base type, format, presence, descriptions, and Darkmatter completion annotations where consumers can still find them.
   - Read grouped matches when emitting root-union metadata and selecting/validating arms, including simplified arms beside raw JSON Schema arms. Require every group only where matching already governs validation; leave ordinary single-schema matching passive.
   - Check every lowering path for keyword overwrites: bounds, schemes, defaults, examples, patterns, and repeated constraints. Avoid changes to unrelated schema layering and union behavior.

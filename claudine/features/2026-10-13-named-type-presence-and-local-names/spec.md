@@ -31,27 +31,38 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 (investigation only) is recorded in implementation-log.md: read its
-    "Surface Inventory", "Provenance Spike", and "Engineering choices settled at
-    the checkpoint" sections before Phase 2. Key facts the plan does not state:
-    (1) import-site `min`/`max` parse as numeric `Min/Max` because imports parse
-    with `SimplifiedType::Any`; a string target then fails with "constraint `max`
-    is not valid on `string`", so bounds must be reinterpreted against the
-    resolved target (like `reinterpret_suggestion_candidates`). (2) Contradictions
-    are silent today (`minimum: 10, maximum: 5`; `minProperties: 3,
-    maxProperties: 2` from `$constraints` + postfix). (3) `load_named_types`
-    already builds a `SchemaSourceMap` via `parse_standalone_schema_document` and
-    discards it; block-scalar named-type files already fail to load, so every
-    importable declaration has spans. The chosen provenance design keeps
-    `Constraint`/`PropertyAtom` span-free and carries `SchemaConstraintOrigin`
-    addresses (source id, structural path, keyword, occurrence, optional span)
-    in the resolver and in two new `SchemaError` variants. (4) `apply_object_arity`
-    silently drops `$constraints` keys other than min/max-keys. (5) Several
-    consumers take only the first `Match` or concatenate arms' patterns
-    (completion.rs, claudine supplied.rs/classify.rs), and validate.rs assumes the
-    match error path ends in `x-darkmatter-match`. (6) A postfix on an
-    already-array target is appended to item constraints today; the log records
-    the choice to interpret it against the array container.
+    Phase 3 is recorded under "## Phase 3" in implementation-log.md. Facts
+    for Phase 4 (Editor Assistance in DMLS; Claudine Consumers):
+    (1) The resolver now PRODUCES `SchemaError::UnknownNamedType { name,
+    namespace, site }` and `SchemaError::ConstraintConflict { name, kind, site,
+    constraints }` (both wrapped by `ReferencedSchema` when they come from a
+    referenced file). `site.path` is the consuming reference's structural path
+    in `site.source`; anchor the primary range on the `ImportName` span at that
+    path in the projected `$schema`/file source map. File origins already carry
+    `span`; `InlineDocument` origins have `span: None`, so DMLS must fill them
+    with `SchemaSourceMap::constraint_span(text, path, keyword, occurrence)`.
+    (2) DMLS's standalone-schema path still never resolves named types, so a
+    missing bare name (`title: nope`) there publishes no diagnostic; Phase 4
+    must cover it. Passive suggestion lint now skips `suggest` on references
+    (the resolved schema's lint judges them).
+    (3) Remaining single-group `match` consumers: darkmatter
+    `schemas/completion.rs` (`suggestion_from_union` concatenates arms;
+    `kind_for_atom` takes the FIRST `Constraint::Match`; public
+    `CompletionKind::File { patterns }`), and Claudine `supplied.rs`
+    (`admits_arm_files`, `eager_file_target`, `file_reference_target`,
+    `file_match_target`), `classify.rs`, `candidates.rs`,
+    `schema_interactive/*`. Switch them to `file_match_groups` /
+    `FileMatchGroups`; a reused type now carries several `Match` groups.
+    Darkmatter's own root-union validation already requires every group
+    (`x-darkmatter-match` is an array of arrays for >1 group).
+    (4) Behavior changes Phase 4/5 should know: block `$constraints`
+    `required`/`generated` on a property's object are moved onto the atom by
+    the parser; other non-key `$constraints` keys are Convert errors; one-atom
+    contradictory bounds/empty schemes/different defaults are Convert errors;
+    several patterns lower to `allOf`; inherited cross-file `example(...)`
+    references are rewritten to absolute paths in `ResolvedSchema.simplified`
+    (so hover/serialization of resolved atoms may show absolute paths).
+    (5) Docs/skills were intentionally not updated in Phase 3 (Phase 5 Wave 6).
 pipeline_step: 3
 related:
     - 2026-10-14-union-type-constraints

@@ -7,7 +7,48 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - darkmatter
+    - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-10-13-named-type-presence-and-local-names (6 phases)
@@ -171,3 +212,204 @@ Affected public constructors: `SchemaError` (two new variants; existing variants
 - No requirement-to-test mapping applies to Phase 1 (no behavior changed); the planned mapping for criteria 1–10 is the table above.
 - Claudine skill: no update needed for Phase 1 (no behavior change). The grouped-match change to Claudine's completion description is scheduled for Phase 5.
 - Phase 1 complete: inventory and provenance design delivered; checkpoint choices recorded under "Engineering choices settled at the checkpoint".
+
+## Phase 2
+
+- Started 2026-10-11 by claude/opus. Wave 2 (Model Contracts) was done by the orchestrator in one pass. Wave 3 (Local Grammar, Grouped Match Model) went to two parallel foreground sub-agents with disjoint file ownership.
+
+### Wave 2 — Model Contracts (API record for Phases 3–4)
+
+**File ownership.** `simplified/types.rs`, `simplified/source.rs` (provenance types only), `errors.rs`, and the re-exports in `simplified/mod.rs` and `schemas/mod.rs` belong to this wave. In later waves, a change to a shared type returns to this contract and is recorded here.
+
+**Local-reference representation (no new AST variant).** A bare non-keyword `Name` parses to `TypeExpr::Imported { name, reference: "this" }`, the same value `Name@this` produces. New helpers in `types.rs`: the `LOCAL_REFERENCE` (`"this"`) constant, `TypeExpr::local(name)`, `TypeExpr::is_local_reference()`, and `SimplifiedType::is_keyword(name)`, which is the built-in collision predicate. The spelling is not stored, for three reasons.
+  - Both spellings must resolve identically (AC 5). One value makes that true by construction, and the existing import path does all of the resolving: the `schema_has_imports` fast path, `this` namespace selection, cycle stack, depth limit, and no dependency edge for `this`. No second resolver exists.
+  - Canonical serialization is bare unless `SimplifiedType::is_keyword(name)` requires `@this`. With no stored spelling, serialize → parse round-trips to an *equal* AST.
+  - Source spans distinguish the spellings where an editor needs it. The span of the reference name is `SchemaSpanKind::ImportName` in both spellings. Only the explicit spelling also records `ImportReference`.
+  - Consequence: every existing `TypeExpr::Imported` consumer (`claudine/gen/src/schema_compat.rs`, `claudine/lib/src/composition/schema/classify.rs`, DMLS hover) already handles bare references, and still renders them as `name@this` until Phase 4/5 adopts `serialize_property_atom` there.
+
+**Provenance (in `simplified/source.rs`, re-exported from `schemas`).**
+  - `SchemaSourceId { InlineDocument, File(PathBuf) }`. A `File` path is the canonical path the resolver loaded from.
+  - `SchemaConstraintOrigin { source, path, keyword, occurrence, span: Option<Range<usize>> }`.
+  - `SchemaReferenceSite { source, path }`.
+  - `SchemaConstraintConflictKind { Bounds, Scheme, Default }`.
+  - `impl Display for SchemaSourcePath` (`a[1].b`, `<root>`).
+  - `SchemaSourceMap::constraint_span(source_text, path, keyword, occurrence)` turns an origin address into a span. It matches whole words, so `min` never selects `min-keys(…)`. A `$constraints` entry is addressed at `path/$constraints/<key>`.
+  - `Constraint`/`PropertyAtom` carry no spans, as decided in Phase 1.
+
+**Typed errors (`errors.rs`).**
+  - `SchemaError::UnknownNamedType { name, namespace: SchemaSourceId, site }`, whose message is `"<site.path>: unknown named type `<name>` in <namespace>"`.
+  - `SchemaError::ConstraintConflict { name, kind, site, constraints: Vec<SchemaConstraintOrigin> }`. It lists every origin in merge order.
+  - Both variants have status blocks and join the `ReferencedSchema` wrapping set in `resolve.rs::load_guarded_in_context`.
+  - **Neither is produced yet.** Phase 3 produces them once it threads `SchemaSourcePath` through `expand_*`. Until then, a missing named type is still `SchemaError::Convert { property: <type name>, "named type `x` is not defined in `this` …" }`.
+
+**Grouped file-match encoding (settled; Wave 3 implements the model, Phase 3 the emission).**
+  - Each authored `match(...)` stays one `Constraint::Match(Vec<String>)` group.
+  - `x-darkmatter-match` is internal generated-schema metadata, not user configuration. One group keeps today's flat string array, so unchanged schemas lower identically. More than one group is an array of string arrays, `[["*.md"], ["guide*"]]`. The keyword decoder accepts both, and the keyword name stays the last path segment, so `validate.rs::is_match_rule_out`/`is_match_keyword_error` keep working.
+
+### Wave 3 — Local Grammar
+
+- `grammar.rs`: `parse_import` became `parse_named_reference(name, explicit)`, one path for both spellings. Bare and `@this` produce equal ASTs for `Name`, `Name[]`, `Name(c)`, `Name[](c)`, `-> description`, inline objects, and union arms. Constraints are parsed with `Any` plus `defer_suggestion_target`, so bound interpretation is deferred as for explicit imports. Keywords win, and `keyword@ref` is still an explicit reference. `Name(c)[]` and `Name(c)[]@ref` now share one error, "`[]` must come before the constraint list in a named type reference"; the explicit form used to fall through to "unknown type". One unchanged asymmetry remains: a keyword followed by `(c)[]@ref` takes the primitive path and fails with "expected end of expression". The module EBNF was updated.
+- `source.rs`: a bare non-keyword name records its span as `ImportName` with no `ImportReference`, while keywords stay `TypeKeyword`. `cursor.rs`/`query.rs` needed no logic change because the AST is identical; their docs were updated and tests added. `serialize.rs` writes a local reference bare unless its name is a keyword, in which case it writes `name@this`. Cross-file references are unchanged.
+- Source-aware edits: no production edit path re-serializes atoms. `serialize_property_atom` is used only by `detect.rs`, which infers a whole schema, and by Claudine `inline_prompt.rs`, which renders a display table. The leaf writer `locate_frontmatter_leaves` is covered by a test showing an untouched `x@this` is not respelled.
+- Passivity: `type_definition_values_accept_reference_syntax_without_lookup` validates the values `person[]` and `person(required)@./missing.yaml` in an empty tempdir context.
+- Fallout: every test that relied on "unknown type" now uses genuinely malformed input such as `string(min(nope))` or `str(`, so it survives Phase 3. Two tests whose negative `!contains("unknown type")` check had become vacuous now make the positive check `contains("unknown constraint")`. The changed tests are `meta_schema_phase3.rs::semantic_defaults_use_the_passive_parser_authority`, `simplified/mod.rs::property_grammar_errors_propagate_with_property_name`, `cursor.rs::a_hard_parse_failure_still_yields_a_usable_state`, `resolve.rs::bare_map_advisory_excludes_json_schema_envelopes_and_invalid_maps`, seven `dmls lsp_session.rs` meta-schema and standalone tests, `grammar.rs::parameterized_expression_is_rejected`, and `schemas_literal_expression.rs::expression_parameterized_rejected_in_v1`.
+- **Known gap, for Phase 3/4:** in a DMLS standalone schema, a half-typed keyword (`title: str`) or a missing bare name (`title: nope`) publishes no diagnostic, because the standalone authoring path never resolves named types. A missing `x@this` already behaved this way; bare names make the case common. Phase 4's missing-name diagnostic must cover the standalone path.
+
+### Wave 3 — Grouped Match Model
+
+- `file_match.rs` adds:
+  - `FileMatchGroups { groups: Vec<FileMatchGlobs> }`, which is never empty. `new(&[G: AsRef<[String]>])`, where an empty list gives `NoPositivePattern`. It also has `groups()`, `matches()` (every group), and `prepare()`.
+  - `PreparedFileMatch`, with `roots()` (the first group's roots), `lists_file()` (every group), and `may_list_below()` (every group). The first group's roots suffice, because every admitted file must be listed by the first group.
+  - `root_union_match_groups(arm, property) -> Option<Vec<&[String]>>`, the crate function `file_match_groups(def)`, and `file_match_admits(value, groups: &[G], origin)`.
+- `root_union_match_patterns` and `file_match_patterns` were removed. `FileMatchGlobs` is unchanged as the one-group judgment.
+- Keyword decoder:
+  - a flat array is one group, with byte-identical messages, so `[]` errors exactly as before;
+  - an array of arrays is several groups;
+  - a mixed shape, an empty group, or a non-string member is a schema error;
+  - the message for several groups names each group;
+  - the rejection still comes from the keyword itself, never through `allOf`.
+- Compile-only consumer edits, with behavior unchanged:
+  - `convert.rs` still emits the first group, as `find_map` did before.
+  - Claudine `supplied.rs::admits_arm_files` passes the first group as a one-group list.
+  - Test call sites in `claudine/cli/src/completion/schema_completion/tests.rs` and `darkmatter/lib/tests/l1/glob_consumers.rs` wrap their one list in a one-group list.
+  - `completion.rs`, `classify.rs`, `candidates.rs`, and `schema_interactive/*` read `Constraint::Match` directly or use the unchanged `FileMatchGlobs`; Phase 3/4 migrates them.
+- No-walk proof: construction takes no context. Preparing against a directory that does not exist yet still gives a judgment that lists a file created afterwards. So the prepared value holds resolved roots and patterns, not a snapshot of a walk.
+
+### Requirement-to-test map (Phase 2 behaviors)
+
+| Behavior | Tests |
+|---|---|
+| Provenance address → span (plain, quoted, `$constraints`, occurrence, whole-word keyword) | `simplified::source::tests::constraint_span_resolves_an_origin_address_in_each_presentation` |
+| Path/source rendering for messages | `simplified::source::tests::schema_source_path_and_id_render_for_messages` |
+| Typed error contracts (display + status block) | `errors::tests::unknown_named_type_names_the_type_the_reference_and_the_namespace`, `errors::tests::constraint_conflict_lists_every_origin_in_merge_order` |
+| Bare reference parses as local; misspelled keyword is a reference; keywords win; `string@this` is a reference | `grammar.rs`: `unknown_identifier_parses_as_local_reference`, `misspelled_keyword_parses_as_local_reference`, `bare_keyword_stays_primitive_and_explicit_keyword_is_a_reference` |
+| Bare and `@this` agree for every postfix form; deferred interpretation; inline objects; identifier chars; `Name(c)[]` rejected in both spellings | `bare_reference_postfixes_match_explicit_reference`, `bare_reference_records_constraints_and_array_marker`, `bare_reference_defers_suggestion_target`, `bare_reference_works_in_inline_objects`, `bare_reference_identifier_characters_match_explicit_reference`, `named_reference_rejects_array_marker_after_constraints_in_both_spellings` |
+| Source projection of bare names, including documents with no `@` (plain, single/double-quoted, flow, inline object, block/flow union arms, `$schema` with offset) | `schemas_source_projection.rs`: `bare_local_reference_projects_its_name_as_an_import_name_span`, `bare_keyword_stays_a_type_keyword_span_and_explicit_this_records_both_spans`, `bare_local_reference_in_a_schema_declaration_records_import_name_spans` |
+| Localized edit does not respell `@this` | `a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference` |
+| Cursor roles for bare names | `cursor.rs`: `a_bare_reference_name_is_a_type_position`, `bare_reference_constraint_positions_match_explicit_reference_positions`, `a_bare_reference_in_an_inline_object_keeps_its_constraint_role` |
+| Suggestion query parity | `query.rs::bare_reference_suggestions_match_explicit_local_reference` |
+| Serialization canonical form + round trip | `serialize.rs`: `local_reference_serializes_bare_and_round_trips`, `local_reference_with_a_keyword_name_keeps_the_explicit_spelling`, `cross_file_reference_serialization_is_unchanged`, `local_reference_inside_an_inline_object_round_trips` |
+| Passive meta-type acceptance | `meta_schema_phase4.rs::type_definition_values_accept_reference_syntax_without_lookup` |
+| One-group parity; several positives/exclusions; cross-group conjunction (`guide-intro.md` vs `notes.md`/`guide.txt`); group-local exclusion; empty intersection without walk; invalid group lists | `file_match.rs`: `one_group_judges_exactly_as_its_globs`, `one_group_takes_several_positives_and_exclusions`, `groups_intersect_instead_of_widening`, `an_exclusion_stays_inside_its_own_group`, `an_empty_intersection_constructs_and_prepares_without_a_walk`, `an_empty_or_invalid_group_list_is_an_error` |
+| Grouped query + keyword encoding/decoding | `root_union_match_groups_keeps_every_group_in_authored_order`, `a_flat_keyword_is_one_group_with_its_message_unchanged`, `a_nested_keyword_requires_every_group`, `a_malformed_keyword_is_a_schema_error` |
+
+- Input Robustness Matrix: not applicable to this phase. Phase 2 changed a text grammar, a renderer, and an in-process API, and read no new configuration fields. The matrix's `$constraints` table is scheduled for Phase 5. Malformed `x-darkmatter-match` shapes, the one generated-metadata decoder touched here, are covered by `a_malformed_keyword_is_a_schema_error`.
+
+### Verification and close
+
+- `darkmatter`: `just test` passed 9195 tests, with 11 skipped. `just lint` exited 0.
+- `claudine`: `just test` passed 8673 tests, with 9 skipped. `just lint` exited 0; its only warning is the existing linker `__eh_frame` notice.
+- `messenger` (it reads the schemas API): `just test` passed 710 tests, with 2 skipped.
+- OS evidence: everything ran on macOS. `just cross-check darkmatter --os windows --lib file_match::tests` passed 15 of 15 on native Windows, since the grouped-glob tests compare paths. Linux and WSL2 were not run locally; CI covers them.
+- Not done in this phase, by plan:
+  - producing `UnknownNamedType`/`ConstraintConflict` (Phase 3);
+  - emitting `x-darkmatter-match` for several groups and reading every group in completion and root-union selection (Phases 3 and 4);
+  - DMLS bare-name assistance (Phase 4);
+  - docs (Phase 5).
+- Skill: `.claude/skills/darkmatter/schema.md` gained the grouped-match note. The `claudine` skill needs no change, because Claudine behavior is unchanged in this phase.
+- Phase 2 complete: shared model, bare-reference grammar, and grouped-match model landed.
+
+## Phase 3
+
+- Started 2026-10-11 by claude/opus. Wave 4 ran as two parallel foreground sub-agents with disjoint ownership:
+  - **Constraint Resolution** owned `resolve.rs`, `simplified/lint.rs`, and `tests/l1/schemas_named_type_merge.rs`.
+  - **Conjunctive Lowering** owned `simplified/convert.rs`, `about.rs`, and `tests/l1/schemas_conjunctive_lowering.rs`.
+  - The orchestrator registered both test modules in `tests/l1/main.rs` before dispatch. It then closed the `$constraints` presence gap and added the cross-pipeline checkpoint test.
+
+### Wave 4 — Constraint Resolution (`resolve.rs`)
+
+- **Presence:** `strip_top_level_presence` and its call are deleted, and the stale comment now states the contract. Inherited `required`/`generated` survive every reference. Presence hoisting from item and union-arm constraints was already in the converter, so `person[]` and union arms inherit `required` with no further change.
+- **Provenance:** a `SchemaSourcePath` is threaded through `expand_shape`/`expand_property_def`/`expand_atom`/`expand_import`. It uses the source map's own segments: union arms are `union_arm(i)`, pattern keys use their authored key, and inline root-union arms start at `[N]`.
+  - Each expanded definition carries one `SchemaConstraintOrigin` per top-level constraint. That covers value, array container, and `$constraints` entries at `path/$constraints/<key>`.
+  - A named type is expanded at `[type-name]` in its own namespace. An inherited constraint keeps the origin of the declaration that introduced it; in a multi-hop chain, `min` points at `[label]` in `types.yaml`.
+  - Spans are filled for `File` origins on the error path only, by re-reading and re-projecting that file. `InlineDocument` origins carry `span: None`, as designed in Phase 1.
+- **Typed errors:**
+  - A missing name is now `SchemaError::UnknownNamedType { name, namespace, site }`. `namespace` is the searched schema and `site` is where the reference was written.
+  - Contradictions are `SchemaError::ConstraintConflict` with both winning origins, inherited first.
+  - When either error comes from a referenced schema, `ReferencedSchema` wraps it (tested). Cycles keep `ImportCycle`, and a mixed bare/explicit chain renders `b -> a -> b`.
+- **Merge (`apply_import_postfix` rewritten):** this follows the spec's Decided 4 table.
+  - **Bounds:** stricter wins per kind: number, string length, item count, key count. Lower > upper is a `ConstraintConflict` of kind `Bounds`. Equal bounds are valid.
+  - **Flags:** deduplicated.
+  - **Patterns and `match`:** every pattern is kept, and every `match` group stays a separate group, inherited first.
+  - **Schemes:** they intersect; an empty intersection is a conflict.
+  - **Defaults:** compared with a local copy of the converter's number normalization, so `3` equals `3.0` and `"3"` differs from `3`. Different defaults are a conflict.
+  - **Suggestions:** at-most-one `suggest` is checked again after union flattening, so duplicates inherited through different arms fail. The error is `Grammar` with span `0..0`, because an inherited candidate's span belongs to another file.
+  - **Description:** a use-site description replaces the inherited one.
+  - **Existing rejections:** union-target postfix, already-array `[]`, and array-level `suggest` are retained.
+- **Target-directed bounds** (checkpoint choices 1 and 2):
+  - On a `string` target, a use-site `min`/`max` becomes `MinLen`/`MaxLen`. A non-integer is a `Convert` error naming the property.
+  - On an already-array target, the value-level postfix applies to the container: `min`/`max` become `MinItems`/`MaxItems`. `suggest` is kept on the items, because candidates describe items and array-level `suggest` is rejected.
+- **Object key bounds:** `$constraints` key bounds, the definition's postfix key bounds, and use-site key bounds merge as one scope. The single winners are placed in `shape.constraints` and removed from the atom.
+- **Examples keep their defining-file origin:** when a definition is inlined from another file, its `example(...)` references are rewritten to the resolved absolute native path, with `this` meaning the defining file. Path resolution was factored out of `resolve_one_example` into `resolve_example_path`. `FileReference` accepts the rewritten path as absolute on every OS; this passed on native Windows.
+- **Lint defect found and fixed (`simplified/lint.rs`):** any schema file that put `suggest(...)` on a named reference failed to load, because the passive suggestion lint tried to convert the unresolved reference. The passive lint now skips references, and the resolved schema's lint still judges candidates against the resolved target (tested).
+- **Existing tests updated, stripping assertions removed:** the resolver unit tests `expands_named_type_import`, `resolves_this_self_import`, `constrained_import_applies_use_site_constraint` (comment only), `multiple_imports_from_same_file_resolve_and_dedup`, the three `shared_type_tables` independence tests, and `import_of_missing_type_name_errors` (now `UnknownNamedType`). A search of `darkmatter/` and `claudine/` found no other test asserting stripping or the old "is not defined in" message.
+
+### Wave 4 — Conjunctive Lowering (`convert.rs`)
+
+- **Patterns:** an atom with exactly one pattern-producing constraint keeps today's single `pattern` keyword, so its output is byte-identical (checkpoint choice 3). With several, the base fragment gains `allOf: [{"pattern": …}, …]`, deduplicated, with no combined regex. `type`, `format`, bounds, `description`, `default`, and every `x-darkmatter-*` annotation stay on the base fragment. `coerce.rs` reads only the numberlike arm, which is unchanged. The triggers matcher already evaluates every constraint.
+- **No keyword overwrites on one atom:**
+  - repeated bounds keep the stricter value per kind;
+  - lower > upper on one atom is a `SchemaError::Convert` backstop, since the resolver catches reuse conflicts first with origins;
+  - schemes intersect, and an empty intersection is a `Convert` error;
+  - defaults are compared after `normalize_json_number`;
+  - examples keep authored order.
+- **Object bounds:** the `$constraints` block and the postfix are one scope, for inline objects and root shapes alike.
+- **`$constraints` silent loss closed** (checkpoint choice 5):
+  - On a property's object, `required`/`generated` mean the same as the postfix (see the orchestrator fix below).
+  - `not-empty`, `unique`, `integer`, `min-items`, and `max-items` are a `Convert` error ("`$constraints` key `…` is not valid on an inline object").
+  - On the root shape or a root-union arm, every key except `min-keys`/`max-keys` is an error ("… on the root object").
+  - The only shipped use is `min-keys: 1` in `darkmatter/docs/schemas/claudine-types.yaml`, which is unaffected.
+- **Grouped match emission:** `attach_root_union_match` keeps its signature and emits every group in one `x-darkmatter-match` keyword. One group is a flat array, as before; several are `[["*.md"],["guide*"]]`.
+  - Groups are not wrapped in `allOf`, so `validate.rs::is_match_rule_out` and `is_match_keyword_error` still work (checkpoint choice 6).
+  - The keyword validator already requires every group, and `without_match_keyword`, `format.rs`, and `about.rs` handle the nested form unchanged.
+  - Single-schema validation stays passive.
+- `about.rs` descriptions of `min`, `max`, `not-empty`, `pattern`, `match`, and `scheme` now describe what repeats do.
+
+### Orchestrator fixes and checkpoint
+
+- **`$constraints` presence moved to the parser (`simplified/mod.rs::parse_mapping_atom`).** The lowering agent first hoisted block `required`/`generated` only in `convert.rs`. Phase projection (`phase.rs::project_atom`), `PropertyAtom::is_required`, the triggers matcher, and `compose` consumers still read the atom, so the block and postfix spellings disagreed:
+  - at the Completion phase, a block `required` + `generated` property passed when absent;
+  - at Launch, a block `required` without `eager` stayed required.
+  
+  The parser now moves those two flags off a property's object block onto the property's atom, so every consumer sees one representation. The converter's private hoist was removed, and lowering now rejects a block presence flag wherever one remains, which is only possible at the root or in a programmatic shape. The tests `block_required_makes_the_object_property_required_like_the_postfix` (now also asserting Launch defers) and `block_generated_defers_presence_in_authored_validation_like_the_postfix` (now also asserting Completion enforces) pin the parity.
+- **Checkpoint test** `schemas_named_type_merge::reused_patterns_and_match_groups_stay_conjunctive_in_validation` runs the whole resolver → converter → validator path:
+  - a reused `code(pattern(z$))@./types.yaml` over `string(pattern(^a))` accepts `az` and rejects `ab` and `bz`;
+  - a root-union arm `doc(match('guide*'))@./types.yaml` over `file(match('*.md'))`, checked against real files, accepts `guide-intro.md` and rejects `notes.md` and `guide.txt`.
+- **Checkpoint comparison:** the following tests show that bare, `@this`, and cross-file references agree after property names and origins are accounted for:
+  - `bare_and_explicit_local_references_resolve_identically`
+  - `required_and_generated_survive_every_reference_spelling`
+  - `a_reference_without_presence_or_repeats_lowers_like_its_inlined_definition`
+  
+  Conflicts expose both declarations (`a_multi_hop_bound_conflict_names_both_origins_with_the_defining_span` and `a_constraints_block_conflict_points_at_the_block_entry`), and conjunctions survive actual validation.
+
+### Requirement-to-test map (Phase 3 behaviors)
+
+Unless prefixed, test names are in `darkmatter/lib/tests/l1/schemas_named_type_merge.rs` (`M`) or `schemas_conjunctive_lowering.rs` (`L`); `convert::repeated_constraints` tests are unit tests.
+
+| AC / behavior | Tests |
+|---|---|
+| AC1 presence through bare/`@this`/cross-file; authored vs runtime; invalid supplied values | M `required_and_generated_survive_every_reference_spelling` |
+| AC2 spike case at top level and inside a mapping type | M `required_expression_type_is_required_at_top_level_and_inside_a_mapping_type` |
+| AC3 combinations, multi-hop, nested object, `person[]`, union arms | M `each_presence_combination_is_inherited_as_declared`, `multi_hop_chains_inherit_presence_locally_and_across_files`, `a_required_inner_field_does_not_require_the_enclosing_property`, `an_array_of_a_required_type_is_a_required_property`, `union_arms_hoist_inherited_required` |
+| AC4 bounds per kind, target-directed interpretation, item vs container | M `string_length_bounds_are_read_against_the_resolved_target_and_keep_the_stricter_value`, `a_fractional_length_bound_on_a_string_target_is_rejected`, `number_bounds_keep_the_stricter_value`, `item_count_bounds_merge_on_an_already_array_target_and_never_with_item_bounds`, `key_bounds_from_constraints_blocks_and_postfixes_are_one_scope` |
+| AC4 conflict with both origins and spans; wrapper | M `a_multi_hop_bound_conflict_names_both_origins_with_the_defining_span`, `a_constraints_block_conflict_points_at_the_block_entry`, `a_conflict_inside_a_referenced_schema_keeps_the_referenced_wrapper` |
+| AC4 schemes, defaults, patterns/match groups, examples, suggestions | M `schemes_intersect_and_an_empty_intersection_is_a_conflict`, `defaults_must_be_equal_after_number_normalization`, `repeated_patterns_and_match_groups_are_all_kept`, `inherited_examples_resolve_from_their_defining_file_and_come_first`, `duplicate_suggestions_through_different_union_arms_fail`, `suggestions_on_a_reference_are_linted_against_the_resolved_target` |
+| AC4 conjunctive lowering + actual validation | L `a_value_must_satisfy_every_pattern`, `not_empty_and_a_pattern_both_apply`, `several_patterns_lower_to_all_of_beside_the_base_keywords`, `repeated_bounds_keep_the_stricter_value_in_validation`, `block_and_postfix_key_bounds_merge_as_one_scope`, `equal_bounds_are_valid_and_contradictory_bounds_are_errors`, `repeated_schemes_intersect`, `repeated_defaults_compare_after_number_normalization`; M `reused_patterns_and_match_groups_stay_conjunctive_in_validation`; unit `convert::repeated_constraints::*` (11 tests) |
+| AC5 bare vs explicit, built-in collision, unknown names, defining-file resolution, cycles | M `bare_and_explicit_local_references_resolve_identically`, `a_bare_keyword_is_the_built_in_and_keyword_at_this_is_the_local_type`, `an_unknown_bare_name_is_a_typed_error_naming_the_type_and_schema`, `an_unknown_name_in_a_root_union_arm_is_addressed_through_the_arm`, `an_unknown_name_inside_an_imported_definition_names_its_defining_file`, `a_bare_name_inside_an_imported_definition_resolves_in_its_defining_file`, `a_schema_file_with_only_bare_references_expands`, `a_cycle_through_bare_and_explicit_references_reports_the_chain` |
+| AC10 restrictions retained; unaffected output equivalent; grouped root union; passivity | M `union_postfix_and_already_array_suffix_remain_rejected`, `a_reference_without_presence_or_repeats_lowers_like_its_inlined_definition`; L `schemas_without_repeats_keep_their_lowered_output`, `root_union_selection_requires_every_match_group`, `an_exclusion_applies_only_inside_its_own_group`, `match_groups_stay_passive_in_a_single_schema`, `several_groups_emit_nested_arrays_and_one_group_a_flat_array` |
+| `$constraints` presence parity and invalid keys | L `block_required_makes_the_object_property_required_like_the_postfix`, `block_generated_defers_presence_in_authored_validation_like_the_postfix`, `block_keys_with_no_object_meaning_are_errors` |
+
+- **Input Robustness Matrix:** the full `$constraints` matrix is scheduled for Phase 5 (Wave 7). In this phase, the `$constraints` reader's previously silent drops became defined outcomes: presence keys move to the atom, and keys with no meaning are errors. That code path was checked for `serde(default)`, `unwrap_or_default`, and `.ok()`, and none was found. The other matrix cells (null, wrong type, duplicate key, trailing content) are unchanged parser behavior and remain Phase 5's evidence.
+
+### Verification and close
+
+- `darkmatter`: `just test` passed 9254 tests, with 11 skipped. Nine tests were slow but passed; all are existing DMLS parity and corpus tests this phase didn't touch. `just lint` exited 0 after a `matches!` clippy fix in `convert.rs`. The `convert` lib tests were rerun after that fix: 122 of 122 passed.
+- `claudine`: `just test` passed 8673 tests, with 9 skipped. `just lint` exited 0.
+- `messenger` (reads the schemas API): `just test` passed 710 tests, with 2 skipped.
+- OS evidence:
+  - macOS: everything above.
+  - Native Windows: `just cross-check darkmatter --os windows schemas_named_type_merge schemas_conjunctive_lowering` passed 48 of 48. This covers the absolute-path example rewrite and the real-file grouped root union.
+  - Linux and WSL2 were not run locally; CI covers them.
+- Docs: no topic docs or skills were changed in this phase. Current docs (`local-type-references.md`, `authoring-schemas.md`, `definition.md`, the `darkmatter` skill) still describe stripping and single-group behavior until Phase 5 (Wave 6) updates them, as planned. New `$constraints` key rules and same-atom contradiction errors also belong in Phase 5's docs.
+- The Claudine skill needs no change, because Claudine behavior is unchanged in this phase.
+- Phase 3 complete: resolution, merging, and lowering are implemented. The plan's Wave 4 tasks are checked off.
