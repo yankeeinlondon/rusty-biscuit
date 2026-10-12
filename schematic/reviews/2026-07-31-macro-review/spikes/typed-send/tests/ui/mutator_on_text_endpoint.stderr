@@ -1,0 +1,15 @@
+error[E0277]: the trait bound `Text: SupportsHooks` is not satisfied
+ --> tests/ui/mutator_on_text_endpoint.rs:5:28
+  |
+5 |         .mutate_response::<GetReadmeRawRequest>(|_ctx, s| { s.push('!'); Ok(()) });
+  |                            ^^^^^^^^^^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `Text`
+  |
+help: the following other types implement trait `SupportsHooks`
+ --> /kache/workspace/src/runtime.rs:552:0
+  |
+  = note: `typed_send_spike::runtime::Json<T>`
+ ::: /kache/workspace/src/runtime.rs:679:0
+  |
+  = note: `typed_send_spike::runtime::GraphQl<D>`
+note: required by a bound in `DemoClientBuilder::mutate_response`
+ --> /kache/workspace/src/client.rs:107:4

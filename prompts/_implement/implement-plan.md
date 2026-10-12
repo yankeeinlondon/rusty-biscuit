@@ -53,19 +53,18 @@ initialize:
               - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+        - when: "spec && file_exists(spec) && frontmatter(spec, 'message_to_agent')"
           action:
               - stderr: |-
                     The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent')}}
+                    > {{frontmatter(spec, 'message_to_agent')}}
               - message: |-
                     The previous phase's agent has passed a message to this agent:
         
-                    > {{frontmatter(log, 'message_to_agent')}}
+                    > {{frontmatter(spec, 'message_to_agent')}}
               - set:
-                    epilog: "{{message_to_agent}}"
-                    message_to_agent: null
+                    epilog: "{{frontmatter(spec, 'message_to_agent')}}"
 
                   
 start:
@@ -233,6 +232,8 @@ You are done when:
 
 The following Frontmatter properties must be set on the spec file ({{spec}}):
 
+- an earlier phase may already have set some of these keys; when a key exists, overwrite its value in place and never add a second copy of the key (duplicate keys make the frontmatter unparseable)
+
 ::block when="!frontmatter(spec, '$schema')"
 ::file ../_set_spec_schema.md 
 ::end-block
@@ -249,6 +250,7 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
             - you must recommend one of these options and explain why you're recommending it
         - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
+    - a previous phase's message may already be there; replace it with yours, or remove the `message_to_agent` key when you have nothing new to pass on, so a stale message is not handed to the next agent again
 ::block when="_loop_is_last"
 - set the `implemented` frontmatter to `true`
 ::end-block

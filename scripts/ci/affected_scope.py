@@ -475,7 +475,7 @@ KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
     "node-22",
     "pnpm-10",
-    "l2-parallel-self-spawn",
+    "l2-serial",
     "neovim",
     "zed-extension",
 }
@@ -528,6 +528,10 @@ CI_TEST_FIELDS = {
     #: out of that scan, so such a test runs only when its own package changes
     #: (see `test_input_references`).
     "source-inputs",
+    #: Why the package's L2 tier cannot run in parallel. Required with the
+    #: `l2-serial` runner tool and rejected without it: L2 runs in parallel
+    #: unless a package states why it must not.
+    "l2-serial-reason",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -1530,6 +1534,20 @@ def validate_package_ci(
         raise RuntimeError(
             f"{label}.tests names unknown runner tool(s) {invalid_tools}; the "
             f"vocabulary is closed: {sorted(KNOWN_RUNNER_TOOLS)}"
+        )
+
+    serial_reason = tests.get("l2-serial-reason")
+    if "l2-serial" in tools:
+        if "L2" not in tiers:
+            raise RuntimeError(f"{label}.tests names the 'l2-serial' runner tool without the L2 tier")
+        if not isinstance(serial_reason, str) or not serial_reason.strip():
+            raise RuntimeError(
+                f"{label}.tests names the 'l2-serial' runner tool without 'l2-serial-reason'; "
+                "L2 runs in parallel unless the package states why it cannot"
+            )
+    elif serial_reason is not None:
+        raise RuntimeError(
+            f"{label}.tests sets 'l2-serial-reason' without the 'l2-serial' runner tool"
         )
 
     validate_archive_includes(label, tests.get("archive-includes", []))

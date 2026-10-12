@@ -11,6 +11,7 @@ mod common;
 
 mod context_construction_guard;
 mod entry_point_parity;
+mod formatting_transaction;
 mod level1_graph_index;
 mod level1_wiki;
 mod lsp_session;
@@ -22,7 +23,9 @@ mod schema_roots_parity;
 mod shell_suffixes;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;
+mod style_markdown_parity;
 mod suggest_constraint_phase1;
 mod test_layout;
 mod undeclared_property;
+mod workspace_formatting_settings;
 mod zed_extension_contract;

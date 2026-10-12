@@ -30,6 +30,11 @@ effects-instrumentation = []
 # boundary, where `cfg(test)` does not reach. Off by default; without it the
 # counters and their accessors are not compiled.
 work-counters = []
+# Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
+# body-cleanup candidate before the fidelity check so consumer suites (the CLI,
+# DMLS) can prove a broken pass is refused. Off by default; production builds
+# compile none of it.
+cleanup-test-hooks = []
 terminal-tests = ["dep:image"]
 browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
 # Opt-in tests of the repository's internal `prompts/`; run by

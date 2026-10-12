@@ -74,9 +74,8 @@ pub fn find_bt_command_end(lines: &[&str], subcommand: &str) -> Option<usize> {
 /// The binary path comes from nextest rather than the spawned login shell's
 /// `PATH`, which keeps clean and archived test runs equivalent.
 pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
-    let cmd = format!("{}\n", bt_command(args));
-    harness.send_text(cmd.as_bytes()).expect("send_text failed");
-    biscuit_test_harness::capture_settled(harness).expect("bt command did not settle");
+    biscuit_test_harness::send_command_settled(harness, &bt_command(args), &[])
+        .expect("bt command did not settle");
 }
 
 /// Polls [`TerminalHarness::capture`] until `predicate` accepts a frame
@@ -103,7 +102,7 @@ pub fn capture_until(
         return last;
     }
     while Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(40));
         if let Ok(frame) = harness.capture() {
             let satisfied = predicate(&frame);
             last = frame;
@@ -115,25 +114,107 @@ pub fn capture_until(
     last
 }
 
+/// Types the shell `line` followed by an end marker unique to this call, and
+/// returns the first frame showing that marker on its own row: the evidence
+/// that everything on `line` has finished.
+///
+/// One or two captures, where [`biscuit_test_harness::send_command_settled`]
+/// takes five (a "before" capture, a change poll, a settled pair): that count
+/// matters while every WezTerm test competes for the mux at once. A shared
+/// pane's earlier output cannot satisfy the wait, and unlike
+/// [`run_bt_rows`] no begin marker can scroll off a tall output. `printf`
+/// assembles the marker so the command echo never spells it. The marker row
+/// stays in the returned frame.
+///
+/// Panics with the last frame when the marker does not appear within 20
+/// seconds.
+pub fn run_to_end_marker(harness: &mut impl TerminalHarness, line: &str) -> CapturedFrame {
+    static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+    // The pid keeps ids unique across the test processes sharing one pane.
+    let id = format!("{}x{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed));
+    let end = format!("BTEND-{id}");
+    harness
+        .send_text(format!("{line}; printf 'BTEND-%s\\n' {id}\n").as_bytes())
+        .expect("send_text failed");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let frame = harness.capture().expect("capture failed");
+        if frame.plain.lines().any(|row| row.trim() == end) {
+            return frame;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "`{line}` did not print its end marker.\nplain:\n{}",
+            frame.plain
+        );
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+/// Clears the pane and puts the cursor on 0-based `row` (`tput cup`) on one
+/// shell line, then returns the first frame whose only text is the prompt on
+/// that row: the evidence that the next command line starts there.
+///
+/// The line runs in a subshell for the reason [`run_line_rows`] gives: the
+/// interactive shell's job control can print a `setpgid` error for a child
+/// that has already exited.
+///
+/// Panics with the last frame when that does not happen within 5 seconds.
+pub fn clear_to_row(harness: &mut impl TerminalHarness, row: u32) -> CapturedFrame {
+    let line = format!("(clear; tput cup {row} 0)\n");
+    harness.send_text(line.as_bytes()).expect("send_text failed");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = harness.capture().expect("capture failed");
+        let mut text = frame.plain.lines().enumerate().filter(|(_, l)| !l.trim().is_empty());
+        if let (Some((index, only)), None) = (text.next(), text.next())
+            && index == row as usize
+            && biscuit_test_harness::looks_like_prompt(only)
+        {
+            return frame;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the prompt did not stand alone on row {row} after `{}`.\nplain:\n{}",
+            line.trim_end(),
+            frame.plain
+        );
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
 /// Types `line` into a cleared pane, run between unique output markers, and
 /// returns the settled frame with the rows the command displayed. See
 /// [`rows_between_markers`].
 ///
-/// Panics with the last frame when the end marker does not appear within
-/// 20 seconds.
+/// The `clear` runs on the same shell line, ahead of the begin marker, so the
+/// output always starts on a cleared screen without a fixed wait for the
+/// `clear` to finish. The frame is returned once it shows both markers and a
+/// prompt, and an identical capture confirms it: WezTerm's first `get-text`
+/// after a write can lack the cells' SGR.
+///
+/// Panics with the last frame when that does not happen within 20 seconds.
 fn run_line_rows(harness: &mut impl TerminalHarness, line: &str) -> (CapturedFrame, Vec<OutputRow>) {
     static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
     // The pid keeps ids unique across the test processes sharing one pane.
     let id = format!("{}x{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed));
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
+    // One subshell runs the whole line. The interactive shell's job control
+    // moves each child it forks into its own process group, and on a loaded
+    // macOS host bash 3.2 loses that race to a child that has already exited,
+    // printing `bash: child setpgid (… to …): Operation not permitted` between
+    // the markers. The subshell has no job control, so `clear`, the command,
+    // and its children are forked without that step.
     harness
-        .send_text(format!("{}\n", marked_command(line, &id)).as_bytes())
+        .send_text(format!("(clear; {})\n", marked_command(line, &id)).as_bytes())
         .expect("send_text failed");
     let deadline = Instant::now() + Duration::from_secs(20);
+    let mut previous: Option<String> = None;
     loop {
-        let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
-        if let Some(rows) = rows_between_markers(&frame.raw, &frame.plain, &id) {
+        let frame = harness.capture().expect("capture failed");
+        if previous.as_deref() == Some(frame.raw.as_str())
+            && biscuit_test_harness::frame_shows_prompt(&frame.plain)
+            && let Some(rows) = rows_between_markers(&frame.raw, &frame.plain, &id)
+        {
             return (frame, rows);
         }
         assert!(
@@ -141,7 +222,8 @@ fn run_line_rows(harness: &mut impl TerminalHarness, line: &str) -> (CapturedFra
             "`{line}` did not display its output markers.\nplain:\n{}",
             frame.plain
         );
-        std::thread::sleep(Duration::from_millis(100));
+        previous = Some(frame.raw);
+        std::thread::sleep(Duration::from_millis(40));
     }
 }
 

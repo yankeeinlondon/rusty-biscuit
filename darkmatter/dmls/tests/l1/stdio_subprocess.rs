@@ -261,3 +261,70 @@ fn native_binary_speaks_lsp_over_stdio() {
         "the native binary must advertise the Layer-0 surface: {result:?}"
     );
 }
+
+/// Malformed JSON in an editor settings notification never reaches the
+/// configuration loader: the `lsp-server` transport rejects the payload and
+/// stops reading the connection, so no later message can be applied under
+/// rules a malformed message half-set. This pins that transport boundary
+/// (plan ruling 7); the loader itself only ever sees a parsed
+/// `serde_json::Value`.
+#[test]
+fn malformed_settings_json_is_rejected_by_the_transport() {
+    let fixture = tempfile::tempdir().expect("create isolated dmls process root");
+    for name in ["home", "cache", "config", "data"] {
+        std::fs::create_dir(fixture.path().join(name)).unwrap();
+    }
+    let child = Command::new(bin_exe!("dmls"))
+        .current_dir(fixture.path())
+        .env("HOME", fixture.path().join("home"))
+        .env("USERPROFILE", fixture.path().join("home"))
+        .env("XDG_CACHE_HOME", fixture.path().join("cache"))
+        .env("XDG_CONFIG_HOME", fixture.path().join("config"))
+        .env("XDG_DATA_HOME", fixture.path().join("data"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn the compiled dmls binary");
+    let mut child = ChildGuard::new(child);
+    let mut stdin = child.child_mut().stdin.take().expect("child stdin");
+    let stdout = child.child_mut().stdout.take().expect("child stdout");
+
+    let (tx, rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        write_message(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "processId": null, "rootUri": null, "capabilities": {} }
+            }),
+        );
+        if await_response(&mut reader, 1).is_none() {
+            let _ = tx.send(Err("no initialize response".to_string()));
+            return;
+        }
+        write_message(&mut stdin, &json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));
+        // A trailing comma: not JSON, so not an LSP message.
+        let body = r#"{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"dmls":{"formatting":{"markdown":{"unwrap":true,}}}}}}"#;
+        let _ = write!(stdin, "Content-Length: {}\r\n\r\n{body}", body.len());
+        let _ = stdin.flush();
+        // A valid request after it is never answered: the transport stopped
+        // reading at the malformed payload.
+        write_message(
+            &mut stdin,
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": null }),
+        );
+        let _ = tx.send(Ok(await_response(&mut reader, 2)));
+    });
+
+    let outcome = rx.recv_timeout(Duration::from_secs(20));
+    let status = child.wait_timeout(Duration::from_secs(10)).expect("wait for dmls");
+    child.terminate();
+    let _ = worker.join();
+
+    let after = outcome.expect("the conversation finished before the timeout").expect("initialized");
+    assert!(after.is_none(), "a request after malformed JSON must not be answered: {after:?}");
+    let status = status.expect("dmls exits once its transport rejects the payload");
+    assert!(!status.success(), "a rejected transport is not a clean exit: {status}");
+}

@@ -17,7 +17,9 @@
 use std::io;
 use std::process::Command;
 
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session_with_env};
+use biscuit_test_harness::tmux::{
+    TmuxHarness, kill_session_by_name, spawn_shell_session_with_env, tmux_command,
+};
 use biscuit_test_harness::{
     TerminalHarness, frame_shows_prompt, skip_with_reason, wait_for_prompt,
 };
@@ -113,7 +115,7 @@ fn assert_pane_is_rc_suppressed(harness: &mut TmuxHarness, session: &str) -> io:
 /// The outer login shell `exec`s the inner one, so the pid is unchanged and
 /// this reports the shell the harness actually drives.
 fn pane_process_argv(session: &str) -> io::Result<String> {
-    let out = Command::new("tmux")
+    let out = tmux_command()
         .args(["display-message", "-p", "-t", session, "#{pane_pid}"])
         .output()?;
     let pid = String::from_utf8_lossy(&out.stdout).trim().to_string();

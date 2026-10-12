@@ -7,11 +7,10 @@
 //! visible terminal UI.
 
 use biscuit_test_harness::shared::SharedHarness;
-use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use serial_test::serial;
-use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
@@ -90,7 +89,7 @@ fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedF
 }
 
 fn capture_scrollback(harness: &TmuxHarness, lines: i32) -> Option<CapturedFrame> {
-    let output = Command::new("tmux")
+    let output = tmux_command()
         .args([
             "capture-pane",
             "-t",

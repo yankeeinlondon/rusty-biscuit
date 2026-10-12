@@ -154,9 +154,11 @@ Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores when there are four or fewer, and `logical_cores - 2` on
 larger runners. This preserves capacity on developer and larger shared hosts
 without crippling small CI runners. It is a concurrency setting, not CPU
-affinity or a guarantee that cores stay reserved. Shared-resource L2 suites
-remain at one worker; `l2-parallel-self-spawn` opts isolated suites into the
-parallel policy, and an explicit `BISCUIT_L2_THREADS` takes precedence.
+affinity or a guarantee that cores stay reserved. L2 runs in parallel by
+default at `max(1, floor(logical_cores / 2))` workers on every host
+(`_test_l2_threads`) because each worker drives a real terminal; only a package declaring the `l2-serial` runner tool,
+with its required `l2-serial-reason`, runs at one worker. An explicit
+`BISCUIT_L2_THREADS` takes precedence.
 
 `_test_threads` in `just/devops.just` calculates the shared worker default.
 It recognizes CI through `CI=true`, `GITHUB_ACTIONS=true`, or a nonempty

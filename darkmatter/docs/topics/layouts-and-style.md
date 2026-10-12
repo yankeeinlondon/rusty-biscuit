@@ -85,6 +85,10 @@ need to use render-tree APIs directly. As a user, the important model is:
 3. A component bucket overrides the page defaults for that component.
 4. CLI flags override frontmatter field by field.
 
+`style.markdown` is the one `style:` key that does not affect rendering: it
+holds the formatting rules `md clean` and DMLS formatting apply to the
+source. See [Markdown Formatting Rules](./markdown-formatting.md).
+
 Use canonical kebab-case keys: `max-width`, `bg-color`, `block-quote`,
 `local-style`, `left-margin`. Older snake-case spellings such as `max_width`
 and `block_quote` are accepted for compatibility, but `--strict-style` rejects

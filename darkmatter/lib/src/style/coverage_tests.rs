@@ -51,6 +51,21 @@ fn sample_for(kind: LeafType) -> Value {
         LeafType::HrAlignment => json!("center"),
         LeafType::CompoundStyle => json!({"bold": true, "italic": true}),
         LeafType::WordWrap => json!("wrap-prose"),
+        // Overridden per rule by `sample_for_leaf`.
+        LeafType::MarkdownRule => Value::Null,
+    }
+}
+
+/// A representative valid value for `leaf`.
+fn sample_for_leaf(leaf: &SchemaLeaf) -> Value {
+    match leaf.canonical {
+        "markdown.fixed-width" => json!(80),
+        "markdown.indentation" => json!(2),
+        "markdown.list-item-padding" => json!("one"),
+        "markdown.list-interior-padding" => json!("except-nested-lists"),
+        "markdown.default-language" => json!("sh"),
+        canonical if canonical.starts_with("markdown.") => json!(false),
+        _ => sample_for(leaf.leaf_type),
     }
 }
 
@@ -176,7 +191,7 @@ fn every_alias_round_trips_with_expected_warnings() {
 #[test]
 fn every_canonical_leaf_round_trips_without_unknown_key() {
     for leaf in SCHEMA {
-        let value = build_at(leaf.canonical, sample_for(leaf.leaf_type));
+        let value = build_at(leaf.canonical, sample_for_leaf(leaf));
         let (_parsed, warnings) = from_json_value(&value).unwrap_or_else(|e| {
             panic!(
                 "canonical leaf `{}` failed to parse: {:?}",
@@ -242,7 +257,8 @@ fn descriptor_entry_count_matches_expected() {
         // hr: 12
         // disclosure: 10
         // code-block: 10
-        16 + 40 + 11 + 15 + 15 + 12 + 10 + 10;
+        // markdown (cleanup rules): 10
+        16 + 40 + 11 + 15 + 15 + 12 + 10 + 10 + 10;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,

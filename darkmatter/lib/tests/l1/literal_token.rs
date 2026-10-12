@@ -92,9 +92,10 @@ fn a_decoded_token_is_data_everywhere_it_flows() {
         assert_eq!(field(&composed, "note"), json!(payload), "{payload:?}");
         assert_eq!(field(&composed, "list"), json!(["plain", { "deep": payload }]), "{payload:?}");
         assert_eq!(field(&composed, "copy"), json!(format!("pre {payload} claudine")), "{payload:?}");
-        // Composition trims trailing spaces, which the empty payload leaves.
+        // The empty payload leaves trailing spaces, which composition keeps
+        // (cleanup never strips trailing whitespace).
         let body = composed.content();
-        let has_line = |line: String| body.lines().any(|seen| seen == line.trim_end());
+        let has_line = |line: String| body.lines().any(|seen| seen.trim_end() == line.trim_end());
         assert!(has_line(format!("Body: claudine {payload} {payload}")), "{payload:?}: {body}");
         assert!(has_line(format!("Child: {payload}")), "{payload:?}: {body}");
         assert!(approvals.commands().is_empty(), "{payload:?}: {:?}", approvals.commands());

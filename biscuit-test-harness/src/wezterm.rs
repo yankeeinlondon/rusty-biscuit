@@ -20,11 +20,8 @@
 use std::env;
 use std::io;
 use std::process::{Command, Stdio};
-use std::sync::Once;
-use std::time::Duration;
-
-#[cfg(target_os = "macos")]
-use std::time::Instant;
+use std::sync::{Mutex, Once};
+use std::time::{Duration, Instant};
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
@@ -57,6 +54,9 @@ static CLEANUP_ONCE: Once = Once::new();
 /// dead socket still fails inside it, because `wezterm cli` gives up on
 /// its own after ~4.8 s of connect retries.
 const AVAILABLE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long [`WezTermHarness::available`] reuses a probe that answered.
+const PROBE_MEMORY: Duration = Duration::from_secs(2);
 
 /// Geometry returned by [`WezTermHarness::pane_size`].
 ///
@@ -243,12 +243,14 @@ impl WezTermHarness {
     ///
     /// ## Caching
     ///
-    /// No caching. The probe is cheap (~50 ms on a quiet host) and any
-    /// cached value could go stale between a `cargo test` launch and
-    /// the moment a test actually runs (the GUI may have been closed,
-    /// restarted, or the socket removed in the interim). Callers that
-    /// invoke `available()` many times in a single process pay the
-    /// probe each time, but the total cost is bounded.
+    /// An answer from the same socket within the last [`PROBE_MEMORY`] is
+    /// reused, nothing longer: a value cached across a `cargo test` launch
+    /// and the moment a test runs could go stale (the GUI may have been
+    /// closed, restarted, or the socket removed in the interim). The window
+    /// covers the pattern every test follows — a gate, then
+    /// [`shared_or_spawn`](Self::shared_or_spawn), which probes again — so a
+    /// test pays one `wezterm cli list`, the heaviest client call, not two.
+    /// Late and refused probes are never reused.
     ///
     /// ## Examples
     ///
@@ -262,11 +264,25 @@ impl WezTermHarness {
     /// // … proceed with WezTerm-backed assertions …
     /// ```
     pub fn available() -> bool {
-        if env::var_os("WEZTERM_UNIX_SOCKET").is_none() || !which("wezterm") {
+        static LAST_ANSWER: Mutex<Option<(std::ffi::OsString, Instant)>> = Mutex::new(None);
+        let Some(socket) = env::var_os("WEZTERM_UNIX_SOCKET") else {
+            return false;
+        };
+        if !which("wezterm") {
             return false;
         }
+        let mut last = LAST_ANSWER.lock().unwrap_or_else(|poison| poison.into_inner());
+        if last
+            .as_ref()
+            .is_some_and(|(answered, at)| *answered == socket && at.elapsed() < PROBE_MEMORY)
+        {
+            return true;
+        }
         match wezterm_gui_probe() {
-            Probe::Answered => true,
+            Probe::Answered => {
+                *last = Some((socket, Instant::now()));
+                true
+            }
             Probe::Refused => false,
             // A late answer is a busy GUI or a hung one. Skipping is the
             // cheap answer for an optional backend, but a run that requires
@@ -299,7 +315,7 @@ impl WezTermHarness {
     pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
         let start = format!("-{lines}");
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args([
             "cli",
             "get-text",
@@ -309,7 +325,7 @@ impl WezTermHarness {
             "--start-line",
             &start,
         ]);
-        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        let out = run_client(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli get-text (scrollback) failed: {}",
@@ -332,13 +348,11 @@ impl WezTermHarness {
     /// any error (best effort).
     fn kill_pane(&mut self) {
         if let Some(id) = self.pane_id.take() {
-            let Ok((mut cmd, _config)) = wezterm_command() else {
-                return;
-            };
+            let mut cmd = wezterm_command();
             cmd.args(["cli", "kill-pane", "--pane-id", &id])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+            let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
         }
     }
 
@@ -358,13 +372,11 @@ impl WezTermHarness {
     fn tag_spawned_pane(&self) {
         let id = self.pane_id();
         let title = self.unique_window_title();
-        let Ok((mut cmd, _config)) = wezterm_command() else {
-            return;
-        };
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "set-tab-title", "--pane-id", id, &title])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+        let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
     }
 
     /// Returns the spawned pane's geometry as `(rows, cols, pixel_width,
@@ -381,9 +393,9 @@ impl WezTermHarness {
     /// when the active pane id is not present in its output.
     pub fn pane_size(&self) -> io::Result<PaneSize> {
         let id = self.pane_id();
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "list", "--format", "json"]);
-        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli list failed: {}",
@@ -496,9 +508,9 @@ impl WezTermHarness {
         let title = self.unique_window_title();
 
         // 1. Stamp a unique title we can target precisely.
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "set-tab-title", "--pane-id", id, &title]);
-        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli set-tab-title failed: {}",
@@ -507,9 +519,9 @@ impl WezTermHarness {
         }
 
         // 2. Activate intra-WezTerm pane focus.
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "activate-pane", "--pane-id", id]);
-        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli activate-pane failed: {}",
@@ -696,13 +708,11 @@ impl Drop for WezTermHarness {
 /// instances were leaked in a different process. Best-effort: any error
 /// is swallowed.
 pub fn kill_pane_by_id(pane_id: &str) {
-    let Ok((mut cmd, _config)) = wezterm_command() else {
-        return;
-    };
+    let mut cmd = wezterm_command();
     cmd.args(["cli", "kill-pane", "--pane-id", pane_id])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+    let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for WezTermHarness {
@@ -720,10 +730,10 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("WezTerm not available"));
         }
         if self.spawn_visibility == SpawnVisibility::Background {
-            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
+            CLEANUP_ONCE.call_once(sweep_if_due);
         }
         let shell = super::detect_shell();
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "spawn", "--new-window"]);
         push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
@@ -736,7 +746,7 @@ impl TerminalHarness for WezTermHarness {
         // attributes only if SGR was actually rendered into cells.
         super::apply_color_forcing_env(&mut cmd);
 
-        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        let out = run_client(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli spawn failed: {}",
@@ -762,9 +772,9 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("WezTerm not available"));
         }
         if self.spawn_visibility == SpawnVisibility::Background {
-            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
+            CLEANUP_ONCE.call_once(sweep_if_due);
         }
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "spawn", "--new-window"]);
         push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
@@ -772,7 +782,7 @@ impl TerminalHarness for WezTermHarness {
         for a in args {
             cmd.arg(a);
         }
-        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        let out = run_client(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli spawn failed: {}",
@@ -791,9 +801,9 @@ impl TerminalHarness for WezTermHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.pane_id().to_string();
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "send-text", "--pane-id", &id, "--no-paste"]);
-        let out = run_with_stdin_timeout(&mut cmd, bytes, SEND_TIMEOUT)?;
+        let out = run_client_with_stdin(&mut cmd, bytes, SEND_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli send-text failed: {}",
@@ -805,9 +815,9 @@ impl TerminalHarness for WezTermHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
-        let (mut cmd, _config) = wezterm_command()?;
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "get-text", "--pane-id", &id, "--escapes"]);
-        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        let out = run_client(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli get-text failed: {}",
@@ -819,6 +829,241 @@ impl TerminalHarness for WezTermHarness {
     }
 }
 
+/// Route a background spawn into the off-screen workspace.
+fn push_workspace_args(cmd: &mut Command, background: bool) {
+    if background {
+        cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+    }
+}
+
+/// Every `wezterm` process the harness starts, with `--skip-config`.
+///
+/// The client evaluates `wezterm.lua` before some subcommands (`spawn` does;
+/// `list` does not), and that evaluation is not the harness's business: it
+/// only ever talks to the mux named by `WEZTERM_UNIX_SOCKET`, which
+/// [`WezTermHarness::available`] requires, so no config value can change what
+/// `list`, `spawn -- <prog>`, `send-text`, `get-text`, or `kill-pane` do. It
+/// can only stall them, fail them, or add log noise. On the Windows build host
+/// it stalls them: the shared config is `dofile`d from a UNC path that is
+/// unreachable outside an interactive logon, and each evaluation blocks for the
+/// SMB connect timeout — 21 s per `spawn` from a test, against a 15 s
+/// [`SPAWN_TIMEOUT`] (2026-09-10). On a developer Mac a 2,000-line config with
+/// two plugins made each `spawn` 0.15–0.2 s against 0.06 s skipped
+/// (2026-10-10).
+///
+/// `--skip-config` also wins over `WEZTERM_CONFIG_FILE`, which the WezTerm GUI
+/// exports into every pane it launches, so a suite run from inside WezTerm
+/// always has it. The flag replaced an empty temporary config file, which was
+/// overridden by that inherited variable and, in the at-exit pane kill, panicked
+/// creating its random file name after thread-locals were torn down, leaking the
+/// pane.
+fn wezterm_command() -> Command {
+    let mut cmd = Command::new("wezterm");
+    cmd.arg("--skip-config");
+    cmd
+}
+
+/// Runs one `wezterm cli` client under [`run_with_timeout`], holding a
+/// [`ClientTurn`] while it is connected.
+fn run_client(cmd: &mut Command, timeout: Duration) -> io::Result<std::process::Output> {
+    let _turn = ClientTurn::acquire(timeout)?;
+    run_with_timeout(cmd, timeout)
+}
+
+/// [`run_client`] for a client that reads `stdin_bytes`.
+fn run_client_with_stdin(
+    cmd: &mut Command,
+    stdin_bytes: &[u8],
+    timeout: Duration,
+) -> io::Result<std::process::Output> {
+    let _turn = ClientTurn::acquire(timeout)?;
+    run_with_stdin_timeout(cmd, stdin_bytes, timeout)
+}
+
+/// How many harness clients may talk to one WezTerm mux at once, across
+/// every process. See [`ClientTurn`].
+const CLIENT_TURNS: usize = 2;
+
+/// One harness client's turn at the WezTerm mux, across processes.
+///
+/// The WezTerm GUI serves every `wezterm cli` connection on its main thread,
+/// and while a client is connected it pushes that client the render changes
+/// of every pane producing output: each one serialized and compressed on that
+/// same thread. A sample of the GUI during a stall had its main thread almost
+/// entirely in `GetPaneRenderChangesResponse` encoding. Cost therefore grows
+/// with connected clients times busy panes, and a slow answer keeps each
+/// client connected longer, which adds more pushes. Parallel Level-2 tests
+/// crossed into that collapse: 16 concurrent clients took 13–40 s each, and
+/// an unrelated `wezterm cli list` stalled 15 s alongside them, so
+/// [`WezTermHarness::available`] said "not available" and `spawn` hit its
+/// 15 s [`SPAWN_TIMEOUT`]. Taking turns, a client answers in 10–50 ms.
+///
+/// [`CLIENT_TURNS`] is 2, not 1: about 8 ms of a 12 ms client is process
+/// startup, which never touches the mux, and a second turn overlaps it with
+/// the other client's service. Against 18 WezTerm tests started together, 2
+/// turns finished the batch in 3.5–4.2 s against 5.3–5.7 s for 1; 3 and 4
+/// turns inflated the summed client time by 50–120 % (2026-10-10).
+///
+/// A turn is an exclusive lock on one of [`CLIENT_TURNS`] files named after
+/// the socket, held while a harness client is connected, and turns are taken
+/// in arrival order (see [`QueuePlace`]). Every harness
+/// process, in any worktree, that talks to the same mux takes turns; another
+/// mux is not delayed. The lock is the operating system's (`flock` on Unix,
+/// `LockFileEx` on Windows), so a process that dies holding it releases it.
+struct ClientTurn {
+    _file: std::fs::File,
+}
+
+impl ClientTurn {
+    /// Waits up to `timeout` for a turn, first come first served.
+    ///
+    /// ## Errors
+    ///
+    /// [`TimedOut`](io::ErrorKind::TimedOut) when other clients hold every
+    /// turn for all of `timeout`, or a lock or queue file's I/O error.
+    fn acquire(timeout: Duration) -> io::Result<Self> {
+        const MAX_POLL: Duration = Duration::from_millis(5);
+        let mut files = (0..CLIENT_TURNS)
+            .map(|turn| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .write(true)
+                    .open(client_lock_path(turn))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let place = QueuePlace::join()?;
+        let deadline = Instant::now() + timeout;
+        let mut poll = Duration::from_millis(1);
+        loop {
+            if place.is_next()? {
+                for turn in 0..files.len() {
+                    match files[turn].try_lock() {
+                        Ok(()) => return Ok(Self { _file: files.swap_remove(turn) }),
+                        Err(std::fs::TryLockError::WouldBlock) => {}
+                        Err(std::fs::TryLockError::Error(err)) => return Err(err),
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("other wezterm clients held the mux for {timeout:?}"),
+                ));
+            }
+            std::thread::sleep(poll);
+            poll = (poll + Duration::from_millis(1)).min(MAX_POLL);
+        }
+    }
+}
+
+/// A client's place in the line for a [`ClientTurn`]: a file named by its
+/// arrival time in a directory shared by every process, removed on drop.
+///
+/// Without the line the turn went to whichever waiter polled first after a
+/// release. That random order averaged the same wait but had a long tail
+/// (p99 1.1 s, maximum 2 s, against roughly 0.3 s for the line ahead of any
+/// one worker), and one such wait in a test's dozen clients was what pushed
+/// it past 5 s. Only the [`CLIENT_TURNS`] oldest entries may take a turn.
+///
+/// The waiter holds an OS lock on its own entry for as long as it waits, so
+/// an entry whose lock another process can take belongs to a process that
+/// died without removing it (a crash, or a nextest timeout kill); that
+/// process removes it and moves up. The OS releases the lock when its holder
+/// exits on every platform, so this needs no pids and no age limit. A
+/// waiter that is alive but stopped (a debugger, `SIGSTOP`) still blocks the
+/// line, exactly as a stopped client holding a turn lock blocks a turn.
+struct QueuePlace {
+    path: std::path::PathBuf,
+    /// The open, locked entry. Taken before the file is removed, so a removal
+    /// never races a handle that would keep the name visible on Windows.
+    lock: Option<std::fs::File>,
+}
+
+impl QueuePlace {
+    fn join() -> io::Result<Self> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = mux_file_path("queue");
+        std::fs::create_dir_all(&dir)?;
+        let since_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        // Zero-padded so names sort in arrival order; pid and counter break ties.
+        let name = format!(
+            "{:020}-{:010}-{}",
+            since_epoch.as_nanos(),
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        // Locked under a hidden name, then renamed into the line, so no other
+        // process ever sees the entry unlocked and mistakes it for a dead one.
+        let hidden = dir.join(format!(".{name}"));
+        let path = dir.join(name);
+        let file = std::fs::File::create(&hidden)?;
+        file.try_lock().map_err(io::Error::from)?;
+        std::fs::rename(&hidden, &path)?;
+        Ok(Self { path, lock: Some(file) })
+    }
+
+    /// Whether fewer than [`CLIENT_TURNS`] live entries arrived before this
+    /// one. Entries of dead waiters are removed on the way.
+    fn is_next(&self) -> io::Result<bool> {
+        let Some(dir) = self.path.parent() else {
+            return Ok(true);
+        };
+        let mine = self.path.file_name().unwrap_or_default();
+        let mut ahead = 0;
+        for entry in std::fs::read_dir(dir)? {
+            let Ok(entry) = entry else { continue };
+            let name = entry.file_name();
+            if name.as_os_str() >= mine || name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            if waiter_is_dead(&entry.path()) {
+                let _ = std::fs::remove_file(entry.path());
+                continue;
+            }
+            ahead += 1;
+        }
+        Ok(ahead < CLIENT_TURNS)
+    }
+}
+
+impl Drop for QueuePlace {
+    fn drop(&mut self) {
+        drop(self.lock.take());
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Whether the queue entry at `path` has no live waiter: nobody holds its
+/// lock. An entry that vanished meanwhile counts as dead (it is gone either
+/// way); one whose lock cannot be tested counts as alive, so an unexpected
+/// error delays a client rather than letting it jump the line.
+fn waiter_is_dead(path: &std::path::Path) -> bool {
+    let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) else {
+        return true;
+    };
+    file.try_lock().is_ok()
+}
+
+/// Lock file `turn` for the mux named by `WEZTERM_UNIX_SOCKET`.
+fn client_lock_path(turn: usize) -> std::path::PathBuf {
+    mux_file_path(&format!("{turn}.lock"))
+}
+
+/// A coordination file for the mux named by `WEZTERM_UNIX_SOCKET`, in the
+/// temporary directory every process of one user shares.
+fn mux_file_path(suffix: &str) -> std::path::PathBuf {
+    let socket = env::var_os("WEZTERM_UNIX_SOCKET").unwrap_or_default();
+    let name: String = socket
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    env::temp_dir().join(format!("biscuit-wezterm-cli-{name}-{suffix}"))
+}
+
 /// Removes stale panes from the harness-owned WezTerm background
 /// workspace.
 ///
@@ -827,69 +1072,43 @@ impl TerminalHarness for WezTermHarness {
 /// not tag background panes; when the background workspace has grown past a
 /// conservative limit, this function also removes untagged panes from that
 /// workspace to recover from historical leaks.
-/// Route a background spawn into the off-screen workspace.
-fn push_workspace_args(cmd: &mut Command, background: bool) {
-    if background {
-        cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
-    }
-}
-
-/// Every `wezterm` process the harness starts.
-///
-/// The client evaluates the developer's `wezterm.lua` before some subcommands
-/// (`spawn` does; `list` does not), and that evaluation is not the harness's
-/// business: it only ever talks to the mux named by `WEZTERM_UNIX_SOCKET`,
-/// which [`WezTermHarness::available`] requires, so no config value can change
-/// what `list`, `spawn -- <prog>`, `send-text`, `get-text`, or `kill-pane` do.
-/// It can only stall them, fail them, or add log noise. On the Windows build
-/// host it stalls them: the shared config is `dofile`d from a UNC path that is
-/// unreachable outside an interactive logon, and each evaluation blocks for the
-/// SMB connect timeout — 21 s per `spawn` from a test, against a 15 s
-/// [`SPAWN_TIMEOUT`] (2026-09-10). So the client gets an empty config unless
-/// the caller has chosen one.
-fn wezterm_command() -> io::Result<(Command, Option<tempfile::NamedTempFile>)> {
-    wezterm_command_with_config(env::var_os("WEZTERM_CONFIG_FILE"))
-}
-
-// The caller retains the file guard until its synchronous client invocation
-// finishes. A shared pathname can be truncated by another process or precreated
-// by another user; a process-global guard would never run its Drop cleanup.
-fn wezterm_command_with_config(
-    inherited: Option<std::ffi::OsString>,
-) -> io::Result<(Command, Option<tempfile::NamedTempFile>)> {
-    let mut cmd = Command::new("wezterm");
-    let config = match inherited {
-        Some(path) => {
-            cmd.env("WEZTERM_CONFIG_FILE", path);
-            None
-        }
-        None => {
-            let config = empty_config_file()?;
-            cmd.env("WEZTERM_CONFIG_FILE", config.path());
-            Some(config)
-        }
-    };
-    Ok((cmd, config))
-}
-
-fn empty_config_file() -> io::Result<tempfile::NamedTempFile> {
-    use std::io::Write;
-
-    let mut file = tempfile::Builder::new()
-        .prefix("biscuit-wezterm-")
-        .suffix(".lua")
-        .tempfile()?;
-    file.write_all(b"return {}\n")?;
-    Ok(file)
-}
-
 pub fn cleanup_stale_wezterm_panes() {
-    if !WezTermHarness::available() {
+    if WezTermHarness::available() {
+        sweep_stale_wezterm_panes();
+    }
+}
+
+/// How often spawning processes sweep one mux between them. Stale panes come
+/// only from processes that died before their exit-time kill, so a later
+/// sweep loses nothing, and a sweep's `wezterm cli list` is the heaviest
+/// client call.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Sweeps unless some process swept this mux within [`SWEEP_INTERVAL`], as
+/// the modification time of a marker file beside the turn locks records.
+fn sweep_if_due() {
+    let marker = mux_file_path("swept");
+    let fresh = std::fs::metadata(&marker)
+        .and_then(|meta| meta.modified())
+        .is_ok_and(|at| at.elapsed().is_ok_and(|age| age < SWEEP_INTERVAL));
+    if fresh {
         return;
     }
-    let Ok((mut cmd, _config)) = wezterm_command() else {
+    if let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&marker) {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
+    sweep_stale_wezterm_panes();
+}
+
+/// [`cleanup_stale_wezterm_panes`] for a caller that has just probed the mux.
+///
+/// The listing and the kills share one [`ClientTurn`], so a process that
+/// lists after another's sweep sees its kills rather than repeating them.
+fn sweep_stale_wezterm_panes() {
+    let Ok(_turn) = ClientTurn::acquire(QUERY_TIMEOUT) else {
         return;
     };
+    let mut cmd = wezterm_command();
     cmd.args(["cli", "list", "--format", "json"]);
     let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) else {
         return;
@@ -942,12 +1161,11 @@ fn string_field<'a>(entry: &'a serde_json::Value, field: &str) -> Option<&'a str
 }
 
 fn kill_wezterm_pane(pane_id: u64) {
-    let Ok((mut cmd, _config)) = wezterm_command() else {
-        return;
-    };
+    let mut cmd = wezterm_command();
     cmd.args(["cli", "kill-pane", "--pane-id", &pane_id.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // The caller, `sweep_stale_wezterm_panes`, holds the client turn.
     let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
@@ -1038,11 +1256,9 @@ fn which(bin: &str) -> bool {
 /// helper's contract is "run the probe and report its outcome", so
 /// callers can unit-test the probe surface in isolation.
 fn wezterm_gui_probe() -> Probe {
-    let Ok((mut cmd, _config)) = wezterm_command() else {
-        return Probe::Refused;
-    };
+    let mut cmd = wezterm_command();
     cmd.args(["cli", "list", "--format", "json"]);
-    match run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
+    match run_client(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
         Ok(out) if out.status.success() => Probe::Answered,
         Err(err) if err.kind() == io::ErrorKind::TimedOut => Probe::Late,
         _ => Probe::Refused,
@@ -1072,53 +1288,87 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    /// `--skip-config` is a global option: it must precede the subcommand.
     #[test]
-    fn isolated_configs_are_unique_readable_and_removed_after_clients_finish() {
-        let clients: Vec<_> = (0..8)
-            .map(|_| std::thread::spawn(|| wezterm_command_with_config(None).unwrap()))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|thread| thread.join().unwrap())
-            .collect();
-        let mut paths = std::collections::HashSet::new();
-        for (command, guard) in &clients {
-            let path = guard.as_ref().unwrap().path();
-            assert!(paths.insert(path.to_path_buf()));
-            let configured = command.get_envs()
-                .find(|(key, _)| *key == "WEZTERM_CONFIG_FILE")
-                .and_then(|(_, value)| value)
-                .unwrap();
-            assert_eq!(configured, path.as_os_str());
-            // Reopen by name, as the client does, while the guard owns its handle.
-            assert_eq!(std::fs::read(path).unwrap(), b"return {}\n");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o077, 0);
-            }
-        }
-        drop(clients);
-        assert!(paths.iter().all(|path| !path.exists()));
+    fn every_client_skips_the_developer_config() {
+        let mut command = wezterm_command();
+        command.args(["cli", "list"]);
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["--skip-config", "cli", "list"]);
     }
 
+    /// A client beyond [`CLIENT_TURNS`] waits, gives up at its timeout, and
+    /// gets a turn once one is dropped.
     #[test]
-    fn isolated_config_preserves_explicit_caller_configuration() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("caller.lua");
-        std::fs::write(&path, "return { scrollback_lines = 42 }\n").unwrap();
-        for inherited in [path.into_os_string(), std::ffi::OsString::new()] {
-            let (command, guard) = wezterm_command_with_config(Some(inherited.clone())).unwrap();
-            assert!(guard.is_none());
-            let configured = command.get_envs()
-                .find(|(key, _)| *key == "WEZTERM_CONFIG_FILE")
-                .and_then(|(_, value)| value)
-                .unwrap();
-            assert_eq!(configured, inherited);
+    #[serial_test::serial]
+    fn client_turns_are_limited_and_released_on_drop() {
+        let prev = env::var_os("WEZTERM_UNIX_SOCKET");
+        // A socket name of this process alone keeps the lock file private.
+        // SAFETY: serialized, and nextest runs each test in its own process.
+        unsafe {
+            env::set_var(
+                "WEZTERM_UNIX_SOCKET",
+                format!("/tmp/biscuit-turn-test-{}", std::process::id()),
+            );
         }
-        assert_eq!(
-            std::fs::read_to_string(directory.path().join("caller.lua")).unwrap(),
-            "return { scrollback_lines = 42 }\n",
-        );
+        let mut held: Vec<_> = (0..CLIENT_TURNS)
+            .map(|_| ClientTurn::acquire(Duration::from_secs(1)).expect("a free turn"))
+            .collect();
+        let waiter = std::thread::spawn(|| ClientTurn::acquire(Duration::from_millis(100)).err());
+        let blocked = waiter.join().unwrap().map(|err| err.kind());
+        held.pop();
+        let after = ClientTurn::acquire(Duration::from_millis(100)).map(drop);
+        drop(held);
+        for turn in 0..CLIENT_TURNS {
+            let _ = std::fs::remove_file(client_lock_path(turn));
+        }
+        let _ = std::fs::remove_dir(mux_file_path("queue"));
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        assert_eq!(blocked, Some(io::ErrorKind::TimedOut));
+        assert!(after.is_ok(), "{after:?}");
+    }
+
+    /// A waiter that died leaves its entry with no lock held, as a crash or a
+    /// kill does on every OS: later waiters skip and remove it. Live waiters
+    /// hold their entries' locks and still count.
+    #[test]
+    #[serial_test::serial]
+    fn queue_skips_dead_waiters_and_counts_live_ones() {
+        let prev = env::var_os("WEZTERM_UNIX_SOCKET");
+        // SAFETY: serialized, and nextest runs each test in its own process.
+        unsafe {
+            env::set_var(
+                "WEZTERM_UNIX_SOCKET",
+                format!("/tmp/biscuit-queue-test-{}", std::process::id()),
+            );
+        }
+        let dir = mux_file_path("queue");
+        std::fs::create_dir_all(&dir).expect("queue directory");
+        let dead = dir.join(format!("{:020}-{:010}-0", 1, 1));
+        std::fs::File::create(&dead).expect("a dead waiter's entry");
+        let first = QueuePlace::join().expect("first waiter");
+        let second = QueuePlace::join().expect("second waiter");
+        let me = QueuePlace::join().expect("third waiter");
+        let behind_two = me.is_next().expect("read the line");
+        let dead_removed = !dead.exists();
+        drop(first);
+        let behind_one = me.is_next().expect("read the line");
+        drop((second, me));
+        let _ = std::fs::remove_dir(&dir);
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        assert!(!behind_two, "two live waiters arrived first");
+        assert!(dead_removed, "the dead waiter's entry was removed");
+        assert!(behind_one, "one live waiter ahead leaves a turn free");
     }
 
     /// `available()` must return `false` when `WEZTERM_UNIX_SOCKET` is
@@ -1277,6 +1527,11 @@ mod tests {
         let start = Instant::now();
         let avail = WezTermHarness::available();
         let elapsed = start.elapsed();
+        // The probe took a turn at this process's own socket name.
+        for turn in 0..CLIENT_TURNS {
+            let _ = std::fs::remove_file(client_lock_path(turn));
+        }
+        let _ = std::fs::remove_dir(mux_file_path("queue"));
         unsafe {
             match prev {
                 Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
@@ -1318,9 +1573,9 @@ mod tests {
         // first `available()` was a false positive (e.g. the env var
         // was set but the GUI just happened to answer), this would
         // surface as a hang or non-zero exit.
-        let (mut cmd, _config) = wezterm_command().expect("prepare isolated WezTerm config");
+        let mut cmd = wezterm_command();
         cmd.args(["cli", "list", "--format", "json"]);
-        let out = run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT)
+        let out = run_client(&mut cmd, AVAILABLE_PROBE_TIMEOUT)
             .expect("reachable per available(); wezterm cli list must succeed within probe budget");
         assert!(
             out.status.success(),

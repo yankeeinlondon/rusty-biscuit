@@ -1,0 +1,1 @@
+{"data":{"repository":{"p0":{"state":"OPEN","commits":{"nodes":[{"commit":{"oid":"fedcba9876543210fedcba9876543210fedcba98","statusCheckRollup":{"contexts":{"checkRunCount":2,"statusContextCount":1,"checkRunCountsByState":[{"state":"SUCCESS","count":1},{"state":"SKIPPED","count":1}],"statusContextCountsByState":[{"state":"SUCCESS","count":1}]}}}}]}}}}}

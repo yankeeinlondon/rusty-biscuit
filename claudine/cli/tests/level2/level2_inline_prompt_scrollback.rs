@@ -42,11 +42,10 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, strip_ansi};
 use serial_test::serial;
@@ -114,7 +113,7 @@ impl PromptPane for TmuxHarness {
     fn history(&mut self) -> io::Result<CapturedFrame> {
         // `capture()` reads the visible pane only; `-S -` starts at the
         // oldest history line.
-        let out = Command::new("tmux")
+        let out = tmux_command()
             .args([
                 "capture-pane",
                 "-p",

@@ -56,28 +56,27 @@ Can't get selected tab of window 1 whose id = NNNNN. (-1728)
 Diagnosis recipe (proves it in seconds): spawn the shared window, record its
 `count of tabs` (1), run only `harness_lifecycle`, re-check — it is now **0**.
 
-### The implemented fix (focus-free; two parts)
+### The fix: spawn without `do script`
 
-Forcing a deterministic new window is impossible without `⌘N`
-(`activate` + `System Events keystroke`), which **steals foreground focus** —
-a hard no. So the fix avoids forcing a new window and instead makes reuse
-*harmless*, in two focus-free parts:
+Forcing a new window with `⌘N` (`activate` + `System Events keystroke`)
+**steals foreground focus**, which is not allowed. The harness avoids the
+problem in a focus-free way:
 
-1. **Ownership guard in `spawn_shell`.** Snapshot the window-id set before
-   `do script`; the AppleScript returns `winId\tisNew` where `isNew` is "the id
-   is not in the pre-snapshot". When `isNew` is false (reuse), Rust clears
-   `owned`, so `Drop` **never closes a window the harness did not create**. No
-   `activate`, no keystroke — spawning stays focus-free.
+1. **`spawn_shell` never uses `do script` to create a window.** It writes a
+   `.terminal` settings file named after the window tag and opens it with
+   `open -g -a Terminal`. Opening the file always creates a new window and
+   leaves Terminal.app in the background, and the spawn finds the window by
+   its settings-set name, so it can never adopt someone else's window. (From
+   2026-10-10. The earlier fix diffed window ids around `do script` and gave
+   up ownership on reuse.) Pitfall 7 covers the settings file's own rules.
 2. **`harness_lifecycle` skips under a shared broker window.** It is the only
-   Apple-Terminal test that spawns its *own* window (to exercise `Drop`), so it
-   is the only one that can reuse — and thereby pollute — the shared window.
+   Apple-Terminal test that spawns its *own* window (to exercise `Drop`).
    When `BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID` is set it early-returns
    (skip-clean); its `Drop`/cleanup coverage runs in the non-broker context
    where there is no shared window to corrupt.
 
-Verified: under a dedicated broker window with `-j 1`, all attach tests pass,
-`harness_lifecycle` skips in 0.04 s, the shared window keeps its tab (no
-destruction), and the run leaks zero windows — deterministically across repeats.
+`send_text` still uses `do script … in selected tab of` the harness's own
+window, which targets that tab and cannot reuse another window.
 
 Two invariants this enforces and that any future change must keep: **never
 `close` a window the harness did not create**, and **spawning must never steal
@@ -207,6 +206,67 @@ printed sentinel differs from the echo only in having a real newline before it
 where the echo has the two literal characters `\n`, so match on the newline
 form — `split("__BT_START__\n")` then `split_once("\n__BT_END__")` — and use
 the same function for the wait and for the assertion's bounded region.
+
+## Pitfall 6 — `osascript` costs, and two traps that cost more
+
+A fresh `osascript` process spends about 100 ms loading Terminal.app's
+scripting dictionary at its first `tell`, so a one-shot call costs 150–300 ms.
+The harness therefore runs its AppleScript through one long-lived helper per
+test process (`osa_helper` in `apple_terminal.rs`), where a call after the
+first takes 10–20 ms. Route new harness scripts through `run_script`. A script
+must return text: a list result reads as empty. JXA quirks the helper works
+around: `NSData.length` arrives as a string (compare `Number(…)`), and
+`executeAndReturnError` crashes when given an error out-pointer (the helper
+wraps each script in an AppleScript `try` instead).
+
+Two traps cost more than any call, and one of them fails without any error:
+
+- **System Events `whose frontmost` costs about 2 s.** On the development Mac
+  (2026-10-10) `name of first process whose frontmost is true` took 2.1 s
+  each time, and timed out with `-1712` when the `System Events` process was
+  left stopped (`ps` state `T`). Read the frontmost application with
+  StandardAdditions' `path to frontmost application`, which takes a few
+  milliseconds, and call System Events only when something actually needs
+  restoring.
+- **`tab` inside `tell application "Terminal"` is Terminal's tab class, not
+  the tab character.** A script that builds `id & tab & title` inside that
+  block writes the literal word `tab`, so a Rust-side `split('\t')` matches
+  nothing and the code that reads it does nothing. Bind
+  `set sep to (character id 9)` outside the `tell` block. Until 2026-10-10
+  this bug meant the cleanup's title pass never closed a window.
+
+A window made with `do script` first starts the developer's own interactive
+login shell, rc files included, and only then runs the harness's `exec` line.
+That took 1.5–2.5 s per window on the development Mac. AppleScript has no
+property for a window's command, which is why the spawn opens a settings file
+instead (Pitfall 7).
+
+## Pitfall 7 — the spawn's settings file
+
+The spawn writes `<tag>.terminal` with `CommandString` and `RunCommandAsShell`,
+and opens it with `open -g -a Terminal`. Terminal.app then runs the command as
+the window's shell, still under `login -pf` and with its own `TERM_PROGRAM`,
+`TERM`, and `LANG`, and the bash prompt is up about 0.4 s after the window
+appears. `.command` and `.tool` files do not help: Terminal types their path
+into the profile's shell, so the rc files still run.
+
+- **Opening the file imports a settings set**, persisted in
+  `com.apple.Terminal`'s `Window Settings`. The spawn deletes it with
+  `delete (every settings set whose name is "<tag>")` as soon as the window
+  exists; the live window keeps running on the default settings. Cleanup
+  deletes harness-tagged sets whose owning process is dead.
+- **`CommandString` is split on whitespace, not parsed by a shell.** Put the
+  invocation in a launcher script, and keep the script's path free of
+  whitespace.
+- **The command must name the shell the tab ends up running.** Terminal
+  counts a tab as idle only while its process carries the command's name. A
+  launcher run directly (`/tmp/x.sh`) that `exec`s `bash` leaves the tab
+  `busy`, and closing a busy tab raises a "terminate running processes?"
+  sheet. Terminal's own scripting cannot dismiss that sheet (the sheet's
+  window has no id and does not understand `close`), and with System Events
+  wedged nothing automated can, so it stays on the developer's screen.
+  `/bin/bash /tmp/x.sh` keeps the tab idle. Check `busy of selected tab` on
+  a probe window before you ever close one in a live session.
 
 ## Checklist before touching this harness
 
