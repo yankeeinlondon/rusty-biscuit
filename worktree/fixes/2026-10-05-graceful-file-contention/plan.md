@@ -1,7 +1,7 @@
 ---
 total_phases: 12
 created: 2026-10-11
-phase: 6
+phase: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -96,6 +96,38 @@ docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/observation.md
+source_files_during_phase_7:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - .config/nextest.toml
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+docs_updated_during_phase_7:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_8:
+  - worktree/lib/Cargo.toml
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+docs_updated_during_phase_8:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/observation.md
 packages:
   - worktree
@@ -596,7 +628,7 @@ pass on macOS (the adapter is `cfg`-gated, the contract compiles everywhere).
 
 ### Wave 8 (Phases 7 and 8 may run concurrently)
 
-- [ ] **macOS adapter** - FSEvents via `fsevent-sys` 4.1 (MIT): one stream
+- [x] **macOS adapter** - FSEvents via `fsevent-sys` 4.1 (MIT): one stream
       covering the checkout and quarantine paths (path-based, so the move
       does not invalidate it), the parent, and the admin directory; nonzero
       latency with file events (not `NoDefer`); drain is
@@ -612,7 +644,7 @@ deliver completely, never silently partial.
 
 ## Phase 8: Windows ReadDirectoryChangesW adapter
 
-- [ ] **Windows adapter** - `ReadDirectoryChangesW` via `windows-sys` 0.61:
+- [x] **Windows adapter** - `ReadDirectoryChangesW` via `windows-sys` 0.61:
       the parent with the subtree flag (one handle; S1 shows it does not block
       the move) and the admin directory; a large buffer on local volumes; a
       zero-byte completion, `ERROR_NOTIFY_ENUM_DIR`, or any completion error

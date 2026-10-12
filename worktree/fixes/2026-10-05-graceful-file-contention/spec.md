@@ -29,13 +29,14 @@ depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: false
 message_to_agent: |-
-  Phases 1-6 are closed. The plan was renumbered to 12 phases on
+  Phases 1-8 are closed. The plan was renumbered to 12 phases on
   2026-10-12; the log's Phase 1-2 text uses the old numbers, and its "Author
   rulings and renumbering" section maps them. Every author decision is made:
   see "## Decisions" below. Do not set human_review for them again.
 
-  Read implementation-log.md "## Phase 1" (S2 for watchers) and "## Phase 6"
-  (observer decisions), and .claude/skills/worktree/observation.md.
+  Read implementation-log.md "## Phase 1" (S2 for watchers), "## Phase 6",
+  "## Phase 7", and "## Phase 8" (observer decisions), and
+  .claude/skills/worktree/observation.md.
 
   Library pieces in worktree/lib/src/remove/ (use them; do not add a second
   store, lock, rename, move, or observer type):
@@ -47,29 +48,64 @@ message_to_agent: |-
   - usage.rs: check_usage(&SniffUsage, ..) with OwnedHandles.
   - quarantine/: rename_no_replace, identity, quarantine_path, plan_move,
     move_to_quarantine(base, &plan, activity_observed).
-  - observation/ (Phase 6): Observation::start(Targets::new(original,
-    quarantine, admin)?, ObserverOptions) -> drain() -> Drain { events, lost }
-    with Scope::{Tree(rel), Original(rel), Quarantine(rel), Admin(name)};
+  - observation/: Observation::start(Targets::new(original, quarantine,
+    admin)?, ObserverOptions) -> drain() -> Drain { events, lost } with
+    Scope::{Tree(rel), Original(rel), Quarantine(rel), Admin(name)};
     moved_to_quarantine() right after the rename; release_admin() before the
     Git unregister; register_handles(&mut OwnedHandles) before check_usage.
-    Lost coverage is sticky. ObservationError (Unsupported, Setup) is exit 4
-    before mutation (Phase 10 maps it).
+    Lost coverage is sticky; Phase 7 added CoverageLost::DrainTimedOut.
+    ObservationError (Unsupported, Setup) is exit 4 before mutation
+    (Phase 10 maps it). Adapters: Linux inotify (Phase 6), macOS FSEvents
+    (Phase 7, observation/fsevents.rs), Windows ReadDirectoryChangesW
+    (Phase 8, observation/read_directory_changes.rs). Observation::start
+    now succeeds on all three; run Phase 9's engine against each.
 
-  For Phases 7 (FSEvents) and 8 (ReadDirectoryChangesW):
-  - add a `Backend` impl in observation/<adapter>.rs and dispatch to it in
-    `native_backend` (mod.rs); report raw events as RawEvent { root, path
-    relative to that root, .. } and let Sink/EventQueue classify. A
-    delivery thread pushes into `EventQueue` (bounded, never waits,
-    classifies before counting); drain moves it into the sink with
-    `take_into`. Path-based adapters re-map in `Backend::moved_to_quarantine`.
-  - widen `cfg!(target_os = "linux")` in observation/tests.rs `native()` so
-    the shared native contract tests run on your OS; they currently assert
-    Unsupported there.
-  - `Sink::push` and `Sink::targets` carry
-    `cfg_attr(not(target_os = "linux"), expect(dead_code))`; once your
-    adapter calls push, the lint fails until you widen or remove it.
-  - Linux drains need no marker (inotify queues inside the causing syscall);
-    macOS uses FSEventStreamFlushSync; Windows still needs its marker.
+  Phase 7 facts that bind Phase 9's deletion engine (measured on macOS):
+  - A directory's removal or rename can be reported IN PLACE OF changes
+    below it that were still pending (FSEvents coalesces them, even at
+    latency 0). The engine must drain after deleting a directory's children
+    and before rmdir of that directory (batching by depth level keeps the
+    cost to one drain per level), and must not expect one Removed event per
+    deleted child. The same holds for the move: changes in the tree just
+    before the rename can be hidden behind it, so the inventory's per-entry
+    revalidation before unlink and the final rmdir are the backstop for that
+    window. The module docs in observation/mod.rs state the rule.
+  - A macOS drain costs about 11 ms idle (marker plus flush; up to ~650 ms
+    under heavy load); a drain per entry would be far too slow.
+  - Item flags are cumulative: a deleted path can carry Created and
+    Modified as well as Removed, and the direction of a rename is inferred
+    from whether the path exists when read. Never classify an operation's
+    own unlink by kind alone.
+  - Name new macOS-native tests native_* in observation/tests.rs (or put
+    them in observation/fsevents/tests.rs): the nextest group fsevents-l1
+    (.config/nextest.toml) runs those one at a time, because concurrent
+    FSEvents stream starts each took up to 5 s.
+
+  Phase 8 facts that bind Phase 9's deletion engine (measured on
+  build-win-native):
+  - On ReFS (build-win-native's B:, where real checkouts live; its temp dir
+    is NTFS C:), a directory deleted with POSIX semantics
+    (std::fs::remove_dir_all, FileDispositionInfoEx) raises NO notification,
+    empty or not; files deleted that way, and directories deleted by
+    RemoveDirectoryW, are reported. So: never infer that a directory still
+    exists, or that nobody touched it, from the absence of a Removed event;
+    the per-entry revalidation before each unlink/rmdir is what catches it.
+    Pinned by read_directory_changes::tests::
+    on_refs_a_directory_removed_with_posix_semantics_is_not_reported.
+  - Windows kinds: FILE_ACTION_MODIFIED covers attributes too (never
+    Metadata); a move between directories is Removed + Created; on ReFS a
+    replacing rename (index.lock -> index) is Removed + Modified. Never
+    classify by kind alone (same rule as macOS).
+  - Each Windows drain writes a self-deleting hidden marker
+    (.wt-observe-<hex>-<n>, FILE_FLAG_DELETE_ON_CLOSE) in the parent and,
+    until release_admin, in the admin directory; ~2 ms per drain. The
+    parent marker is a sibling of the checkout, never inside it: the
+    inventory walks the checkout only, so it never sees one.
+  - An open watch handle does not leave a deleted directory delete-pending
+    (NTFS and ReFS); release_admin closes the admin handle anyway before
+    returning, so call it before the Git unregister as planned.
+  - To check ReFS behavior on build-win-native, root test fixtures under
+    env!("CARGO_MANIFEST_DIR") (B:); tempfile fixtures land on NTFS C:.
   - Linux clippy cannot run from the Mac (aws-lc-sys needs a Linux C cross
     compiler) and cross-check has no lint mode; Windows cross-target clippy
     works (`cargo clippy -p worktree --lib --tests --target

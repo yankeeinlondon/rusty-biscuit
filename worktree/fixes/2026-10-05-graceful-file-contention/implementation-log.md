@@ -96,6 +96,38 @@ skills_files_updated_during_phase_6:
   - .claude/skills/worktree/SKILL.md
   - .claude/skills/worktree/remove.md
   - .claude/skills/worktree/observation.md
+source_files_during_phase_7:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - .config/nextest.toml
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+docs_updated_during_phase_7:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_8:
+  - worktree/lib/Cargo.toml
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+docs_updated_during_phase_8:
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/observation.md
 packages:
   - worktree
   - worktree-cli
@@ -1151,3 +1183,342 @@ Cross-OS (`just cross-check worktree --os <os> [observation]`):
 Not run: `just test-l2` (no terminal code changed).
 
 Phase 6 is complete; ready for review.
+
+## Phase 7
+
+Started and finished 2026-10-12. Phase 7 adds the macOS FSEvents adapter
+behind the Phase 6 observer contract. Nothing calls the observer yet (Phase
+10 does), so `wt remove`'s behavior is unchanged. `Observation::start` now
+succeeds on macOS; Windows still returns `Unsupported` until Phase 8.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/observation/fsevents.rs` | `FsEvents` (the `Backend`): one FSEvents stream (`fsevent-sys` 4.1, `kFSEventStreamCreateFlagFileEvents`, 0.1 s latency) over the original, quarantine, and admin paths plus a private marker directory, on a run-loop thread `wt-fsevents`; `Shared::locate`/`deliver` (flags → raw events or loss); `Paths::resolve`; `MarkerDirectory`; the marker barrier; identity checks; stop-and-join on drop |
+| `worktree/lib/src/remove/observation/fsevents/tests.rs` | macOS-only adapter tests |
+| `worktree/lib/src/remove/observation/mod.rs` | macOS dispatch in `native_backend` (now also given `ObserverOptions`); `CoverageLost::DrainTimedOut { waited }`; `EventQueue::take_loss` (macOS); the coalescing rule in the module contract |
+| `worktree/lib/src/remove/observation/tests.rs` | `NATIVE_ADAPTER` (Linux, macOS), `COALESCES_BELOW_DIRECTORY` and `settle`, 25 barrier rounds on macOS, new `native_a_change_below_a_directory_is_reported_or_the_directory_event_stands_for_it` |
+| `.config/nextest.toml` | test group `fsevents-l1` (`max-threads = 1`) for the macOS native observer tests |
+| `worktree/lib/Cargo.toml`, `Cargo.lock` | `fsevent-sys` 4.1.0 (MIT), macOS only |
+
+### Decisions and departures
+
+1. **The drain is a marker plus flush, not `FSEventStreamFlushSync` alone.**
+   The plan (from S2) said "drain is `FSEventStreamFlushSync`, never a
+   marker". Measured: the flush delivers only what fseventsd has already read
+   from the kernel, and that takes about 10 ms. The shared barrier test failed
+   at round 5 of 50 with the flush alone. A marker alone is no drain either
+   (S2: delivery is reordered against it). The drain therefore creates a file
+   in a private marker directory the stream watches, then flushes every 1 ms
+   until that file's event arrives. fseventsd reads the kernel's events in
+   order, so every earlier change has reached it, and the flush that delivered
+   the marker delivered them too. About 9 flushes and 11 ms per drain idle,
+   and up to ~650 ms under full-suite load. Without the marker in 5 s
+   (`DRAIN_TIMEOUT`) the drain records `CoverageLost::DrainTimedOut`, a new
+   shared variant Phase 8 can use for its own marker.
+2. **The marker directory is outside the checkout and Git.** Per Phase 6's
+   reason for avoiding markers on Linux, it is not in the tree or the admin
+   directory. It is `<confstr(_CS_DARWIN_USER_TEMP_DIR)>/wt-observe-<64-bit
+   hex>`: per-user, owner-only, read without an environment variable, removed
+   on drop. A crash leaves an empty directory for the system's temp cleanup.
+   Ordering holds across volumes:
+   `the_barrier_holds_for_a_checkout_on_another_volume` ran with the checkout
+   on `/Volumes/coding` (disk3s7) and the marker on the Data volume (disk3s5).
+3. **`start` runs one barrier.** `FSEventStreamStart` returns before events
+   reach the stream; a file written right after it was never reported. If the
+   first marker is not confirmed, `start` fails with `ObservationError::Setup`
+   (exit 4 before mutation).
+4. **The parent is not watched; identities are checked instead.** The plan
+   listed the parent among the stream's paths, but FSEvents is recursive, so
+   that would deliver every sibling worktree's activity, and a busy sibling (a
+   build) is enough to make FSEvents drop events. The stream watches the
+   original and quarantine paths (path-based, so the move needs no new
+   watch), which also covers recreation of the original. A moved or deleted
+   parent or admin directory produces no event under those paths, so every
+   drain compares their `(dev, ino)` with start: a mismatch is
+   `WatchLost { Parent }` or `WatchLost { Admin }` (admin only until
+   released).
+5. **FSEvents coalesces child changes into a directory's removal or rename.**
+   Found while making the shared tests pass. A file written in `d` and then
+   `d` renamed or deleted within one delivery batch is reported only as `d`'s
+   event, even at latency 0. It was seen 0 of 5 times with no wait, and 5 of 5
+   once the write was delivered first. The same hides a child's `Removed`
+   when its directory is removed right after. This is now part of the observer
+   contract (module docs in `mod.rs`): a caller that must see changes below a
+   directory drains before removing or renaming it. The shared tests drain
+   there through `settle` on macOS only, so Linux keeps its stronger
+   no-drain assertions. The new shared test pins what holds everywhere: the
+   directory's event is always reported. For Phase 9 this means a drain
+   between a directory's children and its `rmdir`. The move's own window
+   relies on Phase 9's per-entry revalidation and final `rmdir`. Recorded in
+   the spec's `message_to_agent`.
+6. **Kinds.** Each item flag present yields one event (`Created`, `Modified`,
+   `Metadata` for inode-meta/Finder-info/owner/xattr, rename, `Removed`),
+   because flags are cumulative history. A rename does not say which side it
+   is: a path that exists when the event is read is `MovedTo`, otherwise
+   `MovedFrom`. `MustScanSubDirs`, `UserDropped`, and `KernelDropped` are
+   `Overflow` on any path; `Mount`/`Unmount` under a watched path are
+   `WatchLost` for that root. The tree's root directory itself is reported as
+   the parent's entry (`Original("")`/`Quarantine("")`), as the parent watch
+   reports it on Linux.
+7. **Relabeling.** `moved_to_quarantine` and `release_admin` each run a
+   barrier first, so changes made before them are labeled as before (tree at
+   the original path; admin reported); after it, the quarantine path is the
+   tree and admin events are dropped.
+8. **Paths.** FSEvents reports resolved paths (`/private/var/...`, on-disk
+   case). `Paths::resolve` canonicalizes the parent, original, and admin.
+   Parent entries are reported under the session's own names, so a
+   differently cased original still classifies (tested on this
+   case-insensitive volume). A link at the original, a non-directory, or a
+   missing path is `ObservationError::Setup` naming the original.
+9. **Thread and drop.** The run-loop thread schedules, starts, runs, then
+   stops, invalidates, and releases the stream itself. The run loop is
+   `CFRetain`ed, so `drop` can repeat `CFRunLoopStop` (a stop sent before the
+   loop runs is lost) until the thread finishes, then join. The callback
+   pushes into the never-waiting `EventQueue`, so a full queue cannot block
+   drop. No handle is registered: fseventsd holds the watch.
+10. **Test group.** Under full-suite load, fifteen observer tests starting
+    streams together each spent up to 5 s in stream start (fseventsd serves
+    registrations one at a time), so seven tests exceeded the 5 s budget.
+    The macOS native observer tests now run in the nextest group
+    `fsevents-l1` (`max-threads = 1`, macOS hosts only, inherited by the `ci`
+    profile). Afterwards the slowest took 1.6 s, and the whole `just test` run
+    dropped from 46 s to 31–36 s. The repo already uses groups for shared
+    system resources (Apple Terminal, Windows networking). Barrier-round counts
+    dropped to 25 on macOS; a flush-only drain already failed by round 5.
+11. **`Sink::push` stays `expect(dead_code)` off Linux.** macOS feeds
+    `EventQueue`, not the sink, so the Phase 6 note ("once your adapter calls
+    push") did not apply; the reason text now says so.
+
+### Requirement-to-test mapping
+
+All tests are L1 (no tier marker) in the `worktree` library binary. The
+input robustness matrix does not apply: nothing here reads a file format or
+configuration.
+
+| Requirement (plan Phase 7) | Test |
+| --- | --- |
+| Phase 6 contract against FSEvents: barrier for create, modify, metadata, rename, directory create, remove (no sleep) | `observation::tests::native_drain_is_a_barrier_for_every_change_kind` |
+| Coverage follows the move (path-based) and sees the original's recreation | `observation::tests::native_coverage_follows_the_move_and_sees_recreation` |
+| Siblings ignored; admin `index.lock` → `index`, `sharedindex.*`, `HEAD`, `gitdir`, `locked` reported; `ORIG_HEAD`, `logs/` not | `observation::tests::native_siblings_are_ignored_and_admin_files_reported` |
+| Intentional deletion and released-admin removal are not loss | `observation::tests::native_intentional_deletion_is_not_coverage_loss` |
+| Deleted admin directory and moved parent are `WatchLost`, sticky (identity checks) | `observation::tests::native_losing_a_watched_directory_is_coverage_loss` |
+| Bounded queue: a full queue is loss | `observation::tests::native_a_full_queue_is_coverage_loss` |
+| Setup failures (missing admin, link at the original) before anything changes | `observation::tests::native_setup_failure_is_an_error_before_anything_changes`; `fsevents::tests::a_setup_failure_names_the_path_and_starts_nothing` (a file, a missing path) |
+| Coalescing: the directory's own event is always reported; children too where the platform does not coalesce | `observation::tests::native_a_change_below_a_directory_is_reported_or_the_directory_event_stands_for_it` |
+| 2,000-file burst: complete or lost, never silently partial | `fsevents::tests::a_burst_is_delivered_completely_or_reported_as_lost` |
+| `MustScanSubDirs` and either dropped flag are `Overflow`, keeping earlier events | `fsevents::tests::every_dropped_or_rescan_flag_is_coverage_loss` |
+| `Mount`/`Unmount` under a watched root is loss; elsewhere ignored | `fsevents::tests::a_mount_or_unmount_under_a_watched_path_is_loss_and_elsewhere_ignored` |
+| Coalesced flags each reported; type unknown without an item-type flag; no item flag reports nothing | `fsevents::tests::coalesced_item_flags_are_each_reported` |
+| Rename direction | `fsevents::tests::a_rename_is_moved_to_where_the_path_exists_and_moved_from_where_it_does_not` |
+| Labels before and after the move; siblings, `checkout2`, the parent, unrelated admin files dropped; released admin silent (events, removal, unmount) | `fsevents::tests::paths_are_labeled_by_where_the_tree_is` |
+| Resolved (`/private`) watched paths; a differently cased original still covered | `fsevents::tests::watched_paths_are_resolved_as_fsevents_reports_them` |
+| Marker barrier across volumes | `fsevents::tests::the_barrier_holds_for_a_checkout_on_another_volume` (skips with a message where temp and checkout share a volume) |
+| Run-loop thread stopped and joined; drop does not block on a full queue | `fsevents::tests::the_run_loop_thread_ends_with_the_session_even_with_a_full_queue` |
+| No self-exclusion entry needed: no handles, and Sniff does not refuse | `fsevents::tests::sniff_sees_nothing_of_the_session` |
+
+Regression evidence: with the flush-only drain,
+`native_drain_is_a_barrier_for_every_change_kind` failed at round 5. Without
+the start barrier, `native_coverage_follows_the_move_and_sees_recreation`
+missed `sub/before.txt`. The coalescing measurements (0/5 at no wait, 5/5 at
+120 ms with latency 0.1; 0/5 and 5/5 at 20 ms with latency 0 or 0.01) came
+from scratch tests that were removed afterwards.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1281 passed, 14 skipped (the area's existing skips), 0
+  failed, none slow.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+- `observation` filter run 8 times in a row on macOS: all green.
+- `cargo nextest show-config test-groups --profile ci` lists the 18 macOS
+  observer tests in `fsevents-l1`.
+
+Cross-OS (`just cross-check worktree --os <os> observation`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | 29 observation tests passed (18 native, in `fsevents-l1`) |
+| Linux (`build-linux`) | 25 passed |
+| WSL2 (`build-win`) | passed |
+| native Windows (`build-win-native`) | 18 passed (native tests assert `Unsupported`) |
+
+Not run: `just test-l2` (no terminal code changed). Linux clippy cannot run
+from this host (see Phase 6); the shared changes compiled warning-free on
+build-linux and WSL2.
+
+Phase 7 is complete; ready for review.
+
+## Phase 8
+
+Started and finished 2026-10-12. Phase 8 adds the Windows
+`ReadDirectoryChangesW` adapter behind the Phase 6 observer contract.
+`Observation::start` now succeeds on every supported OS. Nothing calls the
+observer yet (Phase 10 does), so `wt remove`'s behavior is unchanged.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/lib/src/remove/observation/read_directory_changes.rs` | `ReadDirectoryChanges` (the `Backend`): two overlapped `ReadDirectoryChangesW` handles (parent with the subtree flag, 1 MiB buffer with a 64 KiB fallback for shares; admin directory, 64 KiB), read by one thread `wt-read-directory-changes` feeding `EventQueue`; `parse` (the `FILE_NOTIFY_INFORMATION` chain), `completion` (result → notifications, overflow, or ended watch), `kind`; `Shared::locate`/`deliver`; the per-directory marker barrier; identity checks; release and stop through two events; cancel-and-wait on drop |
+| `worktree/lib/src/remove/observation/read_directory_changes/tests.rs` | Windows-only adapter tests |
+| `worktree/lib/src/remove/observation/mod.rs` | Windows dispatch in `native_backend`; `EventQueue::take_loss` and the `EventQueue` dead-code allowance now cover Windows |
+| `worktree/lib/src/remove/observation/tests.rs` | `NATIVE_ADAPTER` includes Windows; `METADATA_IS_DISTINCT` and `MOVE_ACROSS_DIRECTORIES_IS_A_RENAME`; a same-directory rename added to the barrier test; the admin replacing rename accepts the ReFS shape on Windows |
+| `worktree/lib/Cargo.toml` | `windows-sys` 0.61 gains `Win32_Security`, `Win32_System_IO`, `Win32_System_Threading` (no new crate; `Cargo.lock` unchanged by this phase) |
+
+### Decisions and departures
+
+1. **Layout as planned.** One handle on the parent with the subtree flag,
+   one on the admin directory. Paths arrive relative to the parent, so an
+   entry named like the tree's current name is `Root::Tree`. The tree root's
+   own entry stays the parent's entry, as on Linux and macOS. Sibling entries
+   are dropped in `locate` before any work (no `stat`), and `EventQueue`
+   classifies before counting, so a busy sibling worktree cannot fill the
+   bound. Names match ASCII case-insensitively, as the file system matches
+   them, and parent entries are reported under the session's own names.
+2. **Marker drain, one marker per handle.** Delivery is FIFO per handle,
+   not across handles, so a drain creates `.wt-observe-<16 hex>-<n>` in the
+   parent and (until released) in the admin directory, then waits on a
+   condition variable until each handle has delivered its marker. Each marker
+   is opened with `FILE_FLAG_DELETE_ON_CLOSE` plus hidden/temporary
+   attributes. Closing it deletes it, and so does a crash (the system closes
+   the handle). Neither Git nor the checkout ever keeps one, which answers
+   Phase 6's objection to markers in Git's admin directory. `DRAIN_TIMEOUT`
+   (5 s) without a marker is `CoverageLost::DrainTimedOut`, the variant Phase
+   7 added. A marker that cannot be created is `ReadFailed`. `start` runs one
+   barrier, so a volume that accepts the call and never delivers (a share) is
+   `ObservationError::Setup`, exit 4. A drain takes about 2 ms on
+   build-win-native (the barrier test's ~55 drains took 0.12 s).
+3. **Completion mapping.** A zero-byte completion and `ERROR_NOTIFY_ENUM_DIR`
+   are `Overflow`, and the read is reissued. Any other completion error, or a
+   failed reissue, is `WatchLost { root }`, and that handle stops. The
+   session's own cancel happens only in `release_admin` and drop, where the
+   thread cancels and waits itself, so `ERROR_OPERATION_ABORTED` reaching
+   `complete` is someone else's doing and is loss too. A malformed buffer is
+   `ReadFailed`.
+4. **Identity checks, as on macOS.** A watch handle never reports its own
+   directory's move. Each drain therefore compares the parent's and admin
+   directory's `quarantine::rename::identity` (volume serial, 128-bit file ID)
+   with start, before the barrier, so a vanished admin directory reports
+   `WatchLost { Admin }` rather than a marker-write failure.
+5. **Threading.** Reads are issued on the delivery thread, because Windows
+   cancels a thread's outstanding I/O when that thread exits. It waits on
+   `[stop, release, parent read, admin read]` with `WaitForMultipleObjects`.
+   `release_admin` runs a barrier, signals `release`, and blocks until the
+   thread has cancelled, awaited, and closed the admin handle. Drop signals
+   `stop` and joins; each `Watch`'s drop cancels and awaits its read before
+   freeing the buffer. The queue never waits, so drop cannot block.
+6. **`directory` flag.** `FILE_NOTIFY_INFORMATION` carries no type. The
+   adapter `stat`s the in-scope entry when reading a creation, change, or
+   rename target, and reports `None` for removals. `ReadDirectoryChangesExW`'s
+   extended information was not used, to keep one code path for ReFS, NTFS,
+   and shares.
+7. **Kinds (measured).** `FILE_ACTION_MODIFIED` covers content, attributes,
+   and timestamps, so it is always `Modified`, and the shared barrier test
+   accepts `Modified` for the read-only flip on Windows
+   (`METADATA_IS_DISTINCT`). A move between two directories of the watched
+   subtree is `REMOVED` plus `ADDED`; only a rename within one directory is
+   `RENAMED_OLD_NAME`/`RENAMED_NEW_NAME` (`MOVE_ACROSS_DIRECTORIES_IS_A_RENAME`;
+   the barrier test now also checks a same-directory rename everywhere). An
+   unknown action is reported as `Modified` rather than dropped.
+8. **ReFS differs from NTFS (found by rerunning the contract on `B:`).**
+   build-win-native's temp directory is NTFS `C:`, while its checkouts live
+   on the ReFS Dev Drive `B:`. A one-off rerun of every native contract test
+   with fixtures under `CARGO_MANIFEST_DIR` (`B:`) found two differences.
+   - A rename onto an existing file (`index.lock` → `index`) is `REMOVED` of
+     the source plus `MODIFIED` of the target. The shared admin test accepts
+     that shape on Windows. Either shape still reports both names, which is
+     what the engine needs.
+   - A directory deleted with POSIX semantics (`std::fs::remove_dir_all`)
+     raises **no notification**, empty or not. Files deleted the same way, and
+     directories deleted by `RemoveDirectoryW`, are reported, and the barrier
+     holds. A foreign process that removes an already-empty directory this
+     way is therefore not seen. Its file deletions are seen, and the deletion
+     engine's per-entry revalidation (Phase 9) finds the directory gone.
+     Pinned by `on_refs_a_directory_removed_with_posix_semantics_is_not_reported`,
+     which runs where the package itself is on ReFS and skips with a message
+     elsewhere. Recorded in the `os` skill and the spec's `message_to_agent`.
+   With the widened admin assertion, all 8 native contract tests passed on
+   `B:` as well as on `C:`.
+9. **Delete-pending (the plan's question).** No. With the watch open
+   (`FILE_SHARE_DELETE`), `RemoveDirectoryW` of the admin directory removed
+   its name at once, and the same name could be created again, on NTFS `C:`
+   and ReFS `B:`. The pending read then ends with an error, which is
+   `WatchLost { Admin }`. `release_admin` still closes the handle first, so
+   nothing depends on this. Recorded in the `os` skill.
+10. **No self-exclusion entry.** Neither handle is inside the checkout, so
+    `handles()` is empty and Sniff's usage query does not refuse
+    (`sniff_sees_nothing_of_the_session`). This matches R12: only a directory
+    handle inside the checkout would need registering by identity.
+11. **No nextest group.** Windows stream starts do not serialize the way
+    fseventsd registrations do. The slowest Windows observer test took 0.9 s
+    (the real Sniff query), and the 1,000-file burst 0.8 s.
+
+### Requirement-to-test mapping
+
+All tests are L1 (no tier marker) in the `worktree` library binary. The
+input robustness matrix does not apply: the only bytes parsed are the
+kernel's `FILE_NOTIFY_INFORMATION` records, not a file format or
+configuration. Their malformed shapes are still tested.
+
+| Requirement (plan Phase 8) | Test |
+| --- | --- |
+| Phase 6 contract against `ReadDirectoryChangesW`: barrier for create, modify, attribute change, cross-directory and same-directory rename, directory create, remove (50 rounds, no sleep) | `observation::tests::native_drain_is_a_barrier_for_every_change_kind` |
+| Parent subtree handle follows the move without blocking it; recreation seen | `observation::tests::native_coverage_follows_the_move_and_sees_recreation`; `read_directory_changes::tests::the_watch_does_not_block_the_move_or_the_deletion` |
+| Siblings ignored; admin files reported (both replacing-rename shapes) | `observation::tests::native_siblings_are_ignored_and_admin_files_reported` |
+| Intentional deletion and released-admin removal are not loss | `observation::tests::native_intentional_deletion_is_not_coverage_loss` |
+| Deleted admin directory and moved parent are `WatchLost`, sticky | `observation::tests::native_losing_a_watched_directory_is_coverage_loss` |
+| Bounded queue: a full queue is loss | `observation::tests::native_a_full_queue_is_coverage_loss` |
+| Setup failures before anything changes (missing admin, missing original, a file, a directory link) | `observation::tests::native_setup_failure_is_an_error_before_anything_changes`; `read_directory_changes::tests::a_link_or_a_missing_directory_is_a_setup_failure` |
+| Directory events stand for coalesced children (Windows does not coalesce) | `observation::tests::native_a_change_below_a_directory_is_reported_or_the_directory_event_stands_for_it` |
+| **The overflow S2 showed `notify` hiding**: a burst while the thread is not reading is `Overflow`, not a short list | `read_directory_changes::tests::a_system_buffer_overflow_is_coverage_loss` (4 KiB buffer, test-only gate, 500 files) |
+| A burst is complete or reported lost, never silently partial (production buffer) | `read_directory_changes::tests::a_burst_is_delivered_completely_or_reported_as_lost` |
+| Zero-byte completion and `ERROR_NOTIFY_ENUM_DIR` are overflow; any other error (including an abort not the session's own) ends the watch | `read_directory_changes::tests::completions_map_to_events_overflow_or_an_ended_watch` |
+| Notification buffers parsed entry by entry; overruns are errors, not shorter lists | `read_directory_changes::tests::notification_buffers_are_parsed_entry_by_entry` |
+| Action → kind; `MODIFIED` never `Metadata`; unknown action still a change | `read_directory_changes::tests::actions_map_to_kinds_and_modified_is_never_metadata` |
+| Labels before and after the move; case-insensitive names; siblings and `checkout2` dropped | `read_directory_changes::tests::paths_are_labeled_by_where_the_tree_is` |
+| Markers never reported, nothing left behind | `read_directory_changes::tests::markers_are_never_reported_and_leave_nothing_behind` |
+| Admin handle closed before the final unregister; delete-pending answer | `read_directory_changes::tests::a_watched_directory_deleted_before_release_and_one_released_first` |
+| No thread left after the session | `read_directory_changes::tests::the_delivery_thread_ends_with_the_session` |
+| No self-exclusion entry needed | `read_directory_changes::tests::sniff_sees_nothing_of_the_session` |
+| ReFS: POSIX-semantics directory delete unreported, barrier holds | `read_directory_changes::tests::on_refs_a_directory_removed_with_posix_semantics_is_not_reported` |
+
+Regression evidence: the first Windows run failed
+`native_drain_is_a_barrier_for_every_change_kind` on the cross-directory
+move (`Removed`/`Created` instead of a rename). The first ReFS run failed
+`the_watch_does_not_block_the_move_or_the_deletion` (`remove_dir_all` left
+no directory events) and `native_siblings_are_ignored_and_admin_files_reported`
+(the replacing rename's shape). A probe test, since removed, separated
+`remove_dir`, `remove_dir_all` of an empty and a full directory, and
+`remove_file` on both volumes.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1281 passed, 14 skipped (the area's existing skips), 0
+  failed. Three unrelated tests (`graph::tests::fork_origin_cutoff_matrix`,
+  two `list::tests::pipeline` tests) went over 5 s in the run that followed a
+  fresh compile. Alone, they take 2.6–3.1 s; this phase touched no code they
+  use.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+- Windows cross-target clippy (`cargo clippy -p worktree --lib --tests
+  --target x86_64-pc-windows-gnu -- -D warnings`): clean.
+
+Cross-OS (`just cross-check worktree --os <os> [observation]`):
+
+| OS | Result |
+| --- | --- |
+| native Windows (`build-win-native`) | `observation`: 31 passed (NTFS temp fixtures; the ReFS test exercised on `B:`); full `worktree` package: 655 passed |
+| native Windows, fixtures on ReFS `B:` (one-off, reverted) | the 8 shared native tests and the adapter tests passed |
+| Linux (`build-linux`) | `observation`: 25 passed |
+| WSL2 (`build-win`) | `observation`: 25 passed |
+| macOS (local) | in `just test` above |
+
+Not run: `just test-l2` (no terminal code changed).
+
+Phase 8 is complete; ready for review.
