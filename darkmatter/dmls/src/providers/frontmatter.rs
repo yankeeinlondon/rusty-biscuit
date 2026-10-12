@@ -2421,9 +2421,10 @@ fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) ->
     atoms_of(def).iter().any(|atom| atom_declares(atom, predicate))
 }
 
-/// Whether any arm of a property is required.
+/// Whether a property is required, by the library's shared presence
+/// calculation: a null-admitting whole value is never required.
 fn is_required(def: &PropertyDef) -> bool {
-    declares_constraint(def, |c| matches!(c, Constraint::Required))
+    def.is_required()
 }
 
 /// Whether any arm of a property declares `eager`, at item or array level.
