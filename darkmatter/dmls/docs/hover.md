@@ -44,10 +44,45 @@ Hovering a schema-declared frontmatter property renders its type, whether it is 
 | default value                | `Default: _draft_` (italic)             | softer metadata                                 |
 | required flag                | `Required` (plain)                      | a plain word needs no emphasis                  |
 | description                  | plain paragraph                         | the prose the author wrote                      |
+| `alphanumeric` character rules | `Options: …`, `Characters: …`, `First character: …`, `` `..`: … `` | the canonical options and the character sets they allow |
 
 The mental model: **box = the thing being described; bold = its type; italic = its example/enum/default values.** (An earlier idea — blue type, dim default — was dropped because color and dim are not expressible in hover Markdown.)
 
 The body is assembled by the pure `schema_hover_body` function in `src/providers/frontmatter.rs`, kept free of any LSP session state so the rule is unit-testable in isolation.
+
+### Schema definitions
+
+Hovering a definition in a schema (its key or its type text) shows what it
+declares, then the catalog description of each built-in type it uses. A type
+with an alias names it, so `whatever: any` hovers as `unknown`:
+
+```markdown
+**`whatever`**
+
+Type: **type-definition**
+
+Declares: **unknown**
+
+**`unknown`** (alias `any`): Every value, including null, or omission; ...
+```
+
+An `alphanumeric` type adds its canonical options (redundant ones dropped)
+and the effective character sets, as the library computes and renders them.
+`alphanumeric(allow-dashes, block-leading-dash, block-double-periods)`
+shows:
+
+```markdown
+Options: `allow-dashes`, `block-leading-dash`
+
+Characters: `A-Z a-z 0-9 -`
+
+First character: `A-Z a-z 0-9`
+
+`..`: forbidden
+```
+
+A local type named like a built-in, referenced as `shell@this`, hovers and
+goes to its local definition; the bare `shell` is the built-in.
 
 ### Union-typed properties and list items
 

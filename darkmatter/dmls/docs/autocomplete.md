@@ -89,6 +89,29 @@ steps:
     # offers `text`, not `run`
 ```
 
+### Schema definitions
+
+Inside a schema definition (a standalone schema file, a frontmatter
+`$schema`, or a `type-definition` value), completion reads what you are in
+the middle of typing from the library's tolerant cursor parser:
+
+- At a type position, including a union arm, it offers every built-in type
+  keyword and its `[]` form, plus aliases labeled as such (`any`, detail
+  ``Alias of `unknown` ``), and your named types.
+- Inside `alphanumeric(`, before the first `;`, it offers the type options
+  not yet written in that group, each with its effect as `detail`. While the
+  group is still empty the constraints are offered too; once it holds an
+  option, only options are; after `;`, only constraints are.
+
+```yaml
+types:
+  slug: alphanumeric(allow-dashes, |   # offers the other eight options
+  id: alphanumeric(allow-dashes; |     # offers `min`, `max`, `required`, ...
+```
+
+Options are not offered inside a reference to a named `alphanumeric` type:
+a use site may only repeat its definition's options.
+
 ## Shell suffix completion (`$( … )::`)
 
 After the closing `)` of a frontmatter `$( … )` value, completion offers the
