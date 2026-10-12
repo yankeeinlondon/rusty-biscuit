@@ -157,6 +157,9 @@ pub enum SchemaConstraintConflictKind {
     Scheme,
     /// Repeated `default(...)` values differ after JSON normalization.
     Default,
+    /// A use site writes `alphanumeric` options whose canonical set differs
+    /// from the named type's.
+    Options,
 }
 
 impl std::fmt::Display for SchemaConstraintConflictKind {
@@ -165,6 +168,7 @@ impl std::fmt::Display for SchemaConstraintConflictKind {
             Self::Bounds => "bounds",
             Self::Scheme => "schemes",
             Self::Default => "defaults",
+            Self::Options => "`alphanumeric` options",
         })
     }
 }
@@ -292,9 +296,11 @@ impl SchemaSourceMap {
                     .get((*span).clone())
                     .and_then(|text| text.strip_prefix(keyword))
                     .is_some_and(|rest| {
-                        rest.chars()
-                            .next()
-                            .is_none_or(|next| next == '(' || next == ':' || next.is_whitespace())
+                        // A `,` ends the first of several `alphanumeric`
+                        // options, which are located as one constraint.
+                        rest.chars().next().is_none_or(|next| {
+                            next == '(' || next == ':' || next == ',' || next.is_whitespace()
+                        })
                     })
             })
             .nth(occurrence)
@@ -887,14 +893,21 @@ impl BlockLocator<'_> {
                 } else {
                     items.push(self.inline_value(item_start..line.end, indent)?);
                 }
-            } else {
-                let child_indent = self
-                    .lines
-                    .get(self.next)
-                    .filter(|next| next.indent > indent)
-                    .map(|next| next.indent)
-                    .ok_or_else(projection_error)?;
+            } else if let Some(child_indent) = self
+                .lines
+                .get(self.next)
+                .filter(|next| next.indent > indent)
+                .map(|next| next.indent)
+            {
                 items.push(self.node(child_indent)?);
+            } else {
+                // An empty item is null, which a schema union may write as
+                // its `null` arm.
+                let at = item_start.min(line.end);
+                items.push(LocatedValue {
+                    span: at..at,
+                    kind: LocatedKind::Scalar(DecodedScalar::empty(at)),
+                });
             }
         }
         let end = items.last().map(|item| item.span.end).unwrap_or(start);
@@ -979,12 +992,12 @@ impl BlockLocator<'_> {
         } else {
             match self.block_value(indent)? {
                 Some(node) => Ok(node),
-                // An empty value is null.
-                None if self.tolerant => Ok(LocatedValue {
+                // An empty value is null, which a schema may write as the
+                // `null` type.
+                None => Ok(LocatedValue {
                     span: value_range.start..value_range.start,
                     kind: LocatedKind::Scalar(DecodedScalar::empty(value_range.start)),
                 }),
-                None => Err(projection_error()),
             }
         }
     }
@@ -1663,11 +1676,26 @@ fn project_atom_source(
             scan_expression_source(scalar, path, source_offset, source_map)?;
             project_inline_shape_source(shape, scalar, path, source_offset, source_map)
         }
+        // The YAML null scalar is the `null` type; its whole scalar (empty
+        // for `key:`) is the keyword.
+        (TypeExpr::Primitive(SimplifiedType::Null), LocatedKind::Scalar(scalar))
+            if is_yaml_null_spelling(scalar.decoded()) =>
+        {
+            let span = offset_span(&located.span, source_offset);
+            source_map.insert(path, SchemaSpanKind::Atom, span.clone());
+            source_map.insert(path, SchemaSpanKind::TypeKeyword, span);
+            Ok(())
+        }
         (_, LocatedKind::Scalar(scalar)) => {
             scan_expression_source(scalar, path, source_offset, source_map)
         }
         _ => Err(projection_error()),
     }
+}
+
+/// Whether `text` is a plain YAML 1.2 core-schema null scalar.
+fn is_yaml_null_spelling(text: &str) -> bool {
+    matches!(text, "" | "~" | "null" | "Null" | "NULL")
 }
 
 fn record_scalar_content(

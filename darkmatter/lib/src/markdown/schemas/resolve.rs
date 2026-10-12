@@ -37,7 +37,7 @@ use super::{
     SchemaAdvisory, SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
-        SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
+        AlphanumericOptions, SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
         SchemaReferenceSite, SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaUnionRejection,
         parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
@@ -1897,6 +1897,26 @@ fn apply_import_postfix(
         description,
     } = reference;
 
+    // `alphanumeric` options belong to the target's identity, not to its
+    // constraints: a use site may repeat them exactly but never change them.
+    if constraints.iter().any(|constraint| matches!(constraint, Constraint::Options(_))) {
+        let (use_value_origins, _) =
+            authored_origins(&constraints, &array_constraints, &site.source, &site.path);
+        let (options, rest): (Vec<_>, Vec<_>) = constraints
+            .into_iter()
+            .zip(use_value_origins)
+            .partition(|(constraint, _)| matches!(constraint, Constraint::Options(_)));
+        constraints = rest.into_iter().map(|(constraint, _)| constraint).collect();
+        check_use_site_options(
+            &base_atom,
+            &base_provenance,
+            options,
+            &MergeSite { name: &name, site },
+            definition,
+            &reference,
+        )?;
+    }
+
     // Only a union target gives a list before `[]` a meaning (its property
     // markers); item constraints on a single named type are not supported.
     if is_array && let Some(first) = constraints.first() {
@@ -1933,13 +1953,14 @@ fn apply_import_postfix(
         .iter()
         .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
     {
-        let TypeExpr::Primitive(ty @ (SimplifiedType::String | SimplifiedType::Number)) =
-            &base_atom.ty
+        let TypeExpr::Primitive(
+            ty @ (SimplifiedType::String | SimplifiedType::Number | SimplifiedType::Alphanumeric),
+        ) = &base_atom.ty
         else {
             return Err(SchemaError::Grammar {
                 property: name.to_string(),
                 message: format!(
-                    "`suggest` on imported type `{name}@{reference}` requires an exact `string` or `number` target"
+                    "`suggest` on imported type `{name}@{reference}` requires an exact `string`, `number`, or `alphanumeric` target"
                 ),
                 span: constraints
                     .iter()
@@ -2051,7 +2072,7 @@ fn apply_import_postfix(
                 (shape.constraints, shape_origins) = shape_other.into_iter().chain(keys).unzip();
                 (value, inherited_array)
             }
-            TypeExpr::Primitive(SimplifiedType::String) => {
+            TypeExpr::Primitive(SimplifiedType::String | SimplifiedType::Alphanumeric) => {
                 let use_site = reinterpret_bounds(use_site, CountedBound::Length, &property)?;
                 (merge_constraints(inherited_value, use_site, &merge_site)?, inherited_array)
             }
@@ -2422,6 +2443,63 @@ fn is_flag(constraint: &Constraint) -> bool {
             | Constraint::Required
             | Constraint::Generated
     )
+}
+
+/// Checks the `alphanumeric` options a use site wrote against the named
+/// type's. Equal canonical sets are a repetition; any difference is a
+/// [`SchemaConstraintConflictKind::Options`] conflict, and options on a
+/// target that is not `alphanumeric` are not valid.
+fn check_use_site_options(
+    base: &PropertyAtom,
+    base_provenance: &AtomProvenance,
+    options: Vec<Tagged>,
+    merge_site: &MergeSite<'_>,
+    definition: &SchemaReferenceSite,
+    reference: &str,
+) -> Result<(), SchemaError> {
+    let name = merge_site.name;
+    let written = options
+        .iter()
+        .filter_map(|(constraint, _)| match constraint {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>();
+    let Some(target) = base.alphanumeric_options() else {
+        return Err(SchemaError::Convert {
+            property: merge_site.site.path.to_string(),
+            message: format!(
+                "`alphanumeric` options ({}) are not valid on the named type \
+                 `{name}@{reference}`, which is not `alphanumeric`",
+                written.keywords().collect::<Vec<_>>().join(", ")
+            ),
+        });
+    };
+    if written.canonical() == target {
+        return Ok(());
+    }
+    let use_origin = options
+        .into_iter()
+        .map(|(_, origin)| origin)
+        .next()
+        .expect("caller passes at least one option list");
+    let base_origin = base
+        .constraints
+        .iter()
+        .zip(&base_provenance.value)
+        .find_map(|(constraint, origin)| {
+            matches!(constraint, Constraint::Options(_)).then(|| origin.clone())
+        })
+        // The base type writes no options; point at its declaration.
+        .unwrap_or_else(|| SchemaConstraintOrigin {
+            source: definition.source.clone(),
+            path: definition.path.clone(),
+            keyword: SimplifiedType::Alphanumeric.as_keyword().to_string(),
+            occurrence: 0,
+            span: None,
+        });
+    Err(merge_site.conflict(SchemaConstraintConflictKind::Options, vec![base_origin, use_origin]))
 }
 
 /// Merges `inherited` and then `use_site` constraints of one level (value or

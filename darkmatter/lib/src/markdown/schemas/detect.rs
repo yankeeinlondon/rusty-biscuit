@@ -143,14 +143,14 @@ fn detect_value_atom(value: &Value, context: &FileResolutionContext) -> Property
         Value::String(s) => PropertyAtom::bare(classify_string(s, context)),
         Value::Array(items) => detect_array_atom(items, context),
         Value::Object(_) => PropertyAtom::bare(SimplifiedType::Object),
-        Value::Null => PropertyAtom::bare(SimplifiedType::Any),
+        Value::Null => PropertyAtom::bare(SimplifiedType::Unknown),
     }
 }
 
 fn detect_array_atom(items: &[Value], context: &FileResolutionContext) -> PropertyAtom {
     if items.is_empty() {
         return PropertyAtom {
-            ty: TypeExpr::Primitive(SimplifiedType::Any),
+            ty: TypeExpr::Primitive(SimplifiedType::Unknown),
             is_array: true,
             constraints: vec![],
             array_constraints: vec![],
@@ -179,7 +179,7 @@ fn detect_array_atom(items: &[Value], context: &FileResolutionContext) -> Proper
             }
             None => {
                 return PropertyAtom {
-                    ty: TypeExpr::Primitive(SimplifiedType::Any),
+                    ty: TypeExpr::Primitive(SimplifiedType::Unknown),
                     is_array: true,
                     constraints: vec![],
                     array_constraints: vec![],
@@ -418,8 +418,8 @@ fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
         // boolean-family widening
         (Boolean, Boolish) | (Boolish, Boolean) => Some(Boolish),
 
-        // `Any` swallows everything
-        (Any, t) | (t, Any) => Some(t),
+        // `Unknown` swallows everything
+        (Unknown, t) | (t, Unknown) => Some(t),
 
         _ => None,
     }
@@ -768,7 +768,7 @@ mod tests {
         match def {
             PropertyDef::Single(atom) => {
                 assert!(atom.is_array);
-                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Any));
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Unknown));
             }
             _ => panic!(),
         }

@@ -3,11 +3,16 @@
 //! Used by tests (especially `proptest` round-trip tests) to verify that the
 //! parser and the AST agree. The output is canonical (deterministic key
 //! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`]
-//! for every atom the passive parser produces.
+//! for every atom the passive parser produces, except that `alphanumeric`
+//! options are written in canonical form, which re-parses to the same type
+//! identity rather than the authored option order.
 
 use std::fmt::Write;
 
-use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+use super::{
+    alphanumeric::AlphanumericOptions,
+    types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr},
+};
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
@@ -22,9 +27,10 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     match &atom.ty {
         TypeExpr::Primitive(ty) => {
             out.push_str(ty.as_keyword());
-            if !atom.constraints.is_empty() {
+            let constraints = render_constraints(&atom.constraints, Some(*ty));
+            if !constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.constraints, *ty);
+                out.push_str(&constraints);
                 out.push(')');
             } else if matches!(ty, SimplifiedType::Enum) {
                 // The parser rejects bare `enum` without members; if a caller
@@ -37,7 +43,7 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push_str("[]");
                 if !atom.array_constraints.is_empty() {
                     out.push('(');
-                    write_constraints(&mut out, &atom.array_constraints, *ty);
+                    out.push_str(&render_constraints(&atom.array_constraints, Some(*ty)));
                     out.push(')');
                 }
             }
@@ -46,12 +52,12 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
             write_inline_object(&mut out, shape, atom.is_array);
             if atom.is_array && !atom.array_constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.array_constraints, SimplifiedType::String);
+                out.push_str(&render_constraints(&atom.array_constraints, None));
                 out.push(')');
             }
             if !atom.is_array && !atom.constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.constraints, SimplifiedType::String);
+                out.push_str(&render_constraints(&atom.constraints, None));
                 out.push(')');
             }
         }
@@ -61,16 +67,17 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
         // keyword, where only `@this` selects the local type.
         TypeExpr::Imported { name, reference } => {
             out.push_str(name);
-            if !atom.constraints.is_empty() {
+            let constraints = render_constraints(&atom.constraints, None);
+            if !constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
+                out.push_str(&constraints);
                 out.push(')');
             }
             if atom.is_array {
                 out.push_str("[]");
                 if !atom.array_constraints.is_empty() {
                     out.push('(');
-                    write_constraints(&mut out, &atom.array_constraints, SimplifiedType::Any);
+                    out.push_str(&render_constraints(&atom.array_constraints, None));
                     out.push(')');
                 }
             }
@@ -135,16 +142,34 @@ fn def_single_atom(def: &super::types::PropertyDef) -> &PropertyAtom {
     }
 }
 
-fn write_constraints(out: &mut String, constraints: &[Constraint], ty: SimplifiedType) {
-    for (idx, c) in constraints.iter().enumerate() {
-        if idx > 0 {
+/// Renders a constraint list without its parentheses. `ty` is the target
+/// type, `None` for a reference or inline object. `alphanumeric` options lead
+/// in canonical form, and redundant ones disappear with it.
+fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) -> String {
+    let mut out = String::new();
+    let options = constraints
+        .iter()
+        .filter_map(|constraint| match constraint {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>()
+        .canonical();
+    out.push_str(&options.keywords().collect::<Vec<_>>().join(","));
+    for c in constraints
+        .iter()
+        .filter(|constraint| !matches!(constraint, Constraint::Options(_)))
+    {
+        if !out.is_empty() {
             out.push(';');
         }
-        write_constraint(out, c, ty);
+        write_constraint(&mut out, c, ty);
     }
+    out
 }
 
-fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
+fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>) {
     match c {
         Constraint::Required => out.push_str("required"),
         Constraint::Eager => out.push_str("eager"),
@@ -189,7 +214,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                 if i > 0 {
                     out.push(',');
                 }
-                let value = if matches!(ty, SimplifiedType::Number) {
+                let value = if ty == Some(SimplifiedType::Number) {
                     candidate
                         .canonical_decimal
                         .as_deref()
@@ -211,6 +236,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
             }
         }
         Constraint::LiteralValue(value) => write_literal_value(out, value),
+        Constraint::Options(_) => unreachable!("options are rendered first, in canonical form"),
         Constraint::Match(globs) => {
             out.push_str("match(");
             for (i, g) in globs.iter().enumerate() {
@@ -249,7 +275,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
     }
 }
 
-fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: SimplifiedType) {
+fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<SimplifiedType>) {
     match value {
         serde_json::Value::Null => out.push_str("null"),
         serde_json::Value::Bool(b) => {
