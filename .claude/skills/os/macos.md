@@ -67,6 +67,21 @@ conditions that masquerade as repository defects.
   sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
   2026-10-06). Keep such a test to one lookup.
 
+## File flushes cost ~25 ms each
+
+On Apple platforms Rust's `File::sync_all` **and** `File::sync_data` call
+`fcntl(F_FULLFSYNC)`. That call also empties the drive's own write cache,
+which costs about 25 ms per call on the primary host's APFS volumes. The
+`worktree` recovery-store tests flush a file and its directory on every write.
+With std's calls they took 0.3–4 s each; with plain `libc::fsync` they took
+about 30 ms (measured 2026-10-12).
+
+Plain `fsync` survives a process or kernel crash, not a power loss. When the
+code claims only process-crash durability, call `libc::fsync` under
+`#[cfg(target_vendor = "apple")]` (`worktree/lib/src/remove/recovery/storage.rs`,
+`flush`). Do not call std's flush in a per-batch loop on macOS without
+measuring it first.
+
 ## Homebrew link paths
 
 Cargo can retain a native library search path to a removed Homebrew Cellar
