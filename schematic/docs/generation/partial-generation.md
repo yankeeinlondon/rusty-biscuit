@@ -33,8 +33,11 @@ holds every member:
 
 `lib.rs` and `prelude.rs` are rebuilt from the kept and the regenerated
 groups, in registry order, so after a partial run they are identical to what
-full generation would write. `shared.rs`, `ws_shared.rs`, the WebSocket
-definition modules, and `schema/Cargo.toml` are rewritten on every run.
+full generation would write. `lib.rs` also records the `schematic-runtime`
+ABI the crate was generated for (see
+[shared runtime compatibility](#shared-runtime-compatibility)). `shared.rs`,
+`ws_shared.rs`, the WebSocket definition modules, and `schema/Cargo.toml` are
+rewritten on every run.
 
 OpenAPI and Postman follow the same rule with their own module names: a
 partial run rewrites only the selected groups' `<module>.json` and
@@ -63,7 +66,7 @@ flowchart TD
     V -->|ok| I{Partial run on a non-empty root?}
     I -->|yes| INV[Read the existing inventory: lib.rs, prelude.rs, generated modules]
     INV -->|cannot be trusted| F
-    INV -->|ok| C{Shared runtime unchanged, or nothing retained?}
+    INV -->|ok| C{"Nothing retained, or runtime ABI<br/>and shared files unchanged?"}
     C -->|no| FG[Fail: run full generation]
     C -->|yes| P[Assemble, syntax-check, and format every file in memory]
     I -->|no| P
@@ -110,8 +113,11 @@ $ schematic-gen generate --api gitea ...
 Move or remove the listed paths, or generate into an isolated output directory.
 ```
 
-A module whose size crosses the split threshold changes layout between
-`<module>.rs` and a `<module>/` directory. The new layout is written first;
+A module whose size crosses the split threshold (2000 formatted lines)
+changes layout between `<module>.rs` and a `<module>/` directory holding
+`mod.rs` (module docs, submodule declarations, re-exports, and each API's
+marker type, client alias, and constructors), `requests.rs`, and
+`responses.rs`. The new layout is written first;
 the old one is deleted only if it is provably generated. If the old layout
 holds hand-written content, the run refuses and leaves it intact.
 
@@ -138,7 +144,7 @@ directory*:
 | a generated module is not declared in `lib.rs` | ``generated module `delta` is not declared in lib.rs`` |
 | `lib.rs` declares a module no current definition produces | ``lib.rs declares module `delta`, which no current definition generates`` |
 | a kept module exists as both `x.rs` and `x/` | ``module `beta` exists both as beta.rs and as beta/`` |
-| the prelude exports for a kept module differ from what the current definitions export (an API was added, removed, or renamed) | ``prelude.rs exports ["Gamma"] from `gamma`, but the current definitions export ["Gamma", "GammaRequest"]`` |
+| the prelude exports for a kept module differ from what the current definitions export (an API was added, removed, or renamed); each API exports its marker `{Api}` and its client alias `{Api}Client` | ``prelude.rs exports ["Gamma"] from `gamma`, but the current definitions export ["Gamma", "GammaClient"]`` |
 
 The inventory is checked against the module and type *names*; a kept module
 whose endpoints changed in the definitions is still kept as it is. Regenerate
@@ -146,19 +152,48 @@ it, or run full generation, to bring it up to date.
 
 ### Shared runtime compatibility
 
-Kept modules were compiled against the `shared.rs` and `ws_shared.rs` already
-on disk. When a partial run would write a different version of either file
-while keeping any module, it refuses before writing anything:
+Kept modules were generated against a particular `schematic-runtime` and
+against the `shared.rs` and `ws_shared.rs` already on disk. Generated
+`lib.rs` records the runtime's ABI version and checks it at compile time:
+
+```rust
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+const _: () = assert!(
+    schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
+    "schematic-schema was generated for schematic-runtime ABI 1, but ...; regenerate the crate ..."
+);
+```
+
+Building the crate against a runtime with another ABI therefore fails to
+compile with that message, instead of failing somewhere inside a module. The
+generator emits `schematic_gen::RUNTIME_ABI`, which a unit test keeps equal to
+`schematic_runtime::ABI`.
+
+A partial run that keeps any module reads that marker from the existing
+`lib.rs` (by parsing it, not by searching its text) and refuses before
+writing anything unless both hold:
+
+- `lib.rs` has exactly one top-level `const SCHEMATIC_RUNTIME_ABI: u32` whose
+  value is an integer literal equal to the generator's `RUNTIME_ABI`. A
+  different value, a missing marker (output generated before
+  `schematic-runtime` existed), or a malformed one (not an integer literal,
+  not `u32`, declared more than once) all count as a change.
+- `shared.rs` and `ws_shared.rs` would be written byte-for-byte unchanged.
 
 ```text
 refusing a partial update of schema/src; nothing was changed: the shared runtime
-file(s) shared.rs would change while module(s) anthropic, ... are retained without
-being regenerated. Run full generation (`generate --api all`) instead
+would change (lib.rs records schematic-runtime ABI 1, this generator emits ABI 2)
+while module(s) anthropic, ... are retained without being regenerated. Run full
+generation (`generate --api all`) instead
 ```
 
-The comparison is byte-for-byte. It runs in one function, so a future
-generator/runtime compatibility marker can replace it without changing the
-callers.
+A missing marker is reported as
+`lib.rs records no schematic-runtime ABI, this generator emits ABI 1`, a
+malformed one as, for example,
+`lib.rs's SCHEMATIC_RUNTIME_ABI is not an integer literal`, and a changed
+shared file by its name (`shared.rs`). A matching marker never bypasses the
+inventory checks above. With nothing retained (every group selected, or an
+empty output directory) the marker and the shared files do not matter.
 
 ## Failures during publication
 

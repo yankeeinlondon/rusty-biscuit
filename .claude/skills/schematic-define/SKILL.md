@@ -17,22 +17,22 @@ Use this skill when working in `schematic/define` or when updating docs/tests th
 - `Headers`, `EnvMapping`, `EnvList`, `SensitiveString`
 - OpenAPI vendor extension models (`x-schematic`)
 
-Code generation and runtime clients live in `schematic-gen` and `schematic-schema`, but this crate defines the contracts they consume.
+Code generation lives in `schematic-gen`, request execution in the hand-written `schematic-runtime`, and the generated clients in `schematic-schema`, but this crate defines the contracts they consume.
 
 ## High-Signal Rules
 
 ### 1) Response Type Selection Is Runtime-Critical
 
-Pick the right `ApiResponse`, because generated method shape depends on it:
+Pick the right `ApiResponse`, because the generated `EndpointSpec` impl takes its success type and codec from it:
 
-| `ApiResponse` | Generated method | Return type |
+| `ApiResponse` | `type Decoder` | `type Success` |
 |---|---|---|
-| `Json(Schema)` | `request<T>()` | `T` |
-| `Binary` | `request_bytes()` | `bytes::Bytes` |
-| `Text` | `request_text()` | `String` |
-| `Empty` | `request_empty()` | `()` |
+| `Json(Schema)` | `schematic_runtime::Json<T>` | `T` |
+| `Binary` | `schematic_runtime::Binary` | `bytes::Bytes` |
+| `Text` | `schematic_runtime::Text` | `String` |
+| `Empty` | `schematic_runtime::Empty` | `()` |
 
-If an endpoint returns bytes/text but is modeled as JSON, generated clients call the wrong response parser.
+If an endpoint returns bytes/text but is modeled as JSON, callers get the wrong success type at compile time, and at runtime the `Json` codec reports a `MalformedSuccess` error in the response envelope (body kept).
 
 There is no streaming variant. SSE and NDJSON endpoints are modeled as `Binary`
 and framed by the caller — see `definitions/src/ollama/mod.rs:316`.
@@ -44,14 +44,15 @@ gets a synthesized `{EndpointId}Form` struct — file parts typed
 `shared::FormFile`, text parts `String`, optional fields `Option<T>` — reached
 through the usual `pub body:` field.
 
-`into_parts` returns `shared::RequestBody` (`Empty` / `Json` / `Multipart` /
-`UrlEncoded` / `Raw`), **not** `Option<String>`, as the third of five tuple
-elements; declared query parameters are the fifth, as unencoded pairs kept out
-of the path. `Text` bodies are a `body: String` field and `Binary` bodies a
-`body: Vec<u8>` field, both sent as `RequestBody::Raw` under the declared
-content type. Header and cookie parameters (`EndpointParams.header`/`cookie`)
-become `with_*` fields sent in the headers element; cookies always end up in
-one `Cookie` header.
+`EndpointSpec::into_parts()` returns a `schematic_runtime::RequestParts`
+struct (`method`, `path`, `query`, `headers`, `body`) or an `InvalidArgument`.
+`body` is a `RequestBody` (`Empty` / `Json` / `Multipart` / `UrlEncoded` /
+`Raw`); `query` holds declared query parameters as unencoded pairs kept out of
+the path, which the runtime encodes once (`%20` for a space). `Text` bodies are
+a `body: String` field and `Binary` bodies a `body: Vec<u8>` field, both sent
+as `RequestBody::Raw` under the declared content type. Header and cookie
+parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
+`headers`; cookies always end up in one `Cookie` header.
 
 ### 2) Auth Strategies Include Query/Cookie API Keys
 
@@ -68,12 +69,16 @@ one `Cookie` header.
 - `Query`
 - `Cookie`
 
-Generated clients send an `ApiKeyParam` key: `.with_api_key_param(key)`
-(explicit, wins) or the first non-empty `env_auth` variable when the
-effective policy's env fallback is `ApiKeyParam`. Both are **temporary**
-until a shared runtime owns credentials. Auth resolution lives once in the
-generated `shared.rs` (`resolve_request_auth`), not per client, and a
-client's `Debug` prints no credential.
+The generated `definition()` translates the effective auth policy into the
+runtime's `AuthConfig` (`ApiKeyParam` becomes `CredentialPlacement::ApiKeyQuery`
+or `ApiKeyCookie`). The runtime resolves one credential per send, for every
+placement: per call (`CallOptions::credential`) → client
+(`builder().credentials(..)`) → first non-empty env var of the definition's
+mapping (`builder().env_order([..])` replaces the order) → anonymous. There is
+no missing-credential error, `CallOptions::anonymous()` sends without one, and
+a credential never overrides a same-named request query/cookie/header value
+(that send fails as `InvalidArgument`). A client's `Debug` prints no
+credential.
 
 ### 3) Public Enums Are `#[non_exhaustive]`
 
@@ -123,27 +128,34 @@ definition must add its row there.
 
 When updating docs or examples that touch generated clients:
 
-- `OpenAI::new()` returns `Self` (no `?`)
-- Variant APIs are:
-  - `variant()` builder
-  - `variant_with(base_url, env_auth, strategy)`
-  - `variant_with_headers(headers)`
-- `Headers::use_bearer_token()` / `use_basic_auth()` bypass env credential lookup when auth is already set programmatically.
+- `OpenAI` is an uninhabited marker (`pub enum OpenAI {}`) with `BASE_URL`,
+  `DOCS_URL`, `definition()`, `builder()`, and
+  `new() -> Result<OpenAIClient, BuildError>`;
+  `OpenAIClient = schematic_runtime::Client<OpenAI>`
+- Each request struct implements `schematic_runtime::EndpointSpec` (`type Api`,
+  `Success`, `Failure = NoDeclaredError`, `Decoder`; `ENDPOINT_ID`, `METHOD`,
+  `into_parts()`); a client accepts only its own API's requests
+- `client.send(request, &CallOptions::new())` returns `Ok(Response)` whenever a
+  response head arrived (any status), `Err(TransportError)` only otherwise;
+  `send_raw` skips decoding
+- Base URL, timeout, credentials, env order, and response hooks
+  (`pre_response_json`, `mutate_response::<Request, _>` for JSON endpoints of
+  the same API) are set on `builder()`
 
 Canonical pattern:
 
 ```rust
-use schematic_define::Headers;
-use schematic_schema::openai::{ListModelsRequest, ListModelsResponse, OpenAI};
+use schematic_schema::prelude::*;
+use schematic_schema::openai::ListModelsRequest;
 
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token("token"))
-    .build();
+let client = OpenAI::builder()
+    .credentials(Credential::access_token("token"))
+    .build()?;
 
-let _models: ListModelsResponse = client
-    .request(ListModelsRequest::default())
+let response = client
+    .send(ListModelsRequest::default(), &CallOptions::new())
     .await?;
+let _models = response.into_result()?; // ListModelsResponse, or the ApiError
 ```
 
 ## OpenAPI Extension Reality (Current Exporter)
@@ -199,28 +211,26 @@ Keep these aligned when docs/examples mention built-in APIs:
 
 ## Verification Commands
 
-Focused response-method generation coverage:
+Focused response-codec generation coverage:
 
 ```bash
-cargo test -p schematic-gen --test l1 e2e_generation::binary_response_generates_request_bytes_method
-cargo test -p schematic-gen --test l1 e2e_generation::text_response_generates_request_text_method
-cargo test -p schematic-gen --test l1 e2e_generation::empty_response_generates_request_empty_method
+cargo nextest run -p schematic-gen --test l1 -E 'test(/^e2e_generation::(binary|text|empty|mixed)_response/)'
 ```
 
 Definitions/auth sanity checks:
 
 ```bash
-cargo test -p schematic-definitions api_uses_bearer_token_auth
-cargo test -p schematic-definitions basic_api_has_expected_endpoint_count
-cargo test -p schematic-definitions bearer_api_has_more_endpoints
+cargo nextest run -p schematic-definitions -E 'test(api_uses_bearer_token_auth) | test(basic_api_has_expected_endpoint_count) | test(bearer_api_has_more_endpoints)'
 ```
 
-End-to-end regeneration safety pass:
+End-to-end regeneration safety pass (`just test` includes the fresh-output
+guard, which compiles freshly generated crates and sends through the runtime
+against wiremock):
 
 ```bash
-cargo test -p schematic-gen
+just -f schematic/justfile test
 just -f schematic/justfile generate
-cargo check -p schematic-schema
+cargo check --manifest-path schematic/schema/Cargo.toml
 ```
 
 The generator's tmux capture suite is L2 behind its internal
@@ -253,7 +263,8 @@ ledger before touching schematic codegen.
 
 ## Remaining Testing Gap
 
-Current tests validate generation logic, emitted methods, and compile-time structure.
+Current tests validate generation logic, emitted `EndpointSpec` impls, compile-time structure,
+and the fixture APIs' wire behavior through the runtime against wiremock.
 They do not validate live provider HTTP integration behavior.
 
 ## Reference Map
@@ -263,8 +274,10 @@ Read these as needed:
 - `schematic/define/README.md` (authoritative type-level behavior)
 - `schematic/docs/headers/README.md` (programmatic auth patterns)
 - `schematic/docs/io/openapi-extensions.md` (extension schema and examples)
-- `schematic/gen/README.md` (generated method/contracts)
-- `schematic/schema/README.md` (runtime client usage examples)
+- `schematic/gen/README.md` (generated marker types and `EndpointSpec` contracts)
+- `schematic/docs/generation/request-side.md` (query, header, cookie, body, and credential placement)
+- `schematic/runtime/src/lib.rs` (sending, response envelope, credentials, hooks)
+- `schematic/schema/README.md` (generated crate)
 - `schematic/definitions/README.md` (built-in API catalog)
 
 For legacy detailed notes that may still be useful, see:
