@@ -308,7 +308,7 @@ fn schema_problem_diagnostics(
         {
             continue;
         }
-        let Some(range) = problem_range(ast, ctx.source_map, problem) else {
+        let Some(range) = problem_range(ctx.text, ast, ctx.source_map, problem) else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -598,7 +598,12 @@ fn semantic_problem_range(
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).
-fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProblem) -> Option<Range> {
+fn problem_range(
+    text: &str,
+    ast: &FrontmatterAst,
+    sm: &SourceMap,
+    problem: &ValidationProblem,
+) -> Option<Range> {
     let span = match problem.code {
         // A missing key has no value node; range the parent mapping so the
         // squiggle is visible.
@@ -610,8 +615,10 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
             .as_deref()
             .and_then(|key| ast.key_span_for(&problem.path, key))
             .unwrap_or_else(|| ast.value_range(&problem.path)),
-        // Type / constraint / file-reference failures range the value node.
-        _ => ast.value_range(&problem.path),
+        // Type / constraint / file-reference failures range the value node,
+        // all of it: the YAML loader ends an empty flow collection (`{}`)
+        // after its opening delimiter.
+        _ => complete_flow_value_span(text, ast.value_range(&problem.path)),
     };
     sm.byte_range_to_lsp(span)
 }

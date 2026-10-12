@@ -22,7 +22,7 @@ use darkmatter::markdown::schemas::{
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor, mapping_separator,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
-    schema_constraint_descriptors, schema_type_descriptors,
+    schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
     flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -390,7 +390,7 @@ fn type_definition_completions(
 ) -> Vec<CompletionItem> {
     let partial = state.token.as_str();
     match &state.role {
-        SchemaCursorRole::Constraint { subject, array_level } => {
+        SchemaCursorRole::Constraint { subject, array_level, leading_group } => {
             return constraint_completions(
                 ctx,
                 start,
@@ -398,6 +398,7 @@ fn type_definition_completions(
                 partial,
                 subject.as_deref(),
                 *array_level,
+                leading_group.as_deref(),
             );
         }
         // A constraint's arguments are author-supplied values (a regex body, a
@@ -425,6 +426,21 @@ fn type_definition_completions(
             )
         {
             items.push(completion);
+        }
+        for alias in descriptor.aliases {
+            if alias.starts_with(partial)
+                && let Some(completion) = item(
+                    ctx,
+                    start,
+                    offset,
+                    alias,
+                    alias,
+                    CompletionItemKind::TYPE_PARAMETER,
+                    Some(format!("Alias of `{}`: {}", descriptor.keyword, descriptor.description)),
+                )
+            {
+                items.push(completion);
+            }
         }
         let array = format!("{}[]", descriptor.keyword);
         if array.starts_with(partial)
@@ -491,6 +507,11 @@ fn type_definition_completions(
 /// array surface ([`SchemaConstraintDescriptor::accepts_array_level`]). A
 /// subject the catalog does not know (a half-typed keyword, an import name)
 /// offers nothing.
+///
+/// A type with options (`alphanumeric`) offers them only in the item-level
+/// list's leading group, before its first `;`: every option not yet written
+/// there while the group holds only options, and constraints too while it is
+/// still empty. After `;` it offers constraints only.
 fn constraint_completions(
     ctx: &DocumentContext,
     start: usize,
@@ -498,24 +519,54 @@ fn constraint_completions(
     partial: &str,
     subject: Option<&str>,
     array_level: bool,
+    leading_group: Option<&[String]>,
 ) -> Vec<CompletionItem> {
     let item_descriptor = if array_level {
         None
     } else {
-        let Some(descriptor) = subject.and_then(|subject| {
-            schema_type_descriptors()
-                .iter()
-                .find(|descriptor| descriptor.keyword == subject)
-        }) else {
+        let Some(descriptor) = subject.and_then(schema_type_descriptor) else {
             return Vec::new();
         };
         Some(descriptor)
     };
-    schema_constraint_descriptors()
+    let mut items = Vec::new();
+    let mut offer_constraints = true;
+    if let (Some(descriptor), Some(group)) = (item_descriptor, leading_group)
+        && !descriptor.type_options.is_empty()
+    {
+        let is_option = |entry: &String| {
+            descriptor.type_options.iter().any(|option| option.keyword() == entry)
+        };
+        if group.iter().all(is_option) {
+            offer_constraints = group.is_empty();
+            items.extend(
+                descriptor
+                    .type_options
+                    .iter()
+                    .filter(|option| !group.iter().any(|entry| entry == option.keyword()))
+                    .filter(|option| option.keyword().starts_with(partial))
+                    .filter_map(|option| {
+                        item(
+                            ctx,
+                            start,
+                            offset,
+                            option.keyword(),
+                            option.keyword(),
+                            CompletionItemKind::ENUM_MEMBER,
+                            Some(format!("`{}` option: {}", descriptor.keyword, option.effect())),
+                        )
+                    }),
+            );
+        }
+    }
+    if !offer_constraints {
+        return items;
+    }
+    items.extend(schema_constraint_descriptors()
         .iter()
         .filter(|constraint| !constraint.keyword.starts_with('<'))
         .filter(|constraint| match item_descriptor {
-            Some(descriptor) => accepts_constraint(descriptor, constraint.keyword),
+            Some(descriptor) => descriptor.accepts_constraint(constraint.keyword),
             None => constraint.accepts_array_level(),
         })
         .filter(|constraint| constraint.keyword.starts_with(partial))
@@ -534,26 +585,10 @@ fn constraint_completions(
                 CompletionItemKind::PROPERTY,
                 Some(constraint.description.to_string()),
             )
-        })
-        .collect()
+        }));
+    items
 }
 
-/// Whether a type descriptor's published item-level constraint list names
-/// `keyword`.
-///
-/// The list is prose (`"eager, match(glob, ...), default, required"`), so each
-/// entry is compared as a whole keyword rather than as a substring — otherwise
-/// `match`'s own argument list would make unrelated keywords appear accepted.
-fn accepts_constraint(
-    descriptor: &darkmatter::markdown::schemas::SchemaTypeDescriptor,
-    keyword: &str,
-) -> bool {
-    descriptor
-        .accepted_constraints
-        .split([',', ';'])
-        .filter_map(|entry| entry.trim().split('(').next())
-        .any(|entry| entry.trim() == keyword)
-}
 
 fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
@@ -1484,7 +1519,50 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
         lines.push("Required".to_string());
     }
     lines.extend(eager_hover_line(def));
+    let mut described = Vec::new();
+    for atom in atoms_of(def) {
+        if let TypeExpr::Primitive(ty) = &atom.ty
+            && !described.contains(ty)
+        {
+            described.push(*ty);
+            lines.extend(type_keyword_hover_line(*ty));
+        }
+        lines.extend(alphanumeric_hover_lines(atom));
+    }
     lines.join("\n\n")
+}
+
+/// The catalog description of a built-in type, naming its aliases, so hover
+/// on `any` shows the canonical `unknown`.
+fn type_keyword_hover_line(ty: SimplifiedType) -> Option<String> {
+    let descriptor = schema_type_descriptor(ty.as_keyword())?;
+    let aliases = match descriptor.aliases {
+        [] => String::new(),
+        aliases => format!(
+            " (alias {})",
+            aliases.iter().map(|alias| format!("`{alias}`")).collect::<Vec<_>>().join(", ")
+        ),
+    };
+    Some(format!("**`{}`**{aliases}: {}", descriptor.keyword, descriptor.description))
+}
+
+/// The effective character rules of an `alphanumeric` atom, from the
+/// library's canonical options; empty for every other atom.
+fn alphanumeric_hover_lines(atom: &PropertyAtom) -> Vec<String> {
+    let Some(options) = atom.alphanumeric_options() else {
+        return Vec::new();
+    };
+    let keywords: Vec<String> = options.keywords().map(|keyword| format!("`{keyword}`")).collect();
+    let double_period = if options.forbids_double_period() { "forbidden" } else { "allowed" };
+    vec![
+        format!(
+            "Options: {}",
+            if keywords.is_empty() { "none".to_string() } else { keywords.join(", ") }
+        ),
+        format!("Characters: `{}`", options.allowed_characters()),
+        format!("First character: `{}`", options.first_characters()),
+        format!("`..`: {double_period}"),
+    ]
 }
 
 /// Hover content for a schema-declared property, at any nesting depth.
@@ -1730,6 +1808,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
         lines.push("Required".to_string());
     }
     lines.extend(eager_hover_line(def));
+    lines.extend(alphanumeric_hover_lines(atom));
     if let Some(members) = enum_members(atom) {
         let italicized: Vec<String> = members.iter().map(|m| hover_italic(m)).collect();
         lines.push(format!("Values: {}", italicized.join(", ")));
@@ -2786,6 +2865,7 @@ mod sequence_tests;
 mod tests {
     use super::*;
 
+    use darkmatter::markdown::schemas::alphanumeric_option_descriptors;
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -4256,6 +4336,9 @@ mod tests {
                     "descriptor `{}` is offered: {items:#?}",
                     descriptor.keyword
                 );
+                for alias in descriptor.aliases {
+                    assert!(labels.contains(alias), "alias `{alias}` is offered: {items:#?}");
+                }
             }
             for scaffold in ["{}", "[]", "Name@./types.yaml"] {
                 assert!(labels.contains(&scaffold), "scaffold `{scaffold}` is offered: {items:#?}");
@@ -4269,6 +4352,20 @@ mod tests {
             let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
             assert!(labels.contains(&"string"), "type keyword completion: {items:#?}");
             assert!(labels.contains(&"string[]"), "array scaffold completion: {items:#?}");
+        });
+
+        // `alphanumeric` options come from the catalog's typed option
+        // descriptors, before the first `;` only.
+        let text = "---\n$schema:\n  slug: alphanumeric(leading-alpha, \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("alpha, ").unwrap() + "alpha, ".len();
+            let labels: Vec<String> = completion(ctx, offset).into_iter().map(|item| item.label).collect();
+            let expected: Vec<String> = alphanumeric_option_descriptors()
+                .iter()
+                .map(|option| option.keyword().to_string())
+                .filter(|keyword| keyword != "leading-alpha")
+                .collect();
+            assert_eq!(labels, expected);
         });
 
         let text = "---\n$schema:\n  title: string(re\n---\n\nbody\n";
