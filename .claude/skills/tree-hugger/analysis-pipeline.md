@@ -107,7 +107,71 @@ post-lookup predicates.
   analyzed file; an ERROR/MISSING node limits coverage only when it touches a
   forwarding trigger, and clean parses are not proof (C++ module files and
   Perl `@Pkg::EXPORT_OK` parse silently wrong, so they are limited by
-  structure). Tests: `tests/l1/symbols_reexports_<lang>.rs` plus the
+  structure). Same-file binding links follow replacement and scope, never
+  spelling alone: Python's `later_import_replacement`/`statement_relation`
+  drop an import a later import of the same name always replaces (sibling
+  `try`/`if`/`match` arms are alternatives; a conditional later import is a
+  `rebound_binding` limit), and Scala's `link_import` takes the nearest
+  preceding import in the same or an enclosing scope unless a definition or
+  class parameter between them hides it. Python `__all__` edits fold into
+  `declared_all_names` only through `apply_all`, which turns a `conditional`
+  edit into `computed_export_list`; append/remove/extend/`=`/`+=` all route
+  there, and `nested_call`/`note_deferred_all_edits` limit `__all__` method
+  calls inside expressions or function/class/lambda/comprehension bodies
+  (and `global __all__`). ECMAScript CommonJS sites resolve
+  through `Table::resolve_at` (module-scope `resolve_any` unless
+  `bindings::shadowed_below_program` finds a nearer declaration: block
+  lexicals, params, hoisted function/namespace `var`s, `catch`, `for`
+  heads, `switch` bodies, class-expression names); ES export sites in
+  namespaces use the same walk. `Table::add_writes` also counts `for (x of
+  ..)` targets, block `var` initializers that hoist to module scope and
+  function declarations in module-level blocks (Annex B, skipped for ES
+  import names); `Table::build` counts a name two module-scope `var`
+  declarators *initialize* (`initialized_names`; a bare `var m;` is not a
+  write); a write to `require`/`module`/`exports`
+  (`global_replaced`) is `shadowed_global` for every dependent site,
+  including `Binding::loader` bindings (`require` and TS
+  `import x = require`). After `cjs::scan`, `cjs::Interface` (every
+  `module.exports`/`exports` assignment, augmented write, update, `delete`,
+  `Object.assign` merge and TS `export =`, numbered by an *epoch* of
+  definite `module.exports =` writes) `settle`s each `declared` entry by the
+  innermost write around it: a later definite same-member or whole write
+  drops it (an `exports.` write after a definite whole write is detached and
+  dropped); a guarded, function-held, augmented, computed or merge write, or
+  a member write onto a forwarded whole module, withholds it as
+  `rebound_binding`. Lua (`reexports/lua.rs`) ties every name to the
+  declaration `resolve` finds at its site (`Resolved::Chunk(statement)`,
+  `Nested` for a nearer local/`local function`/parameter/loop variable/
+  `repeat` local, `Global`); `collect_writes` keys chunk-level writes
+  (assignments and `function x() end`) by declaration id and name, `Scan::bound`
+  matches the env by that declaration, and a `require` call derives only
+  where `require` resolves to the global. For a returned table `M`,
+  `table_uses` classifies every reference resolving to its declaration:
+  a write inside a block or function body withholds that field, and a
+  write under a `Key::Unknown` key withholds every field (`rebound_binding`
+  at the statement); a call argument, method receiver (`M:f()`) or stored
+  value (`local a = M`, `{M}`, `M or x`, a nested `return M`) withholds
+  every field (`dynamic_forwarding` at the call or stored expression).
+  Reads, chunk-level named-key writes, number/boolean-key writes and the
+  final `return M` pass. "Chunk-level named-key write" means exactly what
+  `field_target` folds: the table is `table_identifier` (the identifier
+  after `unparenthesized`), so `(M).x = v` folds and `(M or t).x = v` is a
+  `rebound_binding` write withholding `x`. Every table, callee
+  (`callee`/`call_name`), `require` argument, declared constructor and
+  metatable argument goes through `unparenthesized`, so the classifier and
+  the collector cannot disagree on a parenthesized spelling. A field
+  written twice in one assignment statement with an import-derived value
+  is `TableField::undecided` (withheld, `rebound_binding` at that
+  statement when its table is returned; a later write clears it). Every key (constructor `field_key`, assignment
+  and member-read `index_key`) goes through `table_key`: an identifier or
+  a verbatim string literal is `Key::Name` (so `x`, `["x"]`, `M.x` and
+  `M["x"]` share one `upsert` identity), a number/boolean is
+  `Key::NonString` (skipped), anything else, including a string with an
+  escape sequence, a long bracket starting with a newline, or `""`, is
+  `Key::Unknown`. An unknown constructor key, or a repeated constructor
+  key where either value is import-derived (Lua leaves constructor order
+  undefined for repeats), makes `constructor_fields` return `Err(field)`, reported as `rebound_binding` only when that table
+  is returned. Tests: `tests/l1/symbols_reexports_<lang>.rs` plus the
   16-language guard in `symbols_reexports.rs`. `work_counters().reexport_extractions` proves
   one extraction per analysis and none without the capability. The cache entry
   writes a required, nullable `reexports` key and `imports[].reexported`;

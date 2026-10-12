@@ -45,10 +45,24 @@ When modifying queries or symbol extraction:
    (revision 51, schema 5.1, lacks `reexports`, `imports[].reexported` and the
    `reexports` capability). Revision 52 stored the placeholder report; its row
    is a `StaleRevision` (Python `from m import a`, probe: entry count).
-   The re-export report's matrix lives in `cache_robustness`
-   (`reexport_report_fields_are_served_only_when_consistent` and its limited,
-   not-applicable, widening and duplicate-key siblings; JSON paths under
-   `reexports.entries[n]`), and the consumers in `tests/l1/reexports_consumers.rs`. Public-surface equivalence
+   Revision 53 forwarded both of two sequential Python imports of one name;
+   its row is a `StaleRevision` (probe: the entries' sources). Revision 54
+   folded a guarded `__all__.remove` into the list as definite; its row is a
+   `StaleRevision` (probe: coverage state, `complete` vs `limited`). An edited
+   import marker cannot stand for a stale revision: the import-inventory
+   digest covers markers, so such a payload is refused on content.
+   The re-export report's matrix lives in `cache_robustness`: shared tables
+   (`reexport_columns`, `limited_reexport_columns` and the three
+   `*_reexport_inconsistencies` case lists; JSON paths under
+   `reexports.entries[n]`) with one generated `#[test]` per row
+   (`matrix_row_tests!`, modules `complete_reexport_report_fields`,
+   `limited_reexport_report_fields`, `*_inconsistencies_are_refused`,
+   `not_applicable_language_is_complete_only_as_not_applicable`), so nextest
+   schedules the rows; never fan a table out over threads or loop it in one
+   test (L1 5 s budget). Add a row to the table and a line to its
+   `matrix_row_tests!` list together:
+   `every_reexport_matrix_row_has_a_generated_test` fails otherwise. The
+   widening, nullable-name and duplicate-key tests are separate. The consumers in `tests/l1/reexports_consumers.rs`. Public-surface equivalence
    (direct = complete index = selective = cache cold/hit/narrowed/widened for all
    16 fixtures; extraction reads no forwarding target; one shared definitions pass;
    widening extracts once, a hit extracts nothing) is `tests/l1/reexports_equivalence.rs`,
