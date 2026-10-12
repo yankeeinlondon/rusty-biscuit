@@ -588,3 +588,63 @@ fn suggestions_on_a_reference_are_checked_against_the_resolved_target() {
 
     fixture.shutdown();
 }
+
+#[test]
+fn an_unsupported_union_postfix_is_reported_at_the_reference_with_its_definition() {
+    let workspace = LspWorkspace::new();
+    let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n");
+    let document = write(
+        &workspace,
+        "doc.md",
+        "---\n$schema:\n  p: 'choice(max(3))@./types.yaml'\n  local: [string, number]\n---\n\nBody\n",
+    );
+    let inline = write(
+        &workspace,
+        "inline.md",
+        "---\n$schema:\n  local: [string, number]\n  p: 'local[](pattern(^a))'\n---\n\nBody\n",
+    );
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+
+    open(&fixture, &document);
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    let named = named_type_diagnostics(&diagnostics);
+    assert_eq!(named.len(), 1, "{diagnostics:?}");
+    assert_eq!(named[0]["range"], range_of(&document.text, "choice", 0));
+    let message = named[0]["message"].as_str().unwrap();
+    assert!(message.contains("`max`") && message.contains("union-typed"), "{message}");
+    let related = named[0]["relatedInformation"].as_array().expect("the definition");
+    assert_eq!(related.len(), 1, "{related:?}");
+    assert_eq!(related[0]["location"]["uri"], json!(canonical_uri(&types.path)));
+    assert_eq!(related[0]["location"]["range"]["start"]["line"], json!(2));
+    assert_eq!(related[0]["message"], json!("`choice` is defined here"));
+
+    open(&fixture, &inline);
+    let diagnostics = fixture.wait_for_diagnostics(&inline.uri);
+    let named = named_type_diagnostics(&diagnostics);
+    assert_eq!(named.len(), 1, "{diagnostics:?}");
+    assert_eq!(named[0]["range"], range_of(&inline.text, "local", 1));
+    assert!(named[0]["message"].as_str().unwrap().contains("`pattern`"), "{:?}", named[0]);
+    let related = named[0]["relatedInformation"].as_array().expect("the definition");
+    assert_eq!(related[0]["location"]["uri"], json!(inline.uri));
+    assert_eq!(related[0]["location"]["range"]["start"]["line"], json!(2));
+
+    fixture.shutdown();
+}
+
+#[test]
+fn an_array_of_a_union_reference_prepares_without_schema_diagnostics() {
+    let workspace = LspWorkspace::new();
+    write(&workspace, "types.yaml", "kind: schema\ntypes:\n  choice: [string, number]\n");
+    let document = write(
+        &workspace,
+        "doc.md",
+        "---\n$schema:\n  p: 'choice[](min(1))@./types.yaml'\n  q: 'choice(required)@./types.yaml'\np: [a, 1]\nq: b\n---\n\nBody\n",
+    );
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    fixture.shutdown();
+}

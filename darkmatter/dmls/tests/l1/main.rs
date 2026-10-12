@@ -27,4 +27,5 @@ mod strict_mode_recovery_spike;
 mod suggest_constraint_phase1;
 mod test_layout;
 mod undeclared_property;
+mod union_item_editor;
 mod zed_extension_contract;
