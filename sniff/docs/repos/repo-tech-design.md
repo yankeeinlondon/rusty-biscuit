@@ -30,12 +30,12 @@ The design follows a **trait-based provider abstraction** so that consumer code 
 
 These are the generated API client endpoints available today. The design maps each functional requirement to specific endpoints.
 
-### GitHub (14 endpoints)
+### GitHub (13 endpoints)
 
 | Endpoint | Returns |
 |----------|---------|
 | `GetRepository` | `RepositoryInfo` — stars, forks, license, topics, wiki flag, default branch |
-| `GetGitTree` / `GetGitTreeRecursive` | `GitTreeResponse` — file tree traversal |
+| `GetGitTree` | `GitTreeResponse` — file tree traversal; `recursive=true` includes every nested entry |
 | `GetRepositoryContentRaw` | `String` — raw file content (README, LICENSE) |
 | `ListPullRequests` | `Vec<PullRequestSummary>` |
 | `ListPullRequestFiles` | `Vec<PullRequestFile>` |
@@ -86,13 +86,12 @@ These are the generated API client endpoints available today. The design maps ea
 | `GetTagReference` | `Vec<GitRef>` |
 | `GetAnnotatedTag` | `AnnotatedTagObject` |
 
-### Bitbucket (14 endpoints)
+### Bitbucket (13 endpoints)
 
 | Endpoint | Returns |
 |----------|---------|
 | `GetRepository` | `Repository` — workspace, project, default branch |
-| `ListDirectoryContents` | `PaginatedResponse<SourceEntry>` — file tree |
-| `GetFileContentRaw` | `String` — raw file content |
+| `GetSource` | `Bytes` (binary) — a paginated JSON `PaginatedResponse<SourceEntry>` listing when the path names a directory, the raw file bytes when it names a file |
 | `ListPullRequests` | `PaginatedResponse<PullRequest>` |
 | `GetPullRequest` | `PullRequest` |
 | `ListPullRequestComments` | `PaginatedResponse<PullRequestComment>` |
@@ -537,7 +536,7 @@ impl GitHubRemote {
 #### GitHub
 
 - `repo_metadata()` → `GetRepository` request, map `RepositoryInfo` → `RepoMetadata`
-- `list_documents()` → `GetGitTreeRecursive` with the default branch, filter for `.md`/`.txt` files
+- `list_documents()` → `GetGitTree` with `recursive=true` on the default branch, filter for `.md`/`.txt` files
 - `get_file_content()` → `GetRepositoryContentRaw` request
 - `list_pull_requests()` → `ListPullRequests` request, map `PullRequestSummary` → `PullRequestInfo`
 - `list_issues()` → `ListIssues` request, filter out entries where `pull_request` field is `Some`, map `IssueSummary` → `IssueInfo`
@@ -576,8 +575,8 @@ impl GitHubRemote {
 #### Bitbucket
 
 - `repo_metadata()` → `GetRepository`, map `Repository` → `RepoMetadata`
-- `list_documents()` → `ListDirectoryContents` recursively, filter for docs
-- `get_file_content()` → `GetFileContentRaw`
+- `list_documents()` → `GetSource` on directory paths (the root, then `docs/` and `doc/` when present), decoding each body as a JSON `PaginatedResponse<SourceEntry>`, filter for docs; a body that does not decode leaves the tree unavailable, never empty
+- `get_file_content()` → `GetSource` on the file path, decoding the bytes as UTF-8 with invalid sequences replaced
 - `list_pull_requests()` → `ListPullRequests`, map `PullRequest` → `PullRequestInfo`
 - `list_issues()` → `ListIssues`, map `Issue` → `IssueInfo`
 - `list_tags_and_releases()` → `ListTags` + `ListDownloads` (Bitbucket uses "downloads" instead of GitHub-style releases)
@@ -994,7 +993,7 @@ sniff/lib/tests/fixtures/remote/
 │   ├── list_issues.json
 │   ├── list_tags.json
 │   ├── list_releases.json
-│   └── get_git_tree_recursive.json
+│   └── get_git_tree.json
 ├── gitlab/
 │   ├── list_merge_requests.json
 │   ├── list_issues.json

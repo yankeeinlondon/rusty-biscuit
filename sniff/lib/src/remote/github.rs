@@ -111,7 +111,7 @@ impl GitHubRemote {
         repo: &str,
         default_branch: &str,
     ) -> Result<RemoteTree, SniffError> {
-        let request = GetGitTreeRecursiveRequest::new(owner, repo, default_branch);
+        let request = GetGitTreeRequest::new(owner, repo, default_branch).with_recursive(true);
         count_api_request("tree");
         let response: GitTreeResponse = self
             .client
@@ -144,8 +144,8 @@ impl GitHubRemote {
         for prefix in CONTINUATION_PREFIXES {
             // `branch:path` addresses a subtree directly, so each continuation is
             // one bounded request rather than a walk.
-            let request =
-                GetGitTreeRecursiveRequest::new(owner, repo, format!("{default_branch}:{prefix}"));
+            let request = GetGitTreeRequest::new(owner, repo, format!("{default_branch}:{prefix}"))
+                .with_recursive(true);
             // Counted under its own slug: a continuation preserves correctness and
             // must stay distinguishable from the duplicate root-tree requests this
             // phase removed.

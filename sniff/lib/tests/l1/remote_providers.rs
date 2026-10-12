@@ -226,9 +226,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        // Mock the tree endpoint
+        // Without `recursive=true` GitHub lists only the top level of the tree.
         Mock::given(method("GET"))
             .and(path_regex(r"/repos/test-owner/test-repo/git/trees/.*"))
+            .and(query_param("recursive", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(github_tree_fixture()))
             .mount(&server)
             .await;
@@ -1775,6 +1776,60 @@ mod bitbucket_tests {
             .filter(|d| d.category == DocumentCategory::Readme)
             .count();
         assert!(readme_count >= 1, "Should have at least one README");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_directory_listing_leaves_the_tree_unavailable_not_empty() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repositories/test-workspace/test-repo/src/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not a listing"))
+            .mount(&server)
+            .await;
+
+        let snapshot = provider
+            .snapshot("test-workspace", "test-repo")
+            .await
+            .expect("metadata succeeded, so the snapshot must not fail");
+
+        // An undecodable listing degrades the tree to unavailable; an observed
+        // empty tree would claim the repository has no documents or CI.
+        assert!(!snapshot.tree.available);
+        assert!(snapshot.tree.files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_file_content_returns_the_raw_bytes_as_text() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/repositories/test-workspace/test-repo/src/main/README.md",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(b"# Title\n\xFF caf\xC3\xA9\n".to_vec(), "text/plain"),
+            )
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-workspace", "test-repo", "README.md")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "# Title\n\u{FFFD} caf\u{E9}\n");
     }
 
     #[tokio::test]

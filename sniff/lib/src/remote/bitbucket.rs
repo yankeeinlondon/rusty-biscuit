@@ -269,7 +269,7 @@ async fn collect_directory_entries(
     let mut entries = Vec::new();
 
     for page in 1..=MAX_LISTING_PAGES {
-        let mut request = ListDirectoryContentsRequest::new(workspace, repo_slug, commit, path);
+        let mut request = GetSourceRequest::new(workspace, repo_slug, commit, path);
         request.pagelen = Some(100);
         if page > 1 {
             request.page = Some(page);
@@ -281,8 +281,11 @@ async fn collect_directory_entries(
             count_api_request("tree");
         }
 
-        let response: PaginatedResponse<SourceEntry> =
-            client.request(request).await.map_err(map_schematic_error)?;
+        let body = client
+            .get_source(request)
+            .await
+            .map_err(map_schematic_error)?;
+        let response = decode_directory_listing(&body)?;
         entries.extend(response.values);
 
         if response.next.is_none() {
@@ -291,6 +294,27 @@ async fn collect_directory_entries(
     }
 
     Ok((entries, true))
+}
+
+/// Decodes a `GetSource` body for a directory path as a paginated JSON listing.
+///
+/// ## Errors
+///
+/// A body that is not a listing is a `RemoteApi` error, never an empty
+/// directory: reading it as empty would report "no docs, no CI" with full
+/// confidence.
+fn decode_directory_listing(body: &[u8]) -> Result<PaginatedResponse<SourceEntry>, SniffError> {
+    serde_json::from_slice(body).map_err(|e| map_schematic_error(SchematicError::Json(e)))
+}
+
+/// Decodes a `GetSource` body for a file path as text.
+///
+/// ## Notes
+///
+/// Invalid UTF-8 is replaced rather than rejected, matching the text decoding
+/// the endpoint's former text response applied.
+fn decode_file_text(body: &[u8]) -> String {
+    String::from_utf8_lossy(body).into_owned()
 }
 
 /// Keeps file entries and drops directories, normalizing to [`RemoteTreeFile`].
@@ -435,12 +459,14 @@ impl RemoteRepoProvider for BitbucketRemote {
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
-        let request = GetFileContentRawRequest::new(workspace, repo_slug, &commit, path);
+        let request = GetSourceRequest::new(workspace, repo_slug, &commit, path);
         count_api_request("contents");
-        self.client
-            .get_file_content_raw(request)
+        let body = self
+            .client
+            .get_source(request)
             .await
-            .map_err(map_schematic_error)
+            .map_err(map_schematic_error)?;
+        Ok(decode_file_text(&body))
     }
 
     async fn list_pull_requests(
@@ -793,6 +819,41 @@ impl RemoteRepoProvider for BitbucketRemote {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_directory_listing_body_decodes_to_its_entries() {
+        let body =
+            br#"{"values": [{"path": "README.md", "type": "commit_file", "size": 3}], "page": 1}"#;
+
+        let listing = decode_directory_listing(body).unwrap();
+
+        assert_eq!(listing.values.len(), 1);
+        assert_eq!(listing.values[0].path.as_deref(), Some("README.md"));
+        assert!(listing.next.is_none());
+    }
+
+    #[test]
+    fn a_malformed_directory_listing_body_is_a_json_error() {
+        let result = decode_directory_listing(b"# README\n");
+
+        match result {
+            Err(SniffError::RemoteApi {
+                provider,
+                status,
+                message,
+            }) => {
+                assert_eq!(provider, "Bitbucket");
+                assert_eq!(status, 0);
+                assert!(message.starts_with("JSON parse error"), "{message}");
+            }
+            other => panic!("expected a RemoteApi JSON error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_text_replaces_invalid_utf8() {
+        assert_eq!(decode_file_text(b"caf\xC3\xA9 \xFF"), "caf\u{E9} \u{FFFD}");
+    }
 
     #[test]
     fn test_build_key_urls() {
