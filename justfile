@@ -156,6 +156,8 @@ cross-check *args:
 # Seed the nightly's native Windows and WSL2 evidence on the BUILD_WIN and
 # BUILD_WSL rigs at a clean, pinned `main` checkout, publishing each cell as
 # it finishes. Rerun to resume; `--plan` previews without proving anything.
+# Level 1 cells only: a pending cell of another gate is reported `unsupported`
+# and left for the nightly, and the exit stays nonzero while it remains.
 # Usage: just ci-seed [--plan] [--os windows|wsl|all] [--package <name>]...
 ci-seed *args:
     @python3 scripts/ci/seed.py {{ args }}

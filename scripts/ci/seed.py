@@ -27,10 +27,15 @@ Running the command again continues where it stopped. A pass pinned to an
 older revision keeps its proof; the nightly reuses it wherever the cell's
 inputs are unchanged and runs the rest.
 
+The rig transport runs a package's Level 1 suite only, so a pending cell of
+any other gate (Level 2, browser, ...) is never run: it is reported as
+`unsupported` and left for the nightly, which schedules it on hosted runners.
+Running Level 1 again would not prove it.
+
 The exit code is 0 only when every requested cell is proved or a governed
 accepted gap. A busy or unreachable rig, a missing `BUILD_*` host, a failed
-run, and a run that published nothing each leave their cells unproved and
-are reported separately.
+run, a run that published nothing, and a gate the transport cannot run each
+leave their cells unproved and are reported separately.
 """
 
 from __future__ import annotations
@@ -55,6 +60,11 @@ import schema  # noqa: E402
 SEED_ENVIRONMENTS = {"windows": "windows-latest", "wsl": "wsl2-ubuntu"}
 #: The variable that declares each rig, as `cross-check.sh` reads it.
 HOST_VARIABLES = {"windows": "BUILD_WIN", "wsl": "BUILD_WSL"}
+#: The gates `cross-check.sh` executes and publishes: its archive consumers
+#: list and run the Level 1 recipe only.
+SEED_GATES = frozenset({"L1"})
+#: Statuses whose cells a leg can still prove.
+OWING = ("pending", "failed", "unproved", "busy", "unreachable")
 STATE_SCHEMA_VERSION = 1
 #: `cross-check.sh` exits 75 while another run holds the rig's clone lock.
 EXIT_BUSY = 75
@@ -187,13 +197,18 @@ class Pass:
                 cell.status, cell.detail = "gap", "governed accepted gap; nothing to prove"
             elif (cell.package, cell.environment, cell.gate) in proved:
                 cell.status, cell.detail = "reused", "already proved; not run again"
+            elif cell.gate not in SEED_GATES:
+                cell.status, cell.detail = (
+                    "unsupported",
+                    f"the seed runs Level 1 only; this {cell.gate} cell stays for the nightly",
+                )
 
     def owing(self) -> list[tuple[str, str]]:
         """`(package, os)` pairs that still have an unproved cell, in order."""
         by_environment = {value: key for key, value in SEED_ENVIRONMENTS.items()}
         pairs: list[tuple[str, str]] = []
         for cell in self.cells:
-            if cell.status in ("pending", "failed", "unproved", "busy", "unreachable"):
+            if cell.status in OWING:
                 pair = (cell.package, by_environment[cell.environment])
                 if pair not in pairs:
                     pairs.append(pair)
@@ -312,6 +327,12 @@ def render(seed: Pass, hosts: dict[str, str | None], out: Any = sys.stdout) -> N
         print(f"  {cell.status:<11} {cell.key:<55} {host}  {cell.detail}".rstrip(), file=out)
     summary = ", ".join(f"{count} {status}" for status, count in sorted(by_status.items()))
     print(f"\n{len(seed.cells)} cell(s): {summary or 'none'}", file=out)
+    if by_status.get("unsupported"):
+        print(
+            f"{by_status['unsupported']} cell(s) need a gate other than Level 1, which the seed "
+            "cannot run; they stay unproved for the nightly",
+            file=out,
+        )
 
 
 def run(
@@ -326,7 +347,7 @@ def run(
         cells = [
             cell for cell in seed.cells
             if cell.package == package and cell.environment == SEED_ENVIRONMENTS[os_name]
-            and cell.status not in ("reused", "proved", "gap")
+            and cell.status in OWING
         ]
         if not hosts.get(os_name):
             for cell in cells:

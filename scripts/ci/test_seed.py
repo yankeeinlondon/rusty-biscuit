@@ -13,6 +13,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import seed
@@ -171,6 +172,81 @@ class SeedRunTests(unittest.TestCase):
         rigs = Rigs()
         self.run_seed(rigs, packages={"beta"})
         self.assertEqual([("beta", "windows"), ("beta", "wsl")], rigs.calls)
+
+    def test_a_pending_higher_tier_is_reported_unsupported_and_never_run_as_level_1(self) -> None:
+        # Level 1 proved, Level 2 pending: the transport runs Level 1 only, so
+        # no leg may start for alpha, and the Level 2 cells must stay unproved.
+        plan = plan_of(
+            ("alpha", "windows-latest", "L1", "pending"),
+            ("alpha", "windows-latest", "L2", "pending"),
+            ("alpha", "wsl2-ubuntu", "L1", "pending"),
+            ("alpha", "wsl2-ubuntu", "L2", "pending"),
+            ("beta", "windows-latest", "L1", "pending"),
+            ("beta", "wsl2-ubuntu", "L1", "pending"),
+        )
+        rigs = Rigs(proved={("alpha", "windows-latest", "L1"), ("alpha", "wsl2-ubuntu", "L1")})
+        for attempt in ("first pass", "resume"):
+            with self.subTest(attempt=attempt):
+                rigs.calls.clear()
+                result = Pass(self.directory / "plan.json", plan, "c" * 40, ["windows", "wsl"], None, rigs.verify)
+                result.refresh()
+                seed.run(result, HOSTS, self.state_path, {"schema_version": 1}, rigs.leg)
+                self.assertNotIn(("alpha", "windows"), rigs.calls)
+                self.assertNotIn(("alpha", "wsl"), rigs.calls)
+                statuses = self.statuses(result)
+                for environment in ("windows-latest", "wsl2-ubuntu"):
+                    self.assertEqual("unsupported", statuses[f"alpha/{environment}/L2"])
+                    self.assertEqual("reused", statuses[f"alpha/{environment}/L1"])
+                self.assertEqual(
+                    {"alpha/windows-latest/L2", "alpha/wsl2-ubuntu/L2"},
+                    {cell.key for cell in result.unproved()},
+                )
+                out = io.StringIO()
+                seed.render(result, HOSTS, out)
+                self.assertIn("2 unsupported", out.getvalue())
+                self.assertIn("Level 1", out.getvalue())
+
+    def test_a_pending_higher_tier_beside_a_pending_level_1_does_not_inherit_its_outcome(self) -> None:
+        plan = plan_of(
+            ("alpha", "windows-latest", "L1", "pending"),
+            ("alpha", "windows-latest", "L2", "pending"),
+            ("alpha", "wsl2-ubuntu", "L1", "pending"),
+            ("alpha", "wsl2-ubuntu", "L2", "pending"),
+        )
+        rigs = Rigs()
+        result = Pass(self.directory / "plan.json", plan, "c" * 40, ["windows", "wsl"], None, rigs.verify)
+        result.refresh()
+        seed.run(result, HOSTS, self.state_path, {"schema_version": 1}, rigs.leg)
+        self.assertEqual([("alpha", "windows"), ("alpha", "wsl")], rigs.calls)
+        statuses = self.statuses(result)
+        for environment in ("windows-latest", "wsl2-ubuntu"):
+            self.assertEqual("proved", statuses[f"alpha/{environment}/L1"])
+            self.assertEqual("unsupported", statuses[f"alpha/{environment}/L2"])
+
+    def test_the_seed_exits_nonzero_while_a_higher_tier_stays_unproved(self) -> None:
+        plan = plan_of(
+            ("alpha", "windows-latest", "L1", "pending"),
+            ("alpha", "windows-latest", "L2", "pending"),
+            ("alpha", "wsl2-ubuntu", "L1", "pending"),
+        )
+        rigs = Rigs(proved={("alpha", "windows-latest", "L1"), ("alpha", "wsl2-ubuntu", "L1")})
+        self.directory.joinpath("plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        with unittest.mock.patch.object(seed, "pin_revision", return_value=("c" * 40, "d" * 40)), \
+                unittest.mock.patch.object(seed, "fetch_notes", return_value=[]), \
+                unittest.mock.patch.object(seed, "resolve_plan", side_effect=lambda path: (
+                    path.write_text(json.dumps(plan), encoding="utf-8"), plan)[1]), \
+                unittest.mock.patch.object(seed, "verified_cells", rigs.verify), \
+                unittest.mock.patch.object(seed, "run_cross_check", rigs.leg), \
+                unittest.mock.patch.object(seed, "git", return_value="git@example.com:o/r.git"), \
+                unittest.mock.patch.dict("os.environ", {"BUILD_WIN": "build-win", "BUILD_WSL": "build-wsl",
+                                               "BISCUIT_CI_EVIDENCE_DIR": str(self.directory)}), \
+                unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(1, seed.main([]))
+            self.assertEqual(0, seed.main(["--plan"]))
+        self.assertEqual([], rigs.calls)
+        (state_path,) = self.directory.glob("seed/*/state.json")
+        cells = json.loads(state_path.read_text(encoding="utf-8"))["cells"]
+        self.assertEqual("unsupported", cells["alpha/windows-latest/L2"])
 
     def test_the_preview_lists_every_cell_with_its_host(self) -> None:
         out = io.StringIO()
