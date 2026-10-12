@@ -74,8 +74,12 @@ The older `formatting.cleanup` (`compact` → `list-item-padding = "none"`,
 are still read and translated, with one migration warning per key each time
 the configuration loads. A `[formatting]` table that mixes them with
 `formatting.markdown`, or that has an unknown key or invalid value, is ignored
-and the remaining settings apply. These findings are written to the server
-log; showing them in the editor is **planned**.
+and the remaining settings apply. Each finding is written to the server log
+and shown in the editor as one `window/showMessage` notification, prefixed
+`dmls:` and naming its source and key: a migration is a Warning, a rejected
+setting an Error. Findings are shown when the server starts and again after
+every `workspace/didChangeConfiguration`, never per formatting request, so a
+legacy key keeps warning once per configuration change until it is migrated.
 
 See [spec.md](../../../features/2026-07-04-dmls/spec.md) § Configuration for the
 full key list.

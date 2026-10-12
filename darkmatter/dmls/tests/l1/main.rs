@@ -11,6 +11,7 @@ mod common;
 
 mod context_construction_guard;
 mod entry_point_parity;
+mod formatting_transaction;
 mod level1_graph_index;
 mod level1_wiki;
 mod lsp_session;
