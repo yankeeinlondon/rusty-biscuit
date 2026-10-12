@@ -44,32 +44,23 @@ initialize:
               - skip
         - action:
             - ensure_file: "{{log}}"
-        - when: "phase != 1"
-          action:
-              - set:
-                    epilog: null
         - when: "!total_phases || total_phases <= 0"
           action:
               - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
-          action:
-              - stderr: |-
-                    The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - message: |-
-                    The previous phase's agent has passed a message to this agent:
-        
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - set:
-                    epilog: "{{message_to_agent}}"
-                    message_to_agent: null
-
-                  
 start:
     message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    # `start` (not `initialize`) because a loop re-enters each phase here; the
+    # body renders the same message for the agent itself.
+    stack:
+        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+          action:
+              - message: |-
+                    The previous phase's agent has passed a message to this agent:
+
+                    {{frontmatter(log, 'message_to_agent')}}
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
@@ -102,7 +93,7 @@ failure:
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases || frontmatter(log, 'human_involvement')"
+    until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
     action: "increment(phase)"
 ---
 ::block when="total_phases"
@@ -115,6 +106,8 @@ loop:
 ::end-block
 
 ::file "../_no_formatting.md"
+
+::file "../_frontmatter_edits.md"
 
 Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
 
@@ -158,6 +151,14 @@ Now we need to update the specification file's frontmatter ({{spec}}):
 ::block when="phase > 1"
 - since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
 ::end-block
+::end-block
+
+::block when="file_exists(log) && frontmatter(log, 'message_to_agent')"
+### Message from the Previous Phase's Agent
+
+The agent that implemented the previous phase left this message for you:
+
+{{frontmatter(log, 'message_to_agent')}}
 ::end-block
 
 ## Test Design Requirements
@@ -228,14 +229,10 @@ You are done when:
         ::end-block
     ::end-block
 
-::block when="spec"
-### Spec Frontmatter
+### Handoff to the Next Phase
 
-The following Frontmatter properties must be set on the spec file ({{spec}}):
+Set these properties on the implementation log ({{log}}), never on the spec or plan:
 
-::block when="!frontmatter(spec, '$schema')"
-::file ../_set_spec_schema.md 
-::end-block
 - If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
     - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
     - when `human_review` is set to `true` you must also set `human_review_items`:
@@ -249,6 +246,16 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
             - you must recommend one of these options and explain why you're recommending it
         - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
+    - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
+
+::block when="spec"
+### Spec Frontmatter
+
+The following Frontmatter properties must be set on the spec file ({{spec}}):
+
+::block when="!frontmatter(spec, '$schema')"
+::file ../_set_spec_schema.md 
+::end-block
 ::block when="_loop_is_last"
 - set the `implemented` frontmatter to `true`
 ::end-block
