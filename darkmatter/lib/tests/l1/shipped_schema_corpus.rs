@@ -9,21 +9,30 @@
 //! shipped Markdown are parsed passively too, and those carrying named-type
 //! references are resolved.
 //!
+//! The same walk accounts for the core types of `2026-10-16-core-schema-types`:
+//! [`CORE_TYPE_USERS`] names every artifact declaring `unknown`/`any`, `null`,
+//! `alphanumeric`, or `shell`, and no artifact may keep an `any(required)`
+//! written to demand presence. The dialect trigger fixtures sit under
+//! `tests/fixtures`, outside the walk, so they are named one by one.
+//!
 //! Passivity is observed, not assumed: the effect-engine and network-attempt
 //! counters (`effects-instrumentation`) must not move; a parse is repeated
 //! with the artifact's path moved into an empty directory and must give the
 //! same result, so no neighboring file was consulted; and every input's bytes
 //! and modification time are unchanged afterwards.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
-    SchemaDeclaration, SchemaError, StandaloneSchemaDocument, parse_property_definition,
+    Constraint, MatchExpr, PathSubject, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError,
+    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr, parse_property_definition,
     parse_schema_declaration, parse_standalone_schema_document, parse_trigger_envelope_from_str,
     resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
+    triggers::matches,
 };
 use serde_yaml_ng::Value as YamlValue;
 
@@ -211,23 +220,17 @@ const EXCEPTIONS: &[Exception] = &[
         "claudine/docs/schemas",
         "partials/stack.yaml",
         Class::Draft {
-            error: "expected a type name",
+            error: "expected a type name, found `LBracket`",
         },
         "spread syntax `[ ...stack_item[] ]`; also names the missing `shell@./shell.yaml`",
     ),
     exception(
         "claudine/docs/schemas",
         "partials/lifecycle.yaml",
-        Class::Draft { error: "got null" },
-        "event names without definitions",
-    ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/side-effect.yaml",
         Class::Draft {
-            error: "unexpected character `:`",
+            error: "types: invalid SimplifiedSchema for property `<root>`: $schema must be a mapping or a sequence, got null",
         },
-        "draft call syntax",
+        "empty `types:`; the event placeholders are `unknown` and load",
     ),
     exception(
         "claudine/docs/schemas",
@@ -245,6 +248,23 @@ const EXCEPTIONS: &[Exception] = &[
         },
         "draft `parameters(...)` constraint; local `number`/`date` collide with built-ins",
     ),
+];
+
+/// Every shipped artifact (of any class whose definitions parse) that declares
+/// one of the core types, with the canonical keywords it uses; `any` parses as
+/// `unknown`. Native YAML null declarations parse as `null`.
+const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
+    // `set_frontmatter.value` has a native null arm; the undefined actions are
+    // `unknown` placeholders.
+    (
+        "claudine/docs/schemas/partials/side-effect.yaml",
+        &["null", "unknown"],
+    ),
+    ("darkmatter/docs/schemas/claudine-types.yaml", &["unknown"]),
+    // `any` for provider-specific shapes and the optional sequence states.
+    ("darkmatter/docs/schemas/claudine.yaml", &["unknown"]),
+    ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
+    ("darkmatter/schemas/partials/doc.yaml", &["unknown"]),
 ];
 
 struct Artifact {
@@ -369,9 +389,9 @@ fn yaml_key<'a>(map: &'a YamlValue, key: &str) -> Option<&'a YamlValue> {
 /// Passively parses an artifact's `$schema` and `types` bodies: the whole body
 /// through the declaration parser, and every non-`$` entry of a mapping (or of
 /// each mapping arm of a root union) as a property definition. Returns the
-/// number of definitions parsed, or every failure message.
-fn parse_bodies(document: &YamlValue) -> Result<usize, Vec<String>> {
-    let mut definitions = 0usize;
+/// parsed definitions, or every failure message.
+fn parse_bodies(document: &YamlValue) -> Result<Vec<PropertyDef>, Vec<String>> {
+    let mut definitions = Vec::new();
     let mut failures = Vec::new();
     for key in ["$schema", "types"] {
         let Some(body) = yaml_key(document, key) else {
@@ -392,7 +412,7 @@ fn parse_bodies(document: &YamlValue) -> Result<usize, Vec<String>> {
                     continue;
                 }
                 match parse_property_definition(name, value) {
-                    Ok(_) => definitions += 1,
+                    Ok(definition) => definitions.push(definition),
                     Err(error) => failures.push(format!("{key}.{name}: {error}")),
                 }
             }
@@ -440,6 +460,90 @@ fn assert_lowered(resolved: &ResolvedSchema, label: &str) {
     );
 }
 
+/// The core types whose meaning or presence changed: `unknown` (alias `any`),
+/// `null`, `alphanumeric`, and `shell`.
+fn is_core_type(ty: SimplifiedType) -> bool {
+    matches!(
+        ty,
+        SimplifiedType::Unknown
+            | SimplifiedType::Null
+            | SimplifiedType::Alphanumeric
+            | SimplifiedType::Shell
+    )
+}
+
+fn atom_core_types(atom: &PropertyAtom, found: &mut BTreeSet<&'static str>) {
+    match &atom.ty {
+        TypeExpr::Primitive(ty) if is_core_type(*ty) => {
+            found.insert(ty.as_keyword());
+        }
+        TypeExpr::InlineObject(shape) => {
+            for definition in shape.properties.values() {
+                definition_core_types(definition, found);
+            }
+            for pattern in &shape.pattern_keys {
+                definition_core_types(&pattern.def, found);
+            }
+        }
+        TypeExpr::Union(arms) => {
+            for arm in arms {
+                atom_core_types(arm, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn definition_core_types(definition: &PropertyDef, found: &mut BTreeSet<&'static str>) {
+    match definition {
+        PropertyDef::Single(atom) => atom_core_types(atom, found),
+        PropertyDef::Union(atoms) => {
+            for atom in atoms {
+                atom_core_types(atom, found);
+            }
+        }
+    }
+}
+
+fn record_core_types(
+    users: &mut BTreeMap<String, BTreeSet<&'static str>>,
+    label: &str,
+    definitions: &[PropertyDef],
+) {
+    let mut found = BTreeSet::new();
+    for definition in definitions {
+        definition_core_types(definition, &mut found);
+    }
+    if !found.is_empty() {
+        users.insert(label.to_string(), found);
+    }
+}
+
+/// Every `any(…)` or `unknown(…)` constraint group in `source` that names
+/// `required`. A null-admitting whole value is never required, so such a site
+/// would silently stop demanding the presence it was written for; `unknown[]`
+/// arrays are not null-admitting and are not reported.
+fn presence_only_sites(source: &str) -> Vec<String> {
+    let mut sites = Vec::new();
+    for keyword in ["any(", "unknown("] {
+        for (start, _) in source.match_indices(keyword) {
+            let preceded_by_word = source[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|previous| previous.is_alphanumeric() || matches!(previous, '_' | '-'));
+            if preceded_by_word {
+                continue;
+            }
+            let group = &source[start..];
+            let group = &group[..group.find(')').map_or(group.len(), |end| end + 1)];
+            if group.contains("required") {
+                sites.push(group.to_string());
+            }
+        }
+    }
+    sites
+}
+
 /// Every shipped schema artifact parses passively, or fails exactly as its
 /// exception says. Parsing builds no effect engine, attempts no network
 /// access, gives the same result from an empty directory, and mutates nothing.
@@ -482,8 +586,14 @@ fn shipped_schema_artifacts_parse_passively() {
 
     let mut definitions = 0usize;
     let mut loadable = 0usize;
+    let mut core_type_users = BTreeMap::new();
     for artifact in &artifacts {
         let label = artifact.label();
+        let sites = presence_only_sites(&artifact.source);
+        assert!(
+            sites.is_empty(),
+            "{label} still relies on a null-admitting type demanding presence: {sites:?}",
+        );
         let document: YamlValue = serde_yaml_ng::from_str(&artifact.source)
             .unwrap_or_else(|error| panic!("{label} is not YAML: {error}"));
         let outcome = standalone_outcome(&artifact.source, &artifact.path);
@@ -500,7 +610,9 @@ fn shipped_schema_artifacts_parse_passively() {
                     matches!(outcome, Ok(Some(_))),
                     "{label} must parse as a standalone schema; classify it in EXCEPTIONS if it is not one: {outcome:?}",
                 );
-                definitions += bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
                 loadable += 1;
             }
             Class::Placeholder => {
@@ -520,13 +632,17 @@ fn shipped_schema_artifacts_parse_passively() {
                     matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(None)),
                     "{label} is now claimed as a trigger; reclassify it",
                 );
-                definitions += bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
             }
             Class::EnvelopeRejected => {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
                 assert!(message.contains("unsupported keys"), "{label}: {message}");
-                definitions += bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
             }
             Class::Draft { error } => {
                 let failures = bodies.expect_err(&format!("{label} now parses; reclassify it"));
@@ -547,6 +663,14 @@ fn shipped_schema_artifacts_parse_passively() {
     assert!(
         before == fingerprint(artifacts.iter().map(|artifact| artifact.path.as_path())),
         "passive parsing must not modify any artifact",
+    );
+    let expected_users: BTreeMap<String, BTreeSet<&str>> = CORE_TYPE_USERS
+        .iter()
+        .map(|(label, keywords)| (label.to_string(), keywords.iter().copied().collect()))
+        .collect();
+    assert_eq!(
+        core_type_users, expected_users,
+        "the shipped artifacts declaring `unknown`/`any`, `null`, `alphanumeric`, or `shell` changed; update CORE_TYPE_USERS",
     );
     assert!(
         artifacts.len() >= 30,
@@ -898,7 +1022,8 @@ fn shipped_research_contracts_resolve_and_lower() {
         let document: YamlValue = serde_yaml_ng::from_str(&source)
             .unwrap_or_else(|error| panic!("{label} is not YAML: {error}"));
         definitions += parse_bodies(&document)
-            .unwrap_or_else(|failures| panic!("{label} does not parse passively: {failures:#?}"));
+            .unwrap_or_else(|failures| panic!("{label} does not parse passively: {failures:#?}"))
+            .len();
         named_references += source.matches("@this").count() + source.matches("@./").count()
             + source.matches("@../").count();
 
@@ -934,5 +1059,221 @@ fn shipped_research_contracts_resolve_and_lower() {
         fingerprint(contracts.iter().map(PathBuf::as_path)),
         before,
         "resolving a contract mutated it"
+    );
+}
+
+/// The value of `key` in `map`, panicking with `label` when it is missing.
+fn shape_property<'a>(shape: &'a SchemaShape, key: &str, label: &str) -> &'a PropertyDef {
+    shape
+        .properties
+        .get(key)
+        .unwrap_or_else(|| panic!("{label} declares no `{key}`"))
+}
+
+fn inline_shape<'a>(definition: &'a PropertyDef, label: &str) -> &'a SchemaShape {
+    match definition {
+        PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::InlineObject(shape),
+            is_array: false,
+            ..
+        }) => shape,
+        other => panic!("{label} must be an inline object: {other:?}"),
+    }
+}
+
+/// The migrated side-effect partial and the shipped Claudine baseline carry the
+/// presence the migration decided, read through the passive parser:
+/// `set_frontmatter.value` admits null and is therefore optional,
+/// `merge_frontmatter` takes exactly `file` and a required `obj`, and the
+/// injected `state` stays required (an object, never null) while the optional
+/// sequence states admit null.
+#[test]
+fn migrated_shipped_definitions_declare_their_presence() {
+    let root = repo_root();
+    let side_effect_path = root.join("claudine/docs/schemas/partials/side-effect.yaml");
+    let claudine_path = root.join("darkmatter/docs/schemas/claudine.yaml");
+    let before = fingerprint([side_effect_path.as_path(), claudine_path.as_path()]);
+    let counters = effect_counters();
+
+    let side_effect: YamlValue =
+        serde_yaml_ng::from_str(&fs::read_to_string(&side_effect_path).expect("readable"))
+            .expect("side-effect partial is YAML");
+    let types = yaml_key(&side_effect, "types").expect("the partial has `types`");
+    let definition = parse_property_definition(
+        "side_effect",
+        yaml_key(types, "side_effect").expect("`side_effect` type"),
+    )
+    .expect("`side_effect` parses");
+    let actions = inline_shape(&definition, "side_effect");
+
+    let set = inline_shape(shape_property(actions, "set_frontmatter", "side_effect"), "set_frontmatter");
+    let value = shape_property(set, "value", "set_frontmatter");
+    assert!(value.admits_null(), "`set_frontmatter.value` must admit null: {value:?}");
+    assert!(!value.is_required(), "a null-admitting `value` is never required");
+    for key in ["file", "prop"] {
+        let argument = shape_property(set, key, "set_frontmatter");
+        assert!(argument.is_required() && !argument.admits_null(), "`set_frontmatter.{key}`: {argument:?}");
+    }
+
+    let merge = inline_shape(shape_property(actions, "merge_frontmatter", "side_effect"), "merge_frontmatter");
+    assert_eq!(
+        merge.properties.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["file", "obj"],
+        "`merge_frontmatter` takes `file` and `obj` only",
+    );
+    let obj = shape_property(merge, "obj", "merge_frontmatter");
+    assert_eq!(
+        obj,
+        &PropertyDef::Single(PropertyAtom {
+            constraints: vec![Constraint::Required],
+            ..PropertyAtom::bare(SimplifiedType::Object)
+        }),
+        "`merge_frontmatter.obj` is `object(required)`",
+    );
+    assert!(obj.is_required());
+
+    let claudine: YamlValue =
+        serde_yaml_ng::from_str(&fs::read_to_string(&claudine_path).expect("readable"))
+            .expect("Claudine baseline is YAML");
+    let schema = yaml_key(&claudine, "$schema").expect("the baseline has `$schema`");
+    let property = |key: &str| {
+        parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
+            .unwrap_or_else(|error| panic!("`{key}`: {error}"))
+    };
+    let state = property("state");
+    assert!(state.is_required(), "`state` must stay required: {state:?}");
+    assert!(!state.admits_null(), "`state` is an object, never null");
+    for key in ["previous_state", "next_state", "tools", "skills", "compatibility"] {
+        let definition = property(key);
+        assert!(
+            definition.admits_null() && !definition.is_required(),
+            "`{key}` is a null-admitting `unknown`: {definition:?}"
+        );
+    }
+
+    assert_eq!(effect_counters(), counters, "parsing a definition ran an effect");
+    assert!(
+        before == fingerprint([side_effect_path.as_path(), claudine_path.as_path()]),
+        "parsing a definition mutated it"
+    );
+}
+
+/// The first `steps` property condition anywhere in `expr`.
+fn steps_condition(expr: &MatchExpr) -> Option<&PropertyAtom> {
+    match expr {
+        MatchExpr::Property { name, atom } if name == "steps" => Some(atom),
+        MatchExpr::All(children) | MatchExpr::Any(children) | MatchExpr::None(children) => {
+            children.iter().find_map(steps_condition)
+        }
+        MatchExpr::MinMatch { of, .. } => of.iter().find_map(steps_condition),
+        _ => None,
+    }
+}
+
+/// The three shipped dialect trigger fixtures load, their `steps` condition is
+/// the `unknown[](required)` gate (a list is present; null, absence, a scalar,
+/// or a mapping is not), the passive matcher keeps every documented registry
+/// decision, and each target schema resolves with its own required key.
+#[test]
+fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
+    let root = repo_root();
+    let triggers = [
+        (
+            "claudine",
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml"),
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/claudine.yaml"),
+            "provider",
+        ),
+        (
+            "inline-compose",
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml"),
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.yaml"),
+            "output",
+        ),
+        (
+            "sequence",
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml"),
+            root.join("darkmatter/tests/fixtures/schema-triggers/schemas/sequence.yaml"),
+            "sequence_name",
+        ),
+    ];
+    // `(frontmatter, dialects whose trigger matches)`.
+    let decisions = [
+        (serde_json::json!({ "steps": [] }), vec!["sequence"]),
+        (serde_json::json!({ "steps": [1, "a", null] }), vec!["sequence"]),
+        (serde_json::json!({ "steps": null }), vec![]),
+        (serde_json::json!({ "steps": "oops" }), vec![]),
+        (serde_json::json!({ "steps": { "a": 1 } }), vec![]),
+        (serde_json::json!({}), vec![]),
+        (serde_json::json!({ "kind": "claudine" }), vec!["claudine"]),
+        (serde_json::json!({ "kind": "claudine", "steps": [] }), vec![]),
+        (serde_json::json!({ "kind": "claudine", "steps": 5 }), vec!["claudine"]),
+        (serde_json::json!({ "prompt": "x" }), vec!["inline-compose"]),
+        (serde_json::json!({ "prompt": "x", "steps": [] }), vec![]),
+        (serde_json::json!({ "prompt": "x", "steps": "oops" }), vec!["inline-compose"]),
+        (serde_json::json!({ "prompt": "x", "steps": null }), vec!["inline-compose"]),
+    ];
+    let inputs: Vec<&Path> = triggers
+        .iter()
+        .flat_map(|(_, trigger, target, _)| [trigger.as_path(), target.as_path()])
+        .collect();
+    let before = fingerprint(inputs.iter().copied());
+    let counters = effect_counters();
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let context = FileResolutionContext::new(scratch.path());
+
+    let mut envelopes = Vec::new();
+    for (dialect, trigger, target, required) in &triggers {
+        let source = fs::read_to_string(trigger).expect("trigger is readable");
+        let sites = presence_only_sites(&source);
+        assert!(sites.is_empty(), "{dialect}: {sites:?}");
+        let envelope = parse_trigger_envelope_from_str(&source)
+            .unwrap_or_else(|error| panic!("{dialect} trigger must load: {error}"))
+            .unwrap_or_else(|| panic!("{dialect} must be claimed as a trigger"));
+
+        let steps = envelope
+            .match_arms
+            .0
+            .iter()
+            .find_map(steps_condition)
+            .unwrap_or_else(|| panic!("{dialect} has a `steps` condition"));
+        assert_eq!(steps.ty, TypeExpr::Primitive(SimplifiedType::Unknown), "{dialect}");
+        assert!(steps.is_array, "{dialect}: `steps` is a list");
+        let gate = PropertyDef::Single(steps.clone());
+        assert!(gate.is_required(), "{dialect}: `steps` must be a gate: {steps:?}");
+        assert!(!gate.admits_null(), "{dialect}: a list of steps never admits null");
+
+        let payload = envelope.payload.as_ref().expect("the trigger names a target");
+        let file_name = target.file_name().and_then(|name| name.to_str()).expect("UTF-8");
+        assert_eq!(payload.as_str(), Some(file_name), "{dialect} target");
+        let resolved = resolve_schema_with_roots(
+            &serde_json::json!(format!("./{file_name}")),
+            target.parent().expect("target directory"),
+            &[],
+            &context,
+        )
+        .unwrap_or_else(|error| panic!("{dialect} target must resolve: {error}"));
+        assert_eq!(
+            resolved.json_schema["required"],
+            serde_json::json!([required]),
+            "{dialect} target requires `{required}`",
+        );
+        envelopes.push((*dialect, envelope));
+    }
+
+    let subject = PathSubject::detached();
+    for (frontmatter, expected) in &decisions {
+        let matched: Vec<&str> = envelopes
+            .iter()
+            .filter(|(_, envelope)| envelope.match_arms.0.iter().any(|arm| matches(arm, frontmatter, &subject)))
+            .map(|(dialect, _)| *dialect)
+            .collect();
+        assert_eq!(&matched, expected, "registry decision for {frontmatter}");
+    }
+
+    assert_eq!(effect_counters(), counters, "matching a trigger ran an effect");
+    assert!(
+        before == fingerprint(inputs.iter().copied()),
+        "loading a trigger mutated a fixture"
     );
 }

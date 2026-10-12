@@ -117,7 +117,7 @@ fn semantic_type_descriptors_are_authoritative() {
             .unwrap_or_else(|| panic!("missing descriptor for {keyword}"));
         assert_eq!(
             descriptor.accepted_constraints,
-            "eager, default, required, generated"
+            ["default", "required", "generated"]
         );
         let description = descriptor.description.to_ascii_lowercase();
         for required in ["string", "mapping", "sequence", "parse-only", "dmls"] {
