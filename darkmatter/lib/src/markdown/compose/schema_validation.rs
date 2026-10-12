@@ -2727,7 +2727,7 @@ mod tests {
         assert_eq!(
             composed.content(),
             format!(
-                "spec says: {}\n",
+                "spec says: {}",
                 resolved.to_string_lossy().replace('\\', "/")
             ),
             "Markdown presentation uses forward slashes without changing effective frontmatter",
@@ -2798,7 +2798,7 @@ mod tests {
         assert_eq!(
             composed.content(),
             format!(
-                "first: {}\n",
+                "first: {}",
                 first.to_string_lossy().replace('\\', "/")
             ),
             "indexed eager-file presentation uses forward slashes without changing the native array",
@@ -3269,7 +3269,7 @@ mod tests {
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
         let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
-        assert_eq!(composed.content(), "caller sibling\n");
+        assert_eq!(composed.content(), "caller sibling");
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),

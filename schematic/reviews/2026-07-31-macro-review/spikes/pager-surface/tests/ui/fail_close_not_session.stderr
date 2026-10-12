@@ -1,0 +1,32 @@
+error[E0277]: `ListRoles` has no server-side session
+ --> tests/ui/fail_close_not_session.rs:4:19
+  |
+4 |     let _ = pages.close().await;
+  |                   ^^^^^ this exists only for sessioned strategies
+  |
+  = help: the trait `Sessioned` is not implemented for `ListRoles`
+  = note: the definition for `ListRoles` authors no `Session`
+note: required by a bound in `Pages::<E>::close`
+ --> /kache/workspace/src/pager.rs:184:4
+
+error[E0277]: `ListRoles` has no server-side session
+ --> tests/ui/fail_close_not_session.rs:4:13
+  |
+4 |     let _ = pages.close().await;
+  |             ^^^^^^^^^^^^^ this exists only for sessioned strategies
+  |
+  = help: the trait `Sessioned` is not implemented for `ListRoles`
+  = note: the definition for `ListRoles` authors no `Session`
+note: required by a bound in `Pages::<E>::close`
+ --> /kache/workspace/src/pager.rs:184:4
+
+error[E0277]: `ListRoles` has no server-side session
+ --> tests/ui/fail_close_not_session.rs:4:27
+  |
+4 |     let _ = pages.close().await;
+  |                           ^^^^^ this exists only for sessioned strategies
+  |
+  = help: the trait `Sessioned` is not implemented for `ListRoles`
+  = note: the definition for `ListRoles` authors no `Session`
+note: required by a bound in `Pages::<E>::close`
+ --> /kache/workspace/src/pager.rs:184:4

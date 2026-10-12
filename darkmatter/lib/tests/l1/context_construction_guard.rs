@@ -34,7 +34,6 @@ const ALLOWLIST: &[Allowance] = &[
         "`current_env.NAME` is the live process environment at reference time by design; it is neither `ctx.*` nor `env.*`",
     ),
     allow(Gate::AmbientState, "editor/mod.rs", "std::env::var", 2, "`$EDITOR` / `$VISUAL` choose the program `md` opens a file in"),
-    allow(Gate::AmbientState, "markdown/cleanup/emphasis.rs", "std::env::var", 1, "`PREFER_ITALICS` emphasis style for cleaned Markdown (rendering)"),
     allow(Gate::AmbientState, "markdown/compose/remote.rs", "std::env::var", 1, "`DARKMATTER_REMOTE_CONCURRENCY` fetch concurrency limit (tuning)"),
     allow(
         Gate::AmbientState,

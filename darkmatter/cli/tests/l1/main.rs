@@ -10,8 +10,11 @@
 mod common;
 
 mod clean;
+mod clean_fidelity;
 mod clean_frontmatter;
 mod clean_json;
+mod clean_parity;
+mod clean_rules;
 mod clean_schema;
 mod code_block;
 mod compose_array_rendering;

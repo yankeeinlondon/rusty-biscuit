@@ -1,0 +1,5 @@
+error[E0599]: no method named `request` found for struct `DemoClient` in the current scope
+ --> tests/ui/no_free_request_generic.rs:4:19
+  |
+4 |     let pulls = c.request::<Vec<Pull>>(GetRepoRequest::new("o", "r")).await;
+  |                   ^^^^^^^ method not found in `DemoClient`

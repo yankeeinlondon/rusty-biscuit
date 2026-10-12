@@ -1245,6 +1245,36 @@ class PackagePolicyTests(unittest.TestCase):
             today=TODAY,
         )
 
+    def test_l2_serial_requires_a_reason(self) -> None:
+        serial = {"tiers": ["L1", "L2"], "l2-backends": ["tmux"], "runner-tools": ["l2-serial"]}
+        for reason in (None, "", "   "):
+            with self.subTest(reason=reason), self.assertRaises(RuntimeError):
+                tests = serial if reason is None else {**serial, "l2-serial-reason": reason}
+                validate_package_ci(
+                    "a", ci_policy(tests=tests), self.RUNNER_LABELS, root=Path("/"), today=TODAY
+                )
+        validate_package_ci(
+            "a",
+            ci_policy(tests={**serial, "l2-serial-reason": "drives one visible window"}),
+            self.RUNNER_LABELS,
+            root=Path("/"),
+            today=TODAY,
+        )
+
+    def test_l2_serial_reason_without_the_marker_is_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={
+                    "tiers": ["L1", "L2"],
+                    "l2-backends": ["tmux"],
+                    "l2-serial-reason": "stale",
+                }),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
     def test_unknown_companion_suite_is_rejected(self) -> None:
         with self.assertRaises(RuntimeError):
             validate_package_ci(
