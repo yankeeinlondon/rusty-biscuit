@@ -433,7 +433,8 @@ deprecated alias of `scope-only`. A receipt's
 `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence` — copied there before the receipt exists;
 `record-cells` refuses an empty or non-retaining directory rather than
-inventing one.
+inventing one. `just ci-evidence` (`scripts/ci/evidence_index.py`) lists the
+store by branch and subject without changing its SHA-keyed layout.
 
 Same-head retries must update that evidence cumulatively. The planner skips
 the already-passing cells, so replacing the note or clearing the retained

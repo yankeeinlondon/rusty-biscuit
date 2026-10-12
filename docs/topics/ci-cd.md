@@ -83,7 +83,9 @@ already stages, so a receipt reports what the run *measured* rather than what it
 reports themselves are retained on the producing host under
 `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/` (root default `~/.rusty-biscuit/ci-evidence`)
 before the receipt is written; `host.report_dir` names that directory, and a copy that fails
-publishes no receipt.
+publishes no receipt. The directories are named by commit SHA because the receipt, a git note on
+that commit, points at its own; `just ci-evidence` lists them readably, newest first, with each
+commit's branch, environments, cell count, result, total cell time and subject.
 
 The receipt is not stored as-is. `scripts/ci/observation_notes.py` turns each of its cells into an
 immutable **observation** (cited by report digest) and unions them into the **observation
