@@ -326,6 +326,18 @@ pub const SCHEMA_SHAPE_DESCRIPTORS: &[SchemaShapeDescriptor] = &[
         example: "addr:\n  street: string\n  zip: number",
         description: "Use a YAML mapping as a property value to declare a nested object shape. Equivalent to the inline object literal for the cases both forms can express; the mapping form additionally permits sequence union arms without quoting.",
     },
+    SchemaShapeDescriptor {
+        name: "Array of a named union",
+        form: "UnionName[](list constraints) -> description",
+        example: "step: [\"string -> A shell command\", \"{ run: string(required) }\"]\nsteps: step[](min(1); unique) -> The steps to run",
+        description: "Use this when every item of a list may be any one of a named union type's alternatives. Each item must match at least one alternative, and every alternative keeps its own constraints and description. `min`, `max`, `unique`, `required`, `generated`, and `eager` after `[]` apply to the list, and a `->` description describes the list. A value constraint such as `pattern` is rejected rather than copied onto every alternative, `[]` is rejected when an alternative is already a list, and `eager` on the list never makes a lazy `file` alternative check existence. Give the union a name first: an unnamed union cannot take `[]`.",
+    },
+    SchemaShapeDescriptor {
+        name: "Marked union reference",
+        form: "UnionName(required; generated; eager) -> description",
+        example: "choice: [string, number]\nanswer: choice(required) -> The chosen value",
+        description: "Use this to mark a property typed by a named union type as `required`, `generated`, or `eager`, or to describe it. The markers and description apply to the property as a whole; the alternatives keep their own descriptions. Any other constraint is rejected rather than copied onto every alternative.",
+    },
 ];
 
 /// Returns all schema shape descriptors in display order.
@@ -1094,6 +1106,26 @@ mod tests {
                         "Nested mapping object example did not lower to TypeExpr::InlineObject: {:?}",
                         atom.ty
                     );
+                }
+                "Array of a named union" | "Marked union reference" => {
+                    // The passive parser keeps the authored reference; only
+                    // the resolver expands it into the union's alternatives.
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(d.example).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("named-union example must parse as a SimplifiedSchema");
+                    let SimplifiedSchema::Single(shape) = schema else {
+                        panic!("expected Single, got {schema:?}");
+                    };
+                    let (_, reference) = shape
+                        .properties
+                        .last()
+                        .expect("the example's last property is the reference");
+                    let PropertyDef::Single(atom) = reference else {
+                        panic!("expected a single reference atom, got {reference:?}");
+                    };
+                    assert!(atom.ty.is_local_reference(), "{:?}", atom.ty);
+                    assert_eq!(atom.is_array, d.name == "Array of a named union");
                 }
                 other => panic!("unexpected shape descriptor: {other}"),
             }

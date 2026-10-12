@@ -90,16 +90,27 @@ pub(super) fn is_eager(shape: Option<&SchemaShape>, name: &str) -> bool {
     let Some(def) = shape.and_then(|shape| shape.properties.get(name)) else {
         return false;
     };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(a) => vec![a],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
+    any_atom_constraint(def, |c| matches!(c, Constraint::Eager))
+}
+
+/// Whether any atom of `def` declares a constraint matching `predicate`, on
+/// the value or the array. The alternatives of a resolved union-typed
+/// reference (`U(required)`, `U[]`) count as arms, because Darkmatter hoists
+/// their presence markers to the property.
+fn any_atom_constraint(def: &PropertyDef, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
+    fn atom_matches(atom: &PropertyAtom, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
         atom.constraints
             .iter()
             .chain(atom.array_constraints.iter())
-            .any(|c| matches!(c, Constraint::Eager))
-    })
+            .any(predicate)
+            || atom
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(|arm| atom_matches(arm, predicate)))
+    }
+    match def {
+        PropertyDef::Single(atom) => atom_matches(atom, predicate),
+        PropertyDef::Union(atoms) => atoms.iter().any(|atom| atom_matches(atom, predicate)),
+    }
 }
 
 /// Reclassify a required top-level property whose effective value is `null`
@@ -182,16 +193,7 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
         // reason.
         return true;
     };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(a) => vec![a],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        atom.constraints
-            .iter()
-            .chain(atom.array_constraints.iter())
-            .any(|c| matches!(c, Constraint::Required))
-    })
+    any_atom_constraint(def, |c| matches!(c, Constraint::Required))
 }
 
 /// Classify a validation problem set as a
@@ -367,7 +369,10 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
             | SimplifiedType::Schema,
         )
         | TypeExpr::InlineObject(_)
-        | TypeExpr::Imported { .. } => None,
+        | TypeExpr::Imported { .. }
+        // A value with several alternatives has no single widget, as for a
+        // property-level union.
+        | TypeExpr::Union(_) => None,
     }
 }
 
@@ -413,6 +418,7 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
         TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
+        TypeExpr::Union(_) => format!("union{suffix}"),
     }
 }
 

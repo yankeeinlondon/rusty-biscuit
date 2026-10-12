@@ -111,8 +111,8 @@ pub fn nested_property_shape(
 /// The first `expression`-typed arm of a property, so a union whose
 /// expression arm is not first is still recognized.
 pub fn expression_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
-    atoms_of(def)
-        .iter()
+    alternatives_of(def)
+        .into_iter()
         .find(|atom| matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression)))
 }
 
@@ -204,11 +204,32 @@ fn collect_expression_values<'v>(
     }
 }
 
+/// The atoms `def` is written as: its one atom, or a property union's arms.
+/// A postfixed union reference stays one atom, keeping its own markers and
+/// description when two root or object arms' definitions merge.
 fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
     match def {
         PropertyDef::Single(atom) => std::slice::from_ref(atom),
         PropertyDef::Union(atoms) => atoms,
     }
+}
+
+/// The value alternatives classification and descent read: [`atoms_of`],
+/// with every [`TypeExpr::Union`] atom replaced by its arms, recursively.
+///
+/// An array of a union (`U[]`) yields its item arms. Key paths here carry no
+/// sequence index, so an array property's path already descends into its
+/// items, exactly as an inline-object array (`{ … }[]`) does.
+fn alternatives_of(def: &PropertyDef) -> Vec<&PropertyAtom> {
+    fn push<'a>(atom: &'a PropertyAtom, out: &mut Vec<&'a PropertyAtom>) {
+        match atom.union_arms() {
+            Some(arms) => arms.iter().for_each(|arm| push(arm, out)),
+            None => out.push(atom),
+        }
+    }
+    let mut out = Vec::new();
+    atoms_of(def).iter().for_each(|atom| push(atom, &mut out));
+    out
 }
 
 fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter: &Value) {
@@ -253,11 +274,14 @@ fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
 
 /// Projects a property-union arm to the minimal JSON the discriminant selector
 /// reads; a non-inline-object arm keeps its slot so indexes stay aligned with
-/// [`atoms_of`].
+/// [`alternatives_of`].
 fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
     match &atom.ty {
         TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
-        _ => serde_json::json!({}),
+        // `alternatives_of` has already replaced a union type with its arms.
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => {
+            serde_json::json!({})
+        }
     }
 }
 
@@ -282,11 +306,13 @@ fn discriminated_arm_shape<'a>(
     frontmatter: &Value,
     path: &[&str],
 ) -> Option<&'a SchemaShape> {
-    let atoms = atoms_of(def);
+    let atoms = alternatives_of(def);
     if atoms.len() < 2 {
         return None;
     }
-    let arms: Vec<Value> = atoms.iter().map(arm_discriminant_json).collect();
+    let arms: Vec<Value> = atoms.iter().map(|atom| arm_discriminant_json(atom)).collect();
+    // An array of a union's value is a sequence, which the selector never
+    // narrows, so its item arms merge in `merged_inline_object_shape`.
     let instance = navigate_json(frontmatter, path)?;
     let index = select_literal_discriminant_arm(&arms, instance)?;
     match &atoms[index].ty {
@@ -306,7 +332,7 @@ fn navigate_json<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
 /// `None` when the property has no inline-object arm.
 fn merged_inline_object_shape(def: &PropertyDef) -> Option<SchemaShape> {
     let mut merged: Option<SchemaShape> = None;
-    for atom in atoms_of(def) {
+    for atom in alternatives_of(def) {
         let TypeExpr::InlineObject(inner) = &atom.ty else {
             continue;
         };

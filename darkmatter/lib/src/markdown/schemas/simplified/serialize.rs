@@ -2,7 +2,8 @@
 //!
 //! Used by tests (especially `proptest` round-trip tests) to verify that the
 //! parser and the AST agree. The output is canonical (deterministic key
-//! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`].
+//! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`]
+//! for every atom the passive parser produces.
 
 use std::fmt::Write;
 
@@ -10,6 +11,10 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
+///
+/// Only passively parsed atoms round-trip. A resolved [`TypeExpr::Union`]
+/// (an expanded postfixed union reference) serializes to a display form,
+/// `[arm, arm][]`, that the grammar does not accept.
 ///
 /// [`grammar::parse_type_expr`]: super::grammar::parse_type_expr
 pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
@@ -66,6 +71,17 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
             if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
                 out.push('@');
                 out.push_str(reference);
+            }
+        }
+        // Display only: the resolver alone produces a union type, and the
+        // bracketed arm list is not a parseable type expression.
+        TypeExpr::Union(arms) => {
+            out.push('[');
+            let rendered: Vec<String> = arms.iter().map(serialize_property_atom).collect();
+            out.push_str(&rendered.join(", "));
+            out.push(']');
+            if atom.is_array {
+                out.push_str("[]");
             }
         }
     }

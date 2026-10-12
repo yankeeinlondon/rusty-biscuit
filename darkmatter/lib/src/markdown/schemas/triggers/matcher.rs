@@ -256,6 +256,11 @@ fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
 fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
     match ty {
         TypeExpr::Primitive(p) => primitive_matches(*p, value),
+        // Loaded match conditions cannot import types, so only a caller
+        // passing a resolved atom reaches this. A value (for `U[]`, each
+        // item) conforms when some arm accepts it; the container's own
+        // markers and array constraints are checked by `type_conforms`.
+        TypeExpr::Union(arms) => arms.iter().any(|arm| type_conforms(arm, value)),
         TypeExpr::InlineObject(shape) => {
             let Some(map) = value.as_object() else {
                 return false;
@@ -478,8 +483,11 @@ fn array_constraints_hold(atom: &PropertyAtom, items: &[Value]) -> bool {
     true
 }
 
+/// A union type's arms count, because an arm's `required` hoists to the
+/// property that holds the union.
 fn is_required(atom: &PropertyAtom) -> bool {
     atom.constraints.iter().any(|c| matches!(c, Constraint::Required))
+        || atom.union_arms().is_some_and(|arms| arms.iter().any(is_required))
 }
 
 fn regex_match(pattern: &str, input: &str) -> bool {

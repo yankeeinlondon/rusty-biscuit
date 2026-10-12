@@ -38,7 +38,7 @@ use super::{
     errors::SchemaError,
     simplified::{
         SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
-        SchemaReferenceSite, SchemaSourceId, SchemaSourceMap, SchemaSourcePath,
+        SchemaReferenceSite, SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaUnionRejection,
         parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
             Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
@@ -1068,8 +1068,8 @@ struct NamedReference {
 ///
 /// A single atom carries the origin of each top-level constraint, which a
 /// use-site merge needs to report where contradictory values were declared.
-/// A union carries none, because no postfix applies to a union-typed named
-/// type.
+/// A union carries none: a postfix over a union keeps the arms verbatim, and
+/// an arm default it lifts takes its arm's position in the definition.
 enum ExpandedDef {
     Single(Box<PropertyAtom>, AtomProvenance),
     Union(Vec<PropertyAtom>),
@@ -1360,6 +1360,7 @@ impl ImportEngine {
             TypeExpr::InlineObject(shape) => {
                 TypeExpr::InlineObject(self.expand_shape(shape, current, path)?)
             }
+            TypeExpr::Union(arms) => TypeExpr::Union(self.expand_union_arms(arms, current, path)?),
         };
         let atom = PropertyAtom {
             ty,
@@ -1428,7 +1429,11 @@ impl ImportEngine {
             NamespaceKey::File(file) => self.rehome_examples(base, file)?,
             NamespaceKey::Root => base,
         };
-        apply_import_postfix(base, reference, &site)
+        let definition = SchemaReferenceSite {
+            source: target.key.source_id(),
+            path: definition_path,
+        };
+        apply_import_postfix(base, reference, &site, &definition)
     }
 
     /// Pins the `example(...)` references of a definition inlined from
@@ -1749,10 +1754,11 @@ fn locate_origin_spans(origins: &mut [SchemaConstraintOrigin]) {
 /// Applies the use-site postfix (`[]`, `(constraints)`, `-> description`) of
 /// `reference` to its expanded definition.
 ///
-/// The definition is inherited verbatim when the use site adds no postfix;
-/// otherwise it must be a single atom (v1 does not compose a postfix over a
-/// union-typed named type). Use-site constraints are interpreted against the
-/// resolved target and merged with the inherited ones (Decided 4):
+/// The definition is inherited verbatim when the use site adds no postfix.
+/// A postfix over a union-typed definition is applied by
+/// [`apply_union_postfix`]. Over a single atom, use-site constraints are
+/// interpreted against the resolved target and merged with the inherited
+/// ones (Decided 4):
 ///
 /// - A use-site `min`/`max` counts characters on a `string` target and items
 ///   on a target that is already an array, whose postfix addresses the
@@ -1769,6 +1775,7 @@ fn apply_import_postfix(
     base: ExpandedDef,
     reference: NamedReference,
     site: &SchemaReferenceSite,
+    definition: &SchemaReferenceSite,
 ) -> Result<ExpandedDef, SchemaError> {
     let NamedReference {
         name,
@@ -1785,13 +1792,20 @@ fn apply_import_postfix(
 
     let (base_atom, base_provenance) = match base {
         ExpandedDef::Single(atom, provenance) => (*atom, provenance),
-        ExpandedDef::Union(_) => {
-            return Err(SchemaError::Convert {
-                property: name.to_string(),
-                message: format!(
-                    "cannot apply `[]`/constraints to the union-typed named type `{name}@{reference}`"
-                ),
-            });
+        ExpandedDef::Union(arms) => {
+            return apply_union_postfix(
+                arms,
+                NamedReference {
+                    name,
+                    reference,
+                    is_array,
+                    constraints,
+                    array_constraints,
+                    description,
+                },
+                site,
+                definition,
+            );
         }
     };
 
@@ -1960,6 +1974,181 @@ fn apply_import_postfix(
             shape: shape_origins,
         },
     ))
+}
+
+/// Applies a use-site postfix to a union-typed definition, producing one atom
+/// whose type is the ordered, flattened [`TypeExpr::Union`].
+///
+/// - Without `[]` only `required`, `generated`, and `eager` apply; they and
+///   the description belong to the property as a whole.
+/// - With `[]` the reference's one constraint list follows `[]`, so it was
+///   parsed at the array level and belongs to the container. Only constraints
+///   valid on an array container apply.
+/// - `[]` is rejected when a flattened arm (looking through nested postfixed
+///   unions) is already an array.
+/// - With `[]`, an arm's default lifts to the container only when it is an
+///   array, and merges with the other container defaults under the
+///   equal-value rule; any other inherited default is rejected rather than
+///   discarded or wrapped.
+///
+/// Arms otherwise keep their own constraints and descriptions, so an item
+/// arm lowers exactly as the same arm does in a property-level union.
+/// Presence and generation are read through the arms
+/// ([`PropertyAtom::is_required`]), not copied onto the container.
+fn apply_union_postfix(
+    mut arms: Vec<PropertyAtom>,
+    reference: NamedReference,
+    site: &SchemaReferenceSite,
+    definition: &SchemaReferenceSite,
+) -> Result<ExpandedDef, SchemaError> {
+    let NamedReference {
+        name,
+        is_array,
+        constraints,
+        array_constraints,
+        description,
+        ..
+    } = reference;
+    let reject = |rejection: SchemaUnionRejection| SchemaError::UnionReference {
+        name: name.clone(),
+        rejection: Box::new(rejection),
+        site: site.clone(),
+        definition: Box::new(definition.clone()),
+    };
+
+    if !is_array {
+        if let Some(rejected) = constraints
+            .iter()
+            .chain(&array_constraints)
+            .find(|constraint| !is_union_marker(constraint))
+        {
+            return Err(reject(SchemaUnionRejection::Constraint {
+                keyword: rejected.keyword().to_string(),
+                array_level: false,
+            }));
+        }
+        let (value_origins, array_origins) =
+            authored_origins(&constraints, &array_constraints, &site.source, &site.path);
+        return Ok(ExpandedDef::Single(
+            Box::new(PropertyAtom {
+                ty: TypeExpr::Union(arms),
+                is_array: false,
+                constraints,
+                array_constraints,
+                description,
+            }),
+            AtomProvenance {
+                value: value_origins,
+                array: array_origins,
+                shape: Vec::new(),
+            },
+        ));
+    }
+
+    let use_site: Vec<Constraint> = constraints.into_iter().chain(array_constraints).collect();
+    if let Some(rejected) = use_site
+        .iter()
+        .find(|constraint| !is_union_marker(constraint) && !is_array_container_constraint(constraint))
+    {
+        return Err(reject(SchemaUnionRejection::Constraint {
+            keyword: rejected.keyword().to_string(),
+            array_level: true,
+        }));
+    }
+    if let Some(arm) = arms.iter().position(arm_is_array) {
+        return Err(reject(SchemaUnionRejection::ArrayArm { arm }));
+    }
+
+    // An arm's default is a property-level value. On an array of the union it
+    // can only be the array's default, so it lifts when it is one.
+    let mut lifted: Vec<Tagged> = Vec::new();
+    for (index, arm) in arms.iter_mut().enumerate() {
+        for default in take_arm_defaults(arm) {
+            if !default.is_array() {
+                return Err(reject(SchemaUnionRejection::ScalarDefault {
+                    arm: index,
+                    value: default,
+                }));
+            }
+            lifted.push((
+                Constraint::Default(default),
+                SchemaConstraintOrigin {
+                    source: definition.source.clone(),
+                    path: definition.path.union_arm(index),
+                    keyword: "default".to_string(),
+                    occurrence: 0,
+                    span: None,
+                },
+            ));
+        }
+    }
+
+    let (_, use_origins) = authored_origins(&[], &use_site, &site.source, &site.path);
+    let merge_site = MergeSite { name: &name, site };
+    let merged = merge_constraints(lifted, use_site.into_iter().zip(use_origins).collect(), &merge_site)?;
+    let (array_constraints, array_origins) = merged.into_iter().unzip();
+    Ok(ExpandedDef::Single(
+        Box::new(PropertyAtom {
+            ty: TypeExpr::Union(arms),
+            is_array: true,
+            constraints: Vec::new(),
+            array_constraints,
+            description,
+        }),
+        AtomProvenance {
+            value: Vec::new(),
+            array: array_origins,
+            shape: Vec::new(),
+        },
+    ))
+}
+
+/// A property marker a union reference accepts without `[]`.
+fn is_union_marker(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Required | Constraint::Generated | Constraint::Eager
+    )
+}
+
+/// A constraint the converter accepts on an array container besides the
+/// property markers (mirrors `convert::apply_array_constraints`).
+fn is_array_container_constraint(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::MinItems(_)
+            | Constraint::MaxItems(_)
+            | Constraint::Unique
+            | Constraint::Default(_)
+            | Constraint::Example(_)
+    )
+}
+
+/// Whether a union arm's outer value is an array, looking through a nested
+/// postfixed union arm. Arrays inside an object arm do not count.
+fn arm_is_array(arm: &PropertyAtom) -> bool {
+    arm.is_array || arm.union_arms().is_some_and(|arms| arms.iter().any(arm_is_array))
+}
+
+/// Removes every default `arm` supplies to its containing property, looking
+/// through a nested non-array postfixed union arm, and returns them.
+fn take_arm_defaults(arm: &mut PropertyAtom) -> Vec<Value> {
+    let mut defaults = Vec::new();
+    for list in [&mut arm.constraints, &mut arm.array_constraints] {
+        list.retain(|constraint| match constraint {
+            Constraint::Default(value) => {
+                defaults.push(value.clone());
+                false
+            }
+            _ => true,
+        });
+    }
+    if let TypeExpr::Union(nested) = &mut arm.ty {
+        for nested_arm in nested {
+            defaults.extend(take_arm_defaults(nested_arm));
+        }
+    }
+    defaults
 }
 
 /// What a use-site `min`/`max` counts once the target is known.
@@ -2245,6 +2434,7 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
     match &atom.ty {
         TypeExpr::Imported { .. } => true,
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
+        TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
         TypeExpr::Primitive(_) => false,
     }
 }

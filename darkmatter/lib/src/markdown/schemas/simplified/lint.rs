@@ -187,6 +187,14 @@ fn lint_atom(
         // passive lint never performs; linting the resolved schema judges its
         // candidates against the resolved target.
         TypeExpr::Imported { .. } => return Ok(()),
+        // A resolved union reference carries no `suggest` of its own; its arms
+        // keep theirs.
+        TypeExpr::Union(arms) => {
+            for (arm_index, arm) in arms.iter().enumerate() {
+                lint_atom(arm, root_arm, Some(arm_index), property_path, problems)?;
+            }
+            return Ok(());
+        }
         TypeExpr::Primitive(_) => {}
     }
     let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {

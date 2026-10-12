@@ -123,7 +123,9 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
                         }
                     }
                     TypeExpr::InlineObject(nested) => walk_shape(nested, out),
-                    TypeExpr::Primitive(_) => {}
+                    // Only the resolver produces a union type; an authored
+                    // schema writes the reference itself.
+                    TypeExpr::Union(_) | TypeExpr::Primitive(_) => {}
                 }
             }
         }

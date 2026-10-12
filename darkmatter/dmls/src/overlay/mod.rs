@@ -728,8 +728,9 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
 }
 
 /// The schema files a resolution error names: the referenced schema that
-/// failed, the namespace searched for an unknown name, and every file that
-/// authored a reference or a conflicting constraint.
+/// failed, the namespace searched for an unknown name, the file defining a
+/// union a reference misuses, and every file that authored a reference or a
+/// conflicting constraint.
 fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
     fn file(source: &SchemaSourceId, out: &mut Vec<PathBuf>) {
         if let SchemaSourceId::File(path) = source {
@@ -750,6 +751,10 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
             SchemaError::ConstraintConflict { site, constraints, .. } => {
                 file(&site.source, out);
                 constraints.iter().for_each(|origin| file(&origin.source, out));
+            }
+            SchemaError::UnionReference { site, definition, .. } => {
+                file(&site.source, out);
+                file(&definition.source, out);
             }
             _ => {}
         }

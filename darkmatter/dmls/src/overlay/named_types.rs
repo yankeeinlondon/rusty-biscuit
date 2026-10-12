@@ -20,7 +20,8 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
 use darkmatter::markdown::schemas::{
-    PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape, SchemaSourceMap, SchemaSourcePath,
+    PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
     parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
@@ -300,14 +301,23 @@ fn collect_definition_targets(definition: &PropertyDef, targets: &mut BTreeSet<S
         PropertyDef::Union(atoms) => atoms.as_slice(),
     };
     for atom in atoms {
-        match &atom.ty {
-            TypeExpr::Imported { .. } if atom.ty.is_local_reference() => {}
-            TypeExpr::Imported { reference, .. } => {
-                targets.insert(reference.trim().to_string());
-            }
-            TypeExpr::InlineObject(nested) => collect_shape_targets(nested, targets),
-            TypeExpr::Primitive(_) => {}
+        collect_atom_targets(atom, targets);
+    }
+}
+
+fn collect_atom_targets(atom: &PropertyAtom, targets: &mut BTreeSet<String>) {
+    match &atom.ty {
+        TypeExpr::Imported { .. } if atom.ty.is_local_reference() => {}
+        TypeExpr::Imported { reference, .. } => {
+            targets.insert(reference.trim().to_string());
         }
+        TypeExpr::InlineObject(nested) => collect_shape_targets(nested, targets),
+        TypeExpr::Union(arms) => {
+            for arm in arms {
+                collect_atom_targets(arm, targets);
+            }
+        }
+        TypeExpr::Primitive(_) => {}
     }
 }
 

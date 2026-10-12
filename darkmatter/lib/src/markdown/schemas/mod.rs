@@ -117,7 +117,8 @@ pub use simplified::{
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaCursor, SchemaCursorRole,
     SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
-    SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
+    SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind, SchemaValueNode,
+    SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
     decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_union_arm_path, lint_suggestions, mapping_separator,
@@ -125,6 +126,7 @@ pub use simplified::{
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
+    Alternative, flattened_alternatives,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };
@@ -1055,8 +1057,9 @@ impl EffectiveSchema {
                     ),
                 }
             }
-            // Ordinary object schema. Narrow any discriminated property-level
-            // union to its selected arm; unrelated properties are untouched.
+            // Ordinary object schema. Narrow any discriminated union (property,
+            // item, or nested field) to its selected arm; other locations are
+            // untouched.
             None => {
                 let problems = validate::collect_problems_with_anchors(
                     &self.validator,
@@ -1064,7 +1067,7 @@ impl EffectiveSchema {
                     positions,
                     anchors,
                 );
-                validate::narrow_property_union_problems(
+                validate::narrow_discriminated_union_problems(
                     &self.json_schema,
                     instance,
                     positions,
@@ -1077,9 +1080,10 @@ impl EffectiveSchema {
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
         // the rendered message (#9) are suppressed so the output stays additive.
         for problem in &mut problems {
-            problem.description = validate::resolve_problem_description(&self.json_schema, problem)
-                .filter(|desc| !desc.trim().is_empty())
-                .filter(|desc| *desc != problem.message);
+            problem.description =
+                validate::resolve_problem_description(&self.json_schema, problem, instance)
+                    .filter(|desc| !desc.trim().is_empty())
+                    .filter(|desc| *desc != problem.message);
         }
         ValidationReport {
             valid: problems.is_empty(),

@@ -6,7 +6,11 @@
 //! completion data for a property, without mutating or re-resolving the
 //! schema. See the *Shell Completions Integration* section of the spec.
 //!
-//! Three property categories are surfaced:
+//! [`for_list_item`], [`for_property_value`], and [`alternatives_for_def`]
+//! answer a second question for editors: which keys and scalar values to
+//! offer inside one incomplete union value, such as an element of `U[]`.
+//!
+//! Three property categories are surfaced by [`for_property`]:
 //!
 //! - [`CompletionKind::File`] — filesystem paths filtered by the property's
 //!   `match(...)` groups. The caller (shell-completion generator) walks the
@@ -32,11 +36,21 @@
 //! }
 //! ```
 
+use std::borrow::Cow;
+use std::sync::LazyLock;
+
+use serde_json::Value;
+
 use super::EffectiveSchema;
+use super::discriminant::select_literal_discriminant_arm;
+use super::simplified::query::{Alternative, flattened_alternatives, yaml_double_quote};
 use super::simplified::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr,
+    TypeExpr, suggestions_for_def, to_json_schema,
 };
+use super::validate::ValidatorCache;
+
+static ALTERNATIVE_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
 
 /// Completion data derived from a single property.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,7 +58,8 @@ pub struct CompletionSuggestion {
     /// Property name (key in frontmatter).
     pub property: String,
     /// `true` when the property is declared with `[]`, i.e. the value is an
-    /// array of completable atoms.
+    /// array of completable atoms. An array of a union (`U[]`) counts, with
+    /// the completable arm describing one element.
     pub is_array: bool,
     /// Optional description from `-> ...` syntax.
     pub description: Option<String>,
@@ -82,7 +97,9 @@ pub enum CompletionKind {
 ///
 /// For a property-level union, the first atom whose type is completable wins —
 /// the spec's intent of "treat the property as that type for the purpose of
-/// completion" without merging competing arms.
+/// completion" without merging competing arms. A resolved union-typed
+/// reference (`U`, `U(required)`, `U[]`) is read through its arms the same
+/// way.
 ///
 /// For a **root-level union**, `property` is gathered from every inline arm
 /// that declares it. When every contributing arm is a `file`, each arm's
@@ -149,7 +166,7 @@ fn completable_in_shape(shape: &SchemaShape) -> Vec<String> {
 /// "first completable arm" rule. Unresolved [`SchemaArm::FileRef`] arms are
 /// skipped.
 fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<CompletionSuggestion> {
-    let atoms: Vec<&PropertyAtom> = arms
+    let alternatives: Vec<Alternative<'_>> = arms
         .iter()
         .filter_map(|arm| match arm {
             SchemaArm::Inline(shape) => shape.properties.get(property),
@@ -158,53 +175,60 @@ fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<Completio
         .filter_map(first_completable_atom)
         .collect();
 
-    let first = *atoms.first()?;
-    let all_file = atoms
+    let first = *alternatives.first()?;
+    let all_file = alternatives
         .iter()
-        .all(|atom| matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File)));
+        .all(|alternative| matches!(&alternative.atom.ty, TypeExpr::Primitive(SimplifiedType::File)));
     if all_file {
-        let mut alternatives: Vec<Vec<Vec<String>>> = Vec::new();
-        for atom in &atoms {
-            let groups = match_groups(atom);
-            if !groups.is_empty() && !alternatives.contains(&groups) {
-                alternatives.push(groups);
+        let mut file_alternatives: Vec<Vec<Vec<String>>> = Vec::new();
+        for alternative in &alternatives {
+            let groups = match_groups(alternative.atom);
+            if !groups.is_empty() && !file_alternatives.contains(&groups) {
+                file_alternatives.push(groups);
             }
         }
         return Some(CompletionSuggestion {
             property: property.to_string(),
-            is_array: atoms.iter().any(|atom| atom.is_array),
-            description: first.description.clone(),
-            generated: atoms.iter().all(|atom| atom_is_generated(atom)),
-            kind: CompletionKind::File { alternatives },
+            is_array: alternatives.iter().any(|alternative| alternative.is_array),
+            description: first.atom.description.clone(),
+            generated: alternatives
+                .iter()
+                .all(|alternative| atom_is_generated(alternative.atom)),
+            kind: CompletionKind::File {
+                alternatives: file_alternatives,
+            },
         });
     }
 
     Some(CompletionSuggestion {
         property: property.to_string(),
         is_array: first.is_array,
-        description: first.description.clone(),
-        generated: atom_is_generated(first),
-        kind: kind_for_atom(first)?,
+        description: first.atom.description.clone(),
+        generated: atom_is_generated(first.atom),
+        kind: kind_for_atom(first.atom)?,
     })
 }
 
 fn suggestion_from_def(property: &str, def: &PropertyDef) -> Option<CompletionSuggestion> {
-    let atom = first_completable_atom(def)?;
+    let alternative = first_completable_atom(def)?;
+    let atom = alternative.atom;
     let kind = kind_for_atom(atom)?;
     Some(CompletionSuggestion {
         property: property.to_string(),
-        is_array: atom.is_array,
+        is_array: alternative.is_array,
         description: atom.description.clone(),
         generated: atom_is_generated(atom),
         kind,
     })
 }
 
-fn first_completable_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
-    match def {
-        PropertyDef::Single(atom) => is_completable(&atom.ty).then_some(atom),
-        PropertyDef::Union(atoms) => atoms.iter().find(|a| is_completable(&a.ty)),
-    }
+/// The first completable alternative of `def`, looking through a resolved
+/// union-typed reference so `U(required)` and `U[]` complete like the
+/// property-level union `U` expands to.
+fn first_completable_atom(def: &PropertyDef) -> Option<Alternative<'_>> {
+    flattened_alternatives(def)
+        .into_iter()
+        .find(|alternative| is_completable(&alternative.atom.ty))
 }
 
 fn atom_is_generated(atom: &PropertyAtom) -> bool {
@@ -229,8 +253,9 @@ fn is_completable(ty: &TypeExpr) -> bool {
         // Inline objects don't have a single completable value at the
         // property level — they describe a typed shape. Imported types are
         // resolved before completion runs; an unresolved one is not
-        // completable here.
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => false,
+        // completable here. A union never reaches here: callers read its
+        // arms through `flattened_alternatives`.
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => false,
     }
 }
 
@@ -248,7 +273,7 @@ fn match_groups(atom: &PropertyAtom) -> Vec<Vec<String>> {
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
     let ty = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => return None,
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => return None,
     };
     match ty {
         SimplifiedType::File => {
@@ -283,6 +308,301 @@ fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
             format: "time-of-day (HH:MM[:SS][±HH:MM])",
         }),
         _ => None,
+    }
+}
+
+/// Where an incomplete value sits relative to its property, for
+/// [`alternatives_for_def`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlternativeSite {
+    /// One element of an array property (`U[]`, `T[]`, or a union of array
+    /// arms): the alternatives are the element's.
+    Item,
+    /// The property's own value: the alternatives are the non-array atoms of
+    /// the property (a property-level union, or a `U` / `U(required)`
+    /// reference).
+    Value,
+}
+
+/// The keys and values an editor may offer for one incomplete union value,
+/// combined across every applicable alternative, or narrowed to one when an
+/// authored literal tag selects it.
+///
+/// Advisory only: nothing here validates, coerces, or selects an arm by
+/// closeness, and keys the value already carries are not removed — the caller
+/// filters by what is authored and by the typed prefix.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlternativeCompletion {
+    /// `true` for an [`AlternativeSite::Item`] query: completion inserts one
+    /// element, never a whole array.
+    pub is_array: bool,
+    /// The alternative an unambiguous literal tag on an object value selected
+    /// (an index into the site's alternatives, in declaration order with
+    /// nested unions flattened). `None` when the choices are combined.
+    pub selected_arm: Option<usize>,
+    /// Keys of the applicable inline-object alternatives, deduplicated in
+    /// alternative-then-declaration order.
+    pub keys: Vec<AlternativeKey>,
+    /// Values of the applicable scalar alternatives — `enum` members,
+    /// `literal(...)` values, and lint-valid `suggest(...)` candidates —
+    /// deduplicated by insertion text in alternative order.
+    pub values: Vec<AlternativeValue>,
+}
+
+/// One key offered by an inline-object alternative.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlternativeKey {
+    /// Mapping key.
+    pub name: String,
+    /// `true` when every alternative offering the key requires it.
+    pub required: bool,
+    /// The description of the key's first declaration.
+    pub description: Option<String>,
+    /// The alternatives that declare the key.
+    pub arms: Vec<usize>,
+}
+
+/// One scalar value offered by a scalar alternative.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlternativeValue {
+    /// Display label.
+    pub label: String,
+    /// YAML-safe insertion text: double-quoted for strings.
+    pub insert_text: String,
+    /// The first alternative offering the value.
+    pub arm: usize,
+}
+
+/// Completion for one element of the array property `property`, given the
+/// element as authored so far (`Value::Null` for a missing or empty item).
+///
+/// Returns `None` when the property is unknown, is not an array, or the
+/// effective schema has no SimplifiedSchema projection. A root-level union
+/// contributes the property's alternatives from every inline arm that
+/// declares it. Each element is judged on its own, so neighboring items can
+/// narrow to different alternatives. See [`alternatives_for_def`].
+pub fn for_list_item(
+    effective: &EffectiveSchema,
+    property: &str,
+    item: &Value,
+) -> Option<AlternativeCompletion> {
+    let def = property_def(effective, property)?;
+    alternatives_for_def(&def, AlternativeSite::Item, item)
+}
+
+/// Completion for the value of `property` itself, given the value as
+/// authored so far. A union used as a property completes exactly as the same
+/// union used as an array element does through [`for_list_item`], apart from
+/// `is_array`.
+pub fn for_property_value(
+    effective: &EffectiveSchema,
+    property: &str,
+    value: &Value,
+) -> Option<AlternativeCompletion> {
+    let def = property_def(effective, property)?;
+    alternatives_for_def(&def, AlternativeSite::Value, value)
+}
+
+/// Whether `value` is a valid instance of one leaf alternative (an
+/// [`Alternative::atom`]), lowered on its own as a present value: the
+/// optional-property null wrapper is never added, so `null` matches only an
+/// alternative that itself accepts `null`, as inside an item union.
+///
+/// Editors use it to name the alternative a value matches only when exactly
+/// one accepts it. It is structural and passive: a `file` alternative is
+/// judged by syntax, never by probing the filesystem, so it must not authorize
+/// a transformation.
+pub fn alternative_accepts(atom: &PropertyAtom, value: &Value) -> bool {
+    let mut present = atom.clone();
+    present.constraints.push(Constraint::Required);
+    let mut shape = SchemaShape::default();
+    shape
+        .properties
+        .insert("value".to_string(), PropertyDef::Single(present));
+    let Ok(schema) = to_json_schema(&SimplifiedSchema::Single(shape)) else {
+        return false;
+    };
+    ALTERNATIVE_VALIDATOR_CACHE
+        .structural_validator_for(&schema)
+        .is_ok_and(|validator| validator.is_valid(&serde_json::json!({ "value": value })))
+}
+
+/// Completion for one incomplete value of `def` at `site`, given the value as
+/// authored so far.
+///
+/// The applicable alternatives follow the authored value's JSON kind, which
+/// no alternative of another kind can ever accept: `null` keeps every
+/// alternative; an object keeps the inline-object alternatives and narrows to
+/// one when [`select_literal_discriminant_arm`] picks it; a string, number, or
+/// boolean keeps the scalar alternatives; an array keeps none. A missing,
+/// unknown, duplicate, or conflicting tag keeps the combined choices.
+///
+/// Returns `None` when `def` has no alternative at `site`.
+///
+/// ## Notes
+///
+/// Passive: reads the resolved definition only, with no I/O or expression
+/// evaluation.
+pub fn alternatives_for_def(
+    def: &PropertyDef,
+    site: AlternativeSite,
+    value: &Value,
+) -> Option<AlternativeCompletion> {
+    let is_array = site == AlternativeSite::Item;
+    let alternatives: Vec<&PropertyAtom> = flattened_alternatives(def)
+        .into_iter()
+        .filter(|alternative| alternative.is_array == is_array)
+        .map(|alternative| alternative.atom)
+        .collect();
+    if alternatives.is_empty() {
+        return None;
+    }
+
+    let selected_arm = value.is_object().then(|| {
+        let projections: Vec<Value> = alternatives.iter().map(|atom| discriminant_json(atom)).collect();
+        select_literal_discriminant_arm(&projections, value)
+    });
+    let selected_arm = selected_arm.flatten();
+
+    let mut completion = AlternativeCompletion {
+        is_array,
+        selected_arm,
+        keys: Vec::new(),
+        values: Vec::new(),
+    };
+    for (arm, atom) in alternatives.iter().enumerate() {
+        if selected_arm.is_some_and(|selected| selected != arm) || !applies_to(atom, value) {
+            continue;
+        }
+        match &atom.ty {
+            TypeExpr::InlineObject(shape) => add_keys(&mut completion.keys, shape, arm),
+            TypeExpr::Primitive(_) => add_values(&mut completion.values, atom, arm),
+            // An unresolved import has no shape to offer; flattening never
+            // yields a union.
+            TypeExpr::Imported { .. } | TypeExpr::Union(_) => {}
+        }
+    }
+    Some(completion)
+}
+
+/// `property`'s definition; across a root union, every declaring inline arm's
+/// atoms as one property-level union.
+fn property_def<'a>(effective: &'a EffectiveSchema, property: &str) -> Option<Cow<'a, PropertyDef>> {
+    match effective.simplified.as_ref()? {
+        SimplifiedSchema::Single(shape) => shape.properties.get(property).map(Cow::Borrowed),
+        SimplifiedSchema::Union(arms) => {
+            let mut atoms: Vec<PropertyAtom> = Vec::new();
+            for arm in arms {
+                let SchemaArm::Inline(shape) = arm else {
+                    continue;
+                };
+                let Some(def) = shape.properties.get(property) else {
+                    continue;
+                };
+                let declared = match def {
+                    PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                    PropertyDef::Union(atoms) => atoms.as_slice(),
+                };
+                for atom in declared {
+                    if !atoms.contains(atom) {
+                        atoms.push(atom.clone());
+                    }
+                }
+            }
+            match atoms.len() {
+                0 => None,
+                1 => atoms.pop().map(|atom| Cow::Owned(PropertyDef::Single(atom))),
+                _ => Some(Cow::Owned(PropertyDef::Union(atoms))),
+            }
+        }
+    }
+}
+
+/// Whether an alternative can accept a value of the authored JSON kind.
+fn applies_to(atom: &PropertyAtom, value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Object(_) => matches!(atom.ty, TypeExpr::InlineObject(_)),
+        Value::String(_) | Value::Number(_) | Value::Bool(_) => matches!(atom.ty, TypeExpr::Primitive(_)),
+        Value::Array(_) => false,
+    }
+}
+
+/// The minimal JSON [`select_literal_discriminant_arm`] reads: an inline
+/// object's `literal(...)` keys as consts. A scalar alternative projects to
+/// `{}` so indexes stay aligned.
+fn discriminant_json(atom: &PropertyAtom) -> Value {
+    let TypeExpr::InlineObject(shape) = &atom.ty else {
+        return serde_json::json!({});
+    };
+    let mut properties = serde_json::Map::new();
+    for (key, def) in &shape.properties {
+        if let PropertyDef::Single(child) = def
+            && let Some(value) = child.literal_value()
+        {
+            properties.insert(key.clone(), serde_json::json!({ "const": value }));
+        }
+    }
+    serde_json::json!({ "properties": properties })
+}
+
+fn add_keys(keys: &mut Vec<AlternativeKey>, shape: &SchemaShape, arm: usize) {
+    for (name, def) in &shape.properties {
+        let required = match def {
+            PropertyDef::Single(atom) => atom.is_required(),
+            PropertyDef::Union(atoms) => atoms.iter().any(PropertyAtom::is_required),
+        };
+        match keys.iter_mut().find(|key| key.name == *name) {
+            Some(key) => {
+                key.required &= required;
+                key.arms.push(arm);
+            }
+            None => keys.push(AlternativeKey {
+                name: name.clone(),
+                required,
+                description: def_description(def),
+                arms: vec![arm],
+            }),
+        }
+    }
+}
+
+fn def_description(def: &PropertyDef) -> Option<String> {
+    match def {
+        PropertyDef::Single(atom) => atom.description.clone(),
+        PropertyDef::Union(atoms) => atoms.iter().find_map(|atom| atom.description.clone()),
+    }
+}
+
+fn add_values(values: &mut Vec<AlternativeValue>, atom: &PropertyAtom, arm: usize) {
+    let mut push = |label: String, insert_text: String| {
+        if !values.iter().any(|value| value.insert_text == insert_text) {
+            values.push(AlternativeValue {
+                label,
+                insert_text,
+                arm,
+            });
+        }
+    };
+    if let Some(literal) = atom.literal_value() {
+        match literal {
+            Value::String(text) => push(text.clone(), yaml_double_quote(text)),
+            other => push(other.to_string(), other.to_string()),
+        }
+    }
+    for constraint in &atom.constraints {
+        if let Constraint::Members(members) = constraint {
+            for member in members {
+                push(member.clone(), yaml_double_quote(member));
+            }
+        }
+    }
+    // `suggestions_for_def` lints the arm's candidates and drops invalid ones;
+    // the leaf name only labels lint context.
+    if let Some(query) = suggestions_for_def("item", &PropertyDef::Single(atom.clone())) {
+        for item in query.items {
+            push(item.label, item.insert_text);
+        }
     }
 }
 

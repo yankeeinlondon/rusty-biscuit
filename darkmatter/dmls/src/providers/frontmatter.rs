@@ -14,13 +14,16 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::schemas::completion::{
+    AlternativeKey, AlternativeSite, alternative_accepts, alternatives_for_def,
+};
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor, mapping_separator,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
     schema_constraint_descriptors, schema_type_descriptors,
-    select_literal_discriminant_arm, suggestions_for_def,
+    flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -33,7 +36,7 @@ use lsp_types::{
 use super::DocumentContext;
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
-    doc_links, expressions,
+    doc_links, expressions, format_dotted,
 };
 use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, semantic_type_regions};
@@ -81,6 +84,9 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
+            if let Some(items) = union_item_completions(ctx, ast, offset, line_start, indent, trimmed) {
+                return items;
+            }
             if let Some(items) = block_array_suggestions(ctx, offset, line_start, indent, trimmed) {
                 return items;
             }
@@ -754,8 +760,10 @@ fn value_completions(
     let mut items = Vec::new();
 
     // Each authored `literal(x)` value, preselected, with YAML insertion text
-    // matching the value's scalar type.
-    for atom in atoms_of(def) {
+    // matching the value's scalar type. A union-typed reference contributes
+    // its arms.
+    let alternatives = flattened_alternatives(def);
+    for atom in alternatives.iter().map(|alternative| alternative.atom) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
             if insert.starts_with(partial)
@@ -775,9 +783,10 @@ fn value_completions(
     // Scaffolds from EVERY non-Literal arm (enum members, boolish `true`/`false`,
     // file paths), accumulated with the items above rather than stopping at the
     // first completable arm — otherwise a mixed union would silently drop its
-    // later arms. `atoms_of` is in declaration order, so a preselected literal
-    // precedes any colliding scaffold and survives `dedup_completions` below.
-    for atom in atoms_of(def) {
+    // later arms. Alternatives are in declaration order, so a preselected
+    // literal precedes any colliding scaffold and survives `dedup_completions`
+    // below.
+    for atom in alternatives.iter().map(|alternative| alternative.atom) {
         if let Some(members) = enum_members(atom) {
             items.extend(
                 members
@@ -1124,6 +1133,150 @@ fn block_array_suggestions(
     suggestion_completions(ctx, &path, item_start, offset, after_dash)
 }
 
+/// Completion for one block-sequence item of an array whose items are a union
+/// (`U[]`, or a property union of several array types), from the library's
+/// [`alternatives_for_def`].
+///
+/// On a `- ` line the item is still empty, so the keys of every object
+/// alternative and the values of every scalar alternative are offered
+/// together. On a later line of an object item, the item's authored keys are
+/// excluded and an unambiguous literal tag in the item narrows the keys to
+/// its alternative; anything less keeps the combined keys. `None` hands the
+/// cursor to the ordinary item and nested-key completion.
+fn union_item_completions(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    trimmed: &str,
+) -> Option<Vec<CompletionItem>> {
+    let shape = known_shape(ctx);
+    let (marker_len, partial) = match trimmed.strip_prefix("- ") {
+        Some(after_dash) => (2, after_dash),
+        None if trimmed == "-" => (1, ""),
+        None => return object_item_key_completions(ctx, ast, &shape, offset, line_start, indent, trimmed),
+    };
+    let ancestors = enclosing_path(ctx, offset, line_start, indent);
+    let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    let segments = key_segments(&path);
+    let mut memo = ShapeMemo::new(ArrayCrossing::Transparent);
+    let def = def_at_path_ctx(ctx, &shape, &segments, &mut memo)?;
+    if !has_union_items(&def) {
+        return None;
+    }
+    let completion = alternatives_for_def(&def, AlternativeSite::Item, &Value::Null)?;
+    let start = line_start + indent + marker_len;
+    let mut items: Vec<CompletionItem> = completion
+        .values
+        .iter()
+        .filter(|value| value.label.starts_with(partial) || value.insert_text.starts_with(partial))
+        .filter_map(|value| {
+            item(ctx, start, offset, &value.label, &value.insert_text, CompletionItemKind::VALUE, None)
+        })
+        .collect();
+    items.extend(alternative_key_items(ctx, start, offset, &completion.keys, &[], partial));
+    Some(dedup_completions(items))
+}
+
+/// Key completion on a continuation line of a block-sequence object item whose
+/// array holds a union.
+fn object_item_key_completions(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    shape: &SchemaShape,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    partial: &str,
+) -> Option<Vec<CompletionItem>> {
+    let item_index = enclosing_object_item(ctx, ast, line_start, indent)?;
+    let item_path = ast.path_at(item_index);
+    let (FmPathSegment::Index(_), array_path) = item_path.split_last()? else {
+        return None;
+    };
+    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
+    let def = def_at_path_ctx(ctx, shape, array_path, &mut memo)?;
+    if !has_union_items(&def) {
+        return None;
+    }
+    let value = ctx
+        .overlay
+        .and_then(|overlay| overlay.bundle())
+        .and_then(|bundle| navigate_json(&bundle.frontmatter_json, &item_path).cloned())
+        .unwrap_or(Value::Null);
+    let completion = alternatives_for_def(&def, AlternativeSite::Item, &value)?;
+    let present: Vec<&str> = ast
+        .entries()
+        .iter()
+        .filter(|entry| entry.parent == Some(item_index))
+        .map(|entry| entry.key.as_str())
+        .collect();
+    let start = offset - partial.len();
+    Some(alternative_key_items(ctx, start, offset, &completion.keys, &present, partial))
+}
+
+/// The block-sequence object item a continuation line at column `indent`
+/// belongs to: the last item mapping starting before the line at that column,
+/// with no shallower line in between.
+fn enclosing_object_item(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    line_start: usize,
+    indent: usize,
+) -> Option<usize> {
+    let (index, entry) = ast
+        .entries()
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| {
+            matches!(entry.role, FmEntryRole::SequenceItem { .. })
+                && entry.kind == FmValueKind::Mapping
+                && entry.value_span.start < line_start
+                && source_column(ctx.text, entry.value_span.start) == indent
+        })
+        .max_by_key(|(_, entry)| entry.value_span.start)?;
+    let between = ctx.text.get(entry.value_span.start..line_start)?;
+    let leaves_item = between.lines().skip(1).any(|line| {
+        let content = line.trim_start();
+        !content.is_empty() && line.len() - content.len() < indent
+    });
+    (!leaves_item && still_placed(ctx, entry)).then_some(index)
+}
+
+/// Whether `def` is an array whose item has more than one alternative.
+fn has_union_items(def: &PropertyDef) -> bool {
+    flattened_alternatives(def).iter().filter(|alternative| alternative.is_array).count() > 1
+}
+
+/// `FIELD` completions for alternative keys not yet authored, filtered by
+/// `partial` and marked `(required)` when every alternative offering the key
+/// requires it.
+fn alternative_key_items(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    keys: &[AlternativeKey],
+    present: &[&str],
+    partial: &str,
+) -> Vec<CompletionItem> {
+    keys.iter()
+        .filter(|key| key.name.starts_with(partial) && !present.contains(&key.name.as_str()))
+        .filter_map(|key| {
+            let detail = key.required.then(|| "(required)".to_string());
+            item(
+                ctx,
+                start,
+                offset,
+                &key.name,
+                &format!("{}: ", key.name),
+                CompletionItemKind::FIELD,
+                detail,
+            )
+        })
+        .collect()
+}
+
 /// Extracts the current element text and its byte-offset start from a flow-array
 /// value partial (the text after `key:` up to the cursor, starting with `[`).
 ///
@@ -1313,6 +1466,7 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
             TypeExpr::Imported { name, reference } => {
                 named_references::reference_spelling(name, reference, atom.is_array)
             }
+            TypeExpr::Union(_) => "union".to_string(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -1337,14 +1491,185 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
 ///
 /// A scalar sequence item hovers as its item definition, labeled with its
 /// dotted path and ranged on the item value it describes.
+///
+/// Inside an item whose type is a union, the hover names an alternative only
+/// when the authored item is valid against exactly that one; a missing,
+/// invalid, or multiply matching item lists every alternative instead. A
+/// field of an object item resolves through the matching alternative when
+/// there is one, and otherwise through the usual literal-tag selection or the
+/// merged object alternatives.
 fn schema_hover(ctx: &DocumentContext, path: &[FmPathSegment<'_>], entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
     let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    let def = def_at_path_ctx(ctx, &shape, path, &mut memo)?;
-    match &entry.key_span {
-        Some(key_span) => markup_hover(ctx, key_span.clone(), schema_hover_body(&entry.key, &def)?),
-        None => markup_hover(ctx, entry.value_span.clone(), schema_hover_body(&entry.dotted, &def)?),
+    let item = union_item(ctx, &shape, path, &mut memo);
+    let (span, label) = match &entry.key_span {
+        Some(key_span) => (key_span.clone(), entry.key.as_str()),
+        None => (entry.value_span.clone(), entry.dotted.as_str()),
+    };
+    let Some(item) = item else {
+        let def = def_at_path_ctx(ctx, &shape, path, &mut memo)?;
+        return markup_hover(ctx, span, schema_hover_body(label, &def)?);
+    };
+    let field = &path[item.depth..];
+    if field.is_empty() {
+        return markup_hover(ctx, span, union_item_hover_body(label, &item));
     }
+    let matched_shape = item.matched.and_then(|index| match &item.alternatives[index].ty {
+        TypeExpr::InlineObject(arm) => Some(arm),
+        _ => None,
+    });
+    let def = match matched_shape {
+        Some(arm) => Cow::Borrowed(def_at_path(arm, field)?),
+        None => def_at_path_ctx(ctx, &shape, path, &mut memo)?,
+    };
+    let body = schema_hover_body(label, &def)?;
+    let note = union_item_note(&format_dotted(&path[..item.depth]), &item);
+    markup_hover(ctx, span, format!("{body}\n\n{note}"))
+}
+
+/// The nearest sequence item enclosing a hovered path, when that item's type
+/// is a union, with the alternative its authored value matches.
+struct UnionItem {
+    /// The item's flattened alternatives, in declaration order.
+    alternatives: Vec<PropertyAtom>,
+    /// How the authored item relates to the alternatives.
+    status: ItemMatch,
+    /// The alternative `status` names when it is [`ItemMatch::Unique`].
+    matched: Option<usize>,
+    /// The length of the path prefix that addresses the item.
+    depth: usize,
+}
+
+/// How an authored union item relates to its alternatives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemMatch {
+    /// The item is absent or `null`.
+    Missing,
+    /// No alternative accepts the item.
+    None,
+    /// Exactly one alternative accepts the item.
+    Unique,
+    /// This many alternatives accept the item.
+    Several(usize),
+}
+
+fn union_item<'p>(
+    ctx: &DocumentContext,
+    shape: &SchemaShape,
+    path: &[FmPathSegment<'p>],
+    memo: &mut ShapeMemo<'p>,
+) -> Option<UnionItem> {
+    let index = path.iter().rposition(|segment| matches!(segment, FmPathSegment::Index(_)))?;
+    let item_path = &path[..=index];
+    let PropertyDef::Union(alternatives) = def_at_path_ctx(ctx, shape, item_path, memo)?.into_owned()
+    else {
+        return None;
+    };
+    let value = ctx
+        .overlay
+        .and_then(|overlay| overlay.bundle())
+        .and_then(|bundle| navigate_json(&bundle.frontmatter_json, item_path).cloned())
+        .unwrap_or(Value::Null);
+    let (status, matched) = if value.is_null() {
+        (ItemMatch::Missing, None)
+    } else {
+        let accepting: Vec<usize> = alternatives
+            .iter()
+            .enumerate()
+            .filter(|(_, alternative)| alternative_accepts(alternative, &value))
+            .map(|(index, _)| index)
+            .collect();
+        match accepting.as_slice() {
+            [] => (ItemMatch::None, None),
+            [only] => (ItemMatch::Unique, Some(*only)),
+            several => (ItemMatch::Several(several.len()), None),
+        }
+    };
+    Some(UnionItem { alternatives, status, matched, depth: index + 1 })
+}
+
+/// Hover body for a union item hovered directly (a scalar item).
+fn union_item_hover_body(label: &str, item: &UnionItem) -> String {
+    match item.matched {
+        Some(index) => {
+            let arm = PropertyDef::Single(item.alternatives[index].clone());
+            let details = schema_hover_details(&arm).unwrap_or_default();
+            format!(
+                "**`{label}`**\n\nMatches alternative {} of {}\n\n{details}",
+                index + 1,
+                item.alternatives.len()
+            )
+        }
+        None => format!("**`{label}`**\n\n{}", union_item_alternatives(item)),
+    }
+}
+
+/// The note under a field's hover naming the alternative its item matches,
+/// or listing every alternative when no single one does.
+fn union_item_note(item_label: &str, item: &UnionItem) -> String {
+    match item.matched {
+        Some(index) => format!(
+            "Item `{item_label}` matches alternative {} of {}:\n{}",
+            index + 1,
+            item.alternatives.len(),
+            alternative_line(&item.alternatives[index])
+        ),
+        None => format!("Item `{item_label}`: {}", union_item_alternatives(item)),
+    }
+}
+
+/// Why no single alternative was chosen, followed by every alternative.
+fn union_item_alternatives(item: &UnionItem) -> String {
+    let count = item.alternatives.len();
+    let reason = match item.status {
+        ItemMatch::Missing => format!("no value; one of {count} alternatives:"),
+        ItemMatch::None => format!("matches none of the {count} alternatives:"),
+        ItemMatch::Several(matching) => format!("matches {matching} of the {count} alternatives:"),
+        ItemMatch::Unique => format!("one of {count} alternatives:"),
+    };
+    let refs: Vec<&PropertyAtom> = item.alternatives.iter().collect();
+    format!("{reason}\n{}", alternative_lines(&refs))
+}
+
+/// One Markdown list line per alternative.
+fn alternative_lines(alternatives: &[&PropertyAtom]) -> String {
+    alternatives
+        .iter()
+        .map(|alternative| alternative_line(alternative))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A list line naming an alternative's type (an object's keys) and its
+/// description.
+fn alternative_line(alternative: &PropertyAtom) -> String {
+    let mut line = match &alternative.ty {
+        TypeExpr::Primitive(ty) => format!("- **{}", ty.as_keyword()),
+        TypeExpr::InlineObject(_) => "- **object".to_string(),
+        TypeExpr::Imported { name, reference } => format!(
+            "- **{}",
+            named_references::reference_spelling(name, reference, alternative.is_array)
+        ),
+        // Callers pass flattened alternatives.
+        TypeExpr::Union(_) => "- **union".to_string(),
+    };
+    if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
+        line.push_str("[]");
+    }
+    line.push_str("**");
+    if let TypeExpr::InlineObject(shape) = &alternative.ty {
+        let keys: Vec<String> = shape.properties.keys().map(|key| format!("`{key}`")).collect();
+        if !keys.is_empty() {
+            line.push_str(&format!(" with {}", keys.join(", ")));
+        }
+    }
+    if let Some(value) = alternative.literal_value() {
+        line.push_str(&format!(" {}", hover_italic(&value.to_string())));
+    }
+    if let Some(description) = &alternative.description {
+        line.push_str(&format!(" — {description}"));
+    }
+    line
 }
 
 /// The Markdown body for a schema-declared property's hover.
@@ -1360,7 +1685,9 @@ pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> 
 }
 
 /// The schema-hover body **without** the leading `**`key`**` heading: type,
-/// required, eager, enum, default, and description. Callers that already display the
+/// required, eager, enum, default, and description. A union-typed reference
+/// (`U[]`, `U(required)`) is described by its flattened alternatives, each
+/// with its own description, in place of a single type. Callers that already display the
 /// property name in their own header (e.g. the interpolation hover's
 /// `**Expression**` block) use this to avoid repeating the name.
 pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
@@ -1377,6 +1704,19 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
             "Type: **{}**",
             named_references::reference_spelling(name, reference, atom.is_array)
         ),
+        TypeExpr::Union(arms) => {
+            let union = PropertyDef::Union(arms.clone());
+            let alternatives: Vec<&PropertyAtom> = flattened_alternatives(&union)
+                .into_iter()
+                .map(|alternative| alternative.atom)
+                .collect();
+            let lead = if atom.is_array {
+                "Type: **array**, each item one of:"
+            } else {
+                "Type: one of:"
+            };
+            format!("{lead}\n{}", alternative_lines(&alternatives))
+        }
     };
     lines.push(type_line);
 
@@ -1841,13 +2181,13 @@ fn descend(
 ) -> Option<SchemaShape> {
     #[cfg(test)]
     SHAPE_MATERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let atoms = atoms_of(def);
-    // Aligned with `atoms` so a selected discriminant index maps back.
-    let arms: Vec<Option<&SchemaShape>> = atoms
-        .iter()
-        .map(|atom| match &atom.ty {
+    // Aligned with the flattened alternatives so a selected discriminant index
+    // maps back; the object arms of `U[]` are the item's alternatives.
+    let arms: Vec<Option<&SchemaShape>> = flattened_alternatives(def)
+        .into_iter()
+        .map(|alternative| match &alternative.atom.ty {
             TypeExpr::InlineObject(inner)
-                if crossing == ArrayCrossing::Transparent || atom.is_array == item =>
+                if crossing == ArrayCrossing::Transparent || alternative.is_array == item =>
             {
                 Some(inner)
             }
@@ -2006,15 +2346,17 @@ fn def_at_path_ctx<'a, 'p>(
 }
 
 /// The definition of one item of `def`'s array arms, or `None` when no arm is
-/// an array.
+/// an array. The item of an array of a union (`U[]`) is a property-level union
+/// of its flattened alternatives; the container's markers, array constraints,
+/// and description describe the array and are not carried onto the item.
 fn array_item_def(def: &PropertyDef) -> Option<PropertyDef> {
-    let mut items: Vec<PropertyAtom> = atoms_of(def)
-        .iter()
-        .filter(|atom| atom.is_array)
-        .map(|atom| PropertyAtom {
+    let mut items: Vec<PropertyAtom> = flattened_alternatives(def)
+        .into_iter()
+        .filter(|alternative| alternative.is_array)
+        .map(|alternative| PropertyAtom {
             is_array: false,
             array_constraints: Vec::new(),
-            ..atom.clone()
+            ..alternative.atom.clone()
         })
         .collect();
     match items.len() {
@@ -2046,11 +2388,16 @@ fn file_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
 
 /// The shape of the first inline-object arm whose array-ness matches `item`,
 /// if any — the deterministic arm a context-free nested lookup descends
-/// through even when it is not first.
+/// through even when it is not first. The arms of a union-typed reference
+/// count, so `U[]`'s object arms are item arms.
 fn inline_object_shape(def: &PropertyDef, item: bool) -> Option<&SchemaShape> {
-    atoms_of(def).iter().find_map(|atom| match &atom.ty {
-        TypeExpr::InlineObject(inner) if atom.is_array == item => Some(inner),
-        TypeExpr::InlineObject(_) | TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => None,
+    flattened_alternatives(def).into_iter().find_map(|alternative| match &alternative.atom.ty {
+        TypeExpr::InlineObject(inner) if alternative.is_array == item => Some(inner),
+        // Flattening has already replaced a union type with its arms.
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_) => None,
     })
 }
 
@@ -2060,13 +2407,18 @@ fn inline_object_shape(def: &PropertyDef, item: bool) -> Option<&SchemaShape> {
 /// item list while `file[](eager)` writes it to the array list, and the same
 /// split applies to `required`. Reading only one list silently drops the marker
 /// for the other spelling.
+///
+/// A union-typed reference's own markers count, and so do its arms', the way
+/// the library hoists an inherited marker (`U[]` over a `required` arm is a
+/// required property).
 fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) -> bool {
-    atoms_of(def).iter().any(|atom| {
-        atom.constraints
-            .iter()
-            .chain(atom.array_constraints.iter())
-            .any(predicate)
-    })
+    fn atom_declares(atom: &PropertyAtom, predicate: fn(&Constraint) -> bool) -> bool {
+        atom.constraints.iter().chain(atom.array_constraints.iter()).any(predicate)
+            || atom
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(|arm| atom_declares(arm, predicate)))
+    }
+    atoms_of(def).iter().any(|atom| atom_declares(atom, predicate))
 }
 
 /// Whether any arm of a property is required.
@@ -4305,5 +4657,20 @@ mod tests {
         for (text, expected) in cases {
             assert_eq!(hover_italic(text), expected, "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_required_union_reference_activates_authoring_in_its_object_arm() {
+        // `holder: pair(required)` resolves to one atom whose type is the
+        // union; activation must read its object arm to find `def`.
+        let text = "---\n$schema:\n  pair: ['{ def: type-definition }', number]\n  holder: pair(required)\nholder:\n  def: str\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("def: str").unwrap() + "def: str".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label == "string"),
+                "type keyword completion inside the union's object arm: {items:#?}"
+            );
+        });
     }
 }

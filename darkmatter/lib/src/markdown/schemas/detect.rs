@@ -428,9 +428,9 @@ fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
 fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
     match ty {
         TypeExpr::Primitive(p) => Some(*p),
-        // Inline objects and imported types do not unify with any other type
-        // in detection (detecting either is a non-goal of this feature).
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => None,
+        // Inline objects, imported types, and resolved unions do not unify
+        // with any other type in detection (detection never produces them).
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
     }
 }
 
@@ -475,6 +475,11 @@ fn mark_required(def: &mut PropertyDef) {
 ///
 /// Property values are emitted as quoted type-and-constraint strings when
 /// they contain characters that YAML would otherwise interpret.
+///
+/// The output parses back for a detected or passively parsed schema. Detection
+/// never produces a resolved union type ([`TypeExpr::Union`]), whose
+/// [`serialize_property_atom`](super::simplified::serialize_property_atom)
+/// form is display only.
 pub fn schema_to_yaml(schema: &SimplifiedSchema) -> String {
     let mut out = String::from("$schema:\n");
     match schema {

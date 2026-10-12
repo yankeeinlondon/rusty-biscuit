@@ -9,7 +9,10 @@
 //! ## Union selection
 //!
 //! - **Property-level union**: the sole eligible suggestion-bearing atom is
-//!   used (cardinality guarantees at most one). All atoms remain linted.
+//!   used (cardinality guarantees at most one). All atoms remain linted. A
+//!   resolved union-typed reference (`U`, `U(required)`, `U[]`) is read
+//!   through its alternatives the same way; for `U[]` the alternatives are
+//!   the item's, and the query reports `is_array`.
 //! - **Root-level union**: the first declaration-order arm with an eligible
 //!   suggestion-bearing definition for the property is used. All arms remain
 //!   linted.
@@ -56,7 +59,8 @@ pub struct SuggestionItem {
 /// omitted; valid siblings are retained.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuggestionQuery {
-    /// Whether the eligible type is an array form (`string[]` / `number[]`).
+    /// Whether the eligible type is an array form (`string[]` / `number[]`),
+    /// or an alternative of an array of a union (`U[]`).
     ///
     /// When `true`, completion should insert one candidate element at the
     /// cursor — not a collection of suggestions or an entire array.
@@ -95,14 +99,15 @@ pub fn suggestions_for_path(
     property_path: &[&str],
 ) -> Option<SuggestionQuery> {
     let (leaf, ancestors) = property_path.split_last()?;
-    let (atom, root_arm, property_arm) =
-        suggest_atom_and_provenance(schema, ancestors, leaf)?;
+    let (alternative, root_arm) = suggest_atom_and_provenance(schema, ancestors, leaf)?;
+    let atom = alternative.atom;
+    let property_arm = alternative.arm;
     let candidates = atom.constraints.iter().find_map(|c| match c {
         Constraint::Suggest(candidates) => Some(candidates.as_slice()),
         _ => None,
     })?;
 
-    let is_array = atom.is_array;
+    let is_array = alternative.is_array;
     let is_string = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::String));
     let is_number = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::Number));
 
@@ -143,7 +148,7 @@ pub fn suggestions_for_path(
 /// order — so a merged union carrying suggestions on more than one arm offers
 /// all of them — with invalid candidates omitted per the same per-atom lint as
 /// [`suggestions_for_path`]. `is_array` is set when any suggest-bearing atom is
-/// an array form.
+/// an array form or an item alternative of an array of a union (`U[]`).
 ///
 /// ## Side-effect freedom
 ///
@@ -153,12 +158,9 @@ pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQu
     let mut is_array = false;
     let mut items = Vec::new();
     let mut found = false;
-    for atom in atoms_of(def) {
-        if !atom
-            .constraints
-            .iter()
-            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-        {
+    for alternative in flattened_alternatives(def) {
+        let atom = alternative.atom;
+        if !has_suggest(atom) {
             continue;
         }
         found = true;
@@ -173,16 +175,18 @@ pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQu
             .insert(leaf.to_string(), PropertyDef::Single(atom.clone()));
         let mini = SimplifiedSchema::Single(shape);
         if let Some(query) = suggestions_for_path(&mini, &[leaf]) {
-            is_array |= query.is_array;
+            // The arm alone cannot know it sits inside `U[]`; the flattening
+            // carried the container's array-ness.
+            is_array |= alternative.is_array;
             items.extend(query.items);
         }
     }
     found.then_some(SuggestionQuery { is_array, items })
 }
 
-/// Resolves the [`PropertyAtom`] carrying `suggest(...)` for a path together
-/// with the lint-problem provenance `(root_arm, property_arm)`, applying the
-/// union-selection rules.
+/// Resolves the alternative carrying `suggest(...)` for a path together with
+/// the lint-problem root-arm provenance (the property-arm provenance is the
+/// alternative's [`Alternative::arm`]), applying the union-selection rules.
 ///
 /// Provenance is derived from the same traversal that selects the atom so lint
 /// filtering always targets the arm/atom the suggestion came from. A root-union
@@ -192,13 +196,12 @@ fn suggest_atom_and_provenance<'a>(
     schema: &'a SimplifiedSchema,
     ancestors: &[&str],
     leaf: &str,
-) -> Option<(&'a PropertyAtom, Option<usize>, Option<usize>)> {
+) -> Option<(Alternative<'a>, Option<usize>)> {
     match schema {
         SimplifiedSchema::Single(shape) => {
             let shape = descend(shape, ancestors)?;
             let def = shape.properties.get(leaf)?;
-            let (atom, property_arm) = suggest_atom_in_def(def)?;
-            Some((atom, None, property_arm))
+            Some((suggest_atom_in_def(def)?, None))
         }
         SimplifiedSchema::Union(arms) => {
             for (root_arm, arm) in arms.iter().enumerate() {
@@ -209,8 +212,8 @@ fn suggest_atom_and_provenance<'a>(
                     let Some(def) = shape.properties.get(leaf) else {
                         continue;
                     };
-                    if let Some((atom, property_arm)) = suggest_atom_in_def(def) {
-                        return Some((atom, Some(root_arm), property_arm));
+                    if let Some(alternative) = suggest_atom_in_def(def) {
+                        return Some((alternative, Some(root_arm)));
                     }
                 }
             }
@@ -233,31 +236,79 @@ fn descend<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaSh
 fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     atoms_of(def).iter().find_map(|atom| match &atom.ty {
         TypeExpr::InlineObject(inner) => Some(inner),
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => None,
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
     })
 }
 
-/// Finds the atom carrying `suggest(...)` in a [`PropertyDef`], paired with its
-/// property-union arm index (`None` for a single-atom definition).
-fn suggest_atom_in_def(def: &PropertyDef) -> Option<(&PropertyAtom, Option<usize>)> {
+/// The first alternative of `def` carrying `suggest(...)`.
+fn suggest_atom_in_def(def: &PropertyDef) -> Option<Alternative<'_>> {
+    flattened_alternatives(def)
+        .into_iter()
+        .find(|alternative| has_suggest(alternative.atom))
+}
+
+fn has_suggest(atom: &PropertyAtom) -> bool {
+    atom.constraints
+        .iter()
+        .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+}
+
+/// One leaf alternative of a property definition, as produced by
+/// [`flattened_alternatives`].
+#[derive(Debug, Clone, Copy)]
+pub struct Alternative<'a> {
+    /// The non-union atom. When [`Alternative::is_array`] is set, its
+    /// `constraints` bind to one array element.
+    pub atom: &'a PropertyAtom,
+    /// The atom's index in its innermost enclosing alternative list, or `None`
+    /// for a definition that is not a union. This is the `property_arm`
+    /// [`super::lint_suggestions`] reports for the atom.
+    pub arm: Option<usize>,
+    /// Whether the property holds an array whose element is this atom: the
+    /// atom's own `[]`, or the `[]` of an enclosing union-typed reference
+    /// (`U[]`).
+    pub is_array: bool,
+}
+
+/// Every leaf alternative of `def`, in declaration order: the atoms of a
+/// property-level union, and the arms of a resolved union-typed reference
+/// (`U`, `U(required)`, `U[]`) wherever it appears, looking through nested
+/// union arms. A union atom never appears in the result itself.
+pub fn flattened_alternatives(def: &PropertyDef) -> Vec<Alternative<'_>> {
+    let mut out = Vec::new();
     match def {
-        PropertyDef::Single(atom) => atom
-            .constraints
-            .iter()
-            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-            .then_some((atom, None)),
-        PropertyDef::Union(atoms) => atoms.iter().enumerate().find_map(|(index, atom)| {
-            atom.constraints
-                .iter()
-                .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-                .then_some((atom, Some(index)))
-        }),
+        PropertyDef::Single(atom) => push_alternatives(atom, None, false, &mut out),
+        PropertyDef::Union(atoms) => {
+            for (index, atom) in atoms.iter().enumerate() {
+                push_alternatives(atom, Some(index), false, &mut out);
+            }
+        }
+    }
+    out
+}
+
+fn push_alternatives<'a>(
+    atom: &'a PropertyAtom,
+    arm: Option<usize>,
+    outer_array: bool,
+    out: &mut Vec<Alternative<'a>>,
+) {
+    let is_array = outer_array || atom.is_array;
+    match atom.union_arms() {
+        Some(arms) => {
+            for (index, inner) in arms.iter().enumerate() {
+                push_alternatives(inner, Some(index), is_array, out);
+            }
+        }
+        None => out.push(Alternative { atom, arm, is_array }),
     }
 }
 
+/// The atoms whose shapes a property path may descend into: a union's
+/// alternatives, including the item alternatives of an array of a union.
 fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
     match def {
-        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Single(atom) => atom.union_arms().unwrap_or(std::slice::from_ref(atom)),
         PropertyDef::Union(atoms) => atoms,
     }
 }

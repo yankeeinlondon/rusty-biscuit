@@ -169,6 +169,56 @@ impl std::fmt::Display for SchemaConstraintConflictKind {
     }
 }
 
+/// Why a use-site postfix cannot apply to a union-typed named type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SchemaUnionRejection {
+    /// A constraint that would have to be pushed into every arm
+    /// (`U(max(10))`, `U(default(x))`), or one that is not valid on an
+    /// array container (`U[](pattern(x))`). `array_level` tells the two
+    /// apart.
+    Constraint {
+        /// The rejected constraint's keyword, as authored.
+        keyword: String,
+        /// Whether the constraint followed `[]`.
+        array_level: bool,
+    },
+    /// `[]` over a union whose flattened arm `arm` is already an array.
+    ArrayArm {
+        /// Index of the offending arm among the union's flattened arms.
+        arm: usize,
+    },
+    /// `[]` over a union whose arm `arm` carries a default that is not an
+    /// array, so it cannot become the array's default.
+    ScalarDefault {
+        /// Index of the offending arm among the union's flattened arms.
+        arm: usize,
+        /// The inherited default.
+        value: serde_json::Value,
+    },
+}
+
+impl std::fmt::Display for SchemaUnionRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Constraint {
+                keyword,
+                array_level: false,
+            } => write!(f, "constraint `{keyword}` cannot apply to a union-typed type"),
+            Self::Constraint {
+                keyword,
+                array_level: true,
+            } => write!(f, "constraint `{keyword}` is not valid on an array of a union"),
+            Self::ArrayArm { arm } => {
+                write!(f, "cannot apply `[]` because union arm {arm} is already an array")
+            }
+            Self::ScalarDefault { arm, value } => write!(
+                f,
+                "cannot apply `[]` because union arm {arm} has the non-array default `{value}`"
+            ),
+        }
+    }
+}
+
 /// The authored role described by one source-map span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SchemaSpanKind {
@@ -2247,6 +2297,7 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
         || match &atom.ty {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
+            TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
             TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => false,
         }
 }

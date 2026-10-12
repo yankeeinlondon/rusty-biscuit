@@ -27,6 +27,7 @@ use thiserror::Error;
 
 use super::simplified::{
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
+    SchemaUnionRejection,
 };
 
 
@@ -188,6 +189,22 @@ pub enum SchemaError {
         kind: SchemaConstraintConflictKind,
         site: SchemaReferenceSite,
         constraints: Vec<SchemaConstraintOrigin>,
+    },
+
+    /// A use-site postfix asks for an operation a union-typed named type
+    /// cannot take: a value constraint without `[]`, a constraint that is not
+    /// valid on an array, `[]` over an arm that is already an array, or `[]`
+    /// over an arm whose default is not an array.
+    ///
+    /// `site` is the consuming reference (its path names the property);
+    /// `definition` is the union's declaration in the namespace that defines
+    /// it. The two boxed fields keep [`SchemaError`] small.
+    #[error("{}: {rejection} (named type `{name}`)", site.path)]
+    UnionReference {
+        name: String,
+        rejection: Box<SchemaUnionRejection>,
+        site: SchemaReferenceSite,
+        definition: Box<SchemaReferenceSite>,
     },
 
     /// A `$schema` file-reference chain revisits a file it is already
@@ -635,6 +652,32 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     .hint("Change the use-site constraint so it agrees with the named type.")
             }
 
+            SchemaError::UnionReference { name, rejection, site, definition } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        "unsupported operation on a union type",
+                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<cyan>{}</cyan> references the union <cyan>{}</cyan>: {}.",
+                            Prose::escape_text(&site.path.to_string()),
+                            Prose::escape_text(name),
+                            Prose::escape_text_outside_code_spans(&rejection.to_string())
+                        )),
+                        Prose::new(format!(
+                            "<dim>Defined at:</dim> {} in {}",
+                            Prose::escape_text(&definition.path.to_string()),
+                            Prose::escape_text_outside_code_spans(&definition.source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "A union reference accepts <cyan>required</cyan>, <cyan>generated</cyan>, \
+                         <cyan>eager</cyan>, a description, and <cyan>[]</cyan> with array \
+                         constraints. Put value constraints on the union's arms.",
+                    )
+            }
+
             SchemaError::ReferenceCycle { chain } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "$schema reference cycle"))
                 .body(Prose::new(format!(
@@ -1028,6 +1071,30 @@ mod tests {
         let out = render(&err);
         assert!(out.contains("contradictory constraints"), "missing summary: {out}");
         assert!(out.contains("label") && out.contains("types.yaml"), "{out}");
+    }
+
+    #[test]
+    fn union_reference_names_the_rejection_the_reference_and_the_definition() {
+        let err = SchemaError::UnionReference {
+            name: "policy".into(),
+            rejection: Box::new(SchemaUnionRejection::Constraint {
+                keyword: "max".into(),
+                array_level: false,
+            }),
+            site: site("content_policy"),
+            definition: Box::new(SchemaReferenceSite {
+                source: SchemaSourceId::File(PathBuf::from("policy.yaml")),
+                path: crate::markdown::schemas::SchemaSourcePath::root().property("policy"),
+            }),
+        };
+        assert_eq!(
+            err.to_string(),
+            "content_policy: constraint `max` cannot apply to a union-typed type (named type \
+             `policy`)"
+        );
+        let out = render(&err);
+        assert!(out.contains("unsupported operation on a union type"), "missing summary: {out}");
+        assert!(out.contains("content_policy") && out.contains("policy.yaml"), "{out}");
     }
 
     #[test]

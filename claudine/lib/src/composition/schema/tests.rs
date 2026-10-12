@@ -2418,3 +2418,32 @@ fn schema_status_report_keeps_the_heading_and_each_property_on_rows() {
     assert!(rows[2].starts_with("⍉ topic: string"), "{rows:#?}");
     assert!(rows[3].starts_with("✓ tone: string"), "{rows:#?}");
 }
+
+#[test]
+fn presence_and_timing_read_through_a_resolved_union_reference() {
+    let dir = TempDir::new().unwrap();
+    let schema = serde_json::json!({
+        "choice": ["string(required)", "number"],
+        "loose": ["string", "file(eager)"],
+        "listed": "choice[]",
+        "marked": "loose(required)",
+        "optional": "loose -> any",
+        "timed": "loose(eager)",
+    });
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
+        &schema,
+        dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
+    )
+    .unwrap();
+    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    else {
+        panic!("a single shape");
+    };
+    assert!(classify::is_required(Some(shape), "listed"), "inherited from an item arm");
+    assert!(classify::is_required(Some(shape), "marked"), "use-site marker");
+    assert!(!classify::is_required(Some(shape), "optional"));
+    assert!(classify::is_eager(Some(shape), "timed"), "use-site timing");
+    assert!(classify::is_eager(Some(shape), "optional"), "an eager arm, as in a property union");
+    assert!(classify::is_eager(Some(shape), "loose"));
+}

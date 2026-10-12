@@ -177,14 +177,23 @@ fn attach_match_keyword(fragment: &mut Value, keyword: &Value) {
 
 fn property_def_to_schema(name: &str, def: &PropertyDef) -> Result<(Value, bool), SchemaError> {
     match def {
-        PropertyDef::Single(atom) => atom_to_schema(name, atom),
-        PropertyDef::Union(arms) => union_property_to_schema(name, arms),
+        // A postfixed union reference without `[]` (`U(required)`, `U -> text`)
+        // is a property union whose markers and description sit on `atom`.
+        PropertyDef::Single(atom) => match atom.union_arms() {
+            Some(arms) if !atom.is_array => union_property_to_schema(name, arms, Some(atom)),
+            _ => atom_to_schema(name, atom),
+        },
+        PropertyDef::Union(arms) => union_property_to_schema(name, arms, None),
     }
 }
 
+/// Lowers a property-level union. `container` is the atom of a postfixed
+/// union reference, whose markers apply to the property as a whole and whose
+/// description describes the union rather than any arm.
 fn union_property_to_schema(
     name: &str,
     arms: &[PropertyAtom],
+    container: Option<&PropertyAtom>,
 ) -> Result<(Value, bool), SchemaError> {
     // Union requiredness must be known *before* building arms: a required
     // union (any arm carries `required`) gets neither the property-level
@@ -192,47 +201,28 @@ fn union_property_to_schema(
     // this up front lets each arm be built with empty-`file` suppression so a
     // required union containing an otherwise-optional `file` arm still rejects
     // the `""` sentinel.
-    let required = arms.iter().any(PropertyAtom::is_required);
+    let required = container.map_or_else(
+        || arms.iter().any(PropertyAtom::is_required),
+        PropertyAtom::is_required,
+    );
     // `generated` is a property-level ownership semantic: if any arm is
     // host-supplied, the static `required` entry is suppressed (spec point 1).
-    let any_generated = arms.iter().any(atom_is_generated);
+    let any_generated = container.map_or_else(
+        || arms.iter().any(PropertyAtom::is_generated),
+        PropertyAtom::is_generated,
+    );
 
-    let mut any_of = Vec::with_capacity(arms.len());
-    let mut hoisted_default: Option<Value> = None;
-
-    for atom in arms {
-        // Use the bare fragment builder so the optional `null` wrapper is
-        // applied once at the property level, not per arm. The optional-`file`
-        // empty-string arm is allowed only when the union itself is optional.
-        let (arm_value, _arm_required) =
-            atom_fragment_without_null_wrap(name, atom, !required)?;
-        // Hoist any `default` key off the arm. `atom_fragment_without_null_wrap`
-        // always returns a `Value::Object` for the converted fragment.
-        let mut arm_value = arm_value;
-        if let Value::Object(map) = &mut arm_value
-            && let Some(arm_default) = map.remove("default")
-        {
-            match &hoisted_default {
-                Some(existing) if existing != &arm_default => {
-                    return Err(SchemaError::Convert {
-                        property: name.to_string(),
-                        message: format!(
-                            "conflicting `default(...)` values across union arms: \
-                             {existing} vs {arm_default}"
-                        ),
-                    });
-                }
-                Some(_) => { /* identical default — collapse silently */ }
-                None => hoisted_default = Some(arm_default),
-            }
-        }
-        any_of.push(arm_value);
-    }
+    // The optional-`file` empty-string arm is allowed only when the union
+    // itself is optional.
+    let (any_of, hoisted_default) = union_arm_fragments(name, arms, !required)?;
 
     let mut union_schema = Map::new();
     union_schema.insert("anyOf".into(), Value::Array(any_of));
     if let Some(default_val) = hoisted_default {
         union_schema.insert("default".into(), default_val);
+    }
+    if let Some(description) = container.and_then(|atom| atom.description.as_ref()) {
+        union_schema.insert("description".into(), Value::String(description.clone()));
     }
     // Surface the ownership semantic on the property's schema object so
     // downstream tooling (LSP, completion, runtime validators) discovers it
@@ -266,6 +256,45 @@ fn union_property_to_schema(
     Ok((schema, static_required))
 }
 
+/// Builds one fragment per union arm and hoists the arms' `default` values,
+/// which must agree, off them.
+///
+/// Each arm uses the bare fragment builder, so an optional `null` wrapper is
+/// applied once by the caller, never per arm.
+fn union_arm_fragments(
+    name: &str,
+    arms: &[PropertyAtom],
+    allow_optional_empty_file: bool,
+) -> Result<(Vec<Value>, Option<Value>), SchemaError> {
+    let mut any_of = Vec::with_capacity(arms.len());
+    let mut hoisted_default: Option<Value> = None;
+
+    for atom in arms {
+        let (mut arm_value, _arm_required) =
+            atom_fragment_without_null_wrap(name, atom, allow_optional_empty_file)?;
+        // `atom_fragment_without_null_wrap` always returns a `Value::Object`.
+        if let Value::Object(map) = &mut arm_value
+            && let Some(arm_default) = map.remove("default")
+        {
+            match &hoisted_default {
+                Some(existing) if existing != &arm_default => {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!(
+                            "conflicting `default(...)` values across union arms: \
+                             {existing} vs {arm_default}"
+                        ),
+                    });
+                }
+                Some(_) => { /* identical default — collapse silently */ }
+                None => hoisted_default = Some(arm_default),
+            }
+        }
+        any_of.push(arm_value);
+    }
+    Ok((any_of, hoisted_default))
+}
+
 // ── Atom → JSON Schema fragment ──────────────────────────────────────────
 
 /// Wraps a finished typed fragment so an optional property also accepts
@@ -276,7 +305,7 @@ fn wrap_optional_null(inner: Value) -> Value {
 
 fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), SchemaError> {
     let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true)?;
-    let generated = atom_is_generated(atom);
+    let generated = atom.is_generated();
 
     // Non-nullable atoms (those carrying `Required`) are emitted unchanged.
     // Optional atoms are wrapped so that JSON `null` validates as "absent".
@@ -346,15 +375,6 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     Ok((schema, false))
 }
 
-/// Reports whether an atom carries the `generated` constraint at either the
-/// value or array level. Used to suppress the static `required` entry for
-/// host-supplied properties (spec semantics point 1) while preserving the
-/// non-nullable type semantics of `required` (point 4).
-fn atom_is_generated(atom: &PropertyAtom) -> bool {
-    atom.property_constraints()
-        .any(|c| matches!(c, Constraint::Generated))
-}
-
 /// Builds the bare atom fragment without the general optional `null` wrapper.
 ///
 /// The returned fragment carries `default`/`description` annotations so that
@@ -376,7 +396,7 @@ fn atom_fragment_without_null_wrap(
     // `Generated` is similarly hoisted: it only surfaces as the
     // `x-darkmatter-generated: true` annotation, never as a typed fragment key.
     let required = atom.is_required();
-    let generated = atom_is_generated(atom);
+    let generated = atom.is_generated();
     let mut default_val: Option<Value> = None;
     // `example(...)` is documentation, not validation: the raw authored
     // reference strings are hoisted onto the `x-darkmatter-example` annotation
@@ -408,6 +428,42 @@ fn atom_fragment_without_null_wrap(
     let inner = match &atom.ty {
         TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+        // The alternatives of each item (with `is_array`) or of a union
+        // nested as an arm. Items get no `null` wrapper or empty-file arm,
+        // like the items of any array.
+        TypeExpr::Union(arms) => {
+            let (any_of, arm_default) = union_arm_fragments(
+                name,
+                arms,
+                allow_optional_empty_file && !atom.is_array && !required,
+            )?;
+            if let Some(value) = arm_default {
+                // The resolver lifts an array-compatible arm default to the
+                // container of `U[]` and rejects any other.
+                if atom.is_array {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!(
+                            "an item alternative carries `default({value})`, which cannot \
+                             default the array"
+                        ),
+                    });
+                }
+                match &default_val {
+                    Some(existing) if existing != &value => {
+                        return Err(SchemaError::Convert {
+                            property: name.to_string(),
+                            message: format!(
+                                "conflicting `default(...)` values: {existing} vs {value}"
+                            ),
+                        });
+                    }
+                    Some(_) => {}
+                    None => default_val = Some(value),
+                }
+            }
+            json!({ "anyOf": any_of })
+        }
         // An imported type must be inline-expanded by the resolver before
         // conversion, just as a root-union `FileRef` arm is. Reaching the
         // converter with one unresolved is a hard error (resolution lands in

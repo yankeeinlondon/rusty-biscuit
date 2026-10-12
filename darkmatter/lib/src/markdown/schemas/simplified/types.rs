@@ -169,16 +169,31 @@ impl PropertyDef {
             Self::Union(atoms) => atoms.iter().any(PropertyAtom::has_default),
         }
     }
+
+    /// The property-level alternatives of this definition, however they were
+    /// written.
+    ///
+    /// Returns the arms of a [`PropertyDef::Union`], and the arms of a single
+    /// non-array atom whose type is a [`TypeExpr::Union`] (a postfixed union
+    /// reference such as `U(required)`). Returns `None` for any other
+    /// definition, including an array of a union, whose alternatives describe
+    /// its items (see [`PropertyAtom::union_arms`]).
+    pub fn alternatives(&self) -> Option<&[PropertyAtom]> {
+        match self {
+            Self::Union(arms) => Some(arms),
+            Self::Single(atom) if !atom.is_array => atom.union_arms(),
+            Self::Single(_) => None,
+        }
+    }
 }
 
 /// A type expression is a primitive type keyword, an inline object literal
-/// declared with `{ ... }` syntax, or a named-type reference (`Name@fileref`
-/// or a bare local `Name`).
+/// declared with `{ ... }` syntax, a named-type reference (`Name@fileref`
+/// or a bare local `Name`), or, after resolution, the alternatives of a
+/// postfixed union-typed reference.
 ///
-/// `TypeExpr` is `Clone` but not `Copy` because the inline-object and import
-/// arms carry owned data. Call sites that previously matched on
-/// `atom.ty: SimplifiedType` now match on `atom.ty: TypeExpr` and handle the
-/// `Primitive` / `InlineObject` / `Imported` arms.
+/// `TypeExpr` is `Clone` but not `Copy` because the inline-object, import,
+/// and union arms carry owned data.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
@@ -199,6 +214,21 @@ pub enum TypeExpr {
         /// The raw file reference (right of `@`); `"this"` is the current file.
         reference: String,
     },
+    /// The ordered, flattened alternatives of a union-typed named type that a
+    /// use site referenced with a postfix (`U[]`, `U[](min(1))`,
+    /// `U(required)`, `U -> text`).
+    ///
+    /// Only the resolver produces this variant; the passive parser keeps the
+    /// authored [`TypeExpr::Imported`] reference. On an atom with `is_array`
+    /// it is the one representation of an array whose items are a union: the
+    /// atom's `array_constraints` and `description` belong to the container
+    /// and each arm keeps its own constraints and description. Without
+    /// `is_array` the atom carries the property's presence/timing markers and
+    /// description over the union. Presence and generation are read through
+    /// the arms rather than copied onto the atom, so an arm lowers exactly as
+    /// it does in a property-level union. A bare reference `U` is still
+    /// inlined as a [`PropertyDef::Union`].
+    Union(Vec<PropertyAtom>),
 }
 
 /// The [`TypeExpr::Imported`] reference that names the current schema's
@@ -279,12 +309,38 @@ impl PropertyAtom {
     pub(crate) fn is_required(&self) -> bool {
         self.property_constraints()
             .any(|constraint| matches!(constraint, Constraint::Required))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::is_required))
+    }
+
+    /// Whether this atom marks its containing property as host-generated.
+    /// Like [`PropertyAtom::is_required`], a union type's arms count.
+    pub(crate) fn is_generated(&self) -> bool {
+        self.property_constraints()
+            .any(|constraint| matches!(constraint, Constraint::Generated))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::is_generated))
     }
 
     /// Whether this atom supplies a default for its containing property.
+    /// Like [`PropertyAtom::is_required`], a union type's arms count.
     pub(crate) fn has_default(&self) -> bool {
         self.property_constraints()
             .any(|constraint| matches!(constraint, Constraint::Default(_)))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::has_default))
+    }
+
+    /// The alternatives of a [`TypeExpr::Union`] type: the item alternatives
+    /// when `is_array` is set, the property alternatives otherwise.
+    pub fn union_arms(&self) -> Option<&[PropertyAtom]> {
+        match &self.ty {
+            TypeExpr::Union(arms) => Some(arms),
+            _ => None,
+        }
     }
 
     /// The scalar const value this atom pins when it is a `literal(x)` type,

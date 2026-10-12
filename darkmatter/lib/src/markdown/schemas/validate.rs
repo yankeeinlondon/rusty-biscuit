@@ -1001,20 +1001,25 @@ fn unescape_pointer_segment(segment: &str) -> String {
 /// compiled JSON Schema) along the problem's instance path to the failing
 /// property node and reading its `description`.
 ///
-/// Returns `None` when the property declares no description or when the path
-/// cannot be resolved. The walk is intentionally defensive: any missing or
-/// mis-shaped node yields `None` rather than panicking, so an unresolvable path
-/// degrades to "no description" instead of a wrong one.
+/// `instance` is the validated value; it is consulted only to let a shared
+/// literal discriminant pick a union arm while descending (see
+/// [`schema_nodes_at`]).
+///
+/// Returns `None` when the property declares no description, when the path
+/// cannot be resolved, or when several union arms reach the path with
+/// different descriptions. The walk is intentionally defensive: any missing or
+/// mis-shaped node yields `None` rather than panicking, so an unresolvable or
+/// ambiguous path degrades to "no description" instead of a wrong one.
 ///
 /// ## Notes
 ///
 /// The base node is the winning root-union arm (`root["anyOf"][arm_index]`)
-/// when `problem.arm_index` is `Some`, otherwise `root` itself. Descent unwraps
-/// nullable `anyOf` wrappers, treats numeric segments as `items`, and reads the
-/// description (or a property-level-union articulation) at the final node.
+/// when `problem.arm_index` is `Some`, otherwise `root` itself. The final node
+/// is read as-is, so a union there yields its articulation (Decision #6).
 pub(super) fn resolve_problem_description(
     root: &Value,
     problem: &ValidationProblem,
+    instance: &Value,
 ) -> Option<String> {
     // Decision #10: an `additionalProperties: false` failure points its path at
     // the *parent* object, but the offending key is undeclared — reusing the
@@ -1023,7 +1028,7 @@ pub(super) fn resolve_problem_description(
         return None;
     }
 
-    let mut node = match problem.arm_index {
+    let base = match problem.arm_index {
         Some(idx) => root.get("anyOf")?.as_array()?.get(idx)?,
         None => root,
     };
@@ -1043,18 +1048,86 @@ pub(super) fn resolve_problem_description(
         segments.push(property.clone());
     }
 
-    for segment in &segments {
-        // Decision #5: step into the non-null arm of a nullable wrapper before
-        // descending into `properties` / `items`.
-        node = unwrap_nullable_arm(node);
-        node = if is_numeric_segment(segment) {
-            node.get("items")? // Decision #4
-        } else {
-            node.get("properties")?.get(segment.as_str())?
-        };
-    }
+    let mut descriptions = schema_nodes_at(base, &segments, instance)
+        .into_iter()
+        .map(description_at_node);
+    let first = descriptions.next()??;
+    descriptions.all(|other| other.as_deref() == Some(first.as_str())).then_some(first)
+}
 
-    description_at_node(node)
+/// The schema nodes that govern the instance location `segments` below `base`.
+///
+/// Each step looks through `anyOf` before descending into `properties` (named
+/// segment) or `items` (numeric segment, Decision #4):
+///
+/// - a nullable wrapper (one non-null arm) is replaced by that arm (Decision
+///   #5);
+/// - a genuine union (two or more non-null arms) — a property union, an item
+///   union under `items.anyOf`, or a nested postfixed union arm — is replaced
+///   by the arm the shared literal discriminant selects for the instance value
+///   at that location, else by every non-null arm. Arms that cannot take the
+///   next segment drop out.
+///
+/// The returned nodes are read as-is, so a final union node is not expanded.
+/// Several nodes mean several arms reach the location; an empty result means
+/// the path does not resolve. Arm choice here explains a report and must never
+/// authorize a transformation.
+fn schema_nodes_at<'a>(base: &'a Value, segments: &[String], instance: &Value) -> Vec<&'a Value> {
+    let mut nodes = vec![base];
+    let mut value = Some(instance);
+    for segment in segments {
+        let mut arms = Vec::new();
+        for node in nodes {
+            push_union_arms(node, value, &mut arms);
+        }
+        let numeric = is_numeric_segment(segment);
+        nodes = Vec::new();
+        for arm in arms {
+            let next = if numeric {
+                arm.get("items") // Decision #4
+            } else {
+                arm.get("properties").and_then(|props| props.get(segment.as_str()))
+            };
+            if let Some(next) = next
+                && !nodes.iter().any(|seen| std::ptr::eq(*seen, next))
+            {
+                nodes.push(next);
+            }
+        }
+        value = value.and_then(|value| match value {
+            Value::Array(items) if numeric => segment.parse::<usize>().ok().and_then(|i| items.get(i)),
+            _ => value.get(segment.as_str()),
+        });
+    }
+    nodes
+}
+
+/// Pushes the concrete (non-union) schemas `node` stands for at an instance
+/// location holding `value`; see [`schema_nodes_at`] for the arm rules.
+fn push_union_arms<'a>(node: &'a Value, value: Option<&Value>, out: &mut Vec<&'a Value>) {
+    let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
+        out.push(node);
+        return;
+    };
+    let non_null: Vec<&Value> = arms.iter().filter(|arm| !is_null_schema(arm)).collect();
+    if non_null.is_empty() {
+        out.push(node);
+        return;
+    }
+    let selected = match value {
+        Some(value) if non_null.len() >= 2 && !value.is_null() => {
+            super::discriminant::select_literal_discriminant_arm(arms, value)
+        }
+        _ => None,
+    };
+    match selected {
+        Some(idx) => push_union_arms(&arms[idx], value, out),
+        None => {
+            for arm in non_null {
+                push_union_arms(arm, value, out);
+            }
+        }
+    }
 }
 
 /// Reads the description at the resolved node: a direct `description` string,
@@ -1128,8 +1201,9 @@ fn type_label(arm: &Value) -> Option<&'static str> {
 
 /// Returns the lone non-null arm of a nullable `anyOf` wrapper, else the node
 /// unchanged. A union with two or more non-null arms is ambiguous to descend
-/// into, so it is left as-is (the subsequent `properties`/`items` lookup will
-/// fail and resolution degrades to `None`).
+/// into, so it is left as-is and a caller's subsequent `properties`/`items`
+/// lookup fails. Description lookup does not use this; it looks through unions
+/// with [`schema_nodes_at`].
 pub(super) fn unwrap_nullable_arm(node: &Value) -> &Value {
     let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
         return node;
@@ -1211,49 +1285,58 @@ pub(super) fn collect_arm_problems_with_anchors(
         .collect()
 }
 
-/// Narrows discriminated **property-level** unions to their selected arm.
+/// Narrows discriminated unions to their selected arm, wherever they sit: a
+/// property union, an item union (`items.anyOf`), or a union nested in an
+/// object field or a selected arm.
 ///
-/// For each top-level property whose schema is an `anyOf` union that a shared
-/// literal discriminant selects unambiguously
-/// ([`super::discriminant::select_literal_discriminant_arm`]), the problems
-/// under that property are replaced with the result of validating the instance
-/// against a synthetic single-property schema carrying only the chosen arm — so
-/// only the matched arm's missing/unknown/type problems surface. Every property
-/// without such a selection keeps its original `anyOf` diagnostics
-/// byte-for-byte.
+/// For each union location whose instance value a shared literal discriminant
+/// selects unambiguously
+/// ([`super::discriminant::select_literal_discriminant_arm`]) and that has at
+/// least one problem at or under it, those problems are replaced with the
+/// result of validating the instance against a synthetic schema that carries
+/// only the chosen arm at that location — so only the matched arm's
+/// missing/unknown/type problems surface. Every other location keeps its
+/// original `anyOf` diagnostics byte-for-byte. A location without problems is
+/// left alone, so a value another arm accepts stays valid (`anyOf` acceptance
+/// is unchanged).
 ///
-/// Validating the whole instance against `{ "properties": { key: arm } }`
-/// (rather than the sub-value against the bare arm) keeps problem paths in the
-/// `/key/...` form the normal report and the `positions` map already use.
-pub(super) fn narrow_property_union_problems(
+/// The synthetic schema mirrors the path (`properties` for a key,
+/// `prefixItems` for an index) and validates the whole instance, so problem
+/// paths keep the `/key/0/...` form the normal report and the `positions` map
+/// already use. Outer locations are narrowed before the unions inside their
+/// selected arm.
+pub(super) fn narrow_discriminated_union_problems(
     schema: &Value,
     instance: &Value,
     positions: &PositionMap,
     anchors: FileRefAnchors<'_>,
     mut problems: Vec<ValidationProblem>,
 ) -> Vec<ValidationProblem> {
-    let (Some(props), Some(obj)) = (
-        schema.get("properties").and_then(Value::as_object),
-        instance.as_object(),
-    ) else {
-        return problems;
-    };
-    for (key, prop_schema) in props {
-        let Some(arms) = prop_schema.get("anyOf").and_then(Value::as_array) else {
+    let mut selections = Vec::new();
+    let mut path = Vec::new();
+    collect_discriminated_arms(schema, instance, &mut path, &mut selections);
+    for (path, arm) in selections {
+        let prefix: String = path.iter().map(PathStep::pointer_segment).collect();
+        if !problems.iter().any(|problem| path_is_under(&problem.path, &prefix)) {
             continue;
-        };
-        let Some(value) = obj.get(key).filter(|value| !value.is_null()) else {
-            continue;
-        };
-        let Some(arm_index) = super::discriminant::select_literal_discriminant_arm(arms, value)
-        else {
-            continue;
-        };
-        let synthetic = serde_json::json!({
-            "$schema": super::simplified::DRAFT_2020_12,
-            "type": "object",
-            "properties": { key: arms[arm_index] }
-        });
+        }
+        let mut synthetic = arm.clone();
+        for step in path.iter().rev() {
+            synthetic = match step {
+                PathStep::Key(key) => {
+                    serde_json::json!({ "properties": { key.as_str(): synthetic } })
+                }
+                PathStep::Index(index) => {
+                    let mut prefix_items = vec![Value::Bool(true); *index];
+                    prefix_items.push(synthetic);
+                    serde_json::json!({ "prefixItems": prefix_items })
+                }
+            };
+        }
+        if let Some(object) = synthetic.as_object_mut() {
+            object.insert("$schema".into(), super::simplified::DRAFT_2020_12.into());
+            object.insert("type".into(), "object".into());
+        }
         let Ok(validator) = build_validator_with(&synthetic, &anchors.file_values()) else {
             continue;
         };
@@ -1261,14 +1344,87 @@ pub(super) fn narrow_property_union_problems(
             .iter_errors(instance)
             .flat_map(|err| build_problems(&err, positions, None, anchors))
             .collect();
-        let prefix = json_pointer_segment(key);
         problems.retain(|problem| !path_is_under(&problem.path, &prefix));
         problems.extend(narrowed);
     }
     problems
 }
 
-/// The JSON-pointer prefix (`/<escaped-key>`) for a top-level property.
+/// One instance-path step to a discriminated union location.
+#[derive(Clone)]
+enum PathStep {
+    Key(String),
+    Index(usize),
+}
+
+impl PathStep {
+    /// The escaped JSON-pointer segment, with its leading `/`.
+    fn pointer_segment(&self) -> String {
+        match self {
+            PathStep::Key(key) => json_pointer_segment(key),
+            PathStep::Index(index) => format!("/{index}"),
+        }
+    }
+}
+
+/// Collects, in pre-order, each union location below `node` whose instance
+/// value selects one arm by literal discriminant, with that arm. Descends
+/// through nullable wrappers, declared object properties present in the
+/// instance, array items, and selected arms; an unselected union is not
+/// descended, so its reporting stays ordinary.
+fn collect_discriminated_arms<'a>(
+    node: &'a Value,
+    value: &Value,
+    path: &mut Vec<PathStep>,
+    out: &mut Vec<(Vec<PathStep>, &'a Value)>,
+) {
+    if value.is_null() {
+        return;
+    }
+    if let Some(arms) = node.get("anyOf").and_then(Value::as_array) {
+        let mut non_null = arms.iter().filter(|arm| !is_null_schema(arm));
+        match (non_null.next(), non_null.next()) {
+            (Some(only), None) => collect_discriminated_arms(only, value, path, out),
+            (Some(_), Some(_)) => {
+                if let Some(idx) = super::discriminant::select_literal_discriminant_arm(arms, value)
+                {
+                    let arm = &arms[idx];
+                    out.push((path.clone(), arm));
+                    collect_discriminated_arms(arm, value, path, out);
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+    match value {
+        Value::Object(fields) => {
+            let Some(props) = node.get("properties").and_then(Value::as_object) else {
+                return;
+            };
+            for (key, prop_schema) in props {
+                if let Some(field) = fields.get(key) {
+                    path.push(PathStep::Key(key.clone()));
+                    collect_discriminated_arms(prop_schema, field, path, out);
+                    path.pop();
+                }
+            }
+        }
+        Value::Array(items) => {
+            let Some(item_schema) = node.get("items").filter(|items| items.is_object()) else {
+                return;
+            };
+            for (index, item) in items.iter().enumerate() {
+                path.push(PathStep::Index(index));
+                collect_discriminated_arms(item_schema, item, path, out);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The escaped JSON-pointer segment (`/<escaped-key>`) for an object key.
 fn json_pointer_segment(key: &str) -> String {
     format!("/{}", key.replace('~', "~0").replace('/', "~1"))
 }
@@ -2147,7 +2303,7 @@ mod tests {
         });
         let p = problem("/title", ValidationProblemKind::Type, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("The headline")
         );
     }
@@ -2165,7 +2321,7 @@ mod tests {
         });
         let p = problem("", ValidationProblemKind::Missing, Some("title"), None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("The headline")
         );
     }
@@ -2181,7 +2337,7 @@ mod tests {
         });
         let p = problem("/a~1b~0c", ValidationProblemKind::Type, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("weird key")
         );
     }
@@ -2206,7 +2362,7 @@ mod tests {
         });
         let p = problem("/config/name", ValidationProblemKind::Type, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("the name")
         );
     }
@@ -2230,9 +2386,62 @@ mod tests {
         });
         let p = problem("/authors/0/name", ValidationProblemKind::Type, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("author name")
         );
+    }
+
+    /// An optional `U[]` property: a nullable array whose `items.anyOf` holds a
+    /// scalar arm and two literal-tagged object arms that both declare `body`.
+    fn item_union_root() -> Value {
+        let tagged = |tag: &str, body: &str| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "const": tag },
+                    "body": { "type": "string", "description": body },
+                    "rule": { "type": "string", "description": "the rule" }
+                },
+                "required": ["kind", "rule"]
+            })
+        };
+        json!({
+            "type": "object",
+            "properties": {
+                "list": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "array", "items": { "anyOf": [
+                        { "type": "string", "pattern": "^Evergreen$" },
+                        tagged("a", "a body"),
+                        tagged("b", "b body")
+                    ] } }
+                ] }
+            }
+        })
+    }
+
+    #[test]
+    fn resolve_missing_field_looks_through_item_alternatives() {
+        let p = problem("/list/1", ValidationProblemKind::Missing, Some("rule"), None);
+        let instance = json!({ "list": ["Evergreen", { "kind": "a" }] });
+        assert_eq!(
+            resolve_problem_description(&item_union_root(), &p, &instance).as_deref(),
+            Some("the rule")
+        );
+    }
+
+    #[test]
+    fn resolve_item_field_uses_the_discriminated_arm_and_refuses_to_guess() {
+        let root = item_union_root();
+        let p = problem("/list/0/body", ValidationProblemKind::Type, None, None);
+        let tagged = json!({ "list": [{ "kind": "b", "body": 1 }] });
+        assert_eq!(
+            resolve_problem_description(&root, &p, &tagged).as_deref(),
+            Some("b body")
+        );
+        // Untagged: two arms reach `body` with different descriptions.
+        let untagged = json!({ "list": [{ "body": 1 }] });
+        assert_eq!(resolve_problem_description(&root, &p, &untagged), None);
     }
 
     #[test]
@@ -2251,7 +2460,7 @@ mod tests {
         });
         let p = problem("/tag", ValidationProblemKind::Type, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("an optional tag")
         );
     }
@@ -2271,7 +2480,7 @@ mod tests {
         });
         let p = problem("/width", ValidationProblemKind::Invalid, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("the element width")
         );
     }
@@ -2292,7 +2501,7 @@ mod tests {
         });
         let p = problem("/payload", ValidationProblemKind::Invalid, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("a union type of: a raw message body | a list of templated messages | object")
         );
     }
@@ -2311,7 +2520,7 @@ mod tests {
         });
         let p = problem("/value", ValidationProblemKind::Invalid, None, None);
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("a union type of: number | string")
         );
     }
@@ -2334,7 +2543,7 @@ mod tests {
         });
         let p = problem("/value", ValidationProblemKind::Invalid, None, None);
         assert_eq!(
-            resolve_problem_description(&described, &p).as_deref(),
+            resolve_problem_description(&described, &p, &Value::Null).as_deref(),
             Some("a count"),
             "null sentinel must not count toward D"
         );
@@ -2350,7 +2559,7 @@ mod tests {
             }
         });
         assert_eq!(
-            resolve_problem_description(&labels_only, &p).as_deref(),
+            resolve_problem_description(&labels_only, &p, &Value::Null).as_deref(),
             Some("a union type of: number | string"),
             "null sentinel must not appear in the articulation"
         );
@@ -2363,7 +2572,7 @@ mod tests {
             "properties": { "title": { "type": "string" } }
         });
         let p = problem("/title", ValidationProblemKind::Type, None, None);
-        assert_eq!(resolve_problem_description(&root, &p), None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
     }
 
     #[test]
@@ -2384,7 +2593,7 @@ mod tests {
         });
         let mut p = problem("/config", ValidationProblemKind::Invalid, None, None);
         p.message = "Additional properties are not allowed ('bogus' was unexpected)".to_string();
-        assert_eq!(resolve_problem_description(&root, &p), None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
     }
 
     #[test]
@@ -2395,7 +2604,7 @@ mod tests {
         });
         // Path descends into a property the schema does not declare.
         let p = problem("/missing/deeper", ValidationProblemKind::Type, None, None);
-        assert_eq!(resolve_problem_description(&root, &p), None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
     }
 
     #[test]
@@ -2415,7 +2624,7 @@ mod tests {
         });
         let p = problem("/doc", ValidationProblemKind::Type, None, Some(1));
         assert_eq!(
-            resolve_problem_description(&root, &p).as_deref(),
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
             Some("arm 1 doc")
         );
     }

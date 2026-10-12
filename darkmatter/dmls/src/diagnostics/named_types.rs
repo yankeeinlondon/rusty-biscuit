@@ -1,7 +1,8 @@
 //! Schema-definition diagnostics for named-type resolution failures.
 //!
-//! An unknown name, contradictory constraints on a reused type, and an import
-//! cycle are defects of the schema, not of a document value. Each is ranged on
+//! An unknown name, contradictory constraints on a reused type, an operation a
+//! union-typed reference cannot take, and an import cycle are defects of the
+//! schema, not of a document value. Each is ranged on
 //! the consuming reference's name when this document wrote it, and lists the
 //! declarations that took part as `relatedInformation`, wherever they live.
 //!
@@ -35,6 +36,7 @@ pub(crate) fn is_named_type_error(error: &SchemaError) -> bool {
         error,
         SchemaError::UnknownNamedType { .. }
             | SchemaError::ConstraintConflict { .. }
+            | SchemaError::UnionReference { .. }
             | SchemaError::ImportCycle { .. }
     )
 }
@@ -132,6 +134,15 @@ impl<'a> NamedTypeScope<'a> {
                         location: self.origin_location(origin)?,
                         message: format!("`{}` is declared here", origin.keyword),
                     })
+                }));
+                self.site_span(site)
+            }
+            SchemaError::UnionReference { name, site, definition, .. } => {
+                related.extend(self.definition_location(definition).map(|location| {
+                    DiagnosticRelatedInformation {
+                        location,
+                        message: format!("`{name}` is defined here"),
+                    }
                 }));
                 self.site_span(site)
             }
@@ -248,6 +259,33 @@ impl<'a> NamedTypeScope<'a> {
             .as_ref()?
             .source_map
             .spans(&site.path, SchemaSpanKind::ImportName)
+            .first()?
+            .clone();
+        self.file_location(path, &file.text, span)
+    }
+
+    /// The definition a named-type error names, in whichever source holds it.
+    fn definition_location(&self, definition: &SchemaReferenceSite) -> Option<Location> {
+        if definition.source == self.this {
+            let span = self
+                .declaration
+                .as_ref()?
+                .source_map
+                .spans(&definition.path, SchemaSpanKind::Definition)
+                .first()?
+                .clone();
+            let range = self.ctx.source_map.byte_range_to_lsp(span)?;
+            return Some(Location::new(self.ctx.uri.clone(), range));
+        }
+        let SchemaSourceId::File(path) = &definition.source else {
+            return None;
+        };
+        let file = self.file(path)?;
+        let span = file
+            .document
+            .as_ref()?
+            .source_map
+            .spans(&definition.path, SchemaSpanKind::Definition)
             .first()?
             .clone();
         self.file_location(path, &file.text, span)

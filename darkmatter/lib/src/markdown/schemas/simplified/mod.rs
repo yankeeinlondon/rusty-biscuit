@@ -26,12 +26,15 @@ pub use cursor::{
     locate_type_definition_cursor,
 };
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
-pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestions_for_path};
+pub use query::{
+    Alternative, SuggestionItem, SuggestionQuery, flattened_alternatives, suggestions_for_def,
+    suggestions_for_path,
+};
 pub use serialize::serialize_property_atom;
 pub use source::{
     SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
-    SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaValueEntry,
-    SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
+    SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
+    SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
     mapping_separator,
     parse_property_definition_with_source, parse_schema_declaration_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
