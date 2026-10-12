@@ -1044,15 +1044,15 @@ fn run_tmux_view(check: fn(&mut TmuxHarness, &Pane<TmuxHarness>)) {
     let pane = tmux_pane();
     check(&mut harness, &pane);
 }
-/// tmux: `-S -` reads the whole history and `-J` rejoins rows tmux
-/// soft-wrapped (rows `hug` broke stay apart).
+/// tmux, on the harness's own server: `-S -` reads the whole history and `-J`
+/// rejoins rows tmux soft-wrapped (rows `hug` broke stay apart).
 fn tmux_pane() -> Pane<TmuxHarness> {
     Pane {
         osc8: false,
         cols: |harness| harness.pane_cols().expect("tmux pane width") as usize,
         wrap_cols: |_| None,
         capture: |harness| {
-            let output = std::process::Command::new("tmux")
+            let output = biscuit_test_harness::tmux::tmux_command()
                 .args(["capture-pane", "-p", "-e", "-J", "-S", "-"])
                 .args(["-t", harness.session_name()])
                 .output()

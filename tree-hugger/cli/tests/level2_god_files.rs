@@ -120,9 +120,10 @@ fn run_god_files<H: TerminalHarness>(
     run_scoped(harness, &command, Duration::from_secs(20), capture)
 }
 
-/// tmux's whole history (`-S -`), soft-wrapped rows rejoined (`-J`).
+/// tmux's whole history (`-S -`) on the harness's own server, soft-wrapped
+/// rows rejoined (`-J`).
 fn tmux_history(harness: &mut TmuxHarness) -> String {
-    let output = std::process::Command::new("tmux")
+    let output = biscuit_test_harness::tmux::tmux_command()
         .args(["capture-pane", "-p", "-e", "-J", "-S", "-"])
         .args(["-t", harness.session_name()])
         .output()
