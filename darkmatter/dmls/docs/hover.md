@@ -49,6 +49,37 @@ The mental model: **box = the thing being described; bold = its type; italic = i
 
 The body is assembled by the pure `schema_hover_body` function in `src/providers/frontmatter.rs`, kept free of any LSP session state so the rule is unit-testable in isolation.
 
+### Union-typed properties and list items
+
+A property typed by a reference to a union-typed named type with a postfix
+(`policy[](min(1))@./content-policy.yaml`, `choice(required)`) has no single
+type, so its hover lists every alternative, one line each, with the
+alternative's own description:
+
+```markdown
+Type: **array**, each item one of:
+- **string** — Never triggers
+- **object** with `rule`, `action`
+```
+
+Hovering one item of such an array names an alternative only when the item
+is valid against exactly that one. A missing (`null`) item, an item no
+alternative accepts, and an item several alternatives accept all show the
+whole list, with the reason first:
+
+| Item                            | Hover shows                                           |
+|---------------------------------|-------------------------------------------------------|
+| `- ValidFor(3mo)`               | `Matches alternative 3 of 9`, then that alternative   |
+| `- Duration(3mo)`               | `matches none of the 9 alternatives:` and the list    |
+| `- null`                        | `no value; one of 9 alternatives:` and the list       |
+
+On a field inside an object item, the field's own hover is followed by a
+line naming the item's alternative (``Item `content_policy[1]` matches
+alternative 9 of 9:``) or, when no single alternative accepts the item, the
+list. Whether an alternative accepts an item is decided by the Darkmatter
+library: the alternative is lowered to JSON Schema and checked with its
+structural validator, which judges a file value by syntax alone.
+
 ## Formatting rule: interpolation `ctx.*` hover
 
 Inside a `{{ … }}` body interpolation, a cursor on an explicitly `ctx.`-qualified variable renders the shared catalog-backed block followed by an interpolation-only note. The variable counts as the root through member access and index access too (for example `ctx.packages[0].first`), because the lexer keeps a dotted `ctx.packages` as a single token.

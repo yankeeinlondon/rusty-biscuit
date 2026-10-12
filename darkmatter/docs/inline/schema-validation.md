@@ -320,6 +320,7 @@ When a frontmatter value is *trivially* the wrong JSON type but **unambiguously*
 | `number` / `integer` / `numberlike` | numeric string (`"42"`, `"-13"`, `"3.14"`) | real number |
 | `string` (incl. `date`/`url`/`email`/`file`…) | a number or boolean scalar | its canonical string (`42` → `"42"`) |
 | `array` of `T` | an array | each element coerced by `T`'s rule |
+| `array` of a union `U` | an array | each element coerced on its own by the property-union rule: committed only when exactly one arm's coerced candidate validates |
 | `object`, `any`, bare `enum`, `null` | — | untouched |
 
 Two consequences matter:
@@ -362,6 +363,11 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
 - a present, non-null string selected by `file` or `file(eager)`, including
   top-level properties, inline-object sub-properties, arrays, and the committed
   arm of a root or property union;
+- each item of an array of a union (`assets: asset[]`), judged on its own by
+  the property-union rule: the value is rewritten through the one validating
+  arm that carries an eager `file`, either as the item itself or as a field of
+  an object arm. With `asset: [file(eager), number]`, the item list
+  `["./a.md", 3]` normalizes to `["a.md", 3]`;
 - eager values probe the ordered plan and require the first existing regular
   file; lazy values materialize the first lexically normalized candidate
   without probing;
@@ -377,6 +383,12 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
   recursive plan has no single path shape without I/O; use `file(eager)`;
 - a value that resolves to a remote URL — there is no local path to project.
 - an absent or `null` optional `file(eager)` property.
+- a property or union item that two eager-`file` arms both accept, such as
+  `{ path: ./a.md }` against overlapping object arms that each declare
+  `path: file(eager)`; the rewrite never picks the closest arm.
+- a lazy `file` arm under `eager` written on the union or its array
+  (`lazy_asset[](eager)`): that `eager` is property timing and does not make
+  the arm eager.
 - a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
 
 **Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.

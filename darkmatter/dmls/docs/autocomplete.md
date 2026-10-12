@@ -68,6 +68,27 @@ the enum / boolish / file families for the same position. The candidates come
 from the schema itself (via the library's `suggestions_for_path`), so DMLS
 holds no parallel suggestion table.
 
+### Items of an array of a union
+
+When an array's items are a union (`policy[](min(1))@./content-policy.yaml`,
+or a property union of several array types), completion inside an item
+comes from the library's `alternatives_for_def`:
+
+- On a new `- ` line, every object alternative's keys (`rule: `, marked
+  `(required)` when every alternative offering it requires it) and every
+  scalar alternative's values (`enum` members, `literal(...)` values, and
+  `suggest(...)` candidates) are offered together.
+- On a later line of an object item, the keys the item already has are left
+  out. If a `literal(...)` tag in the item selects exactly one alternative
+  (`kind: say`), only that alternative's keys are offered; a missing,
+  unknown, or conflicting tag keeps every alternative's keys.
+
+```yaml
+steps:
+  - kind: say
+    # offers `text`, not `run`
+```
+
 ## Shell suffix completion (`$( … )::`)
 
 After the closing `)` of a frontmatter `$( … )` value, completion offers the

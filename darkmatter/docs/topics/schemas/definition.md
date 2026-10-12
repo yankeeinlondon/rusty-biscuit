@@ -1151,6 +1151,10 @@ $schema:
 
 Given a document with `kind: created`, validation reports only the `created` arm's missing/unknown/type problems instead of the full `anyOf` noise, and DMLS sibling-key completion offers only that arm's keys.
 
+Validation narrows the same way wherever the union sits: a property, each item of an array of a union (`events: event[]`, where every item selects its own arm), or a field nested inside an object. Narrowing changes only which problems are reported. A value that another arm accepts is still valid, and a union location with no problems is never narrowed.
+
+A problem's description is looked up through union arms as well. For `/events/1/path`, the lookup descends into the `items` alternatives, takes the arm the item's tag selects (or, without one, every arm that declares `path`), and reads that field's description. When several arms declare the field with different descriptions and no tag picks one, the problem carries no description rather than a guessed one.
+
 An arm is selected **only when** all of the following hold:
 
 - the same discriminant key is present as a `literal` in **at least two** arms,
@@ -1379,6 +1383,14 @@ For a root-level union, coercion must make the instance satisfy *at least one* a
 Coercion recurses into the nested structure of an inline object when the matching schema path is unambiguous. The same boolean / boolish / number / numberlike / string-shaped scalar matrix that applies to top-level fields also applies to fields inside an inline object body and to elements of an inline object array. A value at `/authors/0/active` is coerced from `"true"` to `true` when the schema is `authors: "{ active: boolean }[]"`.
 
 For property-level unions, coercion is attempted per arm. The compose stage builds a per-arm coerced candidate using that arm's schema path, validates each candidate against that arm, and commits the coerced value only when **exactly one** arm validates after coercion. If zero arms validate, or if multiple arms validate (ambiguous), the original value is left uncoerced and normal validation/reporting proceeds from the original. This avoids guessing across ambiguous inline object paths while still allowing unambiguous union arms to coerce nested scalars.
+
+An array of a union (a `U[]` reference to a union-typed named type) applies the same rule to **each item on its own**. Every item builds its candidates from its original value, and each item may select a different arm. An item that no arm accepts, or that several arms accept, is left unchanged while its siblings still coerce. A `boolish` or `numberlike` arm inside the union normalizes its item just as it does at property level. Given `toggle: [boolish, "{ name: string(required), enabled: boolean }"]`:
+
+```yaml
+toggles: ["TRUE", {name: x, enabled: "false"}, maybe]
+# coerces to
+toggles: [true, {name: x, enabled: false}, maybe]   # `maybe` fits no arm and fails validation
+```
 
 The same conservative rules apply at every nested level — coercion never fires on array- or object-typed values, never crosses a property boundary, and never produces a false accept on a value that is genuinely the wrong type.
 
@@ -1766,6 +1778,44 @@ Three completion categories are surfaced:
 - `CompletionKind::Hint { format }` — a one-line format hint for value-completion-unfriendly types (`url`, `email`, `date`, `datetime`, `time`).
 
 For a root union, `completable_properties` lists every inline arm's completable properties, and a property declared as `file` in several arms offers each arm's groups as a separate alternative. Raw JSON Schema inputs do not expose a SimplifiedSchema projection, so they return no completion data.
+
+A union-typed reference completes through its arms: `U(required)` like the union `U`, and `U[]` with `is_array: true` and the first completable arm describing one element. The `suggest(...)` queries (`suggestions_for_path`, `suggestions_for_def`) read the same arms and report `is_array: true` for `U[]`.
+
+### Completing inside a union value
+
+Editors that complete inside one value of a union — typically an element of a `U[]` list — use:
+
+- `completion::for_list_item(&effective, "name", &item)` — the alternatives of one array element;
+- `completion::for_property_value(&effective, "name", &value)` — the alternatives of a non-array property's own value;
+- `completion::alternatives_for_def(&def, site, &value)` — the same answer for a `PropertyDef` the caller already resolved.
+
+Pass the value as authored so far (`Value::Null` when it is missing or empty). The result, an `AlternativeCompletion`, lists `keys` from the inline-object alternatives and `values` from the scalar alternatives (`enum` members, `literal(...)` values, and lint-valid `suggest(...)` candidates, YAML-quoted where they are strings):
+
+```yaml
+types:
+  step:
+    - "{ kind: literal(shell; required), run: string(required) }"
+    - "{ kind: literal(say; required), text: string(required) }"
+    - enum(fast, slow)
+```
+
+| Authored element of `step[]` | Keys offered        | Values offered | `selected_arm` |
+|------------------------------|---------------------|----------------|----------------|
+| missing or `null`            | `kind`, `run`, `text` | `fast`, `slow` | none |
+| `{ kind: shell }`            | `kind`, `run`       | none           | `0` |
+| `{ kind: other }` or `{}`    | `kind`, `run`, `text` | none         | none |
+| `"f"`                        | none                | `fast`, `slow` | none |
+
+The rules:
+
+- Only alternatives that can hold the authored JSON kind apply: an object keeps the object alternatives, a scalar keeps the scalar ones, `null` keeps all of them.
+- An object narrows to one alternative only when the shared literal-discriminant selector picks it unambiguously; a missing, unknown, duplicate, or conflicting tag keeps the combined choices. Nothing is chosen by closeness.
+- Each element is judged on its own, so neighboring elements can narrow to different alternatives.
+- A key's `required` is `true` only when every alternative offering it requires it; already-authored keys are not removed, so the caller filters them and the typed prefix.
+- The same union used as a property value gives the same answer as an element, apart from `is_array`.
+- `suggest(...)` candidates are linted against their own arm, so a candidate that only another arm accepts is dropped.
+
+All of it is passive: no file is read or written, and no expression is evaluated.
 
 ## Error Model
 
