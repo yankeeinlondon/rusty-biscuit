@@ -84,6 +84,35 @@ legacy key keeps warning once per configuration change until it is migrated.
 See [spec.md](../../../features/2026-07-04-dmls/spec.md) § Configuration for the
 full key list.
 
+## Formatting
+
+"Format Document" (`textDocument/formatting`) runs the same clean transaction
+as `md clean`, on the editor's current buffer rather than the file on disk:
+
+- frontmatter YAML repair, the same repairs `md clean` applies, unless the
+  document sets `style.markdown.frontmatter: false`;
+- body formatting under the
+  [`style.markdown` rules](../../../docs/topics/markdown-formatting.md). For each
+  rule, the document's own `style.markdown` wins over
+  `[formatting.markdown]`, which wins over the built-in default.
+
+The result is one whole-document edit, or no edit when the buffer is already
+clean. Formatting never composes the document, runs shell commands, or reads
+the network. Only whole-document formatting is offered; there is no range or
+on-type formatting.
+
+Formatting can decline. When cleanup cannot format the buffer without changing
+its meaning (usually a malformed directive such as a `::block` with no
+`::end-block`), or the frontmatter cannot be read even after repair, `dmls`
+returns no edits and shows one Warning through `window/showMessage`. The
+warning names the line and column in the editor's position encoding, so a
+format-on-save that changed nothing is visible rather than silent:
+
+```text
+cleanup left the document unchanged because of a malformed directive region
+at line 4, column 1: `::block when="x"` is never closed by an `::end-block`
+```
+
 ## Filetype / document selector
 
 Register `dmls` for the `markdown` language. Recommended file globs for
