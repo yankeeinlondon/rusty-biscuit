@@ -2617,48 +2617,102 @@ fn reexport_columns() -> Vec<Column> {
     columns
 }
 
-/// Every matrix cell of a complete report, from a real entry: only the
-/// control and the cells whose edit is a no-op or a legal empty are served.
-#[test]
-fn reexport_report_fields_are_served_only_when_consistent() {
+// The matrices below are shared tables, and each row runs as its own
+// `#[test]`: a row spawns `hug` once per cell, so a whole table in one test
+// exceeds the L1 budget under suite load. Nextest schedules the rows across
+// the runner's cores; `every_reexport_matrix_row_has_a_generated_test`
+// fails when a table row has no generated test.
+
+/// One `#[test]` per named row of a shared table, each calling `$check` with
+/// its row's name, and `LISTED`, the names in generation order.
+macro_rules! matrix_row_tests {
+    ($check:path; $($test:ident => $row:literal),* $(,)?) => {
+        pub(super) const LISTED: &[&str] = &[$($row),*];
+        $(#[test] fn $test() { $check($row); })*
+    };
+}
+
+/// Runs the `name` column of `columns` against an entry `hug` wrote.
+fn check_reexport_column(
+    scratch: &Scratch,
+    args: &[&str],
+    (original, uncached, relative_entry): (&Value, &Value, &Path),
+    columns: &[Column],
+    name: &str,
+) {
+    let column = columns
+        .iter()
+        .find(|column| column.name == name)
+        .unwrap_or_else(|| panic!("no `{name}` column in the table"));
+    let base = field_base(original.clone(), column);
+    let failures = check_column(scratch, args, &base, uncached, relative_entry, column);
+    assert!(failures.is_empty(), "re-export matrix:\n{}", failures.join("\n"));
+}
+
+/// One column of a complete report, from a real entry: only the control and
+/// the cells whose edit is a no-op or a legal empty are served.
+fn check_complete_reexport_column(name: &str) {
     let (scratch, uncached, relative_entry, original) = written_entry(REEXPORT_FILE, REEXPORT_SOURCE);
     assert_eq!(original["reexports"]["coverage"]["state"], "complete", "a complete report");
     assert_eq!(original["reexports"]["entries"].as_array().map(Vec::len), Some(3));
     assert_eq!(original["imports"][0]["reexported"], true);
     assert_eq!(original["imports"][1]["reexported"], false);
-    let columns = reexport_columns();
-    let failures = check_reexport_columns(&scratch, &REEXPORT_ARGS, &original, &uncached, &relative_entry, &columns);
-    assert!(failures.is_empty(), "re-export matrix:\n{}", failures.join("\n"));
+    check_reexport_column(&scratch, &REEXPORT_ARGS, (&original, &uncached, &relative_entry), &reexport_columns(), name);
 }
 
-fn check_reexport_columns(
-    scratch: &Scratch,
-    args: &[&str],
-    original: &Value,
-    uncached: &Value,
-    relative_entry: &Path,
-    columns: &[Column],
-) -> Vec<String> {
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = columns
-            .iter()
-            .map(|column| {
-                scope.spawn(move || {
-                    let base = field_base(original.clone(), column);
-                    check_column(scratch, args, &base, uncached, relative_entry, column)
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("column thread")).collect()
-    })
+mod complete_reexport_report_fields {
+    use super::check_complete_reexport_column as check;
+    matrix_row_tests! { check;
+        reexports => "reexports",
+        coverage => "reexports.coverage",
+        coverage_state => "reexports.coverage.state",
+        coverage_limits => "reexports.coverage.limits",
+        entries => "reexports.entries",
+        entry_form => "entry.form",
+        entry_evidence => "entry.evidence",
+        named_entry_exported_name => "named entry.exported_name",
+        named_entry_original_name => "named entry.original_name",
+        wildcard_entry_exported_name => "wildcard entry.exported_name",
+        wildcard_entry_original_name => "wildcard entry.original_name",
+        entry_local_name => "entry.local_name",
+        entry_source => "entry.source",
+        entry_excluded_names => "entry.excluded_names",
+        entry_scope => "entry.scope",
+        entry_restriction => "entry.restriction",
+        entry_type_only => "entry.type_only",
+        entry_conditional => "entry.conditional",
+        entry_caveats => "entry.caveats",
+        entry_import_span_none => "entry.import_span (none)",
+        entry_import_span_linked => "entry.import_span (linked)",
+        linked_entry_local_name => "linked entry.local_name",
+        imports_reexported_marker_list => "imports.reexported marker list",
+        forwarded_import_reexported => "forwarded import.reexported",
+        unforwarded_import_reexported => "unforwarded import.reexported",
+        completed_capabilities => "completed_capabilities",
+        entry_span => "entry.span.span",
+        entry_span_start_byte => "entry.span.start_byte",
+        entry_span_end_byte => "entry.span.end_byte",
+        entry_span_start => "entry.span.start",
+        entry_span_end => "entry.span.end",
+        entry_span_start_line => "entry.span.start.line",
+        entry_span_start_column => "entry.span.start.column",
+        entry_span_end_line => "entry.span.end.line",
+        entry_span_end_column => "entry.span.end.column",
+        entry_statement_span => "entry.statement_span.span",
+        entry_statement_span_start_byte => "entry.statement_span.start_byte",
+        entry_statement_span_end_byte => "entry.statement_span.end_byte",
+        entry_statement_span_start => "entry.statement_span.start",
+        entry_statement_span_end => "entry.statement_span.end",
+        entry_statement_span_start_line => "entry.statement_span.start.line",
+        entry_statement_span_start_column => "entry.statement_span.start.column",
+        entry_statement_span_end_line => "entry.statement_span.end.line",
+        entry_statement_span_end_column => "entry.statement_span.end.column",
+    }
 }
 
 /// A limited report: the reasons are required, and an empty entry list is a
 /// genuine value.
-#[test]
-fn a_limited_reexport_report_is_served_only_when_consistent() {
-    let (scratch, uncached, relative_entry, original) = written_entry(LIMITED_FILE, LIMITED_SOURCE);
-    assert_eq!(original["reexports"]["coverage"]["state"], "limited");
+fn limited_reexport_columns() -> Vec<Column> {
     let limit: &'static [&'static str] = &["reexports", "coverage", "limits", "0"];
     let mut columns = vec![
         rx_scalar("limited state", &["reexports", "coverage", "state"], json!("")),
@@ -2668,8 +2722,32 @@ fn a_limited_reexport_report_is_served_only_when_consistent() {
         rx_empty_list("limited entries", &["reexports", "entries"]),
     ];
     columns.extend(rx_span_columns("limit.span", rx(&[limit[0], limit[1], limit[2], limit[3], "span"])));
-    let failures = check_reexport_columns(&scratch, &LIMITED_ARGS, &original, &uncached, &relative_entry, &columns);
-    assert!(failures.is_empty(), "limited re-export matrix:\n{}", failures.join("\n"));
+    columns
+}
+
+fn check_limited_reexport_column(name: &str) {
+    let (scratch, uncached, relative_entry, original) = written_entry(LIMITED_FILE, LIMITED_SOURCE);
+    assert_eq!(original["reexports"]["coverage"]["state"], "limited");
+    check_reexport_column(&scratch, &LIMITED_ARGS, (&original, &uncached, &relative_entry), &limited_reexport_columns(), name);
+}
+
+mod limited_reexport_report_fields {
+    use super::check_limited_reexport_column as check;
+    matrix_row_tests! { check;
+        limited_state => "limited state",
+        limits => "limits",
+        limit_reason => "limit.reason",
+        limited_entries => "limited entries",
+        limit_span => "limit.span.span",
+        limit_span_start_byte => "limit.span.start_byte",
+        limit_span_end_byte => "limit.span.end_byte",
+        limit_span_start => "limit.span.start",
+        limit_span_end => "limit.span.end",
+        limit_span_start_line => "limit.span.start.line",
+        limit_span_start_column => "limit.span.start.column",
+        limit_span_end_line => "limit.span.end.line",
+        limit_span_end_column => "limit.span.end.column",
+    }
 }
 
 /// The lookup, refusal reason and output of one run over an edited entry.
@@ -2684,10 +2762,18 @@ fn serve_edited(scratch: &Scratch, temp: &Path, entry: &Path, args: &[&str], edi
 
 type Edit = fn(&mut Value);
 
-/// Well-typed edits no fresh analysis produces: each is refused for its
-/// stated reason and recomputed to the uncached output, and the unedited
-/// entry is a hit.
-fn check_inconsistencies(file: &str, source: &str, args: &[&str], cases: &[(&str, &str, Edit)]) {
+/// A well-typed edit no fresh analysis produces: its label, the refusal
+/// reason the reader must give, and the edit.
+type Inconsistency = (&'static str, &'static str, Edit);
+
+/// Runs the `label` case of `cases`: the edit is refused for its stated
+/// reason and recomputed to the uncached output, and the unedited entry is a
+/// hit.
+fn check_inconsistency(file: &str, source: &str, args: &[&str], cases: &[Inconsistency], label: &str) {
+    let &(_, reason, edit) = cases
+        .iter()
+        .find(|(case, _, _)| *case == label)
+        .unwrap_or_else(|| panic!("no `{label}` case in the table"));
     let scratch = Scratch::new(&[(file, source)]);
     let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
     let temp = TempDir::new().expect("cell temp");
@@ -2699,25 +2785,19 @@ fn check_inconsistencies(file: &str, source: &str, args: &[&str], cases: &[(&str
     let original = read_json(&entry);
     let (lookup, _, served) = serve_edited(&scratch, temp.path(), &entry, args, &original);
     assert_eq!((lookup, &served), ("hit", &uncached), "{file}: the unedited entry");
-    let mut failures = Vec::new();
-    for &(label, reason, edit) in cases {
-        let mut edited = original.clone();
-        edit(&mut edited);
-        let (lookup, stderr, output) = serve_edited(&scratch, temp.path(), &entry, args, &edited);
-        if lookup != "miss" {
-            failures.push(format!("{label}: expected a miss, entry was served"));
-        } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
-            failures.push(format!("{label}: refused for another reason: {stderr}"));
-        } else if output != uncached {
-            failures.push(format!("{label}: missed, but output differs from an uncached run"));
-        }
-    }
-    assert!(failures.is_empty(), "{file} inconsistencies:\n{}", failures.join("\n"));
+    let mut edited = original;
+    edit(&mut edited);
+    let (lookup, stderr, output) = serve_edited(&scratch, temp.path(), &entry, args, &edited);
+    assert_eq!(lookup, "miss", "{file} / {label}: expected a miss, entry was served");
+    assert!(
+        stderr.contains(&format!("inconsistent entry: {reason}")),
+        "{file} / {label}: refused for another reason: {stderr}"
+    );
+    assert!(output == uncached, "{file} / {label}: missed, but output differs from an uncached run");
 }
 
-#[test]
-fn well_typed_reexport_inconsistencies_in_a_complete_report_are_refused() {
-    let cases: &[(&str, &str, Edit)] = &[
+fn complete_reexport_inconsistencies() -> Vec<Inconsistency> {
+    vec![
         ("evidence without its capability", "a re-export report without the reexports capability, or the reverse", |entry| {
             // Diagnostics requires re-exports, so the entry gives up both.
             let capabilities = entry["completed_capabilities"].as_array_mut().expect("capabilities");
@@ -2772,13 +2852,36 @@ fn well_typed_reexport_inconsistencies_in_a_complete_report_are_refused() {
             entry["reexports"]["coverage"]["state"] = json!("not_applicable");
             entry["reexports"]["entries"] = json!([]);
         }),
-    ];
-    check_inconsistencies(REEXPORT_FILE, REEXPORT_SOURCE, &REEXPORT_ARGS, cases);
+    ]
 }
 
-#[test]
-fn well_typed_reexport_inconsistencies_in_a_limited_report_are_refused() {
-    let cases: &[(&str, &str, Edit)] = &[
+fn check_complete_reexport_inconsistency(label: &str) {
+    check_inconsistency(REEXPORT_FILE, REEXPORT_SOURCE, &REEXPORT_ARGS, &complete_reexport_inconsistencies(), label);
+}
+
+mod complete_reexport_inconsistencies_are_refused {
+    use super::check_complete_reexport_inconsistency as check;
+    matrix_row_tests! { check;
+        evidence_without_its_capability => "evidence without its capability",
+        entries_deleted_from_a_positive_report => "a positive report's entries deleted",
+        marker_cleared_while_an_entry_forwards_the_import => "a marker cleared while an entry forwards the import",
+        marker_set_on_an_import_nothing_forwards => "a marker set on an import nothing forwards",
+        import_site_that_is_not_an_import => "an import site that is not an import",
+        span_past_the_end_of_the_file => "a span past the end of the file",
+        statement_that_does_not_contain_its_specifier => "a statement that does not contain its specifier",
+        entries_out_of_source_order => "entries out of source order",
+        wildcard_that_names_an_export => "a wildcard that names an export",
+        named_forward_that_lost_its_original_name => "a named forward that lost its original name",
+        excluded_names_on_a_named_forward => "excluded names on a named forward",
+        empty_source_path => "an empty source path",
+        repeated_caveats => "repeated caveats",
+        limits_on_a_complete_report => "limits on a complete report",
+        not_applicable_state_for_a_supported_language => "a not-applicable state for a supported language",
+    }
+}
+
+fn limited_reexport_inconsistencies() -> Vec<Inconsistency> {
+    vec![
         ("a limited state with its reasons deleted", "limits that disagree with the coverage state", |entry| {
             entry["reexports"]["coverage"]["limits"] = json!([]);
         }),
@@ -2796,13 +2899,27 @@ fn well_typed_reexport_inconsistencies_in_a_limited_report_are_refused() {
             });
             entry["reexports"]["coverage"]["limits"] = json!([first, earlier]);
         }),
-    ];
-    check_inconsistencies(LIMITED_FILE, LIMITED_SOURCE, &LIMITED_ARGS, cases);
+    ]
 }
 
-#[test]
-fn a_not_applicable_language_is_complete_only_as_not_applicable() {
-    let cases: &[(&str, &str, Edit)] = &[
+fn check_limited_reexport_inconsistency(label: &str) {
+    check_inconsistency(LIMITED_FILE, LIMITED_SOURCE, &LIMITED_ARGS, &limited_reexport_inconsistencies(), label);
+}
+
+mod limited_reexport_inconsistencies_are_refused {
+    use super::check_limited_reexport_inconsistency as check;
+    matrix_row_tests! { check;
+        limited_state_with_its_reasons_deleted => "a limited state with its reasons deleted",
+        complete_state_with_a_reason_left => "a complete state with a reason left",
+        limit_span_past_the_end_of_the_file => "a limit span past the end of the file",
+        limits_out_of_order => "limits out of order",
+    }
+}
+
+/// A language with no forwarding construct is complete only as
+/// `not_applicable`.
+fn not_applicable_reexport_inconsistencies() -> Vec<Inconsistency> {
+    vec![
         ("a supported state for a language with no forwarding", "a coverage state that disagrees with the language", |entry| {
             entry["reexports"]["coverage"]["state"] = json!("complete");
         }),
@@ -2816,8 +2933,52 @@ fn a_not_applicable_language_is_complete_only_as_not_applicable() {
             });
             entry["reexports"]["entries"] = json!([forged]);
         }),
+    ]
+}
+
+fn check_not_applicable_reexport_inconsistency(label: &str) {
+    check_inconsistency(
+        NOT_APPLICABLE_FILE,
+        NOT_APPLICABLE_SOURCE,
+        &NOT_APPLICABLE_ARGS,
+        &not_applicable_reexport_inconsistencies(),
+        label,
+    );
+}
+
+mod not_applicable_language_is_complete_only_as_not_applicable {
+    use super::check_not_applicable_reexport_inconsistency as check;
+    matrix_row_tests! { check;
+        supported_state_for_a_language_with_no_forwarding => "a supported state for a language with no forwarding",
+        entries_in_a_language_with_no_forwarding => "entries in a language with no forwarding",
+    }
+}
+
+/// Each re-export matrix table names exactly the rows its generated tests
+/// run, in order and without repeats, so a row added to a table later
+/// cannot go untested.
+#[test]
+fn every_reexport_matrix_row_has_a_generated_test() {
+    let columns = |table: Vec<Column>| table.iter().map(|column| column.name).collect::<Vec<_>>();
+    let cases = |table: Vec<Inconsistency>| table.iter().map(|(label, _, _)| *label).collect::<Vec<_>>();
+    let tables = [
+        ("complete report fields", columns(reexport_columns()), complete_reexport_report_fields::LISTED),
+        ("limited report fields", columns(limited_reexport_columns()), limited_reexport_report_fields::LISTED),
+        ("complete inconsistencies", cases(complete_reexport_inconsistencies()), complete_reexport_inconsistencies_are_refused::LISTED),
+        ("limited inconsistencies", cases(limited_reexport_inconsistencies()), limited_reexport_inconsistencies_are_refused::LISTED),
+        (
+            "not-applicable inconsistencies",
+            cases(not_applicable_reexport_inconsistencies()),
+            not_applicable_language_is_complete_only_as_not_applicable::LISTED,
+        ),
     ];
-    check_inconsistencies(NOT_APPLICABLE_FILE, NOT_APPLICABLE_SOURCE, &NOT_APPLICABLE_ARGS, cases);
+    for (table, rows, listed) in tables {
+        assert_eq!(rows, listed, "{table}: the generated tests and the table disagree");
+        let mut unique = rows.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), rows.len(), "{table}: a row name is repeated");
+    }
 }
 
 /// An entry written without the capability is widened by the next

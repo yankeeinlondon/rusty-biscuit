@@ -2281,6 +2281,50 @@ fn entry_from_extractor_revision_fifty_two_is_not_served_after_the_language_extr
     });
 }
 
+/// Revision 53 forwarded both of two sequential Python imports of one name
+/// (and linked a Scala export to an import a nearer member definition hid);
+/// revision 54 forwards only the final import binding.
+#[test]
+fn entry_from_extractor_revision_fifty_three_is_not_served_after_binding_scope_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "53", key: OldKey::Computed, file: "forward.py", language: "python",
+        source: "from old import a\nfrom new import a\n\ndef Sentinel():\n    pass\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| {
+            let entries = out["indexes"][0]["reexports"]["entries"].as_array().expect("entries");
+            Value::from(entries.iter().map(|entry| entry["source"].clone()).collect::<Vec<_>>())
+        },
+        repaired: serde_json::json!(["new"]), stale: serde_json::json!(["old", "new"]),
+        revert: |snapshot| {
+            let replaced = snapshot["imports"][0].clone();
+            let mut forwarded = snapshot["reexports"]["entries"][0].clone();
+            forwarded["source"] = Value::from("old");
+            forwarded["span"] = replaced["span"].clone();
+            forwarded["import_span"] = replaced["span"].clone();
+            forwarded["statement_span"] = replaced["statement_span"].clone();
+            snapshot["reexports"]["entries"].as_array_mut().expect("entries").insert(0, forwarded);
+        },
+    });
+}
+
+/// Revision 54 folded a conditional `__all__.append`/`.remove` into the
+/// final list as if it always ran, so a guarded removal read as a complete
+/// negative; revision 55 limits coverage with `computed_export_list`.
+#[test]
+fn entry_from_extractor_revision_fifty_four_is_not_served_after_conditional_list_edits_are_limited() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "54", key: OldKey::Computed, file: "forward.py", language: "python",
+        source: "from m import read\n__all__ = [\"read\"]\nif enabled:\n    __all__.remove(\"read\")\n\ndef Sentinel():\n    pass\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| out["indexes"][0]["reexports"]["coverage"]["state"].clone(),
+        repaired: Value::from("limited"), stale: Value::from("complete"),
+        revert: |snapshot| {
+            snapshot["reexports"]["coverage"] = serde_json::json!({ "state": "complete", "limits": [] });
+        },
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {
