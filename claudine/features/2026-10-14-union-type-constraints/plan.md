@@ -4,6 +4,15 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+    - darkmatter/lib/tests/union_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/schemas_union_fixture_controls.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Union-Typed Named-Type Constraints Implementation Plan
@@ -50,11 +59,11 @@ consolidated test-module registration rather than editing it concurrently.
 
 ### Wave 1 — Baseline and Inventory (Sequential)
 
-- [ ] **Verify Prerequisite**
+- [x] **Verify Prerequisite**
   - Confirm the prerequisite's local-reference, inherited-presence, merge, and provenance behavior through its public tests and implementation log. Record the exact baseline revision/tree before changing union behavior.
   - Capture deterministic serialized JSON Schema for existing shipped schemas and resolver fixtures on that tree. Preserve serializer ordering; comparing parsed JSON values alone does not prove byte identity.
   - Checkpoint: the baseline passes its existing named-type tests and does not incorporate this feature's new syntax or lowering.
-- [ ] **Inventory Consumers**
+- [x] **Inventory Consumers**
   - Inspect `simplified/{types,grammar,serialize,convert,source,query,cursor,lint}.rs`, `resolve.rs`, `errors.rs`, and all `TypeExpr` matches after the prerequisite lands. Record the actual affected paths rather than relying on this checkout's pre-prerequisite enum.
   - Audit the JSON Schema walkers `validate`, `clean`, `rewrite`, `coerce`, and `discriminant`; typed consumers `completion`, `frontmatter_shape`, `about`, `phase`, `detect`, `triggers/matcher`, and `compose/context/catalog`; CLI `commands/schema/assignment`; DMLS `overlay/schema` and `providers/frontmatter` and their delegates.
   - Use text search and, where callers are unclear, the repo's GitNexus workflow to identify downstream public-type consumers, especially Claudine. Use Sniff with its skill for package/dependency discovery. Record scoped downstream compile/test checks for Phase 5.
@@ -62,12 +71,12 @@ consolidated test-module registration rather than editing it concurrently.
 
 ### Wave 2 — Representation Spike (Sequential, Once)
 
-- [ ] **Prove Representation**
+- [x] **Prove Representation**
   - Evaluate the smallest extension of the prerequisite's typed model that stores an array container separately from ordered union items. Prefer reuse of existing property-union semantics over a second array encoding or new general-purpose abstraction.
   - Prototype only the uncertain seam: passive parse of authored `U[]`, resolve with its defining table/origin, lower to `items.anyOf`, and retain enough authored state to serialize/reparse the named reference. Inspect description, marker, and default ownership in that shape.
   - Deliver a short decision record in the implementation log with the chosen fields/variant, provenance flow, serializer/display contract, and shared API/file ownership for later waves. Retain useful proof tests or remove throwaway code before production work.
   - Checkpoint: demonstrate one mixed scalar/object item union and an inherited marker without distributing array constraints into arms. If the existing authored/resolved split cannot preserve references, resolve that design here before proceeding. Do not repeat the spike later.
-- [ ] **Prepare Fixtures**
+- [x] **Prepare Fixtures**
   - After the representation decision, establish fixtures reused by later tasks: modified Content Policy schema with bare same-file references and `long_form.rule: short_form(required)`, tagged/untagged unions, overlapping arms, eager/lazy files, multi-hop imports, and a repairable non-union sibling.
   - Seed from the shipped schema via an explicit repository read recognized by the test-input index; copy it into a hermetic temporary workspace before modifications. Freeze a valid document/control for each matrix below. Keep schema-artifact tests separate from prompt opt-in tests.
   - Confirm fixture paths and process setup use existing request-context and `CliProcessFixture` helpers, `test_toolkit`, and runtime manifest/binary lookup. Avoid ambient HOME, CWD, providers, shell execution, network access, terminal windows, and browser windows.

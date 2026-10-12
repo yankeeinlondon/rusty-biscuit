@@ -30,6 +30,17 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+    Phase 1 is complete. Read the implementation log's Phase 1 section first. It has the 21 compile-forced `TypeExpr` match sites, the walker audit, and the representation decision.
+
+    - Representation: add `TypeExpr::Union(Vec<PropertyAtom>)`. With `is_array: true` it is the only array-of-union encoding. With `is_array: false` it carries a use-site marker or description on a union reference (`U(required)`, `U -> text`). A bare `U` stays today's `PropertyDef::Union`, which keeps existing lowering byte-identical. A working prototype of the resolver, lowering, and stub arms is in `spike/union-array-representation.patch`. It applies cleanly with `git apply`. Treat it as a starting point, not production code: its error messages say SPIKE, and its errors are untyped.
+    - Grammar fact: a named reference has one constraint list. `U(c)[]` is a parse error. After `[]`, the grammar stores the list in `atom.constraints`, so the resolver must move it to the container's `array_constraints`.
+    - Adding the variant breaks compile in `claudine` (`composition/schema/classify.rs` x2) and `claudine-gen` (`gen/src/schema_compat.rs`). Phase 2 must update those as well as darkmatter, DMLS, and the darkmatter CLI. Check them with `cargo check -p claudine -p claudine-gen --all-targets`.
+    - Marker hoisting should be computed (the `is_required`/generated/eager queries also consult union arms), not copied onto the container. Arms stay verbatim, so an item lowers exactly like the same arm in a property union.
+    - The input matrix probe found no loader gap. Duplicate keys, trailing documents, and invalid YAML already fail through the real loaders. Load documents with `Markdown::try_from(path)` or `try_from_content`. Never use `Markdown::from(&str)`: it silently treats a bad frontmatter block as absent.
+    - Shared fixtures live in `darkmatter/lib/tests/union_fixtures/mod.rs`. Each test must keep its own `include_str!` of the shipped content-policy schema.
+    - Byte-identity baseline: `baseline/lowered-corpus.blake3` (347 entries) and `baseline/capture_lowering.rs` (rerun instructions in its doc).
+    - For Phase 3 (clean): acceptance criterion 4 says a repairable sibling is still repaired. Clean's auto-repair is gated on exactly one raw problem, and `schema_quoting_safety::multiple_problems_block_auto_apply` pins that gate on purpose. Keep the gate and see the log's recommended test split.
 pipeline_step: 4
 depends-on:
     - 2026-10-13-named-type-presence-and-local-names
