@@ -85,9 +85,123 @@ skills_files_updated_during_phase_4:
   - schematic/skill/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
   - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_5:
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_5:
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_5:
+  - schematic/docs/generation/request-side.md
+skills_files_updated_during_phase_5:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/output/assemble/shared.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/define/src/types.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/src/artificial_analysis/mod.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/bitbucket/mod.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/elevenlabs/mod.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/emqx/mod.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/eversolo/mod.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/gitlab/mod.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/huggingface/mod.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+docs_updated_during_phase_6:
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/gen/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 packages:
   - schematic-gen
   - test-toolkit
+  - schematic-schema
+  - schematic-define
 ---
 
 # Implementation Log for 2026-10-11-schematic-generation-integrity (7 phases)
@@ -1173,3 +1287,574 @@ No dependency was added (`indexmap` and `syn` were already dependencies).
 6. Inventory and compatibility adequacy once the runtime/envelope follow-up
    adds a runtime package check: the byte comparison lives only in
    `inventory::shared_runtime_compatibility`, the intended replacement point.
+
+## Phase 5
+
+### Authorization state
+
+- Pre-authorization items 1–8 still have no recorded author confirmation.
+  Phase 5 cannot exist without item 6 (change the public shape of the
+  generated `RequestParts`/`into_parts`, R28) and its Task 5.2 requires item 1
+  (`just generate`). Following Phase 1's and Phase 3's narrow reading, both
+  are read as authorized by the request to "implement phase 5" **for this
+  phase's query split and its generator-produced refresh of `schema/src`
+  only**. Recorded for review 1.
+- The regeneration ran the exact command of `just generate`
+  (`cargo run -p schematic-gen -- generate --api all --output schema/src
+  --openapi-out openapi --postman-out postman`) without the recipe's desktop
+  notification. Nothing generated was hand-edited.
+- Items 2, 3, 4, 7, 8 were not exercised. Temporary crates under the system
+  temp directory and the child target (item 5) are the Phase 1 guard's.
+
+### Consumer search repeated before changing the tuple (R31)
+
+- `rg -l "into_parts|RequestParts" --type rust` outside `schematic/gen` and
+  `schematic/schema`: only unrelated same-named items (`biscuit-file`,
+  `darkmatter`, `sniff`'s `aggregate_view::into_parts`, `sniff` CLI) and the
+  macro-review spike. **No consumer of the generated `RequestParts` or
+  `into_parts`.** `ResponseContext` (whose `path` changes meaning, below) has
+  no user outside `schematic/` either (`rg ResponseContext|variant_hooks`).
+
+### What was built (Tasks 5.1–5.2)
+
+- **`RequestParts` (default 12 adopted):** still a tuple, with a fifth
+  element `Vec<(String, String)>`:
+  `(method, path, body, headers, query)`. `query` holds declared query
+  parameters, unencoded, in declaration order, one pair per array element.
+  Headers stay in element `3`.
+- **`into_parts`** (`codegen/request_structs/shared.rs`
+  `generate_path_format`): path substitution is unchanged (percent-encoded
+  unless `{+name}`); a `?…` written in the path template stays in the path
+  verbatim, with its existing escaping. Declared parameters are pushed as
+  `(name.to_string(), value.to_string())`; no encoding. `path` is no longer
+  `mut`.
+- **`shared::append_query_pairs(url, path, pairs)`** (new, emitted by
+  `codegen::error::generate_request_parts_type`): the only place query pairs
+  are encoded, with the existing `urlencoding::encode` on every name and
+  value (spaces stay `%20`; reqwest's form-query encoding is not used). It is
+  `pub` so the later redaction layer and hand-written callers can build the
+  same URL; a `pub(crate)` helper would also warn as dead code in any crate
+  without a REST client.
+- **Client URL assembly** (`codegen/client/methods.rs`):
+  `let mut url = format!("{}{}", self.base_url, path);
+  crate::shared::append_query_pairs(&mut url, &path, &query);`.
+- **Separator rule — chosen from `path`, not from `url`.** The golden line
+  `base-url-with-query` (`GET /api/v1?tenant=a%20b/repos/o/r/pulls?page=1`)
+  shows the pre-split client appended `?` after a base URL that already held
+  a query, because the old check looked at the path only. Choosing from the
+  full URL would have produced `…/pulls&page=1`, a wire change. R29 requires
+  byte equivalence, so the old rule is kept and documented; the pre-split
+  oddity itself stays recorded (Phase 1) for the runtime/envelope follow-up.
+  A mutation run (separator switched to `url.contains('?')`) failed the
+  guard with exactly that difference, then was reverted.
+- **`ResponseContext.path`** (hooks) is now the path without declared query
+  parameters; `ResponseContext.url` still carries the full URL. Its doc
+  comment was updated. This is a visible behavior change for response hooks;
+  no hook in the repository reads `path`.
+
+### Requirement → test mapping (Phase 5)
+
+| Requirement | Test(s) | Boundary / rung | Result |
+| --- | --- | --- | --- |
+| R28 path holds no declared query; pairs separate, unencoded, arrays repeated, legacy suffix kept, headers separate | `fresh_output_compile::slow_query_wire_matches_pre_split_baseline` → child test `into_parts_returns_unencoded_query_pairs_apart_from_the_path` (real generated Gitea `ListPullRequests` with space/`+`/`%`/Unicode/reserved values and an empty value, no-query case, Gitea `GetGitTreeRecursive` and GitLab `GetRepositoryFile` legacy suffixes, OpenAI `ListConversationItems` repeated `include`, OpenAI `BetaListInputItems` legacy suffix + declared pair; asserts no query name among headers) | crate boundary: freshly generated `schematic-schema` compiled offline and run through nextest (F3) | pass |
+| R28 codegen shape | `query_params_codegen::{single_query_param_is_collected_apart_from_the_path, multiple_query_params_keep_declaration_order, legacy_path_template_query_stays_in_the_path, endpoint_without_query_params_returns_empty_pairs, path_is_immutable_when_query_params_present, query_values_are_left_unencoded_by_into_parts, array_query_param_generates_loop_for_values, special_char_query_params_are_sanitized_with_serde_rename}`; `path_substitution::path_params_are_substituted_without_declared_query_params`; `http_client::client_appends_query_pairs_once_at_url_assembly` (destructure, base+path, append, then request builder, in that order; only headers reach `merge_headers`); unit `codegen::request_structs::tests::{generates_query_param_in_into_parts, generates_array_query_param}`, `codegen::client::tests::generate_request_method_no_auth` | generated source (F1) | pass |
+| R29 wire equivalence | `slow_query_wire_matches_pre_split_baseline`: the 8 raw request lines captured in Phase 1 **before any generator change** (raw `TcpListener`, no HTTP library normalization) are byte-identical after the split; golden file unchanged | process + socket boundary (F3) | pass |
+| R29 encoded exactly once, existing queries preserved | child test `append_query_pairs_encodes_once_and_keeps_existing_queries` (base-URL query, legacy path query continues with `&`, empty pair list leaves the URL alone, empty value `a=`, `$top=a%20b+c` → `%24top=a%2520b%2Bc`: encoded once, never decoded); `query_params_codegen::append_query_pairs_encodes_each_name_and_value_once` | F3 / F1 | pass |
+| R31 (partial) dependents unaffected | `cargo check --all-targets` of `sniff`, `biscuit-speaks`, `model-citizen`, `homelab`, `eversolo-integration`, `unfolded-integration-helper`, `arcam-amp-integration`, `sony-receiver-integration` against the regenerated crate | compile only; their test runs are Phase 7 | pass |
+
+Regression evidence: the existing codegen tests asserted the old in-path
+assembly (`path.push_str(&format!("?{}", query_string))`) and failed (10
+tests) after the change until rewritten; the rewritten ones assert the
+absence of in-path assembly and encoding. The golden test is the
+before/after wire evidence and was shown to fail on a separator regression.
+
+Coverage of the remaining declared-query endpoints (117 in the live
+definitions): every one is emitted by the same two code shapes — the
+per-parameter `query.push` (scalar or array loop) and the single shared
+`append_query_pairs` — and the regenerated diff shows exactly 117 removed
+in-path `} else {` separator branches, one per such endpoint. The eight
+golden lines exercise each branch of that shape (scalar, array, empty
+value, no query, legacy suffix with and without placeholder, base-URL
+query). Legacy warning-only paths (R33's nine) keep their previous
+escaping and order: two are in the golden set and in the `into_parts`
+assertions.
+
+Input Robustness Matrix: not applicable (no reader of a file format or
+configuration was added or changed).
+
+Test placement: every new or renamed test is in the `l1` binary
+(`autotests = false`, modules already declared). The child tests live inside
+the existing `slow_` guard's generated crate, so no new `slow_` name exists
+and the R35 builder selection and archive exclusions are unchanged. The outer
+test asserts the child run reported both new tests, so they cannot silently
+drop out. `just check-tier-coverage schematic`: 0 stranded.
+
+### Regeneration diff (R31, Task 5.2)
+
+- `just generate` changed 27 files under `schema/src` (3907+/3790−); every
+  OpenAPI and Postman file is byte-identical (the operation-id repair already
+  landed in Phase 3).
+- Filtering the diff for lines not about `query`/`path`/`url`/
+  `into_parts`/`RequestParts` leaves only the new doc text, the
+  `append_query_pairs` body, and the 117 removed `} else {` branches. **No
+  change is unexplained by R28.**
+- `schematic/schema/Cargo.lock` also changed (14+/48−): Cargo re-resolved the
+  excluded crate's lockfile because `biscuit-file`'s manifest now uses
+  `globset` instead of `dirs`. `just test-schema`/`just lint-schema` run Cargo
+  without `--locked` and rewrote it. Not a generator change; kept so the lock
+  matches the current path dependency. For review 1.
+- `query-in-path` still reports exactly the nine endpoints per output (R33).
+
+### Design choices not dictated by the spec
+
+- Helper name and placement: `append_query_pairs` in the generated
+  `shared.rs`, public, taking the path to choose the separator.
+- `ResponseContext.path` follows the path element (no declared query) rather
+  than re-concatenating the old path-plus-query string; `url` keeps the full
+  request URL. A hook that wanted the query reads `url`.
+- Test renames in `query_params_codegen.rs` where the old name described the
+  removed behavior: `single_query_param_uses_question_mark` →
+  `single_query_param_is_collected_apart_from_the_path`,
+  `multiple_query_params_uses_correct_separators` →
+  `multiple_query_params_keep_declaration_order`,
+  `query_params_with_existing_path_query_uses_ampersand` →
+  `legacy_path_template_query_stays_in_the_path`,
+  `path_uses_mut_when_query_params_present` →
+  `path_is_immutable_when_query_params_present`,
+  `generated_code_uses_urlencoding_for_query_values` →
+  `query_values_are_left_unencoded_by_into_parts` plus
+  `append_query_pairs_encodes_each_name_and_value_once`.
+- New docs page `schematic/docs/generation/request-side.md` (default 19's
+  request-side page): query separation now, with text/binary bodies, header
+  and cookie parameters, and `ApiKeyParam` marked **planned** for Phase 6.
+
+### Comment and doc drift found (code assumed correct)
+
+- `codegen/error.rs` `generate_request_parts_type` docs listed "Optional JSON
+  body" (the body has been `RequestBody` for a while); replaced.
+- `codegen/request_structs/mod.rs` doc example showed
+  `Ok(("GET", path, None, vec![]))` with an unencoded path; corrected to the
+  real five-element shape.
+- `gen/README.md` sample generated code showed a three-element
+  `(&'static str, String, Option<String>)` `into_parts` in five places
+  (predates this phase); corrected to `Result<RequestParts, SchematicError>`
+  with the current bodies. Added a "Query Parameters" section.
+- `.claude/skills/schematic-define/schematic/gen.md` showed
+  `RequestParts = (&'static str, String, Option<String>, Vec<…>)`; corrected.
+- `ResponseContext.path` doc ("The URL path with parameters substituted")
+  now states that declared query parameters are only in `url`.
+
+### Broader gates
+
+- `just test` (schematic): exit 0. L1 **1764 passed, 9 skipped** (Phase 4:
+  1760; +4 tests); fresh-output guard **4 passed** in 38.4 s (child rebuild
+  of the changed schema crate; the wire test alone takes 11 s warm).
+- `just lint` (schematic): exit 0 (clippy only; the shared `_lint` recipe
+  runs no formatter). Also `cargo clippy -p schematic-gen --all-targets
+  --features terminal-tests -- -D warnings`: clean.
+- `just test-schema`: 20 passed. `just lint-schema`: clean.
+- `just test-l2` (tmux, no focus): 3 passed.
+- `artifact_drift::` ran inside `just test`: pass.
+
+### Platform evidence
+
+- macOS (this host): everything above.
+- Linux, native Windows, WSL2: not run in Phase 5. The change is generated
+  string handling with no filesystem, path, process, or OS-specific API;
+  `cross-check` runs no `slow_` tests, so it could not exercise the child
+  wire test anyway. CI's pull-request Linux leg runs the guard on the build
+  job (R35). Phase 7 owns per-OS evidence.
+
+### Files touched outside `schematic/`
+
+- `.claude/skills/schematic-define/schematic/gen.md` and
+  `.claude/skills/schematic-define/SKILL.md` (tuple shape).
+
+No dependency was added (`urlencoding` was already in the generated
+manifest).
+
+### Downstream follow-up notes
+
+- Runtime/envelope follow-up: URL redaction can mask exactly the secret
+  pairs in `RequestParts.4` before `append_query_pairs`; `ApiKeyParam` query
+  keys (Phase 6) join that same collection. The base-URL-query oddity
+  (path appended after the base URL's query) is preserved for byte
+  equivalence and is that follow-up's to fix deliberately.
+- Definition-API follow-up: migrating the nine `?`-in-path templates to
+  declared parameters will move their query from `path` into `query`;
+  the bytes stay the same only if the declared order matches the template.
+
+### Human review agenda items raised in Phase 5
+
+1. Items 6 and 1 read as authorized by the phase request (no recorded
+   confirmation).
+2. Default 12 adopted as stated (fifth tuple element); the new public
+   `shared::append_query_pairs` is part of that surface.
+3. The separator is chosen from the path, preserving the pre-split
+   base-URL-query behavior for byte equivalence.
+4. `ResponseContext.path` no longer contains declared query parameters.
+5. `schematic/schema/Cargo.lock` re-resolved by Cargo (unrelated
+   `biscuit-file` dependency change).
+
+## Phase 6
+
+### Authorization state
+
+- Pre-authorization items 1–8 still have no recorded author confirmation.
+  Phase 6's regeneration (Task 6.4) needs item 1; as in Phases 3 and 5 it is
+  read as authorized by the request to "implement phase 6" **for this phase's
+  generator-produced refresh of `schema/src` only**. The exact command of
+  `just generate` was run (without the desktop notification). Nothing
+  generated was hand-edited.
+- Item 4 (dev-dependency) was **not needed**: the generated manifest already
+  carries `wiremock` and `serial_test`, and the fixture crate reuses them.
+  No dependency was added anywhere; `docs/dependencies.md` is unchanged.
+- Item 8 (`schematic-define`) was **not needed** as an additive change:
+  `EnvMapping` and every type are unchanged. Only the doc comment of
+  `RestApi::legacy_env_mapping_for` changed (default 15), plus a one-line
+  inline comment in the same match arm. Within the area; logged.
+- Items 2, 3, 6, 7 were not exercised.
+
+### What was built (Tasks 6.1–6.4)
+
+- **Raw bodies (R21, R22; default 11 adopted).** `ApiRequest::Text` →
+  `pub body: String`, `ApiRequest::Binary` → `pub body: Vec<u8>`; both are
+  required by `new(...)`, get the usual body-only `From<String>` /
+  `From<Vec<u8>>`, and `into_parts` emits `RequestBody::Raw { content_type:
+  <declared>, bytes }` (`into_bytes()` for text). The existing send branch was
+  unchanged and is now proven by the wiremock tests (bytes and
+  `Content-Type`, including empty bodies and non-UTF-8 bytes). The struct doc
+  example no longer "imports" `String`/`Vec<u8>` as if they were schema types.
+- **Header and cookie parameters (R25, R26; defaults 13, 14 adopted).** New
+  `codegen/request_structs/named_params.rs`: `Option<T>` fields (query type
+  mapping, `serde(rename)` to the wire name), `with_*` builders, and the
+  headers-element assembly. `required` is not enforced. Endpoints **without**
+  header/cookie parameters keep the old inline `vec![...]` headers expression
+  and the old `into_parts` doc text, so the 500+ real endpoints that have
+  none are byte-identical in that method.
+  - header: a set parameter does `retain(!eq_ignore_ascii_case)` + `push`, so
+    it replaces a static endpoint header of the same name; arrays join with
+    `,`; unset leaves the static header.
+  - cookie: each set value goes through the generated
+    `shared::encode_cookie_value` (RFC 6265 cookie-octets kept, `%` included;
+    every other UTF-8 byte `%XX` uppercase; space `%20`); array elements are
+    encoded one by one and joined with a literal `,`. They are folded with the
+    endpoint's static `Cookie` header by `shared::combine_cookie_headers`.
+- **One Cookie header end to end.** `combine_cookie_headers(headers, cookies)`
+  pulls every `Cookie` header (case-insensitive) out of a header list, parses
+  each into `name=value` pairs, applies `cookies`, and re-inserts one header
+  at the first Cookie header's position. Same name (case-sensitive) → value
+  replaced in place; new name → appended. With a single Cookie header and
+  nothing to add it does nothing (static cookies are never rewritten when
+  there is nothing to merge). An unparseable static cookie that must be merged
+  fails with `SchematicError::Header(InvalidHeaderValue("Cookie"))`. The
+  client's `merge_headers` now keeps **both** API and endpoint `Cookie`
+  headers (API first) instead of letting the endpoint one win, then calls
+  `combine_cookie_headers` with the credential cookie. Merge order as the plan
+  elaborated: API static → endpoint static → set parameters → credential.
+- **Header validation before send (R24, R25).** Every merged header is
+  parsed through `reqwest::header::HeaderName`/`HeaderValue`
+  (`shared::header_pair`) before `req_builder.header(...)`; failure is
+  `SchematicError::Header(InvalidHeaderName|InvalidHeaderValue(<name>))`,
+  never echoing the value, and no request is sent. Previously reqwest
+  deferred the same failure to `send()` as an opaque builder error.
+- **`ApiKeyParam` (R23, R24, R27; defaults 15, 16 adopted).**
+  - Client field `api_key_param: Option<schematic_define::SensitiveString>`
+    (redacting `Debug` even if printed), initialized `None` by all four
+    constructors and carried by `variant().build()`.
+  - `with_api_key_param(mut self, key) -> Self` is generated only when the
+    **effective** policy's explicit methods include `ApiKeyParam`. Consuming
+    builder (the `with_` naming of default 16); the other explicit helpers are
+    `&self -> Self` clones. Doc-marked temporary.
+  - Env scan: when — and only when — the effective policy's `env_fallback`
+    is `ApiKeyParam`, the first **non-empty** variable named by the client's
+    `env_auth` (the definition's names, emitted literally into the
+    constructors; a `variant().env_auth(..)` override is honored). A policy
+    without that fallback reads no variable.
+  - Resolution (`shared::resolve_request_auth`): explicit credential (auth
+    header on `Headers` **or** explicit param key) wins and disables every env
+    fallback; otherwise header fallback via `EnvMapping` and param fallback via
+    the scan; required policy with neither → existing
+    `AuthenticationRequired`, whose `env_fallback_vars` now lists `env_auth`
+    for `ApiKeyParam`, and whose explicit-method list names
+    "an explicit API key for `<name>` (`with_api_key_param`)".
+    `headers_satisfy_fallback` keeps its header-only meaning; the required
+    check adds `key.is_none()`, so a resolved param key satisfies an
+    `ApiKeyParam` fallback ("Align headers_satisfy_fallback").
+  - Injection (`shared::apply_api_key_param`): query key → remove every query
+    pair with the same name (case-sensitive) and append, so it is encoded once
+    by `append_query_pairs`; cookie key → `encode_cookie_value` and merged last
+    into the one Cookie header. A key for a location the client cannot send
+    (future `#[non_exhaustive]` variant) resolves as no key → auth required,
+    never silently dropped.
+  - Client `Debug` (new; clients had none): `shared::debug_client` prints the
+    type name, `base_url`, and `auth_policy`, `finish_non_exhaustive`.
+    `headers` (which holds explicit bearer/API-key/basic values in plain text)
+    and the param key are never printed.
+- **Validation (Phase 2's Rust-side gap checks removed, as the Phase 5 note
+  required).** `check_auth_support`, `check_request_body_support`, and the
+  Rust call of `check_unsent_params` are gone. Replaced by checks of what the
+  client now sends verbatim (all `error`, Rust output only):
+  - `text-request-body`/`binary-request-body`: content type empty or not
+    visible-ASCII/SP/HTAB;
+  - `api-key-param`: empty query name, or a cookie name that is not an RFC 9110
+    token (read through the effective policy, explicit and fallback);
+  - `header-parameter`/`cookie-parameter`: name not an HTTP token, or
+    `Array(Array(_))` (no serialization) — rejected, not dropped;
+  - `generated-name-collision` now includes header and cookie fields and the
+    raw `body` field (`with_*` builders collide exactly when fields do).
+  Postman still reports header/cookie parameters it does not carry
+  (unchanged); OpenAPI declares them (unchanged).
+- **Fixture coverage (R19, Task 6.4).** `fresh_output_compile.rs` fixtures
+  grew from 3 to 7 APIs: `FixtureBearer` (+ `SearchWidgets` with static
+  `X-Mode`/`Cookie` endpoint headers, 3 header and 3 cookie parameters, API
+  static `X-Client` and `Cookie`), `FixtureBasic` (+ `SendNote` text body,
+  `UploadBlob` binary body), `FixtureQueryKey` (legacy `ApiKeyParam` query,
+  declared `api_key` query parameter that the credential must own),
+  `FixtureCookieKey` (`ApiKeyParam` cookie, API static `Cookie: lang=en;
+  sid=static`, declared `sid` cookie parameter), `FixturePolicyKey` (legacy
+  `auth: None` + explicit-only `auth_policy`, no env fallback),
+  `FixtureOAuth` (OAuth2 PKCE metadata). `FIXTURE_COVERAGE` names every
+  feature; the existing guard test ties it to the fixture list.
+  - `slow_fixture_apis_compile_offline` was **renamed**
+    `slow_fixture_apis_compile_and_send_offline`: after the offline
+    `cargo check` it adds `tests/request_side.rs` (16 wiremock tests, port 0)
+    to the child crate and runs it through offline, locked nextest with
+    `FIXTURE_ENV` passed to the child (no process-environment mutation; each
+    child test is its own process under nextest anyway). It asserts every one
+    of the 16 names appears in the child report; a plain L1 guard
+    (`request_side_test_list_names_every_child_test`) ties that list to the
+    `async fn`s in the source. Still exactly three principal `slow_` tests
+    plus Phase 5's wire test; CI selects `slow_` by regex, so the R35 builder
+    selection and archive executed/expected exclusions needed no edit
+    (re-reviewed: `justfile` `test-fresh-output`, `.config/nextest.toml`
+    override, `ci.yml` build-job step all key on `/(^|::)slow_/`).
+
+### Design choice: auth resolution moved into `shared.rs` (review 1)
+
+The first implementation put the new resolution in each client and grew every
+client by ~124 lines, then ~37 after moving the `ApiKeyParam` helpers to
+`shared.rs`. Two facts forced a further step:
+
+- `unfolded_circle_core_rest.rs` was **1963** lines against the 2000-line
+  `SPLIT_THRESHOLD_LINES`; +37 split it into a directory (a layout conversion
+  of a real module for no behavioral reason). The `assemble_modules` split
+  rule is `> 2000`.
+- Six partial-generation/output tests use a two-API group of near-empty
+  clients that was within ~60 lines of the threshold (two clients ≈ 2029
+  lines after the change) and started producing a directory.
+
+So the whole per-client auth block (`auth_is_required`,
+`accepted_explicit_auth_methods`, `env_fallback_var_names`,
+`authentication_required_error`, `apply_env_fallback`,
+`headers_satisfy_fallback`, `resolve_request_headers`) moved, unchanged in
+logic, into free functions emitted once into `shared.rs`
+(`codegen/client/shared_auth.rs`), parameterized by
+`(policy, headers, env_auth, api_key_param)`. Each client keeps one call
+(`crate::shared::resolve_request_auth(...)`). Result: every client is
+**168 lines smaller** than before Phase 6 (anthropic 1306 → 1138;
+`unfolded_circle_core_rest` 1963 → 1800), `shared.rs` grows once, and the
+whole precedence rule lives in one function the runtime/envelope follow-up
+can replace. This is broader than the minimal change and touches every
+client's generated code; recorded for review 1.
+
+Finding for the fidelity/polish follow-up: a tiny client is still ~1000
+lines (mostly per-client variant builder, request methods, and docs), so a
+two-API group of trivial clients sits near the split threshold. The
+threshold's interaction with module size is fragile.
+
+### Requirement → test mapping (Phase 6)
+
+| Requirement | Test(s) | Boundary / rung | Result |
+| --- | --- | --- | --- |
+| R21 text body | child `text_body_reaches_the_server_verbatim_under_its_content_type` (empty and `"line one\nzwei – ünïcödé\r\n"`; method, path, exact body bytes, `Content-Type: text/plain; charset=utf-8`); unit `request_structs::tests::text_body_is_a_string_field_sent_as_raw_bytes_under_its_content_type` | process + socket (F3); generated source (F1) | pass |
+| R22 binary body | child `binary_body_reaches_the_server_byte_for_byte` (non-UTF-8 `[00 9F 92 96 FF 0A 0D C3]` and empty; `application/octet-stream`; path param encoded); unit `binary_body_is_a_byte_vector_sent_as_raw_bytes_under_its_content_type` | F3 / F1 | pass |
+| R23 query key | child `explicit_query_key_wins_over_env_and_owns_its_query_name` (`q=x%20y&api_key=SENTINEL%20key%26%3D`: declared `api_key` replaced, `q` kept, encoded once, no cookie) | F3 | pass |
+| R23 cookie key | child `cookie_key_replaces_the_same_named_cookie_in_place` (`lang=en; sid=SENTINEL%3Bv; theme=dark`: API static, parameter, and credential in one header), `env_cookie_key_is_appended_when_no_cookie_has_its_name` (`theme=t; sid=env-cookie-key`) | F3 | pass |
+| R24 sources and errors | child `env_query_key_is_read_from_the_definition_env_names` (definition `env_auth`), `the_first_non_empty_env_variable_supplies_the_key` (`""` then `second-key`), `a_missing_key_is_authentication_required_and_nothing_is_sent` (error variant, `env_fallback_vars`, explicit-method text, zero requests), explicit-wins via the explicit query test (env var set, sentinel sent), `a_policy_without_env_fallback_reads_no_variable` (legacy `auth: None` + explicit-only policy: env var set but unused → `AuthenticationRequired`, zero requests; explicit key → `token=explicit`) | F3 | pass |
+| R24 policy in validation | unit `validation::tests::api_key_param_is_found_through_the_effective_policy` (explicit, fallback, and a policy override hiding the legacy field) | F1 | pass |
+| R25 header params | child `set_header_parameters_override_static_headers_by_case_insensitive_name` (`x-trace-id: abc 123`, `x-mode: param` replaces static `X-Mode`, `x-ids: 1,22,333`, API `x-client` kept, bearer kept, query untouched), `unset_header_parameters_keep_static_headers_and_send_nothing`, `invalid_header_parameter_values_fail_before_send_without_echoing_them` (CR/LF injection, NUL, DEL: `Header(InvalidHeaderValue("X-Trace-Id"))`, value absent from `Display` and `Debug`, zero requests); unit `header_parameters_become_optional_fields_sent_under_their_wire_names`, `named_parameters_start_unset_in_every_constructor`, `endpoints_without_named_parameters_keep_their_inline_headers` | F3 / F1 | pass |
+| R26 cookie params | child `cookies_from_api_endpoint_and_parameters_share_one_header` (exactly one Cookie header `api=1; theme=dark; session=a%20b%3Bc%0D%0AX-Evil:%201; prefs=x%2Cy,%C3%A9,%`; no `x-evil` header), `unset_cookie_parameters_still_merge_api_and_endpoint_cookies` (`api=1; theme=dark; session=static`); unit `cookie_parameters_are_encoded_and_folded_into_one_cookie_header` | F3 / F1 | pass |
+| R25/R26 validation | unit `invalid_header_and_cookie_parameters_fail_only_the_rust_client` (bad header name, cookie name with `;`, array of arrays), `rust_only_rejections_name_feature_and_endpoint` (content types with CR/LF and empty, cookie key name, empty query key name, header/query field collision, cookie named `body` beside a raw body), `request_inputs_the_client_sends_pass_rust_validation` (accept table incl. `__Host-id`, `openai-beta`, arrays, both key locations), `postman_reports_unsent_header_and_cookie_parameters_by_requiredness` | F1 | pass |
+| R27 Debug | child `debug_output_never_contains_a_credential` (header API key, query key, cookie key, bearer token, env-sourced key; and a request struct) | F3 | pass |
+| R19 coverage | `fixture_coverage_names_every_fixture_api`, `request_side_test_list_names_every_child_test`, `slow_fixture_apis_compile_and_send_offline` (7 fixture APIs compile offline; all 16 child tests reported), child `header_key_oauth_and_form_bodies_reach_the_server` (header API key, URL-encoded body bytes `name=a+b`, OAuth bearer); real 18 APIs: `slow_real_apis_compile_offline` | F3 | pass |
+| R20 drift after regeneration | `slow_real_apis_compile_offline` (fresh vs committed `schema/src`: identical), `artifact_drift::*` | F3 | pass |
+| shared helpers | unit `codegen::client::tests::{shared_auth_handles_all_strategies, shared_auth_bearer_env_fallback, shared_auth_api_key_env_fallback, shared_auth_basic_env_fallback, generate_auth_setup_skips_env_check_when_programmatic_auth_set, generate_request_method_applies_headers, generate_request_method_uses_runtime_auth_matching}`; L1 `http_client::{bearer_token_*, api_key_uses_runtime_auth_matching, basic_auth_uses_reqwest_basic_auth, dual_auth_*}` (now read client + `assemble_shared_module`) | F1 | pass |
+
+Regression evidence: before this phase none of the child tests could
+compile (no `body` field, no `with_x_trace_id`, no `with_api_key_param`, no
+client `Debug`), and the Phase 2 validator rejected every fixture feature.
+Two deliberate mutations, each run through the real guard and then reverted:
+removing the credential's query `retain` failed
+`explicit_query_key_wins_over_env_and_owns_its_query_name`; letting
+`encode_cookie_value` keep spaces failed
+`cookies_from_api_endpoint_and_parameters_share_one_header`. The fixture
+guard also caught one wrong assumption of mine: `"ünï"` is a **valid** header
+value for the HTTP types (RFC 9110 `obs-text`), so the invalid-value cases
+use control characters and the docs say non-ASCII is sent as raw UTF-8.
+
+Input Robustness Matrix: not applicable (no reader of a file format or
+configuration was added; the Cookie-header parser reads a header built by
+the generator and definitions, and its one outcome for malformed input —
+error, never drop — is tested).
+
+Test placement: all new tests are in the `l1` binary (modules already
+declared) or the `schematic-gen` lib; Cargo-invoking work stays inside the
+existing `slow_` fixture test. `just check-tier-coverage schematic`: 0
+stranded.
+
+### Regeneration diff (R31, Task 6.4)
+
+- `just generate`: 58 Rust files written; **every OpenAPI and Postman file is
+  byte-identical** (no artifact change). `schema/Cargo.lock` is unchanged
+  since Phase 5 (14+/48−, the `biscuit-file` re-resolution logged there).
+- The Rust diff (shared with Phase 5's uncommitted query split) was
+  classified line by line. Phase 6 contributes: the auth block removed from
+  every client and added once to `shared.rs`; the `api_key_param` field (+4
+  constructor inits, +1 variant line); the `Debug` impl; `header_pair` /
+  `combine_cookie_headers` / `apply_api_key_param` call sites; the
+  cookie-aware `merge_headers`; and, from a feature the live definitions
+  already use, the `openai-beta` header parameter on the seven OpenAI
+  `Beta*` endpoints (`with_openai_beta(Vec<String>)`, sent comma-joined).
+  Nothing else remained unexplained after filtering.
+- Text/binary bodies, cookie parameters, and `ApiKeyParam` have zero live
+  users, so they change no real request struct (fixture-only, as the spec's
+  "fixture drift" risk anticipated).
+- `query-in-path` still reports exactly the nine endpoints per output.
+- Dependents compile against the regenerated crate: `cargo check
+  --all-targets -p sniff -p biscuit-speaks -p model-citizen -p homelab -p
+  eversolo-integration -p unfolded-integration-helper -p
+  arcam-amp-integration -p sony-receiver-integration` — clean, no warning.
+  Their test runs remain Phase 7's.
+
+### Design choices not dictated by the spec
+
+- Module/helper names: `named_params.rs` (`ParamLocation`,
+  `generate_headers_assembly`), `client/shared_auth.rs`
+  (`generate_request_auth_helpers`), generated `shared::{RequestAuth,
+  ApiKeyParamCredential, resolve_request_auth, apply_api_key_param,
+  header_pair, debug_client, encode_cookie_value, combine_cookie_headers}`.
+  Public items are `pub` (like `append_query_pairs`) so crates without a
+  caller do not warn; `explicit_api_key_param`/`env_api_key_param` and the
+  moved auth helpers are private.
+- `QueryParamInfo` is reused for header and cookie parameters (documented)
+  rather than renamed, to keep the change surgical.
+- Header-name/cookie-name grammar in validation: RFC 9110 `token`.
+  Content-type grammar: non-empty, visible ASCII + SP + HTAB (stricter than
+  the HTTP types, which also accept `obs-text`).
+- Array cookie values join with a literal `,` after per-element encoding
+  (RFC 6265 does not allow `,` in a cookie value; servers generally accept
+  it, and per-element encoding keeps element commas distinguishable). `%` is
+  kept literally per default 13, so a literal `%20` and an encoded space are
+  indistinguishable to a decoding server; documented as "no server is
+  assumed to decode". Both for review 1.
+- Explicit-credential semantics: an explicit **parameter** key also disables
+  header env fallbacks (and an explicit header credential disables the param
+  scan), extending the existing "explicit auth suppresses env fallback" rule
+  to the new credential kind.
+- Nested arrays in **query** parameters already generate code that does not
+  compile (`Vec<_>: Display`); not a Phase 6 feature and no feature id fits,
+  so it is recorded here, not fixed (no live definition has one; the full
+  guard compiles).
+- `HeaderError::InvalidHeaderValue("Cookie")` is reused for an unparseable
+  static cookie (no new error variant).
+
+### Comment and doc drift found (code assumed correct)
+
+- `codegen/request_structs/body.rs` module doc said bodies were JSON only and
+  carried "Text and Binary bodies are not yet carried"; corrected with the
+  code.
+- `request_structs/mod.rs` `generate_request_struct` doc listed "a `body`
+  field if the endpoint has a request schema"; now names all body kinds.
+- `client/methods.rs` `merge_headers` doc now states the Cookie exception;
+  `client/helpers.rs` `generate_auth_setup` doc described a per-client helper.
+- `RestApi::legacy_env_mapping_for` doc/comment ("the legacy mapping omits
+  them") now says where parameter keys are resolved (default 15).
+- `docs/generation/request-side.md`: the **planned** section was replaced by
+  the shipped behavior (raw bodies, header parameters, cookie serialization
+  and merge order, `ApiKeyParam` sources/injection/errors with a Mermaid
+  flow, header validation, Debug); intro, flow diagram, and tuple table
+  updated. `docs/generation/validation.md`: the "cannot send yet" rows were
+  replaced by the new rules. `gen/README.md`: authentication precedence,
+  generated-code sample (it showed the old per-client
+  `self.apply_env_fallback`), new `ApiKeyParam` subsection, raw bodies, and a
+  header/cookie section. `.claude/skills/schematic-define/SKILL.md` said Text
+  and Binary bodies "are still not carried"; corrected. `schematic/skill`,
+  `schematic-define/schematic/SKILL.md` (strategy table) and `gen.md`
+  (`shared.rs` contents) updated.
+
+Pre-existing, not fixed (outside this phase's symbols): `cargo doc -p
+schematic-define` with `-D rustdoc::broken_intra_doc_links` fails on
+``[`Display`]`` in `define/src/headers/sensitive.rs:8`. The new links in
+`legacy_env_mapping_for`'s doc resolve.
+
+### Broader gates
+
+- `just test` (schematic): exit 0. L1 **1773 passed, 9 skipped** (Phase 5:
+  1764); fresh-output guard **4 passed** in 102.3 s total (child rebuild of the
+  regenerated 18-API crate plus the 7-API fixture crate with its 16 wiremock
+  tests; the fixture test alone is ~4.7 s warm).
+- `just lint` (schematic): exit 0 (clippy only; `_lint` runs no formatter).
+  Also `cargo clippy -p schematic-gen --all-targets --features
+  terminal-tests -- -D warnings`: clean.
+- `just test-schema`: 20 passed. `just lint-schema` (clippy `-D warnings` on
+  the regenerated crate): clean.
+- `artifact_drift::` ran inside `just test`: pass.
+- `just test-l2` (tmux, no focus): 3 passed.
+
+### Platform evidence
+
+- macOS (this host): everything above.
+- Linux, native Windows, WSL2: not run in Phase 6. The changes are generated
+  string handling, header parsing through `http` types, and `std::env::var`
+  reads; no path, filesystem, process, or console API changed. One
+  OS-sensitive detail is passed to the child: `FIXTURE_EMPTY_KEY=""`. On
+  Windows an empty variable may read as absent rather than empty; the test
+  passes either way (both fall through to the second name), so it proves
+  "empty is skipped" only where empty variables exist. `cross-check` runs no
+  `slow_` tests; CI's Linux build job runs the guard (R35). Phase 7 owns
+  per-OS evidence.
+
+### Files touched outside `schematic/`
+
+- `.claude/skills/schematic-define/SKILL.md`,
+  `.claude/skills/schematic-define/schematic/SKILL.md`,
+  `.claude/skills/schematic-define/schematic/gen.md`.
+
+### Downstream follow-up notes
+
+- Runtime/envelope follow-up: a query key is the pair named by
+  `ApiKeyParamCredential.name` in `RequestParts.4` after
+  `apply_api_key_param`, so URL redaction can mask exactly it. Until then the
+  key **is** in the request URL, `ResponseContext.url`, and therefore in any
+  `reqwest::Error` text (`SchematicError::Http` Display includes the URL).
+  `with_api_key_param`, the env scan, and `shared::resolve_request_auth` are
+  the surfaces it replaces.
+- Definition-API follow-up: header/cookie `required`, style, `explode`, and
+  enum fidelity remain unimplemented (default 14).
+
+### Human review agenda items raised in Phase 6
+
+1. Item 1 read as authorized by the phase request (no recorded confirmation);
+   items 4 and 8 turned out unnecessary.
+2. Default 16 surface: `with_api_key_param(mut self, key) -> Self`
+   (consuming), generated only when the effective policy accepts an explicit
+   `ApiKeyParam`; key stored as `SensitiveString`. Temporary.
+3. Default 15: env scan reads the client's `env_auth` (definition names,
+   variant-overridable), first non-empty wins, only under an `ApiKeyParam`
+   env fallback. Temporary. `EnvMapping` unchanged.
+4. The per-client auth block moved into `shared.rs` (every client −168
+   lines, one resolver) — broader than minimal, chosen to keep
+   `unfolded_circle_core_rest` below the split threshold and to keep one
+   precedence implementation.
+5. New client `Debug` impls (clients had none) print base URL and auth
+   policy only.
+6. Cookie encoding keeps `%`; array cookies join with a literal `,`;
+   non-ASCII header values are accepted as `obs-text`.
+7. `merge_headers` now keeps the API's `Cookie` header alongside the
+   endpoint's (they used to be replaced by it), merged cookie by cookie.
+8. A query key is visible in URLs and `reqwest` error text until the
+   redaction follow-up.
+9. The fixture guard test was renamed (`slow_fixture_apis_compile_offline` →
+   `slow_fixture_apis_compile_and_send_offline`); CI selection is by `slow_`
+   regex, so no CI file changed.

@@ -86,9 +86,123 @@ skills_files_updated_during_phase_4:
   - schematic/skill/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
   - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_5:
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_5:
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_5:
+  - schematic/docs/generation/request-side.md
+skills_files_updated_during_phase_5:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/output/assemble/shared.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/define/src/types.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/src/artificial_analysis/mod.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/bitbucket/mod.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/elevenlabs/mod.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/emqx/mod.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/eversolo/mod.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/gitlab/mod.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/huggingface/mod.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+docs_updated_during_phase_6:
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/gen/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 packages:
   - schematic-gen
   - test-toolkit
+  - schematic-schema
+  - schematic-define
 ---
 
 # Schematic generation integrity implementation plan
@@ -252,14 +366,14 @@ Run partial-generation/filesystem/CLI tests, then `just test` and `just lint`. C
 
 ### Wave 9 — Query transport (sequential)
 
-- [ ] **Split query transport** — Task 5.1; depends on Phase 4; owns request-parts templates, `into_parts`, path/query generation, and client URL assembly.
+- [x] **Split query transport** — Task 5.1; depends on Phase 4; owns request-parts templates, `into_parts`, path/query generation, and client URL assembly.
   - Repeat the external-consumer search before changing the public tuple. Add unencoded query pairs as its fifth element; declared arrays remain repeated ordered keys. Substitute path parameters as before, keeping legacy embedded suffixes untouched (R28).
   - Apply existing percent encoding exactly once when appending pairs, preserving `%20`, existing literal/base URL queries, reserved characters, empty values, and order. Do not blindly switch to reqwest form-query encoding (R29).
   - Update every template and request-parts consumer, including helpers/tests. Keep header/cookie values in headers. Do not migrate definitions or implement URL redaction now.
 
 ### Wave 10 — Query evidence and regeneration (sequential)
 
-- [ ] **Verify query equivalence** — Task 5.2; depends on Task 5.1; owns query/path/http tests, fixture runtime cases, and regenerated schema.
+- [x] **Verify query equivalence** — Task 5.2; depends on Task 5.1; owns query/path/http tests, fixture runtime cases, and regenerated schema.
   - Update `query_params_codegen.rs`, `path_substitution.rs`, and `http_client.rs` for the new shape without weakening existing encoded-wire expectations. Compare raw local-server request lines with Phase 1 goldens and explain coverage of every existing declared-query endpoint.
   - Assert query pairs are unencoded, encoded once only at assembly, and separate from path/headers. Confirm warning-only legacy paths keep their previous escaping/order.
   - Run `just generate`; explain schema diffs as the query split and prior operation-id repair. Update query examples, tuple docs, and downstream follow-up notes in the implementation log.
@@ -272,10 +386,10 @@ Run raw-wire golden tests and fresh full-output compile/drift tests, then `just 
 
 ### Wave 11 — Independent request features (parallelizable)
 
-- [ ] **Generate raw bodies** — Task 6.1; depends on Phase 5; owns body-field/conversion generation and raw-body fixture cases.
+- [x] **Generate raw bodies** — Task 6.1; depends on Phase 5; owns body-field/conversion generation and raw-body fixture cases.
   - Emit text/binary body fields and convert to `RequestBody::Raw` with declared content type. Test empty/nonempty text and non-UTF-8 bytes; verify the existing send branch receives and transmits them exactly (R21–R22).
   - Add fixtures to the compile guard alongside codegen assertions and local mock-server byte/header tests; no production definition edits.
-- [ ] **Generate named parameters** — Task 6.2; depends on Phase 5; owns separate header/cookie field and serialization helpers plus parameter fixtures.
+- [x] **Generate named parameters** — Task 6.2; depends on Phase 5; owns separate header/cookie field and serialization helpers plus parameter fixtures.
   - Emit optional typed fields/builders, preserve exact wire names, and join scalar/array values using the adopted mapping. Validate nested-array shapes, sanitized-field/builder collisions, header names/values, and cookie names with scoped diagnostics.
   - Merge headers case-insensitively: endpoint static headers override API defaults; set parameters override matching endpoint headers; unset parameters preserve them. Reject invalid supplied values before network send without echoing contents (R25).
   - Build one Cookie header from API/endpoint static cookies and supplied parameters, preserving distinct names and case-sensitive replacement. Verify declaration order, Unicode/space/separator encoding, arrays, unset fields, and CR/LF resistance using exact server-observed bytes (R26).
@@ -285,12 +399,12 @@ Tasks 6.1 and 6.2 must keep edits to shared `into_parts.rs`, validator registrat
 
 ### Wave 12 — Authentication and integration (sequential)
 
-- [ ] **Inject parameter credentials** — Task 6.3; depends on Tasks 6.1–6.2; owns client auth helpers/builders and their fixture cases.
+- [x] **Inject parameter credentials** — Task 6.3; depends on Tasks 6.1–6.2; owns client auth helpers/builders and their fixture cases.
   - Resolve `effective_auth_policy`, including explicit methods/fallback overrides. Add temporary explicit-key storage/setter outside `Debug`; explicit keys win, first nonempty enabled env fallback wins, and disabled fallback stays disabled. Align `headers_satisfy_fallback`/missing-auth handling (R23–R24).
   - Merge query keys into the separate query collection and cookie keys into the existing single Cookie header. The resolved credential replaces every matching query/cookie name case-sensitively and preserves unrelated parameters. Location-specific encoding occurs once.
   - Test explicit/env/empty-then-nonempty/missing credentials, disabled fallback, policy overrides, same-name conflicts, and header/query/cookie sentinel Debug safety for clients and request structs (R27). Prefer isolated child environments; if mutating process environment, use `EnvGuard` and appropriate serial coordination, accounting for nextest process boundaries.
   - Update `legacy_env_mapping_for`'s comment; leave `EnvMapping` fields unchanged. Validate invalid HTTP header values without credential-bearing diagnostics. Record temporary surface choices for review 1.
-- [ ] **Complete fixture coverage** — Task 6.4; depends on Task 6.3; integrator owns helper orchestration, manifests, shared files, and documentation.
+- [x] **Complete fixture coverage** — Task 6.4; depends on Task 6.3; integrator owns helper orchestration, manifests, shared files, and documentation.
   - Merge feature work and run the freshly generated fixture crate through nextest with wiremock on port 0. Cover JSON, multipart, URL-encoded, text, binary, supported Bearer/header-key/Basic/OAuth, query-key/cookie-key auth, and query/header/cookie parameters (R19, R21–R29).
   - Keep exactly the two principal `slow_` guard tests and the negative control, unless distinct coverage justifies another test. Child compilations/runtime tests stay inside the R35 builder selection; cheap codegen assertions stay on archive consumers. Update both executed/expected exclusions if names change.
   - Reuse fixture-manifest wiremock/serial_test dependencies; add a dependency only if actually absent and authorized. Regenerate through `just generate` and explain any changed real output despite zero-count fixture-only features.

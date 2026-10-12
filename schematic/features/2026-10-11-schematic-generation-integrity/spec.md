@@ -28,13 +28,14 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-  Phase 4 is done (see implementation-log.md "## Phase 4"). Carry forward:
-  - Pre-authorization items 1-8 still have NO recorded author confirmation. Phase 5 needs item 6 (change RequestParts/into_parts) and item 1 (`just generate`). Earlier phases read the phase request as authorizing only what the phase cannot exist without; apply the same narrow reading and log it, or leave the action pending.
-  - Every generate run now goes prepare -> publish (`output::prepare_rust_output` + `MutationPlan::publish`; exports via `pipeline::publish_openapi/publish_postman`). `just generate` (`--api all`) over the committed tree was verified byte-identical on a copy, and every committed file carries its ownership proof (the `.rs` header; `schema/Cargo.toml` the marker line). A planned path holding a file without that proof now fails the output with `UnsafeOutput` instead of being overwritten.
-  - When Phase 5 changes `shared.rs` (the RequestParts tuple), a partial run (`generate --api <one>`) over the older committed tree will refuse with `RequiresFullGeneration`; that is intended. Regenerate with `just generate` (full).
-  - `pipeline::generate_batch(&registry, &BatchScope, opts, registry_for)`: `apis` is the registry; `BatchScope::Selection(Vec<String>)` names the selected APIs; `BatchScope::Complete` is full generation.
-  - `fresh_output_compile::slow_real_apis_compile_offline` now also runs a partial `OllamaNative` generation over the fresh 18-API tree before comparing with committed `schema/src` and compiling; no test names changed, so the R35 selection is unchanged.
-  - Phase 1/2 notes still apply: Cargo-invoking tests must be `slow_*` in the l1 binary; `just test` runs `test-fresh-output` after L1; R35's completion-record gap stays logged. Phase 6 must remove the Rust-side gap checks as it implements each request feature.
+  Phase 6 is done (see implementation-log.md "## Phase 6"). Carry forward:
+  - Pre-authorization items 1-8 still have NO recorded author confirmation. Phases 3, 5, 6 read item 1 (just generate) narrowly as authorized by the phase request; Phase 7's Task 7.1 needs item 2 (delete schematic/gen/schematic/) and item 3 (checks/cargo-machete.txt, conditional). Apply the same narrow reading and log it, or leave the action pending and record the boundary.
+  - Auth resolution no longer lives in each client: it is emitted once into the generated shared.rs by gen/src/codegen/client/shared_auth.rs (shared::resolve_request_auth, apply_api_key_param, header_pair, debug_client); clients call it with (auth_policy, headers, env_auth, api_key_param). Cookie helpers (encode_cookie_value, combine_cookie_headers) are in codegen/error.rs beside append_query_pairs. Every client shrank by 168 lines; unfolded_circle_core_rest.rs is 1800/2000 lines (SPLIT_THRESHOLD_LINES) - watch it if generated output grows.
+  - Rust-side gap diagnostics are gone; validation now checks header/cookie names (HTTP token), nested header/cookie arrays, raw-body content types, and ApiKeyParam names. Postman still reports header/cookie params it cannot carry.
+  - The only live users of the new features are the 7 OpenAI Beta* endpoints' `openai-beta` header parameter. OpenAPI/Postman artifacts did not change in Phase 6; schema/Cargo.lock unchanged since Phase 5.
+  - Fixture guard renamed to fresh_output_compile::slow_fixture_apis_compile_and_send_offline; it now runs 16 wiremock tests in the generated fixture crate (REQUEST_SIDE_TESTS list guarded by request_side_test_list_names_every_child_test). CI selects slow_ by regex; no CI file changed.
+  - Dependents (sniff, biscuit-speaks, model-citizen, homelab, eversolo-integration, unfolded-integration-helper, arcam-amp-integration, sony-receiver-integration) pass `cargo check --all-targets` against the regenerated crate; their `just test {pkg}` runs are Phase 7's.
+  - Known gaps to keep recorded, not fix: a query API key appears in the request URL, ResponseContext.url, and reqwest error text until the redaction follow-up; nested query arrays generate non-compiling code (no live user).
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on: []
 refresh_required: false
