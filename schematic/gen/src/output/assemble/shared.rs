@@ -4,7 +4,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::codegen::{
-    generate_error_type, generate_paginated_trait, generate_request_parts_type,
+    generate_error_type, generate_paginated_trait, generate_request_auth_helpers,
+    generate_request_parts_type,
     generate_response_kind_type, generate_variant_types,
 };
 
@@ -22,6 +23,7 @@ use crate::codegen::{
 /// A TokenStream containing the shared module code.
 pub fn assemble_shared_module() -> TokenStream {
     let request_parts_type = generate_request_parts_type();
+    let request_auth_helpers = generate_request_auth_helpers();
     let response_kind_type = generate_response_kind_type();
     let error_type = generate_error_type();
     let variant_types = generate_variant_types();
@@ -53,6 +55,8 @@ pub fn assemble_shared_module() -> TokenStream {
         pub use schematic_define::{AuthPolicy, AuthStrategy, EnvAuthStrategy, Headers, OAuth2Config, UpdateStrategy};
 
         #request_parts_type
+
+        #request_auth_helpers
 
         #response_kind_type
 

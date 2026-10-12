@@ -19,6 +19,10 @@ pub(crate) fn generate_explicit_auth_helpers(api: &RestApi) -> TokenStream {
         .iter()
         .any(|method| matches!(method, schematic_define::AuthMethod::Basic));
     let has_oauth = policy.oauth2().is_some();
+    let api_key_param = policy.explicit.iter().find_map(|method| match method {
+        schematic_define::AuthMethod::ApiKeyParam { name, location } => Some((name, location)),
+        _ => None,
+    });
 
     let bearer_helper = bearer_header.map(|header| match header {
         Some(header_name) => quote! {
@@ -87,8 +91,31 @@ pub(crate) fn generate_explicit_auth_helpers(api: &RestApi) -> TokenStream {
         quote! {}
     };
 
+    let api_key_param_helper = api_key_param
+        .map(|(name, location)| {
+            let location = match location {
+                schematic_define::ApiKeyLocation::Cookie => "cookie",
+                _ => "query parameter",
+            };
+            let doc = format!(" Returns this client configured to send `key` as the `{name}` {location}.");
+            quote! {
+                #[doc = #doc]
+                ///
+                /// The key wins over the environment fallback and is never
+                /// printed by `Debug`. **Temporary:** this setter is replaced
+                /// when credentials move to a shared runtime.
+                #[must_use]
+                pub fn with_api_key_param(mut self, key: impl Into<String>) -> Self {
+                    self.api_key_param = Some(schematic_define::SensitiveString::new(key));
+                    self
+                }
+            }
+        })
+        .unwrap_or_default();
+
     quote! {
         #api_key_helper
+        #api_key_param_helper
         #bearer_helper
         #basic_helper
         #oauth_helper

@@ -502,6 +502,34 @@ fn special_char_path_params_are_sanitized_with_serde_rename() {
 }
 
 #[test]
+fn path_params_are_substituted_without_declared_query_params() {
+    // Query parameters are returned as separate pairs; the path holds only the
+    // substituted, percent-encoded segments.
+    let mut endpoint = get_endpoint("ListIssues", "/repos/{owner}/{repo}/issues");
+    endpoint.params = Some(schematic_define::EndpointParams::default().with_query_params(vec![(
+        "state",
+        schematic_define::QueryParamType::String,
+        false,
+        None,
+    )]));
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains(r#""/repos/{}/{}/issues""#),
+        "path format should hold only path placeholders:\n{code}"
+    );
+    assert!(
+        !code.contains("let mut path") && !code.contains("issues?"),
+        "the path must not receive the declared query:\n{code}"
+    );
+    assert!(
+        code.contains(r#"query.push(("state".to_string(), value.to_string()))"#),
+        "the declared query should be a separate pair:\n{code}"
+    );
+}
+
+#[test]
 fn path_param_values_are_percent_encoded() {
     // A value such as `release/1.0` must not break out of its path segment, so
     // the emitter wraps each path argument in `urlencoding::encode`.

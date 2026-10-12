@@ -11,12 +11,23 @@ use schematic_define::{
     ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
     OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
 };
+use schematic_gen::output::assemble::assemble_shared_module;
 use schematic_gen::output::assemble_api_code;
 
 /// Formats generated tokens into readable code for assertions.
 fn format_tokens(tokens: &TokenStream) -> String {
     let file = syn::parse2::<syn::File>(tokens.clone()).expect("Generated code should be valid");
     prettyplease::unparse(&file)
+}
+
+/// The client module for `api` followed by the generated `shared.rs`, whose
+/// `resolve_request_auth` every client calls for its credentials.
+fn client_and_shared_code(api: &RestApi) -> String {
+    format!(
+        "{}\n{}",
+        format_tokens(&assemble_api_code(api)),
+        format_tokens(&assemble_shared_module())
+    )
 }
 
 /// Creates a test API with the given auth strategy.
@@ -282,8 +293,7 @@ fn bearer_token_uses_runtime_auth_matching() {
         AuthStrategy::BearerToken { header: None },
         vec!["BEARER_TOKEN".to_string()],
     );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = client_and_shared_code(&api);
 
     // Should store env var in struct init
     assert!(
@@ -294,7 +304,7 @@ fn bearer_token_uses_runtime_auth_matching() {
 
     // Should use runtime match for auth
     assert!(
-        code.contains("match &self.auth_policy.env_fallback"),
+        code.contains("&self.auth_policy") && code.contains("match &policy.env_fallback"),
         "Should use auth policy fallback matching\nGenerated code:\n{}",
         code
     );
@@ -321,8 +331,7 @@ fn bearer_token_with_custom_header() {
         },
         vec!["MY_TOKEN".to_string()],
     );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = client_and_shared_code(&api);
 
     // Should store custom header in auth_strategy init
     assert!(
@@ -348,8 +357,7 @@ fn api_key_uses_runtime_auth_matching() {
         },
         vec!["API_SECRET".to_string()],
     );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = client_and_shared_code(&api);
 
     // Should store env var in struct init
     assert!(
@@ -381,8 +389,7 @@ fn api_key_uses_runtime_auth_matching() {
 #[test]
 fn basic_auth_uses_reqwest_basic_auth() {
     let api = make_basic_auth_api("BasicAuthApi", "API_USER", "API_PASS");
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = client_and_shared_code(&api);
 
     // Should contain env var names
     assert!(
@@ -424,8 +431,7 @@ fn dual_auth_generates_explicit_api_key_and_oauth_helpers() {
 #[test]
 fn dual_auth_generates_descriptive_authentication_required_error() {
     let api = make_dual_auth_api();
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = client_and_shared_code(&api);
 
     assert!(
         code.contains("SchematicError::AuthenticationRequired"),
@@ -438,7 +444,8 @@ fn dual_auth_generates_descriptive_authentication_required_error() {
         code
     );
     assert!(
-        code.contains("if !headers.has_explicit_auth()"),
+        code.contains("let explicit = headers.has_explicit_auth() || key.is_some();")
+            && code.contains("if !explicit {"),
         "Should only apply env fallback when explicit auth is absent\nGenerated code:\n{}",
         code
     );
@@ -551,6 +558,33 @@ fn client_constructs_url_from_base_and_path() {
     assert!(
         code.contains(r#"format!("{}{}", self.base_url, path)"#),
         "Should construct URL from base_url and path\nGenerated code:\n{}",
+        code
+    );
+}
+
+#[test]
+fn client_appends_query_pairs_once_at_url_assembly() {
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
+    let tokens = assemble_api_code(&api);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("let (method, path, body, endpoint_headers, mut query) = request.into_parts()?"),
+        "Should destructure the query pairs separately\nGenerated code:\n{}",
+        code
+    );
+    let url = code.find(r#"let mut url = format!("{}{}", self.base_url, path);"#);
+    let append = code.find("crate::shared::append_query_pairs(&mut url, &path, &query);");
+    let builder = code.find("self.client.get(&url)");
+    assert!(
+        matches!((url, append, builder), (Some(u), Some(a), Some(b)) if u < a && a < b),
+        "Query pairs should be appended after the base URL and before the request is built\nGenerated code:\n{}",
+        code
+    );
+    // Query values never travel as headers.
+    assert!(
+        code.contains("Self::merge_headers(&api_headers, &endpoint_headers)"),
+        "Only header pairs should reach merge_headers\nGenerated code:\n{}",
         code
     );
 }

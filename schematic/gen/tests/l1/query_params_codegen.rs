@@ -1,12 +1,15 @@
 //! Tests for query parameter code generation in generated request structs.
 //!
-//! These tests verify the generated `into_parts()` method correctly builds
-//! query strings with proper URL encoding and separator handling.
+//! These tests verify the generated `into_parts()` method returns declared
+//! query parameters as unencoded pairs apart from the path, and that the
+//! shared `append_query_pairs` helper is the one place they are encoded. What
+//! actually reaches a server is asserted by
+//! `fresh_output_compile::slow_query_wire_matches_pre_split_baseline`.
 //!
 //! ## Test Categories
 //!
-//! 1. **Separator tests**: First param uses `?`, subsequent use `&`
-//! 2. **URL encoding tests**: Values with special characters are encoded
+//! 1. **Separation tests**: pairs are collected apart from the path, in order
+//! 2. **URL encoding tests**: encoding happens once, at URL assembly
 //! 3. **Type-specific tests**: Boolean, enum, array params generate correctly
 //! 4. **Interaction tests**: Query params with path params
 
@@ -14,7 +17,7 @@ use proc_macro2::TokenStream;
 use schematic_define::{
     ApiResponse, Endpoint, EndpointParams, ParamDef, ParamStyle, QueryParamType, RestMethod,
 };
-use schematic_gen::codegen::generate_request_struct;
+use schematic_gen::codegen::{generate_request_parts_type, generate_request_struct};
 
 /// Formats generated tokens into readable code for assertions.
 fn format_tokens(tokens: &TokenStream) -> String {
@@ -65,11 +68,11 @@ fn make_endpoint_with_query(
 }
 
 // =============================================================================
-// Separator tests: Collector pattern with single ?/& check at the end
+// Separation tests: pairs are collected apart from the path
 // =============================================================================
 
 #[test]
-fn single_query_param_uses_question_mark() {
+fn single_query_param_is_collected_apart_from_the_path() {
     let endpoint = make_endpoint_with_query(
         "ListItems",
         RestMethod::Get,
@@ -80,26 +83,35 @@ fn single_query_param_uses_question_mark() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    // Should use collector pattern with single ?/& check
     assert!(
-        code.contains("let mut query_pairs: Vec<(&str, String)> = Vec::new()"),
-        "Should use query_pairs collector\nGenerated code:\n{}",
+        code.contains(r#"let path = "/items".to_string();"#),
+        "The path should hold no declared query\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(r#"if path.contains('?')"#),
-        "Should check if path contains '?' at the end\nGenerated code:\n{}",
+        code.contains("let mut query: Vec<(String, String)> = Vec::new()"),
+        "Should collect query pairs\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(r#"path.push_str(&format!("?{}", query_string))"#),
-        "Should use '?' for query string\nGenerated code:\n{}",
+        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
+        "Should push the unencoded value under its wire name\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains(r#"Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))"#),
+        "Query pairs should be the fifth element of RequestParts\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        !code.contains("push_str"),
+        "into_parts should no longer append a query string to the path\nGenerated code:\n{}",
         code
     );
 }
 
 #[test]
-fn multiple_query_params_uses_correct_separators() {
+fn multiple_query_params_keep_declaration_order() {
     let endpoint = make_endpoint_with_query(
         "ListItems",
         RestMethod::Get,
@@ -114,74 +126,60 @@ fn multiple_query_params_uses_correct_separators() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    // Each param should push to query_pairs
+    let positions: Vec<usize> = ["page", "limit", "sort"]
+        .iter()
+        .map(|name| {
+            let push = format!(r#"query.push(("{name}".to_string(), value.to_string()))"#);
+            code.find(&push)
+                .unwrap_or_else(|| panic!("missing push for {name}\nGenerated code:\n{code}"))
+        })
+        .collect();
     assert!(
-        code.contains(r#"query_pairs.push(("page", value.to_string()))"#),
-        "Page param should push to query_pairs\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains(r#"query_pairs.push(("limit", value.to_string()))"#),
-        "Limit param should push to query_pairs\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains(r#"query_pairs.push(("sort", value.to_string()))"#),
-        "Sort param should push to query_pairs\nGenerated code:\n{}",
-        code
-    );
-
-    // Query string construction with URL encoding
-    assert!(
-        code.contains("urlencoding::encode(v)"),
-        "Should URL-encode values\nGenerated code:\n{}",
-        code
-    );
-
-    // Single ?/& check at the end
-    assert!(
-        code.contains(r#"if path.contains('?')"#),
-        "Should have single '?' check at end\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains(r#"path.push_str(&format!("&{}", query_string))"#),
-        "Should use '&' when path has '?'\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains(r#"path.push_str(&format!("?{}", query_string))"#),
-        "Should use '?' when path has no '?'\nGenerated code:\n{}",
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "Pairs should be pushed in declaration order\nGenerated code:\n{}",
         code
     );
 }
 
 #[test]
-fn query_params_with_existing_path_query_uses_ampersand() {
-    // This test documents the behavior when path already has hardcoded query params
-    // (The path normalization should happen before code generation, but the generated
-    // code handles it by checking if '?' is already in the path)
+fn legacy_path_template_query_stays_in_the_path() {
+    // A query written into the path template is not declared query data: it
+    // stays in the path verbatim, and declared pairs travel separately.
     let endpoint = make_endpoint_with_query(
         "ListItems",
         RestMethod::Get,
-        "/items", // Clean path - no hardcoded query
+        "/items?beta=true",
         vec![("page", QueryParamType::Integer)],
     );
 
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    // Generated code should handle both cases with single check at end
     assert!(
-        code.contains(r#"if path.contains('?')"#),
-        "Should check for existing '?' at end\nGenerated code:\n{}",
+        code.contains(r#"let path = "/items?beta=true".to_string();"#),
+        "The embedded query should stay in the path\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(r#"} else {"#),
-        "Should have else branch for '?'\nGenerated code:\n{}",
+        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
+        "The declared parameter should still be a separate pair\nGenerated code:\n{}",
         code
     );
+}
+
+#[test]
+fn endpoint_without_query_params_returns_empty_pairs() {
+    let endpoint = make_endpoint_with_query("ListItems", RestMethod::Get, "/items", vec![]);
+
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("let query: Vec<(String, String)> = Vec::new();"),
+        "Should return an empty pair list\nGenerated code:\n{}",
+        code
+    );
+    assert!(!code.contains("let mut query"), "No mutation needed\nGenerated code:\n{}", code);
 }
 
 // =============================================================================
@@ -330,10 +328,10 @@ fn array_query_param_generates_loop_for_values() {
         code
     );
 
-    // Each array value should push to query_pairs
+    // Each array value becomes its own pair under the same key
     assert!(
-        code.contains(r#"query_pairs.push(("tags", value.to_string()))"#),
-        "Array values should push to query_pairs\nGenerated code:\n{}",
+        code.contains(r#"query.push(("tags".to_string(), value.to_string()))"#),
+        "Array values should push repeated pairs\nGenerated code:\n{}",
         code
     );
 }
@@ -405,7 +403,7 @@ fn query_params_with_path_params_generates_both() {
 }
 
 #[test]
-fn path_uses_mut_when_query_params_present() {
+fn path_is_immutable_when_query_params_present() {
     let endpoint = make_endpoint_with_query(
         "ListRepoIssues",
         RestMethod::Get,
@@ -416,10 +414,15 @@ fn path_uses_mut_when_query_params_present() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    // Path should be mutable when query params need to be appended
+    // Query params no longer touch the path
     assert!(
-        code.contains("let mut path = format!"),
-        "Path should be mutable when query params present\nGenerated code:\n{}",
+        code.contains("let path = format!"),
+        "Path should be built once when query params are present\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        !code.contains("let mut path"),
+        "Path should not be mutated for query params\nGenerated code:\n{}",
         code
     );
 }
@@ -624,7 +627,7 @@ fn single_path_param_with_query_params_has_from_impls() {
 // =============================================================================
 
 #[test]
-fn generated_code_uses_urlencoding_for_query_values() {
+fn query_values_are_left_unencoded_by_into_parts() {
     let endpoint = make_endpoint_with_query(
         "Search",
         RestMethod::Get,
@@ -635,19 +638,33 @@ fn generated_code_uses_urlencoding_for_query_values() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    // Should use urlencoding::encode for values
     assert!(
-        code.contains("urlencoding::encode(v)"),
-        "Should use urlencoding::encode for values\nGenerated code:\n{}",
+        !code.contains("urlencoding::encode(v)") && !code.contains("urlencoding::encode(value"),
+        "into_parts must not encode query values\nGenerated code:\n{}",
         code
     );
+}
 
-    // Should format encoded_key=encoded_value
+#[test]
+fn append_query_pairs_encodes_each_name_and_value_once() {
+    let code = format_tokens(&generate_request_parts_type());
+
     assert!(
-        code.contains(
-            r#"format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))"#
-        ),
-        "Should format encoded_key=encoded_value\nGenerated code:\n{}",
+        code.contains("pub fn append_query_pairs(url: &mut String, path: &str, pairs: &[(String, String)])"),
+        "Shared helper should be emitted\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("url.push_str(&urlencoding::encode(name));")
+            && code.contains("url.push_str(&urlencoding::encode(value));"),
+        "Name and value should each be encoded once\nGenerated code:\n{}",
+        code
+    );
+    // The separator follows the path, not the base URL, which keeps request
+    // lines byte-identical to the pre-split clients.
+    assert!(
+        code.contains("url.push(if path.contains('?') { '&' } else { '?' });"),
+        "Separator should be chosen from the path\nGenerated code:\n{}",
         code
     );
 }
@@ -722,13 +739,13 @@ fn special_char_query_params_are_sanitized_with_serde_rename() {
         code.contains(r#"#[serde(rename = "user.name")]"#),
         "must preserve the `user.name` wire name:\n{code}"
     );
-    // The query string is still keyed by the original wire names.
+    // The query pairs are still keyed by the original wire names.
     assert!(
-        code.contains(r#"query_pairs.push(("$top""#),
+        code.contains(r#"query.push(("$top".to_string()"#),
         "query key should stay `$top`:\n{code}"
     );
     assert!(
-        code.contains(r#"query_pairs.push(("user.name""#),
+        code.contains(r#"query.push(("user.name".to_string()"#),
         "query key should stay `user.name`:\n{code}"
     );
 }

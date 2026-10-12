@@ -300,6 +300,7 @@ pub(super) fn generate_variant_builder(struct_name: &Ident, builder_name: &Ident
                     auth_policy,
                     env_username: self.base.env_username.clone(),
                     headers,
+                    api_key_param: self.base.api_key_param.clone(),
                     variant_hooks: crate::shared::VariantHooks {
                         pre_response_json: self.pre_response_json,
                         response_mutators: self.response_mutators,

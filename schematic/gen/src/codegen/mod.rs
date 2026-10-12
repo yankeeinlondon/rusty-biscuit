@@ -38,7 +38,9 @@ pub mod traits;
 pub mod variant;
 
 pub use api_struct::generate_api_struct;
-pub use client::{generate_request_method, generate_request_method_with_suffix};
+pub use client::{
+    generate_request_auth_helpers, generate_request_method, generate_request_method_with_suffix,
+};
 pub use error::{
     generate_error_type, generate_request_parts_type, generate_response_kind_type,
 };

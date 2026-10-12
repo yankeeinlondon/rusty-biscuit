@@ -859,33 +859,31 @@ fn generates_query_param_in_into_parts() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    // Check that collector pattern is generated
+    // Pairs are collected apart from the path and returned unencoded
     assert!(
-        code.contains("let mut query_pairs: Vec<(&str, String)> = Vec::new()"),
-        "Expected query_pairs collector, got:\n{}",
+        code.contains("let mut query: Vec<(String, String)> = Vec::new()"),
+        "Expected query collector, got:\n{}",
         code
     );
-    // Check params are pushed to collector
     assert!(
-        code.contains(r#"query_pairs.push(("page", value.to_string()))"#),
+        code.contains(r#"query.push(("page".to_string(), value.to_string()))"#),
         "Expected page param push, got:\n{}",
         code
     );
     assert!(
-        code.contains(r#"query_pairs.push(("limit", value.to_string()))"#),
+        code.contains(r#"query.push(("limit".to_string(), value.to_string()))"#),
         "Expected limit param push, got:\n{}",
         code
     );
-    // Check URL encoding is used
     assert!(
-        code.contains("urlencoding::encode(v)"),
-        "Expected urlencoding::encode, got:\n{}",
+        !code.contains("urlencoding::encode(v)"),
+        "Query values are encoded at URL assembly, not here, got:\n{}",
         code
     );
-    // Check single query string construction
     assert!(
-        code.contains(r#"path.push_str(&format!("?{}", query_string))"#),
-        "Expected single query string append, got:\n{}",
+        code.contains(r#"let path = "/items".to_string();"#)
+            && code.contains("vec![], query))"),
+        "Expected an unmodified path and the pairs as the fifth element, got:\n{}",
         code
     );
 }
@@ -942,7 +940,7 @@ fn generates_array_query_param() {
         code
     );
     assert!(
-        code.contains(r#"query_pairs.push(("tags", value.to_string()))"#),
+        code.contains(r#"query.push(("tags".to_string(), value.to_string()))"#),
         "Expected tags push in loop, got:\n{}",
         code
     );
@@ -1333,4 +1331,175 @@ mod pagination_doc_tests {
             code
         );
     }
+}
+
+// ---- raw text and binary bodies (R21, R22) ----
+
+#[test]
+fn text_body_is_a_string_field_sent_as_raw_bytes_under_its_content_type() {
+    let endpoint = make_endpoint(
+        "SendNote",
+        RestMethod::Post,
+        "/notes",
+        Some(ApiRequest::Text {
+            content_type: "text/plain; charset=utf-8".to_string(),
+        }),
+    );
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+
+    assert!(code.contains("pub body: String,"), "{code}");
+    assert!(code.contains("pub fn new(body: String) -> Self"), "{code}");
+    assert!(code.contains("impl From<String> for SendNoteRequest"), "{code}");
+    assert!(
+        code.contains(r#"content_type: "text/plain; charset=utf-8".to_string()"#),
+        "{code}"
+    );
+    assert!(code.contains("bytes: self.body.into_bytes()"), "{code}");
+    assert!(!code.contains("RequestBody::Empty"), "the body must not be dropped:\n{code}");
+    // The example does not pretend `String` is a schema type to import.
+    assert!(!code.contains("SendNoteRequest, String}"), "{code}");
+}
+
+#[test]
+fn binary_body_is_a_byte_vector_sent_as_raw_bytes_under_its_content_type() {
+    let endpoint = make_endpoint(
+        "UploadBlob",
+        RestMethod::Put,
+        "/blobs/{name}",
+        Some(ApiRequest::Binary {
+            content_type: "application/octet-stream".to_string(),
+        }),
+    );
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+
+    assert!(code.contains("pub body: Vec<u8>,"), "{code}");
+    assert!(code.contains("pub fn new(name: impl Into<String>, body: Vec<u8>) -> Self"), "{code}");
+    assert!(
+        code.contains(r#"content_type: "application/octet-stream".to_string()"#),
+        "{code}"
+    );
+    assert!(code.contains("bytes: self.body,"), "{code}");
+    assert!(validate_generated_code(&generate_request_struct(&endpoint)).is_ok());
+}
+
+// ---- header and cookie parameters (R25, R26) ----
+
+/// `code` with all whitespace removed, so assertions survive line wrapping.
+fn squash(code: &str) -> String {
+    code.split_whitespace().collect()
+}
+
+fn named_param(name: &str, param_type: QueryParamType) -> schematic_define::ParamDef {
+    schematic_define::ParamDef {
+        name: name.to_string(),
+        required: true,
+        description: None,
+        param_type,
+        explode: false,
+        style: schematic_define::ParamStyle::Simple,
+    }
+}
+
+fn endpoint_with_named_params(
+    headers: Vec<schematic_define::ParamDef>,
+    cookies: Vec<schematic_define::ParamDef>,
+) -> Endpoint {
+    Endpoint {
+        headers: vec![("X-Mode".to_string(), "static".to_string())],
+        params: Some(schematic_define::EndpointParams {
+            header: headers,
+            cookie: cookies,
+            ..Default::default()
+        }),
+        ..make_endpoint("Search", RestMethod::Get, "/search", None)
+    }
+}
+
+#[test]
+fn header_parameters_become_optional_fields_sent_under_their_wire_names() {
+    let endpoint = endpoint_with_named_params(
+        vec![
+            named_param("X-Trace-Id", QueryParamType::String),
+            named_param("X-Ids", QueryParamType::Array(Box::new(QueryParamType::Integer))),
+        ],
+        vec![],
+    );
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let flat = squash(&code);
+
+    // `required` is not enforced: every parameter is an `Option` with a builder.
+    assert!(code.contains(r#"#[serde(rename = "X-Trace-Id")]"#), "{code}");
+    assert!(code.contains("pub x_trace_id: Option<String>,"), "{code}");
+    assert!(code.contains("pub x_ids: Option<Vec<i64>>,"), "{code}");
+    assert!(code.contains("pub fn with_x_trace_id(mut self, value: String) -> Self"), "{code}");
+    assert!(code.contains("pub fn with_x_ids(mut self, value: Vec<i64>) -> Self"), "{code}");
+    // A set parameter replaces a same-named endpoint header, case-insensitively.
+    assert!(
+        flat.contains(&squash(r#"vec![("X-Mode".to_string(), "static".to_string())]"#)),
+        "{code}"
+    );
+    assert!(
+        flat.contains(&squash(r#"headers.retain(|(name, _)| !name.eq_ignore_ascii_case("X-Trace-Id"))"#)),
+        "{code}"
+    );
+    assert!(flat.contains(&squash(r#"headers.push(("X-Trace-Id".to_string(), value))"#)), "{code}");
+    // Arrays are joined with `,`; header values never join the query.
+    assert!(code.contains(r#".join(",")"#), "{code}");
+    assert!(code.contains("let query: Vec<(String, String)> = Vec::new()"), "{code}");
+    assert!(!code.contains("combine_cookie_headers"), "{code}");
+}
+
+#[test]
+fn cookie_parameters_are_encoded_and_folded_into_one_cookie_header() {
+    let endpoint = endpoint_with_named_params(
+        vec![],
+        vec![
+            named_param("session", QueryParamType::String),
+            named_param("prefs", QueryParamType::Array(Box::new(QueryParamType::String))),
+        ],
+    );
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let flat = squash(&code);
+
+    assert!(code.contains("pub session: Option<String>,"), "{code}");
+    assert!(code.contains("pub fn with_prefs(mut self, value: Vec<String>) -> Self"), "{code}");
+    assert!(
+        flat.contains(&squash(
+            r#"cookies.push(("session".to_string(), crate::shared::encode_cookie_value(&value.to_string()),))"#
+        )),
+        "{code}"
+    );
+    // Each array element is encoded on its own before the `,` join.
+    assert!(flat.contains(&squash("crate::shared::encode_cookie_value(&item.to_string(),)")), "{code}");
+    assert!(
+        flat.contains(&squash("crate::shared::combine_cookie_headers(&mut headers, &cookies)?")),
+        "{code}"
+    );
+    assert!(code.contains("`Cookie` header, which set cookie parameters join"), "{code}");
+}
+
+#[test]
+fn named_parameters_start_unset_in_every_constructor() {
+    let endpoint = Endpoint {
+        path: "/search/{scope}".to_string(),
+        ..endpoint_with_named_params(
+            vec![named_param("X-Trace-Id", QueryParamType::String)],
+            vec![named_param("session", QueryParamType::String)],
+        )
+    };
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+
+    assert!(code.contains("x_trace_id: None"), "{code}");
+    assert!(code.contains("session: None"), "{code}");
+    assert!(code.contains("impl From<&str> for SearchRequest"), "{code}");
+    assert!(validate_generated_code(&generate_request_struct(&endpoint)).is_ok());
+}
+
+#[test]
+fn endpoints_without_named_parameters_keep_their_inline_headers() {
+    let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+
+    assert!(code.contains("vec![], query))"), "{code}");
+    assert!(!code.contains("let mut headers"), "{code}");
 }

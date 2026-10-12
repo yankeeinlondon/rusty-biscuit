@@ -4,7 +4,10 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use schematic_define::{ApiRequest, Endpoint};
 
-use crate::codegen::request_structs::shared::{QueryParamInfo, generate_path_format};
+use crate::codegen::request_structs::named_params::generate_headers_assembly;
+use crate::codegen::request_structs::shared::{
+    QueryParamInfo, extract_cookie_params, extract_header_params, generate_path_format,
+};
 
 /// Generates the into_parts method.
 pub(super) fn generate_into_parts(
@@ -29,42 +32,62 @@ pub(super) fn generate_into_parts(
         Some(ApiRequest::UrlEncoded { .. }) => quote! {
             crate::shared::RequestBody::UrlEncoded(self.body.into_form_pairs())
         },
+        Some(ApiRequest::Text { content_type }) => quote! {
+            crate::shared::RequestBody::Raw {
+                content_type: #content_type.to_string(),
+                bytes: self.body.into_bytes(),
+            }
+        },
+        Some(ApiRequest::Binary { content_type }) => quote! {
+            crate::shared::RequestBody::Raw {
+                content_type: #content_type.to_string(),
+                bytes: self.body,
+            }
+        },
         _ => quote! { crate::shared::RequestBody::Empty },
     };
 
-    // Generate headers initialization
-    let headers_init = generate_endpoint_headers_init(&endpoint.headers);
+    let cookie_params = extract_cookie_params(&endpoint.params);
+    let (headers_statements, headers_init) = generate_headers_assembly(
+        &endpoint.headers,
+        &extract_header_params(&endpoint.params),
+        &cookie_params,
+    );
+    // Header and cookie parameters travel in the headers element; only cookie
+    // parameters add a failure, so the doc line is emitted only for them.
+    let cookie_error_doc = if cookie_params.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            ///
+            /// Returns `SchematicError::Header` if the endpoint's static
+            /// `Cookie` header, which set cookie parameters join, cannot be
+            /// parsed.
+        }
+    };
 
     quote! {
-        /// Converts the request into (method, path, body, headers) parts.
+        /// Converts the request into (method, path, body, headers, query) parts.
         ///
         /// ## Returns
         ///
         /// A tuple of:
         /// - HTTP method as a static string (e.g., "GET", "POST")
-        /// - Fully substituted path string with query parameters
+        /// - Path with path parameters substituted; declared query parameters
+        ///   are not part of it
         /// - The request body as a `RequestBody`
         /// - Endpoint-specific headers as key-value pairs
+        /// - Declared query parameters as unencoded key-value pairs
         ///
         /// ## Errors
         ///
         /// Returns `SchematicError::SerializationError` if a JSON request body
         /// fails to serialize.
+        #cookie_error_doc
         pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
             #path_format
-            Ok((#method_str, path, #body_expr, #headers_init))
+            #headers_statements
+            Ok((#method_str, path, #body_expr, #headers_init, query))
         }
-    }
-}
-
-/// Generates the initialization code for endpoint-specific headers.
-fn generate_endpoint_headers_init(headers: &[(String, String)]) -> TokenStream {
-    if headers.is_empty() {
-        quote! { vec![] }
-    } else {
-        let header_pairs = headers.iter().map(|(k, v)| {
-            quote! { (#k.to_string(), #v.to_string()) }
-        });
-        quote! { vec![#(#header_pairs),*] }
     }
 }

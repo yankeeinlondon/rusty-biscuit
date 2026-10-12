@@ -121,6 +121,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
 
     // Generate Default impl
     let default_impl = constructors::generate_default_impl(&struct_name);
+    let debug_impl = generate_debug_impl(&struct_name);
 
     quote! {
         #[doc = #description]
@@ -137,6 +138,24 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
 
         #default_impl
 
+        #debug_impl
+
         #variant_builder
+    }
+}
+
+/// Generates a `Debug` impl that prints no credential.
+///
+/// `headers` can hold explicit bearer tokens and API keys in plain text and
+/// `api_key_param` holds a parameter key, so the shared `debug_client`
+/// prints only the base URL and the auth policy.
+fn generate_debug_impl(struct_name: &proc_macro2::Ident) -> TokenStream {
+    let name = struct_name.to_string();
+    quote! {
+        impl std::fmt::Debug for #struct_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                crate::shared::debug_client(f, #name, &self.base_url, &self.auth_policy)
+            }
+        }
     }
 }

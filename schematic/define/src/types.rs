@@ -311,6 +311,13 @@ impl RestApi {
     /// This is used by the generator to preserve the existing `env_auth` /
     /// `env_username` authoring API while routing runtime behavior through
     /// [`EnvMapping`].
+    ///
+    /// An [`AuthStrategy::ApiKeyParam`] strategy yields an empty mapping:
+    /// [`EnvMapping`] only describes header credentials. The generated client
+    /// resolves a query or cookie key from `env_auth` itself, and only while
+    /// its effective policy's env fallback is
+    /// [`EnvAuthStrategy::ApiKeyParam`]; that interim scan is replaced when
+    /// credentials move to a shared runtime.
     #[must_use]
     pub fn legacy_env_mapping_for(
         auth: &AuthStrategy,
@@ -329,8 +336,7 @@ impl RestApi {
                 }),
                 ..Default::default()
             },
-            // Parameter-based keys (query/cookie) have no header-based
-            // `EnvMapping` representation; the legacy mapping omits them.
+            // See the doc comment: parameter keys are not header credentials.
             Some(EnvAuthStrategy::ApiKeyParam { .. }) => EnvMapping::default(),
             Some(EnvAuthStrategy::Basic) => EnvMapping {
                 basic_user: env_username.map(EnvList::single),

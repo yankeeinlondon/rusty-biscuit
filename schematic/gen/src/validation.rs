@@ -58,8 +58,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthMethod, Endpoint, EnvAuthStrategy, FormFieldKind, ParamDef,
-    RestApi,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, Endpoint, EnvAuthStrategy, FormFieldKind,
+    ParamDef, QueryParamType, RestApi,
 };
 use schematic_definitions::registry::SchemaRegistry;
 
@@ -146,7 +146,9 @@ pub fn endpoint_uniqueness_key(endpoint: &Endpoint) -> EndpointUniquenessKey {
 /// Covers everything the OpenAPI and Postman validators check about routes,
 /// plus the Rust-only rules: identifiers, request suffixes, module paths and
 /// file names, type syntax, generated-name collisions across each module
-/// group, and request inputs the generated client cannot send yet.
+/// group, and the request inputs the client sends verbatim: header and
+/// cookie parameter names, raw body content types, and API-key parameter
+/// names.
 pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
@@ -390,7 +392,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     }
 
     check_module_path(api, diagnostics);
-    check_auth_support(api, diagnostics);
+    check_api_key_param(api, diagnostics);
     check_convenience_methods(api, diagnostics);
 
     for endpoint in &api.endpoints {
@@ -416,8 +418,8 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         }
 
         check_request_struct_fields(api, endpoint, diagnostics);
-        check_request_body_support(api, endpoint, diagnostics);
-        check_unsent_params(api, endpoint, Output::Rust, diagnostics);
+        check_raw_body_content_type(api, endpoint, diagnostics);
+        check_named_params(api, endpoint, diagnostics);
     }
 }
 
@@ -496,48 +498,122 @@ fn check_module_path(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>)
     }
 }
 
-/// Reports API-key parameter authentication, which the client cannot send yet.
+/// Checks the parameter names of API-key parameter authentication.
 ///
 /// Reads the effective policy, so explicit methods and environment fallbacks
-/// count as well as the legacy `auth` field.
-fn check_auth_support(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+/// count as well as the legacy `auth` field. A cookie key needs a valid
+/// cookie name; a query key only a non-empty one, since it is percent-encoded.
+fn check_api_key_param(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     let policy = api.effective_auth_policy();
-    let explicit = policy
-        .explicit
-        .iter()
-        .any(|method| matches!(method, AuthMethod::ApiKeyParam { .. }));
-    let fallback = matches!(policy.env_fallback, Some(EnvAuthStrategy::ApiKeyParam { .. }));
-    if explicit || fallback {
+    let explicit = policy.explicit.iter().filter_map(|method| match method {
+        AuthMethod::ApiKeyParam { name, location } => Some((name, location)),
+        _ => None,
+    });
+    let fallback = match &policy.env_fallback {
+        Some(EnvAuthStrategy::ApiKeyParam { name, location }) => Some((name, location)),
+        _ => None,
+    };
+    for (name, location) in explicit.chain(fallback) {
+        let problem = match location {
+            ApiKeyLocation::Cookie if !is_http_token(name) => "is not a valid cookie name",
+            _ if name.is_empty() => "is empty",
+            _ => continue,
+        };
         diagnostics.push(ValidationDiagnostic::new(
             Severity::Error,
             &api.name,
             None,
             Feature::ApiKeyParam,
             Output::Rust,
-            "the generated client cannot send an API key as a query parameter or cookie yet",
+            format!("API-key parameter name `{name}` {problem}"),
         ));
     }
 }
 
-/// Reports text and binary request bodies, which the client drops.
-fn check_request_body_support(
+/// Checks the declared content type of a text or binary request body, which
+/// the client sends verbatim as the `Content-Type` header value.
+fn check_raw_body_content_type(
     api: &RestApi,
     endpoint: &Endpoint,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
-    let feature = match &endpoint.request {
-        Some(ApiRequest::Text { .. }) => Feature::TextRequestBody,
-        Some(ApiRequest::Binary { .. }) => Feature::BinaryRequestBody,
+    let (feature, content_type) = match &endpoint.request {
+        Some(ApiRequest::Text { content_type }) => (Feature::TextRequestBody, content_type),
+        Some(ApiRequest::Binary { content_type }) => (Feature::BinaryRequestBody, content_type),
         _ => return,
     };
+    if !content_type.is_empty() && is_header_value(content_type) {
+        return;
+    }
     diagnostics.push(ValidationDiagnostic::new(
         Severity::Error,
         &api.name,
         Some(&endpoint.id),
         feature,
         Output::Rust,
-        "the generated client cannot send this request body yet",
+        format!("content type `{}` is not a valid header value", content_type.escape_debug()),
     ));
+}
+
+/// Checks the header and cookie parameters the client sends.
+///
+/// Wire names must be HTTP tokens, since they are sent as written. Array
+/// elements are joined with `,`, so an array of arrays has no
+/// representation and is rejected rather than dropped.
+fn check_named_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let Some(params) = &endpoint.params else {
+        return;
+    };
+    let located = [
+        (Feature::HeaderParameter, "header", &params.header),
+        (Feature::CookieParameter, "cookie", &params.cookie),
+    ];
+    for (feature, location, declared) in located {
+        for param in declared {
+            let mut push = |message: String| {
+                diagnostics.push(ValidationDiagnostic::new(
+                    Severity::Error,
+                    &api.name,
+                    Some(&endpoint.id),
+                    feature,
+                    Output::Rust,
+                    message,
+                ));
+            };
+            if !is_http_token(&param.name) {
+                push(format!(
+                    "{location} parameter name `{}` is not a valid {location} name",
+                    param.name.escape_debug()
+                ));
+            }
+            let nested = matches!(
+                &param.param_type,
+                QueryParamType::Array(inner) if matches!(**inner, QueryParamType::Array(_))
+            );
+            if nested {
+                push(format!(
+                    "{location} parameter `{}` is an array of arrays, which has no {location} \
+                     serialization",
+                    param.name
+                ));
+            }
+        }
+    }
+}
+
+/// An RFC 9110 token, the grammar of header and cookie names.
+fn is_http_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+}
+
+/// Whether `value` is a valid HTTP header value: visible ASCII, spaces, tabs.
+fn is_header_value(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte == b'\t' || (0x20..=0x7E).contains(&byte))
 }
 
 /// Reports header and cookie parameters `output` does not send.
@@ -605,8 +681,8 @@ fn referenced_type_names(endpoint: &Endpoint) -> Vec<(&'static str, &str)> {
 ///
 /// Field names come from [`sanitize_rust_field_ident`], exactly as the
 /// emitters derive them, so distinct wire names can still collide
-/// (`{user-id}` and `user_id`). Query builders are `with_<field>`, so a
-/// builder collision is a query field collision.
+/// (`{user-id}` and `user_id`). Query, header, and cookie builders are all
+/// `with_<field>`, so a builder collision is a field collision.
 fn check_request_struct_fields(
     api: &RestApi,
     endpoint: &Endpoint,
@@ -627,13 +703,15 @@ fn check_request_struct_fields(
     for name in extract_path_params(&endpoint.path) {
         fields.push((format!("path parameter `{name}`"), name.to_string()));
     }
-    let query: &[ParamDef] = endpoint
-        .params
-        .as_ref()
-        .map(|params| params.query.as_slice())
-        .unwrap_or_default();
-    for param in query {
-        fields.push((format!("query parameter `{}`", param.name), param.name.clone()));
+    let no_params: &[ParamDef] = &[];
+    let (query, header, cookie) = endpoint.params.as_ref().map_or(
+        (no_params, no_params, no_params),
+        |params| (params.query.as_slice(), params.header.as_slice(), params.cookie.as_slice()),
+    );
+    for (location, declared) in [("query", query), ("header", header), ("cookie", cookie)] {
+        for param in declared {
+            fields.push((format!("{location} parameter `{}`", param.name), param.name.clone()));
+        }
     }
 
     let mut struct_fields: Vec<(String, String)> = Vec::new();
@@ -651,7 +729,13 @@ fn check_request_struct_fields(
     }
     if matches!(
         endpoint.request,
-        Some(ApiRequest::Json(_) | ApiRequest::FormData { .. } | ApiRequest::UrlEncoded { .. })
+        Some(
+            ApiRequest::Json(_)
+                | ApiRequest::FormData { .. }
+                | ApiRequest::UrlEncoded { .. }
+                | ApiRequest::Text { .. }
+                | ApiRequest::Binary { .. }
+        )
     ) {
         struct_fields.push(("the request body".to_string(), "body".to_string()));
     }
@@ -1335,10 +1419,10 @@ mod tests {
                 Some("RequestEmpty"),
             ),
             (
-                "text request body",
+                "text request body with a control character in its content type",
                 api_with(vec![Endpoint {
                     request: Some(ApiRequest::Text {
-                        content_type: "text/plain".to_string(),
+                        content_type: "text/plain\r\nX-Injected: 1".to_string(),
                     }),
                     ..endpoint("Note", RestMethod::Post, "/note")
                 }]),
@@ -1346,10 +1430,10 @@ mod tests {
                 Some("Note"),
             ),
             (
-                "binary request body",
+                "binary request body with an empty content type",
                 api_with(vec![Endpoint {
                     request: Some(ApiRequest::Binary {
-                        content_type: "application/octet-stream".to_string(),
+                        content_type: String::new(),
                     }),
                     ..endpoint("Blob", RestMethod::Put, "/blob")
                 }]),
@@ -1357,16 +1441,53 @@ mod tests {
                 Some("Blob"),
             ),
             (
-                "legacy API-key parameter auth",
+                "API-key cookie whose name is not a cookie name",
                 RestApi {
                     auth: AuthStrategy::ApiKeyParam {
-                        name: "api_key".to_string(),
+                        name: "session id".to_string(),
+                        location: ApiKeyLocation::Cookie,
+                    },
+                    ..make_test_api()
+                },
+                Feature::ApiKeyParam,
+                None,
+            ),
+            (
+                "API-key query parameter with an empty name",
+                RestApi {
+                    auth: AuthStrategy::ApiKeyParam {
+                        name: String::new(),
                         location: ApiKeyLocation::Query,
                     },
                     ..make_test_api()
                 },
                 Feature::ApiKeyParam,
                 None,
+            ),
+            (
+                "header and query parameters sanitize to one field",
+                api_with(vec![Endpoint {
+                    params: Some(params(
+                        vec![param("x_id", false)],
+                        vec![param("X-Id", false)],
+                        vec![],
+                    )),
+                    ..get("Items")
+                }]),
+                Feature::GeneratedNameCollision,
+                Some("Items"),
+            ),
+            (
+                "cookie parameter named like the raw body field",
+                api_with(vec![Endpoint {
+                    request: Some(ApiRequest::Text {
+                        content_type: "text/plain".to_string(),
+                    }),
+                    params: Some(params(vec![], vec![], vec![param("body", false)])),
+                    ..endpoint("Note", RestMethod::Post, "/note")
+                }]),
+                Feature::GeneratedNameCollision,
+                Some("Note"),
             ),
         ];
 
@@ -1407,28 +1528,131 @@ mod tests {
         let explicit = RestApi {
             auth_policy: Some(AuthPolicy {
                 explicit: vec![AuthMethod::ApiKeyParam {
-                    name: "token".to_string(),
+                    name: "bad name".to_string(),
                     location: ApiKeyLocation::Cookie,
                 }],
                 env_fallback: None,
             }),
             ..make_test_api()
         };
+        let fallback = RestApi {
+            auth_policy: Some(AuthPolicy {
+                explicit: vec![],
+                env_fallback: Some(EnvAuthStrategy::ApiKeyParam {
+                    name: "bad name".to_string(),
+                    location: ApiKeyLocation::Cookie,
+                }),
+            }),
+            ..make_test_api()
+        };
         // A policy override that drops the legacy strategy hides it.
         let overridden = RestApi {
             auth: AuthStrategy::ApiKeyParam {
-                name: "api_key".to_string(),
-                location: ApiKeyLocation::Query,
+                name: "bad name".to_string(),
+                location: ApiKeyLocation::Cookie,
             },
             auth_policy: Some(AuthPolicy::default()),
             ..make_test_api()
         };
 
-        assert_eq!(
-            features(&rust(&explicit)),
-            vec![(Severity::Error, Feature::ApiKeyParam)]
-        );
+        for api in [&explicit, &fallback] {
+            assert_eq!(features(&rust(api)), vec![(Severity::Error, Feature::ApiKeyParam)]);
+        }
         assert!(rust(&overridden).is_empty());
+    }
+
+    #[test]
+    fn invalid_header_and_cookie_parameters_fail_only_the_rust_client() {
+        let cases: Vec<(&str, RestApi, Feature, Option<&str>)> = vec![
+            (
+                "header parameter whose name is not a header name",
+                api_with(vec![Endpoint {
+                    params: Some(params(vec![], vec![param("X Trace", false)], vec![])),
+                    ..get("Items")
+                }]),
+                Feature::HeaderParameter,
+                Some("Items"),
+            ),
+            (
+                "cookie parameter whose name holds a separator",
+                api_with(vec![Endpoint {
+                    params: Some(params(vec![], vec![], vec![param("a;b", false)])),
+                    ..get("Items")
+                }]),
+                Feature::CookieParameter,
+                Some("Items"),
+            ),
+            (
+                "header parameter that is an array of arrays",
+                api_with(vec![Endpoint {
+                    params: Some(params(
+                        vec![],
+                        vec![ParamDef {
+                            param_type: QueryParamType::Array(Box::new(QueryParamType::Array(
+                                Box::new(QueryParamType::String),
+                            ))),
+                            ..param("X-Matrix", false)
+                        }],
+                        vec![],
+                    )),
+                    ..get("Items")
+                }]),
+                Feature::HeaderParameter,
+                Some("Items"),
+            ),
+        ];
+
+        for (name, api, feature, endpoint) in cases {
+            let rust = rust(&api);
+            assert_eq!(features(&rust), vec![(Severity::Error, feature)], "{name}");
+            assert_eq!(rust[0].endpoint.as_deref(), endpoint, "{name}");
+            assert!(validate_openapi(&[&api]).is_empty(), "{name}");
+            // Postman reports only that it does not send the parameter.
+            assert!(
+                validate_postman(&[&api]).iter().all(|d| d.severity == Severity::Warning),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn request_inputs_the_client_sends_pass_rust_validation() {
+        let array = |name: &str| ParamDef {
+            param_type: QueryParamType::Array(Box::new(QueryParamType::Integer)),
+            ..param(name, true)
+        };
+        let endpoints = vec![
+            Endpoint {
+                request: Some(ApiRequest::Text {
+                    content_type: "text/plain; charset=utf-8".to_string(),
+                }),
+                ..endpoint("Note", RestMethod::Post, "/note")
+            },
+            Endpoint {
+                request: Some(ApiRequest::Binary {
+                    content_type: "application/octet-stream".to_string(),
+                }),
+                ..endpoint("Blob", RestMethod::Put, "/blob")
+            },
+            Endpoint {
+                params: Some(params(
+                    vec![param("q", false)],
+                    vec![param("X-Trace-Id", true), array("X-Ids"), param("openai-beta", false)],
+                    vec![param("session", true), array("prefs"), param("__Host-id", false)],
+                )),
+                ..get("Items")
+            },
+        ];
+        for (location, name) in [(ApiKeyLocation::Query, "api key"), (ApiKeyLocation::Cookie, "sid")] {
+            let api = RestApi {
+                auth: AuthStrategy::ApiKeyParam {
+                    name: name.to_string(),
+                    location,
+                },
+                ..api_with(endpoints.clone())
+            };
+            assert!(rust(&api).is_empty(), "{location:?}: {:#?}", rust(&api));
+        }
     }
 
     // ---- rules for every output ----
@@ -1548,7 +1772,7 @@ mod tests {
     }
 
     #[test]
-    fn unsent_header_and_cookie_parameters_are_reported_by_requiredness() {
+    fn postman_reports_unsent_header_and_cookie_parameters_by_requiredness() {
         let api = api_with(vec![Endpoint {
             params: Some(params(
                 vec![],
@@ -1558,21 +1782,16 @@ mod tests {
             ..get("Items")
         }]);
 
-        for (output, diagnostics) in [
-            (Output::Rust, rust(&api)),
-            (Output::Postman, validate_postman(&[&api])),
-        ] {
-            assert_eq!(
-                features(&diagnostics),
-                vec![
-                    (Severity::Warning, Feature::HeaderParameter),
-                    (Severity::Error, Feature::HeaderParameter),
-                    (Severity::Warning, Feature::CookieParameter),
-                ],
-                "{output}"
-            );
-        }
-        // OpenAPI declares header and cookie parameters.
+        assert_eq!(
+            features(&validate_postman(&[&api])),
+            vec![
+                (Severity::Warning, Feature::HeaderParameter),
+                (Severity::Error, Feature::HeaderParameter),
+                (Severity::Warning, Feature::CookieParameter),
+            ]
+        );
+        // The Rust client sends them; OpenAPI declares them.
+        assert!(rust(&api).is_empty());
         assert!(validate_openapi(&[&api]).is_empty());
     }
 

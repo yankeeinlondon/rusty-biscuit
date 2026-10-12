@@ -1,4 +1,5 @@
-use super::helpers::{generate_auth_helper_methods, generate_auth_setup, to_snake_case};
+use super::generate_request_auth_helpers;
+use super::helpers::{generate_auth_setup, to_snake_case};
 use super::*;
 use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
 use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod};
@@ -102,8 +103,14 @@ fn generate_request_method_no_auth() {
     assert!(code.contains("async fn build_and_send_request"));
     assert!(code.contains("let request = request.into()"));
     assert!(code.contains("let endpoint_id = request.endpoint_id()"));
-    assert!(code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?"));
-    assert!(code.contains("format!(\"{}{}\", self.base_url, path)"));
+    assert!(
+        code.contains("let (method, path, body, endpoint_headers, mut query) = request.into_parts()?")
+    );
+    assert!(code.contains(
+        "crate::shared::apply_api_key_param(api_key_param, &mut query, &mut cookies)"
+    ));
+    assert!(code.contains("let mut url = format!(\"{}{}\", self.base_url, path)"));
+    assert!(code.contains("crate::shared::append_query_pairs(&mut url, &path, &query)"));
 
     // Check HTTP method matching
     assert!(code.contains(r#""GET" => self.client.get(&url)"#));
@@ -143,54 +150,47 @@ fn generate_request_method_uses_runtime_auth_matching() {
     let tokens = generate_request_method(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    assert!(code.contains("fn resolve_request_headers"));
-    assert!(code.contains("match &self.auth_policy.env_fallback"));
-    assert!(code.contains("schematic_define::EnvAuthStrategy::BearerToken"));
-    assert!(code.contains("schematic_define::EnvAuthStrategy::ApiKey"));
-    assert!(code.contains("schematic_define::EnvAuthStrategy::Basic"));
+    // The client delegates to the shared resolver with its own state.
+    assert!(code.contains("crate::shared::resolve_request_auth("));
+    assert!(code.contains("&self.auth_policy"));
+    assert!(code.contains("self.api_key_param.as_ref()"));
+
+    let shared = shared_auth_code();
+    assert!(shared.contains("match &policy.env_fallback"));
+    assert!(shared.contains("schematic_define::EnvAuthStrategy::BearerToken"));
+    assert!(shared.contains("schematic_define::EnvAuthStrategy::ApiKey"));
+    assert!(shared.contains("schematic_define::EnvAuthStrategy::ApiKeyParam"));
+    assert!(shared.contains("schematic_define::EnvAuthStrategy::Basic"));
+}
+
+fn shared_auth_code() -> String {
+    format_generated_code(&generate_request_auth_helpers()).expect("Failed to format code")
 }
 
 #[test]
-fn generate_request_method_bearer_uses_self_env_auth() {
-    let api = make_api(
-        "Bearer",
-        AuthStrategy::BearerToken { header: None },
-        vec!["API_TOKEN".to_string()],
-    );
-    let tokens = generate_request_method(&api);
-    let code = format_generated_code(&tokens).expect("Failed to format code");
+fn shared_auth_bearer_env_fallback() {
+    let code = shared_auth_code();
 
-    assert!(code.contains("self.headers.env_mapping().clone()"));
+    assert!(code.contains("headers.env_mapping().clone()"));
     assert!(code.contains("EnvAuthStrategy::BearerToken"));
     assert!(code.contains("headers.use_bearer_token(token)"));
     assert!(code.contains("AuthenticationRequired"));
 }
 
 #[test]
-fn generate_request_method_api_key_uses_self_env_auth() {
-    let api = make_api(
-        "ApiKey",
-        AuthStrategy::ApiKey {
-            header: "X-API-Key".to_string(),
-            value_prefix: None,
-        },
-        vec!["X_API_KEY".to_string()],
-    );
-    let tokens = generate_request_method(&api);
-    let code = format_generated_code(&tokens).expect("Failed to format code");
+fn shared_auth_api_key_env_fallback() {
+    let code = shared_auth_code();
 
     assert!(code.contains("EnvAuthStrategy::ApiKey"));
     assert!(code.contains("headers.header(header.clone(), value)"));
-    assert!(code.contains("let env_mapping = self.headers.env_mapping().clone();"));
+    assert!(code.contains("let env_mapping = headers.env_mapping().clone();"));
     assert!(code.contains(".api_key"));
     assert!(code.contains("AuthenticationRequired"));
 }
 
 #[test]
-fn generate_request_method_basic_auth() {
-    let api = make_basic_auth_api("BasicAuth", "API_USER", "API_PASS");
-    let tokens = generate_request_method(&api);
-    let code = format_generated_code(&tokens).expect("Failed to format code");
+fn shared_auth_basic_env_fallback() {
+    let code = shared_auth_code();
 
     assert!(code.contains("EnvAuthStrategy::Basic"));
     assert!(code.contains("headers.env_mapping().basic_user"));
@@ -252,18 +252,20 @@ fn generate_auth_setup_produces_runtime_match() {
     let tokens = generate_auth_setup(&api);
     let code = tokens.to_string();
 
-    assert_eq!(code, "self . resolve_request_headers () ?");
+    assert!(code.starts_with("crate :: shared :: resolve_request_auth ("), "{code}");
+    assert!(code.ends_with(") ?"), "{code}");
 }
 
 #[test]
-fn generate_auth_setup_handles_all_strategies() {
-    let tokens = generate_auth_helper_methods();
-    let code = tokens.to_string();
+fn shared_auth_handles_all_strategies() {
+    let code = shared_auth_code();
 
-    assert!(code.contains("EnvAuthStrategy :: BearerToken"));
-    assert!(code.contains("EnvAuthStrategy :: ApiKey"));
-    assert!(code.contains("EnvAuthStrategy :: Basic"));
+    assert!(code.contains("EnvAuthStrategy::BearerToken"));
+    assert!(code.contains("EnvAuthStrategy::ApiKey"));
+    assert!(code.contains("EnvAuthStrategy::ApiKeyParam"));
+    assert!(code.contains("EnvAuthStrategy::Basic"));
     assert!(code.contains("AuthenticationRequired"));
+    assert!(validate_generated_code(&generate_request_auth_helpers()).is_ok());
 }
 
 #[test]
@@ -304,10 +306,13 @@ fn generate_request_method_applies_headers() {
     let tokens = generate_request_method(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    assert!(code.contains("let api_headers = self.resolve_request_headers()?;"));
+    assert!(code.contains("let (api_headers, api_key_param) = crate::shared::resolve_request_auth("));
     assert!(code.contains("merge_headers(&api_headers, &endpoint_headers)"));
+    assert!(code.contains("crate::shared::combine_cookie_headers(&mut merged_headers, &cookies)?"));
     assert!(code.contains("for (key, value) in merged_headers"));
-    assert!(code.contains("req_builder.header(key.as_str(), value.as_str())"));
+    // Every header is parsed through the HTTP types before the request is sent.
+    assert!(code.contains("let (key, value) = crate::shared::header_pair(&key, &value)?;"));
+    assert!(code.contains("req_builder = req_builder.header(key, value)"));
 }
 
 #[test]
@@ -657,18 +662,14 @@ fn to_snake_case_converts_correctly() {
 
 #[test]
 fn generate_auth_setup_skips_env_check_when_programmatic_auth_set() {
-    let api = make_api(
-        "ProgrammaticAuth",
-        AuthStrategy::BearerToken { header: None },
-        vec!["API_TOKEN".to_string()],
-    );
-    let tokens = generate_request_method(&api);
-    let code = format_generated_code(&tokens).expect("Failed to format code");
+    let code = shared_auth_code();
 
     assert!(
-        code.contains("if !headers.has_explicit_auth()"),
+        code.contains("let explicit = headers.has_explicit_auth() || key.is_some();"),
         "Should check for explicit auth before env fallback.\nGenerated code:\n{}",
         code
     );
-    assert!(code.contains("headers = self.apply_env_fallback(headers);"));
+    assert!(code.contains("if !explicit {"));
+    assert!(code.contains("headers = apply_env_fallback(policy, headers);"));
+    assert!(code.contains("key = env_api_key_param(policy, env_auth);"));
 }
