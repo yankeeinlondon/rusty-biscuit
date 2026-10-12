@@ -2,7 +2,7 @@ ordered-scalars-reserved-unicode	GET /api/v1/repos/own%20er/re%2Bpo%25/pulls?pag
 empty-value	GET /api/v1/repos/o/r/pulls?state= HTTP/1.1
 no-query	GET /api/v1/repos/o/r/pulls HTTP/1.1
 legacy-embedded-literal-query	GET /api/v1/repos/o/r/git/trees/a%20b?recursive=true HTTP/1.1
-base-url-with-query	GET /api/v1?tenant=a%20b/repos/o/r/pulls?page=1 HTTP/1.1
+base-url-with-query	GET /api/v1?tenant=a%20b/repos/o/r/pulls&page=1 HTTP/1.1
 legacy-embedded-query-with-placeholder	GET /api/v4/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs?ref=feature%2Fx%20y%2Bz HTTP/1.1
 repeated-array-keys	GET /v1/conversations/conv%201/items?limit=5&order=a%2Bb&after=x%25y&include=%22a%20b%22&include=%22c%2Bd%22&include=%22%22&include=%22%C3%A9%22 HTTP/1.1
 legacy-embedded-query-plus-declared	GET /v1/responses/resp%201/input_items?beta=true&limit=3&include=%22x%20y%22 HTTP/1.1

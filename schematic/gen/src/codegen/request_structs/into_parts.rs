@@ -1,4 +1,4 @@
-//! `into_parts` method and header initialization generation.
+//! The body of a request type's `EndpointSpec::into_parts`.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -9,85 +9,70 @@ use crate::codegen::request_structs::shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, generate_path_format,
 };
 
-/// Generates the into_parts method.
-pub(super) fn generate_into_parts(
+/// Generates the statements that assemble `schematic_runtime::RequestParts`.
+///
+/// The parts carry no credential; the runtime attaches one per hop. A JSON
+/// body that fails to serialize, and a static `Cookie` header that cannot be
+/// merged with cookie parameters, are `InvalidArgument`s reported before any
+/// network work.
+pub(super) fn generate_into_parts_body(
     endpoint: &Endpoint,
     path_params: &[&str],
     query_params: &[QueryParamInfo],
-    method_str: &str,
 ) -> TokenStream {
     let path_format = generate_path_format(&endpoint.path, path_params, query_params);
 
     let body_expr = match &endpoint.request {
         Some(ApiRequest::Json(_)) => quote! {
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body).map_err(|e| {
-                    SchematicError::SerializationError(e.to_string())
+            schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body).map_err(|_| {
+                    schematic_runtime::InvalidArgument::new("the request body cannot be serialized as JSON")
                 })?
             )
         },
         Some(ApiRequest::FormData { .. }) => quote! {
-            crate::shared::RequestBody::Multipart(self.body.into_form_parts())
+            schematic_runtime::RequestBody::Multipart(self.body.into_form_parts())
         },
         Some(ApiRequest::UrlEncoded { .. }) => quote! {
-            crate::shared::RequestBody::UrlEncoded(self.body.into_form_pairs())
+            schematic_runtime::RequestBody::UrlEncoded(self.body.into_form_pairs())
         },
         Some(ApiRequest::Text { content_type }) => quote! {
-            crate::shared::RequestBody::Raw {
+            schematic_runtime::RequestBody::Raw {
                 content_type: #content_type.to_string(),
-                bytes: self.body.into_bytes(),
+                bytes: self.body.into_bytes().into(),
             }
         },
         Some(ApiRequest::Binary { content_type }) => quote! {
-            crate::shared::RequestBody::Raw {
+            schematic_runtime::RequestBody::Raw {
                 content_type: #content_type.to_string(),
-                bytes: self.body,
+                bytes: self.body.into(),
             }
         },
-        _ => quote! { crate::shared::RequestBody::Empty },
+        _ => quote! { schematic_runtime::RequestBody::Empty },
     };
 
-    let cookie_params = extract_cookie_params(&endpoint.params);
     let (headers_statements, headers_init) = generate_headers_assembly(
         &endpoint.headers,
         &extract_header_params(&endpoint.params),
-        &cookie_params,
+        &extract_cookie_params(&endpoint.params),
     );
-    // Header and cookie parameters travel in the headers element; only cookie
-    // parameters add a failure, so the doc line is emitted only for them.
-    let cookie_error_doc = if cookie_params.is_empty() {
-        quote! {}
+    // The assembly binds `headers` itself when parameters add to it;
+    // otherwise its expression is the static list, bound here.
+    let headers_binding = if headers_statements.is_empty() {
+        quote! { let headers: Vec<(String, String)> = #headers_init; }
     } else {
-        quote! {
-            ///
-            /// Returns `SchematicError::Header` if the endpoint's static
-            /// `Cookie` header, which set cookie parameters join, cannot be
-            /// parsed.
-        }
+        headers_statements
     };
 
     quote! {
-        /// Converts the request into (method, path, body, headers, query) parts.
-        ///
-        /// ## Returns
-        ///
-        /// A tuple of:
-        /// - HTTP method as a static string (e.g., "GET", "POST")
-        /// - Path with path parameters substituted; declared query parameters
-        ///   are not part of it
-        /// - The request body as a `RequestBody`
-        /// - Endpoint-specific headers as key-value pairs
-        /// - Declared query parameters as unencoded key-value pairs
-        ///
-        /// ## Errors
-        ///
-        /// Returns `SchematicError::SerializationError` if a JSON request body
-        /// fails to serialize.
-        #cookie_error_doc
-        pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-            #path_format
-            #headers_statements
-            Ok((#method_str, path, #body_expr, #headers_init, query))
-        }
+        #path_format
+        #headers_binding
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: #body_expr,
+        })
     }
 }

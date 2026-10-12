@@ -2,7 +2,10 @@
 //!
 //! [`FreshCrate::generate`] runs the public generation entry point into a
 //! temporary directory outside the checkout and writes the manifest with
-//! [`generate_cargo_toml_with_paths`], pointing it at local dependency paths.
+//! [`generate_cargo_toml_with_paths`], pointing it at local dependency paths:
+//! the checkout's `schematic-define` and `schematic-runtime` (or a doctored
+//! runtime copy, [`FreshCrate::generate_with_runtime`]) and the real or a
+//! stand-in `schematic-definitions`.
 //! Cargo then resolves strictly offline against a copy of a committed
 //! lockfile: `cargo update --workspace --offline` adds only the temporary
 //! package entries, and every build runs with `--offline --locked`. There is
@@ -94,6 +97,17 @@ impl FreshCrate {
     /// Generates `apis` into a new temporary crate and copies `lockfile` beside
     /// its manifest.
     pub fn generate(apis: &[&RestApi], definitions: Definitions<'_>, lockfile: &Path) -> Self {
+        Self::generate_with_runtime(apis, definitions, lockfile, &schematic_root().join("runtime"))
+    }
+
+    /// [`generate`](Self::generate), with the generated crate depending on
+    /// the `schematic-runtime` at `runtime` instead of the checkout's.
+    pub fn generate_with_runtime(
+        apis: &[&RestApi],
+        definitions: Definitions<'_>,
+        lockfile: &Path,
+        runtime: &Path,
+    ) -> Self {
         let root = TempDir::new().expect("create temp dir");
         let crate_dir = root.path().join("schema");
         let src_dir = crate_dir.join("src");
@@ -111,8 +125,11 @@ impl FreshCrate {
                 stub
             }
         };
-        let manifest =
-            generate_cargo_toml_with_paths(path_str(&define), path_str(&definitions_path));
+        let manifest = generate_cargo_toml_with_paths(
+            path_str(&define),
+            path_str(&definitions_path),
+            path_str(runtime),
+        );
         fs::write(crate_dir.join("Cargo.toml"), manifest).expect("write Cargo.toml");
         fs::copy(lockfile, crate_dir.join("Cargo.lock"))
             .unwrap_or_else(|e| panic!("copy lockfile {}: {e}", lockfile.display()));
@@ -131,6 +148,13 @@ impl FreshCrate {
     pub fn cargo_check(&self) -> CargoRun {
         self.resolve_offline();
         self.cargo(&["check", "--lib"])
+    }
+
+    /// `cargo check --offline --locked --tests --keep-going`: every test
+    /// target is checked, and each one that fails reports its own errors.
+    pub fn cargo_check_tests(&self) -> CargoRun {
+        self.resolve_offline();
+        self.cargo(&["check", "--tests", "--keep-going"])
     }
 
     /// Builds and runs the crate's integration tests through nextest,
@@ -266,6 +290,34 @@ fn child_target_dir() -> PathBuf {
         .parent()
         .expect("profile dir has a parent")
         .join("schematic-fresh-output")
+}
+
+/// Copies the `schematic-runtime` crate at `runtime` into `destination` with
+/// its `ABI` constant set to `abi`, for proving that generated code refuses a
+/// runtime of another ABI. Only the package and its normal dependencies are
+/// kept: the copy is a dependency, never a workspace member, so its tests and
+/// their path dependencies have no meaning there.
+pub fn doctored_runtime(runtime: &Path, destination: &Path, abi: u32) {
+    use biscuit_file::toml_crate;
+
+    let manifest = fs::read_to_string(runtime.join("Cargo.toml")).expect("read runtime manifest");
+    let mut table: toml_crate::Table = toml_crate::from_str(&manifest).expect("runtime manifest is TOML");
+    table.retain(|key, _| key == "package" || key == "dependencies");
+    fs::create_dir_all(destination.join("src")).expect("create runtime copy");
+    fs::write(destination.join("Cargo.toml"), toml_crate::to_string(&table).expect("serialize"))
+        .expect("write runtime copy manifest");
+
+    for entry in fs::read_dir(runtime.join("src")).expect("list runtime src") {
+        let path = entry.expect("runtime src entry").path();
+        let target = destination.join("src").join(path.file_name().expect("file name"));
+        fs::copy(&path, &target).unwrap_or_else(|e| panic!("copy {}: {e}", path.display()));
+    }
+    let lib = destination.join("src/lib.rs");
+    let source = fs::read_to_string(&lib).expect("read runtime lib.rs");
+    let marker = "pub const ABI: u32 = ";
+    let start = source.find(marker).expect("the runtime declares its ABI") + marker.len();
+    let end = start + source[start..].find(';').expect("the ABI declaration ends");
+    fs::write(&lib, format!("{}{abi}{}", &source[..start], &source[end..])).expect("write runtime lib.rs");
 }
 
 /// Relative path to file bytes (or `None` for a directory) under one root.

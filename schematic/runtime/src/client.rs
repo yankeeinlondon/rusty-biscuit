@@ -817,9 +817,7 @@ impl<A: Api> Client<A> {
         }
         .map_err(|_| TransportErrorKind::InvalidUrl)?;
         url.set_fragment(None);
-        if !query.is_empty() {
-            url.query_pairs_mut().extend_pairs(&query);
-        }
+        append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value.as_str())));
 
         let mut headers = inner.default_headers.clone();
         let mut replaced = Vec::new();
@@ -920,8 +918,34 @@ fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
         return;
     }
     url.set_query(None);
-    if !kept.is_empty() {
-        url.query_pairs_mut().extend_pairs(&kept);
+    append_query(url, kept.iter().map(|(name, value)| (name.as_str(), value.as_str())));
+}
+
+/// Appends `pairs` to `url`'s query. Names and values are percent-encoded
+/// except for RFC 3986 unreserved characters, so a space is sent as `%20`,
+/// never `+`; the generated clients have always put this form on the wire.
+fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a str)>) {
+    let mut query = url.query().unwrap_or_default().to_string();
+    for (name, value) in pairs {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        encode_query_component(name, &mut query);
+        query.push('=');
+        encode_query_component(value, &mut query);
+    }
+    if !query.is_empty() {
+        url.set_query(Some(&query));
+    }
+}
+
+fn encode_query_component(text: &str, out: &mut String) {
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
     }
 }
 
@@ -959,7 +983,7 @@ fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, 
                     "the request already sets the query parameter `{name}` that carries the credential"
                 )));
             }
-            assembled.url.query_pairs_mut().append_pair(name, value);
+            append_query(&mut assembled.url, [(name.as_str(), value)]);
         }
         CredentialPlacement::ApiKeyCookie { name } => {
             if cookie_pairs(&assembled.headers).any(|(cookie, _)| &cookie == name) {

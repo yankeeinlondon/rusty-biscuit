@@ -249,17 +249,17 @@ async fn an_invalid_argument_is_refused_before_any_request() {
 async fn query_order_duplicates_and_a_template_query_reach_the_server() {
     let server = serve(200, br#"{"id":1}"#, "application/json").await;
     let mut parts = RequestParts::new(Method::GET, "/item?fixed=1#fragment");
-    parts.query = vec![("tag".into(), "a".into()), ("tag".into(), "b".into()), ("q".into(), "x y&z".into())];
+    parts.query = vec![("tag".into(), "a".into()), ("tag".into(), "b".into()), ("q".into(), "x y&z+~é".into())];
     let response = plain_client(&server.uri())
         .send(Call::<Json<Item>>::new(parts), &CallOptions::new())
         .await
         .expect("head");
 
     let received = server.received_requests().await.expect("recorded");
-    assert_eq!(received[0].url.query(), Some("fixed=1&tag=a&tag=b&q=x+y%26z"));
+    assert_eq!(received[0].url.query(), Some("fixed=1&tag=a&tag=b&q=x%20y%26z%2B~%C3%A9"));
     assert_eq!(received[0].url.fragment(), None, "fragments are never sent");
     let names: Vec<_> = response.meta.request.query.iter().map(|(name, value)| format!("{name}={value}")).collect();
-    assert_eq!(names, ["fixed=1", "tag=a", "tag=b", "q=x y&z"]);
+    assert_eq!(names, ["fixed=1", "tag=a", "tag=b", "q=x y&z+~é"]);
 }
 
 #[tokio::test]

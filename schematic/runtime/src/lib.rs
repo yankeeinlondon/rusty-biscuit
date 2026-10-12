@@ -70,6 +70,11 @@ pub use origin::OriginPolicy;
 pub use raw::{RawCompletion, RawJsonError, RawResponse};
 pub use redact::{RedactedUrl, SecretNames};
 pub use transport::{SharedTransport, SharedTransportBuilder};
+
+/// The HTTP method type of [`EndpointSpec::METHOD`] and [`RequestParts::method`].
+pub use http::Method;
+/// The URL type of [`Client::check_link`].
+pub use url::Url;
 pub use response::{
     ApiError, ErrorKind, FailureCategory, NoDeclaredError, Outcome, RedirectRefusal, Response,
 };

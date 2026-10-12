@@ -97,10 +97,10 @@ pub(super) fn generate_named_builder_methods(
 /// Generates the expression or statements that produce `into_parts`'s
 /// headers element.
 ///
-/// With no header or cookie parameters this is the plain list of the
-/// endpoint's static headers, exactly as before these parameters were
-/// supported. Otherwise it binds `headers` and the returned expression is
-/// that binding.
+/// With no header or cookie parameters, and at most one static `Cookie`
+/// header, this is the plain list of the endpoint's static headers.
+/// Otherwise it binds `headers`, merging every `Cookie` header and set cookie
+/// parameter into one, and the returned expression is that binding.
 pub(super) fn generate_headers_assembly(
     static_headers: &[(String, String)],
     header_params: &[QueryParamInfo],
@@ -115,7 +115,13 @@ pub(super) fn generate_headers_assembly(
         quote! { vec![#(#static_pairs),*] }
     };
 
-    if header_params.is_empty() && cookie_params.is_empty() {
+    // An API-level `Cookie` is folded in ahead of the endpoint's own, so the
+    // static list itself can hold two `Cookie` headers to merge.
+    let static_cookies = static_headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+        .count();
+    if header_params.is_empty() && cookie_params.is_empty() && static_cookies < 2 {
         return (quote! {}, static_list);
     }
 
@@ -132,8 +138,12 @@ pub(super) fn generate_headers_assembly(
         }
     });
 
-    let cookies = if cookie_params.is_empty() {
+    let cookies = if cookie_params.is_empty() && static_cookies < 2 {
         quote! {}
+    } else if cookie_params.is_empty() {
+        quote! {
+            crate::shared::combine_cookie_headers(&mut headers, &[])?;
+        }
     } else {
         let cookie_pushes = cookie_params.iter().map(|param| {
             let field_name = format_ident!("{}", param_field_name(&param.name));
@@ -148,9 +158,7 @@ pub(super) fn generate_headers_assembly(
         quote! {
             let mut cookies: Vec<(String, String)> = Vec::new();
             #(#cookie_pushes)*
-            if !cookies.is_empty() {
-                crate::shared::combine_cookie_headers(&mut headers, &cookies)?;
-            }
+            crate::shared::combine_cookie_headers(&mut headers, &cookies)?;
         }
     };
 

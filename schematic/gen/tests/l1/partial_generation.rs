@@ -182,7 +182,7 @@ fn partial_run_regenerates_the_whole_group_and_keeps_every_other_module() {
     );
     let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
     for name in ["AlphaOne", "AlphaTwo", "Beta", "Gamma"] {
-        assert!(prelude.contains(&format!("{name}, {name}Request")), "prelude exports {name}");
+        assert!(prelude.contains(&format!("{name}, {name}Client")), "prelude exports {name}");
     }
 
     // A second partial run is idempotent.
@@ -306,7 +306,7 @@ refusal_tests! {
     refuses_export_mismatch:
         |root: &Path| {
             let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
-            let edited = prelude.replace("Gamma, GammaRequest", "Gamma");
+            let edited = prelude.replace("Gamma, GammaClient", "Gamma");
             assert_ne!(prelude, edited);
             fs::write(root.join("prelude.rs"), edited).unwrap();
         },
@@ -334,10 +334,10 @@ refusal_tests! {
         "it is left intact", unsafe_output;
     refuses_changed_shared_runtime:
         |root: &Path| append(&root.join("shared.rs"), "// older runtime\n"),
-        "shared.rs would change", requires_full;
+        "the shared runtime would change (shared.rs)", requires_full;
     refuses_changed_websocket_runtime:
         |root: &Path| append(&root.join("ws_shared.rs"), "// older runtime\n"),
-        "ws_shared.rs would change", requires_full;
+        "the shared runtime would change (ws_shared.rs)", requires_full;
 }
 
 #[cfg(unix)]
@@ -382,6 +382,181 @@ fn full_generation_recovers_after_a_compatibility_refusal() {
     assert!(requires_full(&err), "{err:?}");
     generate(&registry, Selection::All, &root);
     assert_eq!(diff_summary(&pristine.tree, &snapshot_tree(&root)), Vec::<String>::new());
+}
+
+/// The marker item exactly as full generation renders it into `lib.rs`.
+fn abi_marker_item(value: &str) -> String {
+    format!("pub const SCHEMATIC_RUNTIME_ABI: u32 = {value};")
+}
+
+/// Rewrites a copy's `lib.rs` with `edit`, asserting the edit changed it.
+fn edit_lib(root: &Path, edit: impl FnOnce(&str) -> String) {
+    let lib = fs::read_to_string(root.join("lib.rs")).unwrap();
+    assert!(lib.contains(&current_marker()), "{lib}");
+    let edited = edit(&lib);
+    assert_ne!(lib, edited, "the edit must change lib.rs");
+    fs::write(root.join("lib.rs"), edited).unwrap();
+}
+
+/// Removes the marker, its doc line, and the compile-time assertion that
+/// names it, so `lib.rs` reads like output from before the runtime crate.
+fn without_marker(lib: &str) -> String {
+    let marker = current_marker();
+    let mut out = String::new();
+    let mut in_assert = false;
+    for line in lib.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if in_assert {
+            in_assert = !trimmed.ends_with(");");
+            continue;
+        }
+        if trimmed.starts_with("const _: () = assert!(") {
+            in_assert = !trimmed.ends_with(");");
+            continue;
+        }
+        if trimmed == marker || trimmed == "/// The `schematic-runtime` ABI this crate was generated against." {
+            continue;
+        }
+        out.push_str(line);
+    }
+    assert!(!out.contains("SCHEMATIC_RUNTIME_ABI"), "{out}");
+    out
+}
+
+fn current_marker() -> String {
+    abi_marker_item(&schematic_gen::RUNTIME_ABI.to_string())
+}
+
+/// Runs a partial generation of `AlphaOne` against a copy of the full output
+/// whose `lib.rs` was changed by `edit`, and asserts a full-generation refusal
+/// whose only change is the `lib.rs` marker described by `needle`, with the
+/// tree left byte-for-byte as it was.
+fn assert_abi_refused(edit: impl FnOnce(&str) -> String, needle: &str) {
+    let apis = registry();
+    let registry = refs(&apis);
+    let pristine = Pristine::new(&registry);
+    let temp = tempfile::tempdir().unwrap();
+    let root = pristine.copy_into(temp.path());
+    edit_lib(&root, edit);
+    let before = snapshot_tree(&root);
+
+    let err = partial(&registry, "AlphaOne", &root).expect_err("the partial run must refuse");
+    let GeneratorError::RequiresFullGeneration { changed, retained, .. } = &err else {
+        panic!("expected RequiresFullGeneration, got {err:?}");
+    };
+    assert_eq!(changed.len(), 1, "only the marker changes: {changed:?}");
+    assert!(changed[0].starts_with("lib.rs"), "{changed:?}");
+    assert!(changed[0].contains(needle), "`{needle}` in {changed:?}");
+    assert_eq!(retained, &["beta", "gamma"]);
+    let message = err.to_string();
+    assert!(message.contains("nothing was changed") && message.contains("generate --api all"), "{message}");
+    assert_eq!(diff_summary(&before, &snapshot_tree(&root)), Vec::<String>::new());
+}
+
+#[test]
+fn abi_marker_control_unedited_output_allows_a_partial_run() {
+    let apis = registry();
+    let registry = refs(&apis);
+    let pristine = Pristine::new(&registry);
+    let temp = tempfile::tempdir().unwrap();
+    let root = pristine.copy_into(temp.path());
+    let lib = fs::read_to_string(root.join("lib.rs")).unwrap();
+    assert_eq!(lib.matches(&current_marker()).count(), 1, "{lib}");
+
+    let prepared = partial(&registry, "AlphaOne", &root).expect("the unedited output is accepted");
+    assert_eq!(prepared.retained, ["beta", "gamma"], "modules are retained, so the marker was checked");
+    prepared.plan.publish().expect("publish");
+    assert_eq!(diff_summary(&pristine.tree, &snapshot_tree(&root)), Vec::<String>::new());
+}
+
+/// One test per marker case, so the cases spread across test threads.
+macro_rules! abi_refusal_tests {
+    ($($name:ident: $edit:expr, $needle:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_abi_refused($edit, &$needle);
+            }
+        )*
+    };
+}
+
+abi_refusal_tests! {
+    refuses_differing_abi_marker:
+        |lib: &str| lib.replace(
+            &current_marker(),
+            &abi_marker_item(&(schematic_gen::RUNTIME_ABI + 1).to_string()),
+        ),
+        format!(
+            "records schematic-runtime ABI {}, this generator emits ABI {}",
+            schematic_gen::RUNTIME_ABI + 1,
+            schematic_gen::RUNTIME_ABI
+        );
+    refuses_missing_legacy_abi_marker:
+        without_marker,
+        "records no schematic-runtime ABI";
+    refuses_abi_marker_that_is_not_an_integer_literal:
+        |lib: &str| lib.replace(&current_marker(), &abi_marker_item(&format!("{} + 0", schematic_gen::RUNTIME_ABI))),
+        "is not an integer literal";
+    refuses_abi_marker_of_the_wrong_type:
+        |lib: &str| lib.replace(&current_marker(), &current_marker().replace(": u32", ": u64")),
+        "is not a `u32`";
+    refuses_conflicting_abi_marker_declarations:
+        |lib: &str| lib.replace(&current_marker(), &format!("{}\n{}", current_marker(), current_marker())),
+        "is declared 2 times";
+}
+
+#[test]
+fn matching_abi_marker_does_not_bypass_the_export_check() {
+    let apis = registry();
+    let registry = refs(&apis);
+    let pristine = Pristine::new(&registry);
+    let temp = tempfile::tempdir().unwrap();
+    let root = pristine.copy_into(temp.path());
+    let lib = fs::read_to_string(root.join("lib.rs")).unwrap();
+    assert_eq!(lib.matches(&current_marker()).count(), 1, "the marker matches: {lib}");
+    let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
+    let edited = prelude.replace("Gamma, GammaClient", "Gamma, GammaClient, GammaExtra");
+    assert_ne!(prelude, edited);
+    fs::write(root.join("prelude.rs"), edited).unwrap();
+    let before = snapshot_tree(&root);
+
+    let err = partial(&registry, "AlphaOne", &root).expect_err("the partial run must refuse");
+    assert!(unsafe_output(&err), "unexpected error kind: {err:?}");
+    let message = err.to_string();
+    assert!(message.contains("GammaExtra") && message.contains("`gamma`"), "{message}");
+    assert!(message.contains("nothing was changed"), "{message}");
+    assert_eq!(diff_summary(&before, &snapshot_tree(&root)), Vec::<String>::new());
+}
+
+#[test]
+fn missing_abi_marker_is_irrelevant_when_nothing_is_retained() {
+    let apis = registry();
+    let registry = refs(&apis);
+    let pristine = Pristine::new(&registry);
+
+    // Every module group selected: the legacy lib.rs is fully rewritten.
+    let temp = tempfile::tempdir().unwrap();
+    let root = pristine.copy_into(temp.path());
+    edit_lib(&root, without_marker);
+    let every_group = [registry[0], registry[2], registry[3]];
+    let prepared = partial_selection(&registry, &every_group, &root);
+    assert!(prepared.retained.is_empty(), "{:?}", prepared.retained);
+    prepared.plan.publish().expect("publish");
+    assert_eq!(diff_summary(&pristine.tree, &snapshot_tree(&root)), Vec::<String>::new());
+
+    // An empty output directory has no lib.rs and retains nothing.
+    let empty = temp.path().join("empty");
+    fs::create_dir(&empty).unwrap();
+    let prepared = partial_selection(&registry, &[registry[2]], &empty);
+    assert!(prepared.retained.is_empty(), "{:?}", prepared.retained);
+    prepared.plan.publish().expect("publish");
+    let lib = fs::read_to_string(empty.join("lib.rs")).unwrap();
+    assert!(lib.contains(&current_marker()), "{lib}");
+}
+
+fn partial_selection(registry: &[&RestApi], selected: &[&RestApi], root: &Path) -> RustOutputPlan {
+    prepare(registry, Selection::Apis(selected), root).expect("a run that retains nothing is accepted")
 }
 
 #[test]

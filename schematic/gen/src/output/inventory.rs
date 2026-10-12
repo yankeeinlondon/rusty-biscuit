@@ -127,6 +127,25 @@ pub(crate) struct RustInventory {
     /// REST module groups declared by the existing output and not selected,
     /// in the order its `lib.rs` declares them.
     pub retained: Vec<String>,
+    /// The runtime ABI the existing `lib.rs` records.
+    pub abi: AbiMarker,
+}
+
+/// The name of the generated `lib.rs` constant recording the
+/// `schematic-runtime` ABI the crate was generated for.
+pub(crate) const ABI_MARKER: &str = "SCHEMATIC_RUNTIME_ABI";
+
+/// What an existing `lib.rs` records about the runtime ABI.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum AbiMarker {
+    /// No marker: the output predates `schematic-runtime`, or has no
+    /// `lib.rs` to read.
+    #[default]
+    Missing,
+    /// `pub const SCHEMATIC_RUNTIME_ABI: u32 = <value>;`
+    Declared(u32),
+    /// A marker of any other form, with what is wrong with it.
+    Malformed(String),
 }
 
 /// Remedy shown when a partial run cannot trust the existing output.
@@ -173,6 +192,7 @@ pub(crate) fn read_rust_inventory(
     };
     let declared = declared_modules(&lib);
     let exports = prelude_exports(&prelude);
+    let abi = abi_marker(&lib);
 
     let ws_modules: BTreeSet<&str> = ws_definition_modules()
         .iter()
@@ -249,7 +269,7 @@ pub(crate) fn read_rust_inventory(
     }
 
     if problems.is_empty() {
-        Ok(RustInventory { retained })
+        Ok(RustInventory { retained, abi })
     } else {
         Err(refuse(problems))
     }
@@ -332,6 +352,41 @@ fn declared_modules(lib: &syn::File) -> BTreeSet<String> {
         .collect()
 }
 
+/// Reads the runtime ABI marker of a generated `lib.rs`.
+///
+/// Only one top-level `const SCHEMATIC_RUNTIME_ABI: u32` whose value is a
+/// plain integer literal counts as a declaration; any other form, or a second
+/// declaration, is reported as malformed rather than guessed at.
+fn abi_marker(lib: &syn::File) -> AbiMarker {
+    let declarations: Vec<&syn::ItemConst> = lib
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Const(constant) if constant.ident == ABI_MARKER => Some(constant),
+            _ => None,
+        })
+        .collect();
+    let constant = match declarations.as_slice() {
+        [] => return AbiMarker::Missing,
+        [constant] => constant,
+        many => return AbiMarker::Malformed(format!("is declared {} times", many.len())),
+    };
+    let is_u32 = matches!(&*constant.ty, syn::Type::Path(path) if path.qself.is_none() && path.path.is_ident("u32"));
+    if !is_u32 {
+        return AbiMarker::Malformed("is not a `u32`".to_string());
+    }
+    match &*constant.expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(value),
+            ..
+        }) if matches!(value.suffix(), "" | "u32") => match value.base10_parse::<u32>() {
+            Ok(value) => AbiMarker::Declared(value),
+            Err(_) => AbiMarker::Malformed("is not a `u32` value".to_string()),
+        },
+        _ => AbiMarker::Malformed("is not an integer literal".to_string()),
+    }
+}
+
 /// Names each `pub use crate::<module>::…` of a `prelude.rs` imports, sorted,
 /// keyed by module. `shared` and the WebSocket helper re-exports are included
 /// under their own modules.
@@ -379,41 +434,60 @@ fn collect_use_names(tree: &syn::UseTree, names: &mut Vec<String>) {
 fn expected_exports(group: &[&RestApi]) -> Vec<String> {
     let mut names: Vec<String> = group
         .iter()
-        .flat_map(|api| [api.name.clone(), format!("{}Request", api.name)])
+        .flat_map(|api| [api.name.clone(), format!("{}Client", api.name)])
         .collect();
     names.sort();
     names
 }
 
-/// Refuses a partial run whose newly assembled runtime files differ from the
-/// ones retained modules were generated against.
+/// Refuses a partial run that would change the shared runtime retained
+/// modules were generated against.
 ///
-/// `planned` pairs each runtime-bearing shared file (`shared.rs` and the
-/// WebSocket `ws_shared.rs`) with its new content. With no retained module there is nothing to keep compatible;
-/// otherwise any byte difference, or a missing existing file, requires full
-/// generation. This is the single place the generator decides runtime
-/// compatibility: a persisted compatibility marker, once one exists, replaces
-/// this conservative comparison here.
+/// With no retained module there is nothing to keep compatible. Otherwise
+/// the existing `lib.rs` must record this generator's
+/// [`RUNTIME_ABI`](crate::RUNTIME_ABI) (a different, missing, or malformed
+/// marker requires full generation), and each of `planned`, which pairs a
+/// generated shared file (`shared.rs` and the WebSocket `ws_shared.rs`) with
+/// its new content, must be byte-for-byte unchanged: retained modules call
+/// the request helpers in `shared.rs`, and the WebSocket modules are still
+/// generated against `ws_shared.rs`. This is the single place the generator
+/// decides runtime compatibility.
 ///
 /// ## Errors
 ///
-/// [`GeneratorError::RequiresFullGeneration`] naming the changed files and
-/// the retained modules.
+/// [`GeneratorError::RequiresFullGeneration`] naming what changes and the
+/// retained modules.
 pub(crate) fn shared_runtime_compatibility(
     root: &Path,
     planned: &[(&str, &str)],
     retained: &[String],
+    abi: &AbiMarker,
 ) -> Result<(), GeneratorError> {
     if retained.is_empty() {
         return Ok(());
     }
-    let changed: Vec<String> = planned
-        .iter()
-        .filter(|(name, content)| {
-            fs::read(root.join(name)).ok().as_deref() != Some(content.as_bytes())
-        })
-        .map(|(name, _)| name.to_string())
-        .collect();
+    let expected = crate::RUNTIME_ABI;
+    let mut changed = Vec::new();
+    match abi {
+        AbiMarker::Declared(found) if *found == expected => {}
+        AbiMarker::Declared(found) => changed.push(format!(
+            "lib.rs records schematic-runtime ABI {found}, this generator emits ABI {expected}"
+        )),
+        AbiMarker::Missing => changed.push(format!(
+            "lib.rs records no schematic-runtime ABI, this generator emits ABI {expected}"
+        )),
+        AbiMarker::Malformed(reason) => {
+            changed.push(format!("lib.rs's {ABI_MARKER} {reason}"));
+        }
+    }
+    changed.extend(
+        planned
+            .iter()
+            .filter(|(name, content)| {
+                fs::read(root.join(name)).ok().as_deref() != Some(content.as_bytes())
+            })
+            .map(|(name, _)| name.to_string()),
+    );
     if changed.is_empty() {
         Ok(())
     } else {
@@ -487,15 +561,18 @@ mod tests {
         fs::write(root.join("ws_shared.rs"), "ws").unwrap();
         let retained = vec!["beta".to_string()];
 
-        shared_runtime_compatibility(root, &[("shared.rs", "same"), ("ws_shared.rs", "ws")], &retained)
+        let current = AbiMarker::Declared(crate::RUNTIME_ABI);
+
+        shared_runtime_compatibility(root, &[("shared.rs", "same"), ("ws_shared.rs", "ws")], &retained, &current)
             .expect("identical runtime is compatible");
-        shared_runtime_compatibility(root, &[("shared.rs", "new")], &[])
+        shared_runtime_compatibility(root, &[("shared.rs", "new")], &[], &AbiMarker::Missing)
             .expect("nothing retained, nothing to keep compatible");
 
         let err = shared_runtime_compatibility(
             root,
             &[("shared.rs", "new"), ("ws_shared.rs", "ws")],
             &retained,
+            &current,
         )
         .unwrap_err();
         let GeneratorError::RequiresFullGeneration { changed, retained, .. } = &err else {
@@ -506,8 +583,54 @@ mod tests {
         assert!(err.to_string().contains("generate --api all"), "{err}");
 
         fs::remove_file(root.join("ws_shared.rs")).unwrap();
-        let err = shared_runtime_compatibility(root, &[("ws_shared.rs", "ws")], &["beta".into()])
+        let err = shared_runtime_compatibility(root, &[("ws_shared.rs", "ws")], &["beta".into()], &current)
             .unwrap_err();
         assert!(matches!(err, GeneratorError::RequiresFullGeneration { .. }));
+    }
+
+    #[test]
+    fn an_abi_marker_other_than_the_generators_requires_full_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("shared.rs"), "same").unwrap();
+        let planned = [("shared.rs", "same")];
+        let retained = vec!["beta".to_string()];
+
+        for marker in [
+            AbiMarker::Declared(crate::RUNTIME_ABI + 1),
+            AbiMarker::Missing,
+            AbiMarker::Malformed("is not an integer literal".to_string()),
+        ] {
+            let err = shared_runtime_compatibility(root, &planned, &retained, &marker).unwrap_err();
+            let GeneratorError::RequiresFullGeneration { changed, .. } = &err else {
+                panic!("{marker:?}: expected RequiresFullGeneration, got {err:?}");
+            };
+            assert_eq!(changed.len(), 1, "{marker:?}: {changed:?}");
+            assert!(changed[0].starts_with("lib.rs"), "{marker:?}: {changed:?}");
+        }
+        shared_runtime_compatibility(root, &planned, &[], &AbiMarker::Missing)
+            .expect("with nothing retained, the marker does not matter");
+    }
+
+    #[test]
+    fn the_abi_marker_is_read_only_from_its_exact_form() {
+        let read = |source: &str| abi_marker(&syn::parse_file(source).unwrap());
+        assert_eq!(read("pub const SCHEMATIC_RUNTIME_ABI: u32 = 7;"), AbiMarker::Declared(7));
+        assert_eq!(read("pub const SCHEMATIC_RUNTIME_ABI: u32 = 7u32;"), AbiMarker::Declared(7));
+        assert_eq!(read("pub mod shared;"), AbiMarker::Missing);
+        assert_eq!(read("pub const OTHER: u32 = 1;"), AbiMarker::Missing);
+        for (source, reason) in [
+            ("pub const SCHEMATIC_RUNTIME_ABI: u32 = 1 + 1;", "is not an integer literal"),
+            ("pub const SCHEMATIC_RUNTIME_ABI: u32 = \"1\";", "is not an integer literal"),
+            ("pub const SCHEMATIC_RUNTIME_ABI: u64 = 1;", "is not a `u32`"),
+            ("pub const SCHEMATIC_RUNTIME_ABI: u32 = 1u8;", "is not an integer literal"),
+            ("pub const SCHEMATIC_RUNTIME_ABI: u32 = 99999999999;", "is not a `u32` value"),
+            (
+                "pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;\nconst SCHEMATIC_RUNTIME_ABI: u32 = 1;",
+                "is declared 2 times",
+            ),
+        ] {
+            assert_eq!(read(source), AbiMarker::Malformed(reason.to_string()), "{source}");
+        }
     }
 }

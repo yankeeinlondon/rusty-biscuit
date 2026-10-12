@@ -1,15 +1,15 @@
 //! Tests for query parameter code generation in generated request structs.
 //!
-//! These tests verify the generated `into_parts()` method returns declared
-//! query parameters as unencoded pairs apart from the path, and that the
-//! shared `append_query_pairs` helper is the one place they are encoded. What
-//! actually reaches a server is asserted by
+//! These tests verify the generated `EndpointSpec::into_parts()` returns
+//! declared query parameters as unencoded pairs apart from the path; the
+//! runtime encodes them once, when it assembles the URL. What actually
+//! reaches a server is asserted by
 //! `fresh_output_compile::slow_query_wire_matches_pre_split_baseline`.
 //!
 //! ## Test Categories
 //!
 //! 1. **Separation tests**: pairs are collected apart from the path, in order
-//! 2. **URL encoding tests**: encoding happens once, at URL assembly
+//! 2. **URL encoding tests**: `into_parts` leaves query values unencoded
 //! 3. **Type-specific tests**: Boolean, enum, array params generate correctly
 //! 4. **Interaction tests**: Query params with path params
 
@@ -17,7 +17,7 @@ use proc_macro2::TokenStream;
 use schematic_define::{
     ApiResponse, Endpoint, EndpointParams, ParamDef, ParamStyle, QueryParamType, RestMethod,
 };
-use schematic_gen::codegen::{generate_request_parts_type, generate_request_struct};
+use schematic_gen::codegen::generate_request_struct;
 
 /// Formats generated tokens into readable code for assertions.
 fn format_tokens(tokens: &TokenStream) -> String {
@@ -98,9 +98,10 @@ fn single_query_param_is_collected_apart_from_the_path() {
         "Should push the unencoded value under its wire name\nGenerated code:\n{}",
         code
     );
+    let flat: String = code.split_whitespace().collect();
     assert!(
-        code.contains(r#"Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))"#),
-        "Query pairs should be the fifth element of RequestParts\nGenerated code:\n{}",
+        flat.contains("RequestParts{method:<Selfasschematic_runtime::EndpointSpec>::METHOD,path,query,headers,"),
+        "Query pairs should fill the `query` field of RequestParts\nGenerated code:\n{}",
         code
     );
     assert!(
@@ -534,9 +535,12 @@ fn into_parts_returns_result_with_query_params() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
+    let flat = code.split_whitespace().collect::<String>().replace(",)", ")");
     assert!(
-        code.contains("pub fn into_parts(self) -> Result<RequestParts, SchematicError>"),
-        "into_parts should return Result<RequestParts, SchematicError>\nGenerated code:\n{}",
+        flat.contains(
+            "fninto_parts(self)->Result<schematic_runtime::RequestParts,schematic_runtime::InvalidArgument>"
+        ),
+        "into_parts should return Result<RequestParts, InvalidArgument>\nGenerated code:\n{}",
         code
     );
 }
@@ -641,30 +645,6 @@ fn query_values_are_left_unencoded_by_into_parts() {
     assert!(
         !code.contains("urlencoding::encode(v)") && !code.contains("urlencoding::encode(value"),
         "into_parts must not encode query values\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn append_query_pairs_encodes_each_name_and_value_once() {
-    let code = format_tokens(&generate_request_parts_type());
-
-    assert!(
-        code.contains("pub fn append_query_pairs(url: &mut String, path: &str, pairs: &[(String, String)])"),
-        "Shared helper should be emitted\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("url.push_str(&urlencoding::encode(name));")
-            && code.contains("url.push_str(&urlencoding::encode(value));"),
-        "Name and value should each be encoded once\nGenerated code:\n{}",
-        code
-    );
-    // The separator follows the path, not the base URL, which keeps request
-    // lines byte-identical to the pre-split clients.
-    assert!(
-        code.contains("url.push(if path.contains('?') { '&' } else { '?' });"),
-        "Separator should be chosen from the path\nGenerated code:\n{}",
         code
     );
 }

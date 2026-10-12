@@ -1,13 +1,16 @@
 //! Schematic code generator library.
 //!
 //! This crate generates strongly-typed Rust client code from REST API
-//! definitions created with `schematic-define`. The generated code includes:
+//! definitions created with `schematic-define`. Generated clients are thin:
+//! the hand-written `schematic-runtime` crate sends their requests. Per API
+//! the generated code includes:
 //!
-//! - A client struct with `new()` and `with_base_url()` constructors
-//! - Request structs for each endpoint (with path parameters as fields)
-//! - A unified request enum for type-safe request handling
-//! - An async `request()` method that handles HTTP communication
-//! - A `SchematicError` type for comprehensive error handling
+//! - an uninhabited marker type named after the API, with `BASE_URL`,
+//!   `DOCS_URL`, `definition()`, `builder()`, and `new()`
+//! - a `{Name}Client` alias for `schematic_runtime::Client<{Name}>`
+//! - one request struct per endpoint, implementing
+//!   `schematic_runtime::EndpointSpec` (its API, success type, codec, and
+//!   endpoint id)
 //!
 //! ## Modules
 //!
@@ -38,28 +41,21 @@
 //! For an API named "OpenAI" with endpoints `ListModels` and `RetrieveModel`:
 //!
 //! ```text
-//! // Error type
-//! pub enum SchematicError { ... }
+//! pub enum OpenAI {}
+//! pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
 //!
-//! // Per-endpoint request structs
 //! pub struct ListModelsRequest { ... }
 //! pub struct RetrieveModelRequest { pub model: String, ... }
 //!
-//! // Unified request enum
-//! pub enum OpenAIRequest {
-//!     ListModels(ListModelsRequest),
-//!     RetrieveModel(RetrieveModelRequest),
+//! impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
+//!     type Api = OpenAI;
+//!     type Success = Model;
+//!     type Decoder = schematic_runtime::Json<Model>;
+//!     ...
 //! }
 //!
-//! // Client struct
-//! pub struct OpenAI {
-//!     client: reqwest::Client,
-//!     base_url: String,
-//! }
-//!
-//! impl OpenAI {
-//!     pub async fn request<T>(&self, req: impl Into<OpenAIRequest>) -> Result<T, SchematicError>;
-//! }
+//! // A caller sends the concrete request; its type fixes the response type.
+//! let response = OpenAI::new()?.send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new()).await?;
 //! ```
 
 pub mod asyncapi_import;
@@ -83,6 +79,15 @@ pub mod ws_codegen;
 
 pub use inference::infer_module_path;
 
+/// The `schematic_runtime::ABI` this generator emits code for.
+///
+/// Generated `lib.rs` declares it as `SCHEMATIC_RUNTIME_ABI` and asserts at
+/// compile time that the runtime it builds against has the same value;
+/// partial generation refuses to keep modules generated for another value.
+/// It changes together with the runtime's constant, which a test checks.
+pub const RUNTIME_ABI: u32 = 1;
+
+
 pub use export::openapi::{
     build_openapi_grouped, operation_id_diagnostics, write_openapi, write_openapi_grouped,
 };
@@ -94,3 +99,30 @@ pub use validation::{
 
 #[cfg(test)]
 pub mod test_utils;
+
+#[cfg(test)]
+mod runtime_abi_tests {
+    /// The generator is built in the same workspace as the runtime it emits
+    /// code for, so their ABI values must agree; generated code built
+    /// against a disagreeing runtime fails its compile-time assertion.
+    #[test]
+    fn the_generator_emits_the_abi_of_the_workspace_runtime() {
+        let source = include_str!("../../runtime/src/lib.rs");
+        let file = syn::parse_file(source).expect("the runtime's lib.rs parses");
+        let abi = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Const(constant) if constant.ident == "ABI" => match &*constant.expr {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(value),
+                        ..
+                    }) => Some(value.base10_parse::<u32>().expect("a u32 literal")),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the runtime declares `pub const ABI: u32 = <literal>;`");
+        assert_eq!(super::RUNTIME_ABI, abi);
+    }
+}

@@ -7,7 +7,7 @@
 //!
 //! 1. **Compilation tests** (`#[ignore]`): Verify generated code compiles with cargo
 //! 2. **Structure tests**: Verify generated files exist and contain expected content
-//! 3. **Response type tests**: Verify correct methods generated for Binary/Text/Empty responses
+//! 3. **Response type tests**: Verify each endpoint's success type and decoder for JSON/Binary/Text/Empty responses
 //! 4. **Multi-API tests**: Verify multiple APIs generate correctly together
 
 use std::path::Path;
@@ -45,7 +45,7 @@ fn read_module_content(src_dir: &Path, module_name: &str) -> String {
     let dir = src_dir.join(module_name);
     if dir.join("mod.rs").exists() {
         let mut content = String::new();
-        for file_name in &["mod.rs", "requests.rs", "responses.rs", "client.rs"] {
+        for file_name in &["mod.rs", "requests.rs", "responses.rs"] {
             let path = dir.join(file_name);
             if path.exists() {
                 content.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
@@ -60,6 +60,49 @@ fn read_module_content(src_dir: &Path, module_name: &str) -> String {
         module_name,
         src_dir.display()
     );
+}
+
+/// `content` without its comment lines, whose usage examples legitimately
+/// mention `send` and `async fn`.
+fn without_comments(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The opening of `request`'s `EndpointSpec` impl, whitespace removed: its
+/// API marker, success type, and decoder.
+fn endpoint_spec_head(api: &str, request: &str, success: &str, decoder: &str) -> String {
+    format!(
+        "implschematic_runtime::EndpointSpecfor{request}{{typeApi={api};typeSuccess={success};\
+         typeFailure=schematic_runtime::NoDeclaredError;typeDecoder={decoder};"
+    )
+}
+
+/// Asserts `request` declares `success` and `decoder` in `content`.
+fn assert_endpoint_spec(content: &str, api: &str, request: &str, success: &str, decoder: &str) {
+    let flat: String = content.split_whitespace().collect();
+    assert!(
+        flat.contains(&endpoint_spec_head(api, request, success, decoder)),
+        "{request} should declare Success = {success} and Decoder = {decoder}\nGenerated code:\n{content}"
+    );
+}
+
+/// Asserts the module emits neither a generic request method nor a
+/// per-endpoint send method: the runtime client's `send` serves every
+/// endpoint.
+fn assert_no_send_methods(content: &str, endpoint_methods: &[&str]) {
+    let code = without_comments(content);
+    assert!(!code.contains("async fn"), "No send method should be emitted:\n{code}");
+    assert!(!code.contains("fn request"), "No generic request method should be emitted:\n{code}");
+    for method in endpoint_methods {
+        assert!(
+            !code.contains(&format!("fn {method}")),
+            "No `{method}` convenience method should be emitted:\n{code}"
+        );
+    }
 }
 
 /// Returns the absolute path to the schematic workspace directory.
@@ -183,25 +226,29 @@ fn generated_files_exist_and_have_expected_structure() {
         std::fs::read_to_string(schema_dir.join("Cargo.toml")).expect("Failed to read Cargo.toml");
     assert!(cargo_content.contains("schematic-schema"));
     assert!(cargo_content.contains("edition = \"2024\""));
-    assert!(cargo_content.contains("reqwest"));
+    assert!(cargo_content.contains("schematic-runtime"));
+    assert!(!cargo_content.contains("reqwest"));
     assert!(cargo_content.contains("serde"));
     assert!(cargo_content.contains("tokio"));
-    assert!(cargo_content.contains("schematic-define")); // For AuthStrategy and UpdateStrategy
 
-    // Verify lib.rs content (now just module declarations)
+    // Verify lib.rs content: module declarations and the runtime ABI check
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
+    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;"));
+    assert!(lib_content.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
+    assert!(lib_content.contains("pub use schematic_runtime;"));
     assert!(lib_content.contains("pub mod shared;"));
     assert!(lib_content.contains("pub mod openai;"));
     assert!(lib_content.contains("pub mod prelude;"));
 
-    // Verify shared.rs content (common error type)
+    // Verify shared.rs content (request-side helpers only; errors are the runtime's)
     let shared_content =
         std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
     assert!(shared_content.contains("//!"));
-    assert!(shared_content.contains("pub enum SchematicError"));
-    assert!(shared_content.contains("thiserror::Error"));
+    assert!(shared_content.contains("pub fn encode_cookie_value"));
+    assert!(shared_content.contains("pub struct FormFile"));
+    assert!(!shared_content.contains("SchematicError"));
 
     // Verify the openai module's content (split across files once it grew large)
     let api_content = read_module_content(&src_dir, "openai");
@@ -210,25 +257,29 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("//!"));
     assert!(api_content.contains("OpenAI"));
 
-    // Should have all the generated components
-    assert!(api_content.contains("use crate::shared::{RequestParts, SchematicError}"));
-    assert!(api_content.contains("pub struct OpenAI"));
-    assert!(api_content.contains("pub enum OpenAIRequest"));
+    // Should have the API marker and its runtime client alias
+    assert!(api_content.contains("pub enum OpenAI {}"));
+    assert!(api_content.contains("pub type OpenAIClient = schematic_runtime::Client<OpenAI>;"));
+    assert!(!api_content.contains("pub enum OpenAIRequest"));
 
-    // Should have request structs for all endpoints
+    // Should have request structs for all endpoints, scoped to the API
     assert!(api_content.contains("pub struct ListModelsRequest"));
     assert!(api_content.contains("pub struct RetrieveModelRequest"));
     assert!(api_content.contains("pub struct DeleteModelRequest"));
+    assert!(api_content.contains("impl schematic_runtime::EndpointSpec for ListModelsRequest {"));
+    assert!(api_content.contains("type Api = OpenAI;"));
 
-    // Should have the async request method
-    assert!(api_content.contains("pub async fn request"));
+    // The runtime client sends; the module has no send method of its own
+    assert_no_send_methods(&api_content, &["list_models"]);
 
     // Verify prelude.rs content
     let prelude_content =
         std::fs::read_to_string(src_dir.join("prelude.rs")).expect("Failed to read prelude.rs");
-    assert!(prelude_content.contains("OpenAI"));
-    assert!(prelude_content.contains("OpenAIRequest"));
-    assert!(prelude_content.contains("SchematicError"));
+    assert!(prelude_content.contains("pub use crate::openai::{OpenAI, OpenAIClient};"));
+    assert!(prelude_content.contains("pub use schematic_runtime::{"));
+    assert!(prelude_content.contains("CallOptions"));
+    assert!(!prelude_content.contains("OpenAIRequest"));
+    assert!(!prelude_content.contains("SchematicError"));
 }
 
 /// Tests generating code for multiple different API configurations.
@@ -414,8 +465,14 @@ fn generate_code_for_various_api_configurations() {
         let content =
             std::fs::read_to_string(&api_module_path).expect("Failed to read API module file");
         assert!(
-            content.contains(&format!("pub struct {}", api.name)),
-            "Should contain API struct for '{}'",
+            content.contains(&format!("pub enum {} {{}}", api.name)),
+            "Should contain API marker for '{}'",
+            api.name
+        );
+        assert_eq!(
+            content.matches(&format!("type Api = {};", api.name)).count(),
+            api.endpoints.len(),
+            "Every request of '{}' should name its API marker",
             api.name
         );
     }
@@ -424,15 +481,16 @@ fn generate_code_for_various_api_configurations() {
 // =============================================================================
 // Response Type Tests
 // =============================================================================
-// These tests verify that the correct methods are generated for different
-// ApiResponse types. This was a gap that caused runtime failures.
+// These tests verify that each endpoint declares the success type and decoder
+// of its ApiResponse. Decoding every response as JSON was a gap that caused
+// runtime failures.
 
-/// Tests that Binary response endpoints generate `request_bytes()` method.
+/// Tests that Binary response endpoints decode to `bytes::Bytes`.
 ///
 /// This test catches the bug where all endpoints used `response.json()` regardless
 /// of their declared response type.
 #[test]
-fn binary_response_generates_request_bytes_method() {
+fn binary_response_declares_bytes_success_and_binary_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     // Note: "BinaryTest" avoids the "Api" suffix which triggers module path inference
@@ -474,36 +532,24 @@ fn binary_response_generates_request_bytes_method() {
     let api_content = std::fs::read_to_string(src_dir.join("binarytest.rs"))
         .expect("Failed to read binarytest.rs");
 
-    // CRITICAL: Must have request_bytes method, NOT just request<T>
-    assert!(
-        api_content.contains("pub async fn request_bytes"),
-        "Binary API must have request_bytes() method"
+    // CRITICAL: must decode as bytes, NOT as JSON
+    assert_endpoint_spec(
+        &api_content,
+        "BinaryTest",
+        "GetAudioRequest",
+        "bytes::Bytes",
+        "schematic_runtime::Binary",
     );
     assert!(
-        api_content.contains("Result<bytes::Bytes, SchematicError>"),
-        "request_bytes must return bytes::Bytes"
+        !api_content.contains("schematic_runtime::Json<"),
+        "Binary-only API should not decode JSON"
     );
-    assert!(
-        api_content.contains("response.bytes().await"),
-        "request_bytes must call response.bytes()"
-    );
-
-    // Should NOT have generic request<T> method (no JSON endpoints)
-    assert!(
-        !api_content.contains("pub async fn request<T"),
-        "Binary-only API should not have request<T>() method"
-    );
-
-    // Should have convenience method for the binary endpoint
-    assert!(
-        api_content.contains("pub async fn get_audio"),
-        "Should have get_audio convenience method"
-    );
+    assert_no_send_methods(&api_content, &["get_audio"]);
 }
 
-/// Tests that Text response endpoints generate `request_text()` method.
+/// Tests that Text response endpoints decode to `String`.
 #[test]
-fn text_response_generates_request_text_method() {
+fn text_response_declares_string_success_and_text_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
@@ -544,23 +590,19 @@ fn text_response_generates_request_text_method() {
     let api_content =
         std::fs::read_to_string(src_dir.join("texttest.rs")).expect("Failed to read texttest.rs");
 
-    assert!(
-        api_content.contains("pub async fn request_text"),
-        "Text API must have request_text() method"
+    assert_endpoint_spec(
+        &api_content,
+        "TextTest",
+        "GetPlainTextRequest",
+        "String",
+        "schematic_runtime::Text",
     );
-    assert!(
-        api_content.contains("Result<String, SchematicError>"),
-        "request_text must return String"
-    );
-    assert!(
-        api_content.contains("response.text().await"),
-        "request_text must call response.text()"
-    );
+    assert_no_send_methods(&api_content, &["get_plain_text"]);
 }
 
-/// Tests that Empty response endpoints generate `request_empty()` method.
+/// Tests that Empty response endpoints decode to `()`.
 #[test]
-fn empty_response_generates_request_empty_method() {
+fn empty_response_declares_unit_success_and_empty_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
@@ -601,19 +643,20 @@ fn empty_response_generates_request_empty_method() {
     let api_content =
         std::fs::read_to_string(src_dir.join("emptytest.rs")).expect("Failed to read emptytest.rs");
 
-    assert!(
-        api_content.contains("pub async fn request_empty"),
-        "Empty API must have request_empty() method"
+    assert_endpoint_spec(
+        &api_content,
+        "EmptyTest",
+        "DeleteItemRequest",
+        "()",
+        "schematic_runtime::Empty",
     );
-    assert!(
-        api_content.contains("Result<(), SchematicError>"),
-        "request_empty must return ()"
-    );
+    assert_no_send_methods(&api_content, &["delete_item"]);
 }
 
-/// Tests that mixed response types generate all appropriate methods.
+/// Tests that each endpoint of a mixed API declares its own success type and
+/// decoder.
 #[test]
-fn mixed_response_types_generate_all_methods() {
+fn mixed_response_types_declare_each_endpoint_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
@@ -689,37 +732,17 @@ fn mixed_response_types_generate_all_methods() {
     let api_content =
         std::fs::read_to_string(src_dir.join("mixedtest.rs")).expect("Failed to read mixedtest.rs");
 
-    // Must have ALL four method types
-    assert!(
-        api_content.contains("pub async fn request<T"),
-        "Mixed API must have request<T>() for JSON"
-    );
-    assert!(
-        api_content.contains("pub async fn request_bytes"),
-        "Mixed API must have request_bytes() for Binary"
-    );
-    assert!(
-        api_content.contains("pub async fn request_text"),
-        "Mixed API must have request_text() for Text"
-    );
-    assert!(
-        api_content.contains("pub async fn request_empty"),
-        "Mixed API must have request_empty() for Empty"
-    );
+    // Each of the four response kinds gets its own decoder
+    for (request, success, decoder) in [
+        ("GetJsonRequest", "JsonResponse", "schematic_runtime::Json<JsonResponse>"),
+        ("GetBinaryRequest", "bytes::Bytes", "schematic_runtime::Binary"),
+        ("GetTextRequest", "String", "schematic_runtime::Text"),
+        ("DeleteItemRequest", "()", "schematic_runtime::Empty"),
+    ] {
+        assert_endpoint_spec(&api_content, "MixedTest", request, success, decoder);
+    }
 
-    // Convenience methods for non-JSON endpoints
-    assert!(
-        api_content.contains("pub async fn get_binary"),
-        "Should have get_binary convenience method"
-    );
-    assert!(
-        api_content.contains("pub async fn get_text"),
-        "Should have get_text convenience method"
-    );
-    assert!(
-        api_content.contains("pub async fn delete_item"),
-        "Should have delete_item convenience method"
-    );
+    assert_no_send_methods(&api_content, &["get_json", "get_binary", "get_text", "delete_item"]);
 }
 
 /// Tests ElevenLabs API generates correct binary methods for audio endpoints.
@@ -737,35 +760,33 @@ fn elevenlabs_binary_endpoints_generate_correctly() {
 
     let api_content = read_module_content(&src_dir, "elevenlabs");
 
-    // Must have request_bytes for binary endpoints
-    assert!(
-        api_content.contains("pub async fn request_bytes"),
-        "ElevenLabs must have request_bytes() method"
-    );
-
-    // Must have request<T> for JSON endpoints
-    assert!(
-        api_content.contains("pub async fn request<T"),
-        "ElevenLabs must have request<T>() method for JSON endpoints"
-    );
-
-    // Convenience methods for known binary endpoints
+    // Known binary endpoints must decode as bytes, not JSON
     let binary_endpoints = [
-        "create_speech",
-        "stream_speech",
-        "get_voice_sample_audio",
-        "create_sound_effect",
-        "get_history_item_audio",
-        "download_history_items",
+        "CreateSpeech",
+        "StreamSpeech",
+        "GetVoiceSampleAudio",
+        "CreateSoundEffect",
+        "GetHistoryItemAudio",
+        "DownloadHistoryItems",
     ];
 
     for endpoint in binary_endpoints {
-        assert!(
-            api_content.contains(&format!("pub async fn {}", endpoint)),
-            "ElevenLabs must have {} convenience method",
-            endpoint
+        assert_endpoint_spec(
+            &api_content,
+            "ElevenLabs",
+            &format!("{endpoint}Request"),
+            "bytes::Bytes",
+            "schematic_runtime::Binary",
         );
     }
+
+    // JSON endpoints keep the JSON decoder
+    assert!(
+        api_content.contains("type Decoder = schematic_runtime::Json<"),
+        "ElevenLabs JSON endpoints must decode JSON"
+    );
+
+    assert_no_send_methods(&api_content, &["create_speech", "stream_speech"]);
 }
 
 // =============================================================================

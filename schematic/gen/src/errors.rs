@@ -58,11 +58,13 @@ pub enum GeneratorError {
         remedy: String,
     },
 
-    /// A partial run would replace shared runtime files that retained,
-    /// unregenerated modules were generated against. Nothing was changed.
+    /// A partial run would change the shared runtime that retained,
+    /// unregenerated modules were generated against: a shared file's content,
+    /// or the `schematic-runtime` ABI recorded in `lib.rs`. Nothing was
+    /// changed.
     #[error(
         "refusing a partial update of {root}; nothing was changed: the shared runtime \
-         file(s) {} would change while module(s) {} are retained without being \
+         would change ({}) while module(s) {} are retained without being \
          regenerated. Run full generation (`generate --api all`) instead",
         changed.join(", "),
         retained.join(", ")
@@ -70,7 +72,9 @@ pub enum GeneratorError {
     RequiresFullGeneration {
         /// The output root that was left untouched.
         root: String,
-        /// Shared runtime files whose new content differs from the existing one.
+        /// What changes: each shared file whose new content differs, by name,
+        /// and a description of a runtime ABI marker that differs from this
+        /// generator's.
         changed: Vec<String>,
         /// Module groups that would have been kept as they are.
         retained: Vec<String>,

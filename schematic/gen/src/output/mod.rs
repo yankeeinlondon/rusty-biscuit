@@ -11,13 +11,13 @@
 //!
 //! ```text
 //! schema/src/
-//! ├── lib.rs              # Module declarations and re-exports
+//! ├── lib.rs              # Module declarations, runtime ABI check, re-exports
+//! ├── shared.rs           # Request-side helpers (cookies, FormFile, Paginated)
 //! ├── openai.rs           # Small API module (single file)
 //! ├── emqx/               # Large API module (split directory)
-//! │   ├── mod.rs          #   Client structs, re-exports, submodule declarations
-//! │   ├── requests.rs     #   Request structs and request enums
-//! │   ├── responses.rs    #   Definitions re-exports
-//! │   └── client.rs       #   HTTP method impl blocks
+//! │   ├── mod.rs          #   API markers and clients, re-exports, submodules
+//! │   ├── requests.rs     #   Request structs and their EndpointSpec impls
+//! │   └── responses.rs    #   Definitions re-exports
 //! └── prelude.rs          # Common re-exports for consumers
 //! ```
 //!
@@ -115,7 +115,6 @@ enum GeneratedModule {
         mod_rs: String,
         requests_rs: String,
         responses_rs: String,
-        client_rs: String,
     },
 }
 
@@ -178,7 +177,7 @@ impl RustOutputPlan {
 ///
 /// The output holds `lib.rs`, `shared.rs`, `prelude.rs`, the WebSocket
 /// modules, and one module per module group: `{module}.rs`, or a directory
-/// with `mod.rs`, `requests.rs`, `responses.rs`, and `client.rs` once the
+/// with `mod.rs`, `requests.rs`, and `responses.rs` once the
 /// module exceeds [`SPLIT_THRESHOLD_LINES`]. Generator-owned modules no API
 /// produces are removed. See [`prepare_rust_output`] for every check that
 /// runs before the first write.
@@ -243,10 +242,11 @@ pub fn prepare_rust_output(
     let regenerated_apis = expand_selection(request.registry, request.selection)?;
     ensure_valid_rust_batch(&regenerated_apis)?;
 
-    let retained = match request.selection {
-        Selection::All => Vec::new(),
-        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected)?.retained,
+    let inventory = match request.selection {
+        Selection::All => inventory::RustInventory::default(),
+        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected)?,
     };
+    let retained = inventory.retained;
     let exported: BTreeSet<&str> = selected.iter().chain(&retained).map(String::as_str).collect();
     let crate_apis: Vec<&RestApi> = request
         .registry
@@ -266,6 +266,7 @@ pub fn prepare_rust_output(
         root,
         &[("shared.rs", &shared), (&ws_shared_filename, &ws_shared)],
         &retained,
+        &inventory.abi,
     )?;
 
     let mut planner = Planner::new(root);
@@ -383,7 +384,6 @@ fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, Generator
                 mod_rs: render(&parts.mod_rs)?,
                 requests_rs: render(&parts.requests_rs)?,
                 responses_rs: render(&parts.responses_rs)?,
-                client_rs: render(&parts.client_rs)?,
             });
         } else {
             generated.push(GeneratedModule::SingleFile {
@@ -473,7 +473,6 @@ impl<'a> Planner<'a> {
                 mod_rs,
                 requests_rs,
                 responses_rs,
-                client_rs,
             } => {
                 self.planned.insert(module_path.clone());
                 let dir = self.root.join(module_path);
@@ -481,7 +480,6 @@ impl<'a> Planner<'a> {
                     ("mod.rs", mod_rs),
                     ("requests.rs", requests_rs),
                     ("responses.rs", responses_rs),
-                    ("client.rs", client_rs),
                 ];
                 let is_real_dir = fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
                 if !is_real_dir && dir.symlink_metadata().is_ok() {
@@ -790,13 +788,15 @@ mod tests {
         let tokens = assemble_api_code(&api);
         let code = tokens.to_string();
 
-        assert!(code.contains("SchematicError"));
-        assert!(code.contains("ListModelsRequest"));
-        assert!(code.contains("RetrieveModelRequest"));
-        assert!(code.contains("CreateCompletionRequest"));
-        assert!(code.contains("OpenAIRequest"));
-        assert!(code.contains("struct OpenAI"));
-        assert!(code.contains("async fn request"));
+        assert!(code.contains("EndpointSpec for ListModelsRequest"));
+        assert!(code.contains("EndpointSpec for RetrieveModelRequest"));
+        assert!(code.contains("EndpointSpec for CreateCompletionRequest"));
+        assert!(code.contains("enum OpenAI"));
+        assert!(code.contains("type OpenAIClient"));
+        // Sending is the runtime client's job; the module has no send path.
+        assert!(!code.contains("OpenAIRequest"));
+        assert!(!code.contains("SchematicError"));
+        assert!(!code.contains("async fn request"));
     }
 
     #[test]
@@ -872,9 +872,10 @@ mod tests {
         let tokens = assemble_api_code(&api);
         let file = validate_code(&tokens).unwrap();
         let formatted = format_code(&file);
-        assert!(formatted.contains("use crate::shared::{RequestParts, SchematicError}"));
-        assert!(formatted.contains("pub struct OpenAI"));
-        assert!(formatted.contains("pub enum OpenAIRequest"));
+        assert!(formatted.contains("use serde::{Deserialize, Serialize};"));
+        assert!(formatted.contains("pub enum OpenAI {}"));
+        assert!(formatted.contains("pub type OpenAIClient = schematic_runtime::Client<OpenAI>;"));
+        assert!(formatted.contains("impl schematic_runtime::EndpointSpec for ListModelsRequest {"));
     }
 
     #[test]
@@ -927,7 +928,7 @@ mod tests {
         let result = generate_and_write(&api, temp_dir.path(), true);
         assert!(result.is_ok());
         let code = result.unwrap();
-        assert!(code.contains("pub struct TestApi"));
+        assert!(code.contains("pub enum TestApi {}"));
     }
 
     #[test]
@@ -957,15 +958,17 @@ mod tests {
         let api_module_path = temp_dir.path().join("openai.rs");
         let content = fs::read_to_string(api_module_path).unwrap();
         assert!(content.contains("    "));
-        assert!(content.contains("pub struct OpenAI"));
-        assert!(content.contains("pub enum OpenAIRequest"));
-        assert!(content.contains("use crate::shared::{RequestParts, SchematicError}"));
+        assert!(content.contains("pub enum OpenAI {}"));
+        assert!(content.contains("pub type OpenAIClient = schematic_runtime::Client<OpenAI>;"));
+        assert!(!content.contains("crate::shared::"));
         let shared_path = temp_dir.path().join("shared.rs");
         let shared_content = fs::read_to_string(shared_path).unwrap();
-        assert!(shared_content.contains("pub type RequestParts"));
-        assert!(shared_content.contains("pub enum SchematicError"));
+        assert!(shared_content.contains("pub fn combine_cookie_headers"));
+        assert!(!shared_content.contains("pub type RequestParts"));
+        assert!(!shared_content.contains("pub enum SchematicError"));
         let lib_path = temp_dir.path().join("lib.rs");
         let lib_content = fs::read_to_string(lib_path).unwrap();
+        assert!(lib_content.contains("pub use schematic_runtime;"));
         assert!(lib_content.contains("pub mod shared;"));
         assert!(lib_content.contains("pub mod openai;"));
         assert!(lib_content.contains("pub mod prelude;"));
@@ -1109,7 +1112,9 @@ mod tests {
         for method in methods {
             let method_str = format!("{:?}", method).to_uppercase();
             assert!(
-                content.contains(&format!("\"{}\"", method_str)),
+                content.contains(&format!(
+                    "const METHOD: schematic_runtime::Method = schematic_runtime::Method::{method_str};"
+                )),
                 "Missing method: {}",
                 method_str
             );
@@ -1239,21 +1244,16 @@ mod tests {
         let tokens = assemble_combined_api_module(&apis);
         let file = validate_code(&tokens).unwrap();
         let code = format_code(&file);
+        assert!(code.contains("pub enum FooNative {}"), "Missing FooNative marker");
+        assert!(code.contains("pub enum FooCompat {}"), "Missing FooCompat marker");
+        // Each API's requests name their own marker, which scopes them to its client.
         assert!(
-            code.contains("pub struct FooNative"),
-            "Missing FooNative struct"
+            code.contains("type Api = FooNative;"),
+            "Missing FooNative request scope"
         );
         assert!(
-            code.contains("pub struct FooCompat"),
-            "Missing FooCompat struct"
-        );
-        assert!(
-            code.contains("pub enum FooNativeRequest"),
-            "Missing FooNativeRequest enum"
-        );
-        assert!(
-            code.contains("pub enum FooCompatRequest"),
-            "Missing FooCompatRequest enum"
+            code.contains("type Api = FooCompat;"),
+            "Missing FooCompat request scope"
         );
         let import_count = code
             .matches("pub use schematic_definitions::foo::*")
@@ -1263,13 +1263,13 @@ mod tests {
             "Expected exactly 1 definitions import, found {}",
             import_count
         );
-        let shared_count = code
-            .matches("use crate::shared::{RequestParts, SchematicError}")
+        let serde_count = code
+            .matches("use serde::{Deserialize, Serialize};")
             .count();
         assert_eq!(
-            shared_count, 1,
-            "Expected exactly 1 shared import, found {}",
-            shared_count
+            serde_count, 1,
+            "Expected exactly 1 serde import, found {}",
+            serde_count
         );
     }
 
@@ -1291,8 +1291,8 @@ mod tests {
             "Unexpected foocompat.rs"
         );
         let foo_content = fs::read_to_string(temp_dir.path().join("foo.rs")).unwrap();
-        assert!(foo_content.contains("pub struct FooNative"));
-        assert!(foo_content.contains("pub struct FooCompat"));
+        assert!(foo_content.contains("pub enum FooNative {}"));
+        assert!(foo_content.contains("pub enum FooCompat {}"));
         assert!(temp_dir.path().join("test.rs").exists(), "Missing test.rs");
     }
 
@@ -1422,15 +1422,17 @@ mod tests {
         let tokens = assemble_prelude(&apis);
         let file = validate_code(&tokens).unwrap();
         let code = format_code(&file);
-        assert!(code.contains("FooNative"), "Missing FooNative in prelude");
-        assert!(code.contains("FooCompat"), "Missing FooCompat in prelude");
         assert!(
-            code.contains("FooNativeRequest"),
-            "Missing FooNativeRequest in prelude"
+            code.contains("pub use crate::foo::{FooNative, FooNativeClient};"),
+            "Missing FooNative in prelude:\n{code}"
         );
         assert!(
-            code.contains("FooCompatRequest"),
-            "Missing FooCompatRequest in prelude"
+            code.contains("pub use crate::foo::{FooCompat, FooCompatClient};"),
+            "Missing FooCompat in prelude:\n{code}"
+        );
+        assert!(
+            !code.contains("FooNativeRequest") && !code.contains("FooCompatRequest"),
+            "Request types are not re-exported by the prelude:\n{code}"
         );
     }
 
@@ -1512,8 +1514,8 @@ mod tests {
             "large/responses.rs should exist"
         );
         assert!(
-            dir.join("client.rs").exists(),
-            "large/client.rs should exist"
+            !dir.join("client.rs").exists(),
+            "large/client.rs should not exist: the runtime client sends"
         );
 
         assert!(
@@ -1523,8 +1525,12 @@ mod tests {
 
         let mod_rs = fs::read_to_string(dir.join("mod.rs")).unwrap();
         assert!(
-            mod_rs.contains("pub struct LargeApi"),
-            "mod.rs should contain struct definition"
+            mod_rs.contains("pub enum LargeApi {}"),
+            "mod.rs should contain the API marker"
+        );
+        assert!(
+            mod_rs.contains("impl LargeApi {"),
+            "mod.rs should contain the API's constructors"
         );
         assert!(
             mod_rs.contains("pub mod requests;"),
@@ -1541,14 +1547,8 @@ mod tests {
             "requests.rs should contain request structs"
         );
         assert!(
-            requests.contains("pub enum LargeApiRequest"),
-            "requests.rs should contain request enum"
-        );
-
-        let client = fs::read_to_string(dir.join("client.rs")).unwrap();
-        assert!(
-            client.contains("impl LargeApi"),
-            "client.rs should contain impl block"
+            requests.contains("type Api = LargeApi;"),
+            "requests.rs should scope its requests to the API marker"
         );
     }
 
@@ -1562,8 +1562,8 @@ mod tests {
 
         let mod_rs = fs::read_to_string(dir.join("mod.rs")).unwrap();
         assert!(
-            !mod_rs.contains("pub use client::*;"),
-            "mod.rs should not re-export client items (only impl blocks)"
+            !mod_rs.contains("mod client;"),
+            "mod.rs should not declare a client submodule"
         );
         assert!(
             mod_rs.contains("pub use requests::*;"),
@@ -1574,10 +1574,14 @@ mod tests {
             "mod.rs should re-export response items"
         );
 
-        let client_rs = fs::read_to_string(dir.join("client.rs")).unwrap();
+        let requests_rs = fs::read_to_string(dir.join("requests.rs")).unwrap();
         assert!(
-            !client_rs.contains("use super::responses::*;"),
-            "client.rs should not import responses (covered by use super::*)"
+            requests_rs.contains("use super::responses::*;"),
+            "requests.rs should import the response types it names"
+        );
+        assert!(
+            requests_rs.contains("use super::LargeApi;"),
+            "requests.rs should import the API marker its requests name"
         );
 
         let responses = fs::read_to_string(dir.join("responses.rs")).unwrap();

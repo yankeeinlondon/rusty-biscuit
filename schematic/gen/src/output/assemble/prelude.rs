@@ -26,11 +26,11 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         .iter()
         .map(|api| {
             let module_name = format_ident!("{}", get_module_path(api));
-            let client_name = format_ident!("{}", api.name);
-            let request_enum = format_ident!("{}Request", api.name);
+            let marker = format_ident!("{}", api.name);
+            let client = format_ident!("{}Client", api.name);
 
             quote! {
-                pub use crate::#module_name::{#client_name, #request_enum};
+                pub use crate::#module_name::{#marker, #client};
             }
         })
         .collect();
@@ -51,7 +51,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
 
     let client_list: Vec<String> = apis
         .iter()
-        .map(|api| format!("//! - [`{name}`] + [`{name}Request`]", name = api.name))
+        .map(|api| format!("//! - [`{name}`] + [`{name}Client`]", name = api.name))
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
@@ -70,18 +70,18 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
     quote! {
         //! Convenient re-exports for working with generated API clients.
         //!
-        //! This prelude exports the client structs, request enums, and shared error
-        //! types. Response types are **not** re-exported here to avoid naming conflicts.
-        //! Import them from specific API modules instead:
+        //! This prelude exports each API's marker type and client alias, and
+        //! the runtime types every send uses. Request and response types are
+        //! **not** re-exported here to avoid naming conflicts. Import them
+        //! from specific API modules instead:
         //!
         //! ```text
-        //! use schematic_schema::openai::Model;
-        //! use schematic_schema::anthropic::CreateMessageResponse;
+        //! use schematic_schema::openai::{ListModelsRequest, ListModelsResponse};
         //! ```
         //!
         //! ## Re-exports
         //!
-        //! **Clients and request enums:**
+        //! **APIs and their clients:**
         //!
         #client_list_tokens
         //!
@@ -89,37 +89,30 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //!
         #ws_helper_list_tokens
         //!
-        //! **Shared types:**
-        //!
-        //! - [`SchematicError`] - Error type for all API operations
-        //! - [`RequestParts`] - Low-level request decomposition tuple
+        //! **Runtime types:** [`CallOptions`], [`Credential`], [`Deadline`],
+        //! [`OriginPolicy`], [`Response`], [`RawResponse`], and
+        //! [`TransportError`] from [`schematic_runtime`].
         //!
         //! ## Examples
         //!
         //! ```text
         //! use schematic_schema::prelude::*;
+        //! use schematic_schema::openai::RetrieveModelRequest;
         //!
-        //! #[tokio::main]
-        //! async fn main() -> Result<(), SchematicError> {
-        //!     let client = OpenAI::new();
-        //!
-        //!     // Typed request with new()
-        //!     let models = client.list_models().await?;
-        //!
-        //!     // Ergonomic From<&str> for single-param endpoints
-        //!     use schematic_schema::openai::{RetrieveModelRequest, Model};
-        //!     let model: Model = client
-        //!         .request(RetrieveModelRequest::from("gpt-4"))
-        //!         .await?;
-        //!
-        //!     Ok(())
+        //! let client = OpenAI::new()?;
+        //! let response = client
+        //!     .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
+        //!     .await?;
+        //! if let Some(model) = response.data() {
+        //!     println!("{}", model.id);
         //! }
         //! ```
 
-        // Shared types
-        pub use crate::shared::{RequestParts, SchematicError};
+        pub use schematic_runtime::{
+            CallOptions, Credential, Deadline, OriginPolicy, RawResponse, Response, TransportError,
+        };
 
-        // API clients and request types
+        // APIs and their clients
         #(#api_reexports)*
 
         // WebSocket definition helpers

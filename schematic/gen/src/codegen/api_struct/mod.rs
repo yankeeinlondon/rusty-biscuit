@@ -1,160 +1,111 @@
-//! API struct generation for REST APIs.
+//! Per-API client generation for REST APIs.
 //!
-//! Generates the main API struct that serves as the client entry point,
-//! with constructors and the base URL constant.
+//! Each API gets an uninhabited marker type named after it, which carries the
+//! API's constants and constructors, and a `{Name}Client` alias for the
+//! runtime client bound to that marker:
+//!
+//! ```text
+//! pub enum OpenAI {}
+//! pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
+//!
+//! impl schematic_runtime::Api for OpenAI {
+//!     const NAME: &'static str = "OpenAI";
+//! }
+//!
+//! impl OpenAI {
+//!     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
+//!     pub const DOCS_URL: Option<&'static str> = Some("https://platform.openai.com/docs");
+//!     pub fn definition() -> schematic_runtime::ApiDefinition { ... }
+//!     pub fn builder() -> schematic_runtime::ClientBuilder<Self> { ... }
+//!     pub fn new() -> Result<OpenAIClient, schematic_runtime::BuildError> { ... }
+//! }
+//! ```
+//!
+//! Sending, hooks, and connection settings belong to the runtime client and
+//! its builder; nothing here forwards to them. Because every request type
+//! names its API marker, the runtime client accepts only that API's requests.
 
 mod auth;
-mod constructors;
-mod fields;
 mod helpers;
-mod request_method;
 #[cfg(test)]
 mod tests;
-mod variant;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
-pub(crate) use auth::{generate_auth_policy_init, generate_auth_strategy_init};
-pub(crate) use helpers::{generate_explicit_auth_helpers, generate_headers_init_from_mapping};
+/// The variables the generated client reads when no credential is supplied:
+/// `(token, key, or password variables, Basic username variables)`, or
+/// `None` when it reads none.
+pub(crate) fn env_fallback_vars(api: &RestApi) -> Option<(Vec<String>, Vec<String>)> {
+    auth::auth_config(api).env.map(|env| (env.vars, env.username_vars))
+}
 
-/// Generates the API struct for the given API definition.
-///
-/// Creates a struct with:
-/// - `BASE_URL` constant containing the API's base URL
-/// - `DOCS_URL` constant containing the API's documentation URL (or `None`)
-/// - `new()` constructor using the default base URL
-/// - `with_base_url()` constructor for custom base URLs
-/// - `with_client()` constructor for custom reqwest clients
-/// - `with_client_and_base_url()` constructor for both custom client and URL
-/// - `Default` trait implementation
-///
-/// ## Examples
-///
-/// For an API named "OpenAi" with base URL `https://api.openai.com/v1`:
-/// ```text
-/// // Generated code:
-/// /// OpenAI API client.
-/// pub struct OpenAi {
-///     client: reqwest::Client,
-///     base_url: String,
-/// }
-///
-/// impl OpenAi {
-///     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
-///
-///     pub fn new() -> Self {
-///         Self {
-///             client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_else(|_| reqwest::Client::new()),
-///             base_url: Self::BASE_URL.to_string(),
-///         }
-///     }
-///
-///     pub fn with_base_url(base_url: impl Into<String>) -> Self {
-///         Self {
-///             client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_else(|_| reqwest::Client::new()),
-///             base_url: base_url.into(),
-///         }
-///     }
-/// }
-///
-/// impl Default for OpenAi {
-///     fn default() -> Self {
-///         Self::new()
-///     }
-/// }
-/// ```
+/// Generates the marker type, client alias, and constructors of one API.
 pub fn generate_api_struct(api: &RestApi) -> TokenStream {
-    let struct_name = format_ident!("{}", api.name);
+    let marker = format_ident!("{}", api.name);
+    let client = format_ident!("{}Client", api.name);
+    let name = &api.name;
     let base_url = &api.base_url;
-    // Leading space for proper /// formatting
-    let description = format!(" {} client.", api.description);
-    let env_auth = &api.env_auth;
-
-    // Generate auth strategy initialization
-    let auth_strategy_init = generate_auth_strategy_init(&api.auth);
-    let auth_policy_init = generate_auth_policy_init(&api.effective_auth_policy());
-
-    // Generate env_username initialization
-    let env_username_init = match &api.env_username {
-        Some(name) => quote! { Some(#name.to_string()) },
-        None => quote! { None },
-    };
-
-    // Generate headers initialization from env_mapping
-    let headers_init = generate_headers_init_from_mapping(api);
-
-    // Generate DOCS_URL constant
-    let docs_url_init = match &api.docs_url {
+    let docs_url = match &api.docs_url {
         Some(url) => quote! { Some(#url) },
         None => quote! { None },
     };
+    let definition = helpers::generate_definition(api);
+    // An API-level `Cookie` travels in each request's own headers instead;
+    // see `crate::output::assemble::api`.
+    let default_headers = api
+        .headers
+        .iter()
+        .filter(|(header, _)| !header.eq_ignore_ascii_case("cookie"))
+        .map(|(header, value)| quote! { .default_header(#header, #value) });
 
-    // Generate builder struct name
-    let builder_name = format_ident!("{}VariantBuilder", api.name);
-    let explicit_auth_helpers = generate_explicit_auth_helpers(api);
-
-    // Generate struct fields
-    let field_list = fields::generate_field_list();
-
-    // Generate constructors and constants
-    let constructors = constructors::generate_constructors(
-        &struct_name,
-        &constructors::ConstructorInit {
-            base_url,
-            env_auth,
-            auth_strategy_init: &auth_strategy_init,
-            auth_policy_init: &auth_policy_init,
-            env_username_init: &env_username_init,
-            headers_init: &headers_init,
-            docs_url_init: &docs_url_init,
-        },
-    );
-
-    // Generate accessor methods
-    let accessors = request_method::generate_accessors(&struct_name);
-
-    // Generate variant methods and builder
-    let variant_methods = variant::generate_variant_methods(&builder_name);
-    let variant_builder = variant::generate_variant_builder(&struct_name, &builder_name);
-
-    // Generate Default impl
-    let default_impl = constructors::generate_default_impl(&struct_name);
-    let debug_impl = generate_debug_impl(&struct_name);
+    let marker_doc = format!(" The {name} API: {}", api.description.trim());
+    let client_doc = format!(" A client for the [`{name}`] API.");
 
     quote! {
-        #[doc = #description]
-        pub struct #struct_name {
-            #field_list
+        #[doc = #marker_doc]
+        ///
+        /// This type is never constructed. It names the API, so that its
+        /// client sends only this API's requests, and it holds the API's
+        /// constants and constructors.
+        pub enum #marker {}
+
+        #[doc = #client_doc]
+        pub type #client = schematic_runtime::Client<#marker>;
+
+        impl schematic_runtime::Api for #marker {
+            const NAME: &'static str = #name;
         }
 
-        impl #struct_name {
-            #constructors
-            #accessors
-            #variant_methods
-            #explicit_auth_helpers
-        }
+        impl #marker {
+            /// The base URL a client uses unless its builder sets another.
+            pub const BASE_URL: &'static str = #base_url;
+            /// The API's documentation, when the definition names it.
+            pub const DOCS_URL: Option<&'static str> = #docs_url;
 
-        #default_impl
+            /// What the API tells the runtime: its base URL, how it accepts
+            /// credentials, its cross-origin policy, its secret names, and its
+            /// request-id header.
+            pub fn definition() -> schematic_runtime::ApiDefinition {
+                #definition
+            }
 
-        #debug_impl
+            /// A client builder seeded from [`definition`](Self::definition)
+            /// and the API's default headers.
+            pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
+                schematic_runtime::Client::builder(Self::definition())
+                    #(#default_headers)*
+            }
 
-        #variant_builder
-    }
-}
-
-/// Generates a `Debug` impl that prints no credential.
-///
-/// `headers` can hold explicit bearer tokens and API keys in plain text and
-/// `api_key_param` holds a parameter key, so the shared `debug_client`
-/// prints only the base URL and the auth policy.
-fn generate_debug_impl(struct_name: &proc_macro2::Ident) -> TokenStream {
-    let name = struct_name.to_string();
-    quote! {
-        impl std::fmt::Debug for #struct_name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                crate::shared::debug_client(f, #name, &self.base_url, &self.auth_policy)
+            /// A client with every default.
+            ///
+            /// ## Errors
+            ///
+            /// Returns [`schematic_runtime::BuildError`] when the HTTP client
+            /// cannot be initialized.
+            pub fn new() -> Result<#client, schematic_runtime::BuildError> {
+                Self::builder().build()
             }
         }
     }

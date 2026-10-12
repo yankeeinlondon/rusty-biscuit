@@ -30,9 +30,9 @@ description = "Generated REST and WebSocket API client code from schematic defin
 [dependencies]
 bytes = "1"
 futures-util = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "rustls"] }
 schematic-define = { version = "0.1.0", path = "{{DEFINE_PATH}}" }
 schematic-definitions = { version = "0.1.0", path = "{{DEFINITIONS_PATH}}" }
+schematic-runtime = { version = "0.1.0", path = "{{RUNTIME_PATH}}" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
@@ -54,8 +54,9 @@ wiremock = "0.6"
 /// ## Arguments
 ///
 /// * `workspace_root` - Optional path to the workspace root. When provided, uses
-///   absolute paths to the schematic-define and schematic-definitions packages.
-///   When `None`, uses the default relative paths (`../define`, `../definitions`).
+///   absolute paths to the schematic-define, schematic-definitions, and
+///   schematic-runtime packages. When `None`, uses the default relative paths
+///   (`../define`, `../definitions`, `../runtime`).
 ///
 /// ## Examples
 ///
@@ -77,22 +78,30 @@ pub fn generate_cargo_toml(workspace_root: Option<&str>) -> String {
         Some(root) => generate_cargo_toml_with_paths(
             &format!("{}/define", root),
             &format!("{}/definitions", root),
+            &format!("{}/runtime", root),
         ),
-        None => generate_cargo_toml_with_paths("../define", "../definitions"),
+        None => generate_cargo_toml_with_paths("../define", "../definitions", "../runtime"),
     }
 }
 
 /// Generates the Cargo.toml content with explicit paths to the
-/// `schematic-define` and `schematic-definitions` packages.
+/// `schematic-define`, `schematic-definitions`, and `schematic-runtime`
+/// packages.
 ///
 /// Each path is serialized as a TOML string, so a Windows path such as
 /// `C:\work\schematic\define` survives intact instead of being read as escape
 /// sequences. An isolated build of freshly generated code uses this to point
-/// the manifest at a checkout or at a stand-in definitions crate.
-pub fn generate_cargo_toml_with_paths(define_path: &str, definitions_path: &str) -> String {
+/// the manifest at a checkout, a stand-in definitions crate, or a runtime
+/// copy.
+pub fn generate_cargo_toml_with_paths(
+    define_path: &str,
+    definitions_path: &str,
+    runtime_path: &str,
+) -> String {
     CARGO_TOML_TEMPLATE
         .replace("\"{{DEFINE_PATH}}\"", &toml_string(define_path))
         .replace("\"{{DEFINITIONS_PATH}}\"", &toml_string(definitions_path))
+        .replace("\"{{RUNTIME_PATH}}\"", &toml_string(runtime_path))
 }
 
 fn toml_string(value: &str) -> String {
@@ -170,7 +179,7 @@ mod tests {
 
     #[test]
     fn generated_manifest_carries_the_ownership_marker() {
-        for content in [generate_cargo_toml(None), generate_cargo_toml_with_paths("a", "b")] {
+        for content in [generate_cargo_toml(None), generate_cargo_toml_with_paths("a", "b", "c")] {
             assert!(content.lines().any(|line| line == MANIFEST_OWNERSHIP_MARKER));
         }
     }
@@ -222,21 +231,16 @@ mod tests {
     }
 
     #[test]
-    fn generate_cargo_toml_includes_reqwest() {
+    fn generated_crate_sends_through_the_runtime_not_its_own_http_client() {
         let content = generate_cargo_toml(None);
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
+        assert_eq!(dependency_path(&content, "schematic-runtime"), "../runtime");
         assert!(
-            deps.contains_key("reqwest"),
-            "reqwest dependency is required"
+            !deps.contains_key("reqwest"),
+            "generated REST code sends through schematic-runtime; WebSocket code uses tokio-tungstenite"
         );
-
-        // Verify reqwest has expected features
-        let reqwest = deps.get("reqwest").unwrap().as_table().unwrap();
-        let features = reqwest.get("features").unwrap().as_array().unwrap();
-        assert!(features.iter().any(|f| f.as_str() == Some("json")));
-        assert!(features.iter().any(|f| f.as_str() == Some("rustls")));
     }
 
     #[test]
@@ -451,6 +455,7 @@ mod tests {
 
         assert!(content.contains("path = \"/workspace/schematic/define\""));
         assert!(content.contains("path = \"/workspace/schematic/definitions\""));
+        assert!(content.contains("path = \"/workspace/schematic/runtime\""));
     }
 
     #[test]
@@ -459,6 +464,7 @@ mod tests {
 
         assert!(content.contains("path = \"../define\""));
         assert!(content.contains("path = \"../definitions\""));
+        assert!(content.contains("path = \"../runtime\""));
     }
 
     fn dependency_path(content: &str, dependency: &str) -> String {
@@ -473,16 +479,18 @@ mod tests {
     fn explicit_windows_paths_round_trip_through_toml() {
         let define = r"C:\Users\dev\rusty-biscuit\schematic\define";
         let definitions = r"D:\tmp\fixture definitions\stub";
-        let content = generate_cargo_toml_with_paths(define, definitions);
+        let runtime = r"E:\runtime copy\schematic-runtime";
+        let content = generate_cargo_toml_with_paths(define, definitions, runtime);
 
         assert_eq!(dependency_path(&content, "schematic-define"), define);
         assert_eq!(dependency_path(&content, "schematic-definitions"), definitions);
+        assert_eq!(dependency_path(&content, "schematic-runtime"), runtime);
     }
 
     #[test]
     fn explicit_paths_with_quotes_round_trip_through_toml() {
         let define = r#"/tmp/a "quoted" dir/define"#;
-        let content = generate_cargo_toml_with_paths(define, "/tmp/definitions");
+        let content = generate_cargo_toml_with_paths(define, "/tmp/definitions", "/tmp/runtime");
 
         assert_eq!(dependency_path(&content, "schematic-define"), define);
         assert_eq!(dependency_path(&content, "schematic-definitions"), "/tmp/definitions");

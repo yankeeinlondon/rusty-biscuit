@@ -29,11 +29,20 @@ fn generate_get_no_params() {
 
     assert!(code.contains("pub struct ListModelsRequest"));
     assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"));
-    assert!(code.contains("into_parts"));
-    assert!(code.contains("Result<"));
-    assert!(code.contains("SchematicError"));
-    assert!(code.contains(r#""GET""#));
+    assert!(code.contains("impl schematic_runtime::EndpointSpec for ListModelsRequest"), "{code}");
+    assert!(
+        squash(&code).contains(&squash(
+            "fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument>"
+        )),
+        "{code}"
+    );
+    assert!(code.contains(r#"const ENDPOINT_ID: &'static str = "ListModels";"#), "{code}");
+    assert!(
+        code.contains("const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;"),
+        "{code}"
+    );
     assert!(code.contains(r#""/models".to_string()"#));
+    assert!(!code.contains("SchematicError"), "{code}");
 }
 
 #[test]
@@ -51,7 +60,7 @@ fn generate_get_with_path_param() {
         ),
         "path encoding mismatch:\n{code}"
     );
-    assert!(code.contains(r#""GET""#));
+    assert!(code.contains("schematic_runtime::Method::GET"), "{code}");
 }
 
 #[test]
@@ -133,10 +142,16 @@ fn generate_post_with_body() {
     assert!(code.contains("pub struct CreateCompletionRequest"));
     assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"));
     assert!(code.contains("pub body: CreateCompletionRequest"));
-    assert!(code.contains(r#""POST""#));
+    assert!(code.contains("schematic_runtime::Method::POST"), "{code}");
+    assert!(code.contains("schematic_runtime::RequestBody::Json("), "{code}");
     assert!(code.contains("serde_json::to_string(&self.body)"));
-    assert!(code.contains(".map_err"));
-    assert!(code.contains("SerializationError"));
+    // A body that cannot be serialized is an invalid argument, not a send failure.
+    assert!(
+        squash(&code).contains(&squash(
+            r#".map_err(|_| { schematic_runtime::InvalidArgument::new("the request body cannot be serialized as JSON") })?"#
+        )),
+        "{code}"
+    );
 }
 
 #[test]
@@ -166,8 +181,8 @@ fn generate_delete_with_path_param() {
 
     assert!(code.contains("pub struct DeleteModelRequest"));
     assert!(code.contains("pub model: String"));
-    assert!(code.contains(r#""DELETE""#));
-    assert!(code.contains("crate::shared::RequestBody::Empty")); // No body for DELETE
+    assert!(code.contains("schematic_runtime::Method::DELETE"), "{code}");
+    assert!(code.contains("body: schematic_runtime::RequestBody::Empty"), "{code}");
 }
 
 #[test]
@@ -185,7 +200,7 @@ fn generate_patch_with_body() {
     assert!(code.contains("pub struct UpdateThreadRequest"));
     assert!(code.contains("pub thread_id: String"));
     assert!(code.contains("pub body: UpdateThreadRequest"));
-    assert!(code.contains(r#""PATCH""#));
+    assert!(code.contains("schematic_runtime::Method::PATCH"), "{code}");
 }
 
 #[test]
@@ -233,9 +248,15 @@ fn all_http_methods_generate_correct_string() {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(
-            code.contains(&format!(r#""{}""#, expected_str)),
-            "Expected method {} not found in generated code",
-            expected_str
+            code.contains(&format!(
+                "const METHOD: schematic_runtime::Method = schematic_runtime::Method::{expected_str};"
+            )),
+            "Expected method {expected_str} not found in generated code:\n{code}"
+        );
+        // `into_parts` reads the method from the constant rather than repeating it.
+        assert!(
+            code.contains("method: <Self as schematic_runtime::EndpointSpec>::METHOD"),
+            "{code}"
         );
     }
 }
@@ -452,7 +473,7 @@ fn generates_example_with_path_params_and_body() {
 #[test]
 fn generates_example_with_custom_module_path() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct_with_options(&endpoint, "Request", Some("openai"));
+    let tokens = generate_request_struct_with_options(&endpoint, "Request", Some("openai"), "OpenAI");
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should use custom module path
@@ -678,8 +699,8 @@ fn skips_from_string_impls_for_no_params() {
 // === Merged impl block tests ===
 
 #[test]
-fn single_impl_block_with_new_and_into_parts() {
-    // Test request with path param (has new() and into_parts())
+fn one_inherent_impl_and_one_endpoint_spec_impl_for_path_param_request() {
+    // A path param request has `new()` inherently and `into_parts()` on the trait
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
     let tokens = generate_request_struct(&endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -693,20 +714,25 @@ fn single_impl_block_with_new_and_into_parts() {
         impl_count, code
     );
 
-    // Both new() and into_parts() should be in same impl block
     assert!(
         code.contains("pub fn new("),
         "Expected new() method in impl block"
     );
+    assert_eq!(
+        code.matches("impl schematic_runtime::EndpointSpec for RetrieveModelRequest").count(),
+        1,
+        "{code}"
+    );
     assert!(
-        code.contains("pub fn into_parts("),
-        "Expected into_parts() method in impl block"
+        !code.contains("pub fn into_parts("),
+        "into_parts() belongs to the EndpointSpec impl, not the inherent one:\n{code}"
     );
 }
 
 #[test]
 fn single_impl_block_with_body_and_both_methods() {
-    // Test request with body (has new() and into_parts())
+    // A request with a body has one inherent impl, holding `new()`; its
+    // `into_parts()` lives in the `EndpointSpec` impl.
     let endpoint = make_endpoint(
         "CreateCompletion",
         RestMethod::Post,
@@ -727,29 +753,25 @@ fn single_impl_block_with_body_and_both_methods() {
 }
 
 #[test]
-fn single_impl_block_for_no_param_request() {
-    // Test request with no params (only into_parts(), no new())
+fn no_inherent_impl_for_no_param_request() {
+    // A request with no params has no `new()`, so only the EndpointSpec impl remains
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
     let tokens = generate_request_struct(&endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
-    // Count occurrences of "impl ListModelsRequest" (non-From impls)
-    let impl_count = code.matches("impl ListModelsRequest").count();
-
     assert_eq!(
-        impl_count, 1,
-        "Expected exactly 1 impl block for ListModelsRequest, got {}\n\nCode:\n{}",
-        impl_count, code
+        code.matches("impl ListModelsRequest").count(),
+        0,
+        "Expected no inherent impl block for ListModelsRequest\n\nCode:\n{code}"
     );
-
-    // Should only have into_parts(), not new()
     assert!(
         !code.contains("pub fn new("),
         "Expected no new() method for no-param request"
     );
-    assert!(
-        code.contains("pub fn into_parts("),
-        "Expected into_parts() method"
+    assert_eq!(
+        code.matches("impl schematic_runtime::EndpointSpec for ListModelsRequest").count(),
+        1,
+        "{code}"
     );
 }
 
@@ -882,8 +904,8 @@ fn generates_query_param_in_into_parts() {
     );
     assert!(
         code.contains(r#"let path = "/items".to_string();"#)
-            && code.contains("vec![], query))"),
-        "Expected an unmodified path and the pairs as the fifth element, got:\n{}",
+            && squash(&code).contains("path,query,headers,"),
+        "Expected an unmodified path and the pairs in the `query` field, got:\n{}",
         code
     );
 }
@@ -1378,15 +1400,18 @@ fn binary_body_is_a_byte_vector_sent_as_raw_bytes_under_its_content_type() {
         code.contains(r#"content_type: "application/octet-stream".to_string()"#),
         "{code}"
     );
-    assert!(code.contains("bytes: self.body,"), "{code}");
+    // `Vec<u8>` converts into the runtime's byte buffer without copying.
+    assert!(code.contains("bytes: self.body.into(),"), "{code}");
     assert!(validate_generated_code(&generate_request_struct(&endpoint)).is_ok());
 }
 
 // ---- header and cookie parameters (R25, R26) ----
 
-/// `code` with all whitespace removed, so assertions survive line wrapping.
+/// `code` with all whitespace, and any trailing comma before `)` or `]`,
+/// removed, so assertions survive line wrapping.
 fn squash(code: &str) -> String {
-    code.split_whitespace().collect()
+    let flat: String = code.split_whitespace().collect();
+    flat.replace(",)", ")").replace(",]", "]")
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> schematic_define::ParamDef {
@@ -1475,7 +1500,11 @@ fn cookie_parameters_are_encoded_and_folded_into_one_cookie_header() {
         flat.contains(&squash("crate::shared::combine_cookie_headers(&mut headers, &cookies)?")),
         "{code}"
     );
-    assert!(code.contains("`Cookie` header, which set cookie parameters join"), "{code}");
+    // Cookies fold into the endpoint's headers, so `headers` is built mutably.
+    assert!(
+        flat.contains(&squash(r#"let mut headers: Vec<(String, String)> = vec![("X-Mode".to_string(), "static".to_string())];"#)),
+        "{code}"
+    );
 }
 
 #[test]
@@ -1500,6 +1529,6 @@ fn endpoints_without_named_parameters_keep_their_inline_headers() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
     let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
 
-    assert!(code.contains("vec![], query))"), "{code}");
+    assert!(code.contains("let headers: Vec<(String, String)> = vec![];"), "{code}");
     assert!(!code.contains("let mut headers"), "{code}");
 }

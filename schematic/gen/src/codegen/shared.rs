@@ -1,0 +1,167 @@
+//! The request-side helpers of the generated `shared.rs`.
+//!
+//! Request execution, the response envelope, credentials, redirects,
+//! deadlines, and redaction live in the hand-written `schematic-runtime`
+//! crate. What remains generated is what request types need to build their
+//! parts: cookie encoding and merging, and the `FormFile` type multipart
+//! request bodies carry.
+
+use proc_macro2::TokenStream;
+use quote::quote;
+
+/// Generates the cookie helpers and `FormFile`.
+pub fn generate_request_helpers() -> TokenStream {
+    quote! {
+        /// Encodes a value for a `Cookie` header.
+        ///
+        /// Bytes that RFC 6265 allows in a cookie value are kept as they are,
+        /// `%` included; every other UTF-8 byte (space, `"`, `,`, `;`, `\`,
+        /// control characters, non-ASCII) becomes `%XX` with uppercase hex, so
+        /// a space is `%20`. No server is assumed to decode the result: the
+        /// value it receives is exactly this string.
+        pub fn encode_cookie_value(value: &str) -> String {
+            let mut encoded = String::with_capacity(value.len());
+            for byte in value.bytes() {
+                match byte {
+                    0x21 | 0x23..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E => {
+                        encoded.push(char::from(byte));
+                    }
+                    _ => encoded.push_str(&format!("%{byte:02X}")),
+                }
+            }
+            encoded
+        }
+
+        /// Folds every `Cookie` header in `headers`, then `cookies`, into one
+        /// `Cookie` header of `name=value` pairs joined by `; `.
+        ///
+        /// Pairs keep the order their names first appear; a later pair with a
+        /// name already present (compared case-sensitively) replaces that
+        /// value in place, and a new name is appended. `cookies` values must
+        /// already be encoded with [`encode_cookie_value`]. The single header
+        /// takes the place of the first `Cookie` header, or is appended. With
+        /// one `Cookie` header and nothing to add, `headers` is left as it is.
+        ///
+        /// ## Errors
+        ///
+        /// Returns [`schematic_runtime::InvalidArgument`] naming `Cookie`,
+        /// never its value, when an existing `Cookie` header that must be
+        /// merged is not a list of `name=value` pairs with valid cookie names.
+        pub fn combine_cookie_headers(
+            headers: &mut Vec<(String, String)>,
+            cookies: &[(String, String)],
+        ) -> Result<(), schematic_runtime::InvalidArgument> {
+            let existing = headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+                .count();
+            if cookies.is_empty() && existing < 2 {
+                return Ok(());
+            }
+
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            let mut position = None;
+            let mut kept = Vec::with_capacity(headers.len());
+            for (name, value) in headers.drain(..) {
+                if !name.eq_ignore_ascii_case("cookie") {
+                    kept.push((name, value));
+                    continue;
+                }
+                position.get_or_insert(kept.len());
+                for piece in value.split(';').map(str::trim).filter(|piece| !piece.is_empty()) {
+                    match piece.split_once('=') {
+                        Some((cookie_name, cookie_value)) if is_cookie_name(cookie_name) => {
+                            set_cookie(&mut pairs, cookie_name, cookie_value);
+                        }
+                        _ => {
+                            return Err(schematic_runtime::InvalidArgument::new(
+                                "header `Cookie` is not a list of name=value pairs",
+                            ));
+                        }
+                    }
+                }
+            }
+            for (cookie_name, cookie_value) in cookies {
+                set_cookie(&mut pairs, cookie_name, cookie_value);
+            }
+            *headers = kept;
+
+            if !pairs.is_empty() {
+                let rendered = pairs
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let at = position.unwrap_or(headers.len());
+                headers.insert(at, ("Cookie".to_string(), rendered));
+            }
+            Ok(())
+        }
+
+        fn set_cookie(pairs: &mut Vec<(String, String)>, name: &str, value: &str) {
+            match pairs.iter_mut().find(|(existing, _)| existing == name) {
+                Some(slot) => slot.1 = value.to_string(),
+                None => pairs.push((name.to_string(), value.to_string())),
+            }
+        }
+
+        /// An RFC 6265 cookie name: a non-empty HTTP token.
+        fn is_cookie_name(name: &str) -> bool {
+            !name.is_empty()
+                && name.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+                })
+        }
+
+        /// A file uploaded as part of a multipart body.
+        #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+        pub struct FormFile {
+            /// Name reported to the server in `Content-Disposition`.
+            pub file_name: String,
+            /// MIME type for this part; the server infers one when absent.
+            pub mime: Option<String>,
+            /// File contents.
+            pub bytes: Vec<u8>,
+        }
+
+        impl FormFile {
+            /// Creates a file part from raw bytes.
+            pub fn new(file_name: impl Into<String>, bytes: Vec<u8>) -> Self {
+                Self { file_name: file_name.into(), mime: None, bytes }
+            }
+
+            /// Sets an explicit MIME type for this part.
+            #[must_use]
+            pub fn with_mime(mut self, mime: impl Into<String>) -> Self {
+                self.mime = Some(mime.into());
+                self
+            }
+
+            /// Reads a file from disk, taking its name from the path.
+            ///
+            /// ## Errors
+            ///
+            /// Returns the error of reading the file.
+            pub fn from_path(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+                let path = path.as_ref();
+                let bytes = std::fs::read(path)?;
+                let file_name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "file".to_string());
+
+                Ok(Self::new(file_name, bytes))
+            }
+
+            /// The multipart part that sends this file under `name`.
+            pub fn into_part(self, name: &str) -> schematic_runtime::FormPart {
+                schematic_runtime::FormPart::File {
+                    name: name.to_string(),
+                    file_name: self.file_name,
+                    mime: self.mime,
+                    bytes: self.bytes.into(),
+                }
+            }
+        }
+    }
+}

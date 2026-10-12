@@ -35,6 +35,10 @@ pub use shared::{format_generated_code, validate_generated_code};
 /// Default suffix for request struct names.
 const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 
+/// The API marker named by request structs generated without an API, for
+/// inspecting one endpoint's output in isolation.
+pub const PLACEHOLDER_API_MARKER: &str = "Api";
+
 /// Generates a request struct for the given endpoint.
 ///
 /// The generated struct includes:
@@ -42,7 +46,13 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 /// - A `body` field if the endpoint sends a body: its JSON type, a generated
 ///   form struct, `String` for a text body, or `Vec<u8>` for a binary body
 /// - `Default` trait implementation
-/// - `into_parts()` method that returns `Result<RequestParts, SchematicError>`
+/// - a `schematic_runtime::EndpointSpec` implementation naming its API
+///   marker, success type, codec, and endpoint id, whose `into_parts`
+///   assembles the request
+///
+/// This form names the API marker [`PLACEHOLDER_API_MARKER`]; generated
+/// modules use [`generate_request_struct_with_options`] with the API's own
+/// name.
 ///
 /// ## Examples
 ///
@@ -64,11 +74,18 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///     pub model: String,
 /// }
 ///
-/// impl RetrieveModelRequest {
-///     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+/// impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
+///     type Api = Api;
+///     type Success = Model;
+///     type Failure = schematic_runtime::NoDeclaredError;
+///     type Decoder = schematic_runtime::Json<Model>;
+///     const ENDPOINT_ID: &'static str = "RetrieveModel";
+///     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
+///
+///     fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
 ///         let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
 ///         let query: Vec<(String, String)> = Vec::new();
-///         Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
+///         Ok(schematic_runtime::RequestParts { method: <Self as schematic_runtime::EndpointSpec>::METHOD, path, query, headers: vec![], body: schematic_runtime::RequestBody::Empty })
 ///     }
 /// }
 /// ```
@@ -80,28 +97,23 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
 ///
 /// This variant allows specifying a custom suffix instead of the default "Request".
 /// For example, using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
-///
-/// ## Arguments
-///
-/// * `endpoint` - The endpoint to generate a request struct for
-/// * `suffix` - The suffix to append to the endpoint ID (e.g., "Request", "Params")
+/// Like [`generate_request_struct`], it names the API marker
+/// [`PLACEHOLDER_API_MARKER`].
 pub fn generate_request_struct_with_suffix(endpoint: &Endpoint, suffix: &str) -> TokenStream {
-    generate_request_struct_with_options(endpoint, suffix, None)
+    generate_request_struct_with_options(endpoint, suffix, None, PLACEHOLDER_API_MARKER)
 }
 
 /// Generates a request struct for the given endpoint with full configuration.
 ///
-/// This variant allows specifying both the suffix and the module path for use imports.
-///
-/// ## Arguments
-///
-/// * `endpoint` - The endpoint to generate a request struct for
-/// * `suffix` - The suffix to append to the endpoint ID (e.g., "Request", "Params")
-/// * `module_path` - Optional module path for use in examples (e.g., "openai")
+/// `suffix` is appended to the endpoint id to name the struct, `module_path`
+/// (for example `openai`) appears in the doc example, and `api_marker` is the
+/// API type the request's `EndpointSpec::Api` names, which scopes the request
+/// to that API's client.
 pub fn generate_request_struct_with_options(
     endpoint: &Endpoint,
     suffix: &str,
     module_path: Option<&str>,
+    api_marker: &str,
 ) -> TokenStream {
     use schematic_define::ApiRequest;
 
@@ -119,7 +131,6 @@ pub fn generate_request_struct_with_options(
         .chain(&cookie_params)
         .cloned()
         .collect();
-    let method_str = endpoint.method.to_string();
 
     // Form endpoints get a synthesized `{EndpointId}Form` body type, so from here
     // down they follow exactly the same path as JSON bodies.
@@ -173,13 +184,9 @@ pub fn generate_request_struct_with_options(
     let from_string_impls =
         single::generate_from_string_impls(&struct_name, &path_params, &optional_params, has_body);
 
-    // Generate EndpointSpec implementation for type-safe hook registration
+    let into_parts_body = into_parts::generate_into_parts_body(endpoint, &path_params, &query_params);
     let endpoint_spec_impl =
-        endpoint_spec::generate_endpoint_spec_impl(&struct_name, &endpoint.id, &endpoint.response);
-
-    // Generate into_parts method
-    let into_parts =
-        into_parts::generate_into_parts(endpoint, &path_params, &query_params, &method_str);
+        endpoint_spec::generate_endpoint_spec_impl(&struct_name, api_marker, endpoint, into_parts_body);
 
     // Generate doc comments with example section
     let doc_lines = generate_doc_comment_with_example(
@@ -212,6 +219,22 @@ pub fn generate_request_struct_with_options(
 
     let form_struct = form::generate_form_struct(endpoint);
 
+    let inherent_methods = quote! {
+        #new_method
+        #query_builder_methods
+        #header_builder_methods
+        #cookie_builder_methods
+    };
+    let inherent_impl = if inherent_methods.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            impl #struct_name {
+                #inherent_methods
+            }
+        }
+    };
+
     quote! {
         #form_struct
 
@@ -223,13 +246,7 @@ pub fn generate_request_struct_with_options(
 
         #default_impl
 
-        impl #struct_name {
-            #new_method
-            #query_builder_methods
-            #header_builder_methods
-            #cookie_builder_methods
-            #into_parts
-        }
+        #inherent_impl
 
         #from_body_impl
 

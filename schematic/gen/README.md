@@ -4,13 +4,13 @@ Code generator that transforms REST and WebSocket API definitions into strongly-
 
 ## Overview
 
-`schematic-gen` takes API definitions created with `schematic-define` and generates complete, production-ready Rust HTTP and WebSocket client code. The generated code includes:
+`schematic-gen` takes API definitions created with `schematic-define` and generates strongly-typed Rust HTTP and WebSocket client code. Generated REST clients are thin: they describe each API and each endpoint, and the hand-written [`schematic-runtime`](../runtime/) crate sends the requests. The generated code includes:
 
-- A client struct with configurable base URL
-- Request structs for each endpoint (with path parameters as fields)
-- A unified request enum for type-safe request handling
-- An async `request()` method powered by `reqwest`
-- Comprehensive error handling with `thiserror`
+- Per API, an uninhabited marker type named after the API (`OpenAI`), a client alias (`OpenAIClient = schematic_runtime::Client<OpenAI>`), and constructors that hand the runtime the API's base URL, credential placements, and policies
+- Per endpoint, a request struct (with path, query, header, and cookie parameters as fields) implementing `schematic_runtime::EndpointSpec`, which names its API, its success type, and the codec that decodes the response
+- A compile-time check that the generated crate and the runtime it builds against agree on the runtime ABI
+
+Sending (`send`, `send_raw`), the response envelope, transport errors, credential resolution, redirects, deadlines, response hooks, and redaction all live in the runtime; see its crate documentation in [`runtime/src/lib.rs`](../runtime/src/lib.rs).
 
 ## Installation
 
@@ -99,7 +99,9 @@ Before writing, each output checks the paths it would change: it never
 overwrites or deletes a file the generator did not write, and a partial run
 refuses an existing crate it cannot account for (a corrupt or hand-edited
 `lib.rs`, a missing or unknown module, exports that no longer match the
-definitions, or a changed `shared.rs`) without changing anything. If a write
+definitions, a changed `shared.rs`, or a `lib.rs` whose recorded
+`SCHEMATIC_RUNTIME_ABI` is missing or differs from the generator's) without
+changing anything. If a write
 fails midway, the error lists completed and pending writes and deletions.
 See [`docs/generation/partial-generation.md`](../docs/generation/partial-generation.md).
 
@@ -173,18 +175,21 @@ let code = generate_and_write(&api, output_dir, true)?;
 ```rust
 use schematic_gen::codegen::{
     generate_api_struct,
-    generate_error_type,
-    generate_request_enum,
-    generate_request_method,
     generate_request_struct,
+    generate_request_struct_with_options,
 };
 use schematic_gen::output::{validate_code, format_code, assemble_api_code};
 
-// Generate just the API struct
+// Generate just the API marker type, client alias, and constructors
 let api_tokens = generate_api_struct(&api);
 
-// Generate a single request struct
+// Generate a single request struct; its `EndpointSpec::Api` names the
+// placeholder marker `Api` (`PLACEHOLDER_API_MARKER`)
 let request_tokens = generate_request_struct(&endpoint);
+
+// The same, scoped to a real API marker, as generated modules do
+let request_tokens =
+    generate_request_struct_with_options(&endpoint, "Request", Some("openai"), "OpenAI");
 
 // Assemble everything and validate
 let tokens = assemble_api_code(&api);
@@ -206,17 +211,13 @@ The generator follows a multi-phase pipeline:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Phase 1: Code Generation                      │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ Error Type    │ │ Request       │ │ Request Enum          │  │
-│  │ Generation    │ │ Structs       │ │ Generation            │  │
+│  │ Request       │ │ EndpointSpec  │ │ API Marker, Client    │  │
+│  │ Structs       │ │ Impls         │ │ Alias, Constructors   │  │
 │  └───────────────┘ └───────────────┘ └───────────────────────┘  │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ API Struct    │ │ Request       │ │ Variant Types         │  │
-│  │ Generation    │ │ Method        │ │ (ResponseContext,     │  │
-│  └───────────────┘ └───────────────┘ │  EndpointSpec, etc.)  │  │
-│  ┌───────────────┐ ┌───────────────┐ └───────────────────────┘  │
-│  │ Paginated     │ │ Module Docs   │                            │
-│  │ Trait         │ │ Generation    │                            │
-│  └───────────────┘ └───────────────┘                            │
+│  │ Shared Request│ │ Paginated     │ │ Module Docs           │  │
+│  │ Helpers       │ │ Trait         │ │ Generation            │  │
+│  └───────────────┘ └───────────────┘ └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -225,7 +226,8 @@ The generator follows a multi-phase pipeline:
 │  - Combine all TokenStreams                                      │
 │  - Add module documentation                                      │
 │  - Add imports and lint attributes                               │
-│  - Generate lib.rs, shared.rs, prelude.rs                       │
+│  - Generate lib.rs (with the runtime ABI check), shared.rs,      │
+│    prelude.rs                                                    │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -258,16 +260,15 @@ The generator produces per-API module files:
 
 ```
 schema/src/
-├── lib.rs           # Module declarations
-├── prelude.rs       # Convenient re-exports
-├── shared.rs        # RequestParts, SchematicError, auth resolution, cookie/query helpers, reqwest re-export
+├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI and its compile-time check, `pub use schematic_runtime`
+├── prelude.rs       # Each API's marker and client alias, plus the runtime's CallOptions, Credential, Response, ...
+├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, the Paginated marker trait
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
-├── anthropic.rs     # A module under 2000 lines stays one file
+├── anthropic.rs     # A module under 2000 formatted lines stays one file
 ├── lmstudio.rs
 ├── openai/          # A larger module is split into a directory:
-│   ├── mod.rs       #   module docs and re-exports
-│   ├── client.rs    #   client struct and request methods
-│   ├── requests.rs  #   per-endpoint request structs
+│   ├── mod.rs       #   module docs, submodules, re-exports, API markers, client aliases, constructors
+│   ├── requests.rs  #   per-endpoint request structs and their EndpointSpec impls
 │   └── responses.rs #   (when the module has response types)
 ├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
 ├── emqx/            # EmqxBasic + EmqxBearer (combined, shared module)
@@ -276,7 +277,7 @@ schema/src/
 ```
 
 APIs sharing a `module_path` are automatically combined into a single output file.
-Each API in the combined file gets its own client struct, request enum, and request
+Each API in the combined file gets its own marker type, client alias, and request
 suffix to avoid naming collisions. Full generation deletes generated modules
 that no API produces any more; files without the generated header are never
 deleted or overwritten.
@@ -381,70 +382,64 @@ let api = RestApi {
 
 ## Generated Code Structure
 
-For an API named "OpenAI" with three endpoints, the generator produces:
+For an API named "OpenAI", the generator produces (abridged):
 
 ```rust
 //! Generated API client for OpenAI.
 //!
 //! This code was automatically generated by schematic-gen. Do not edit manually.
 
-use serde::{Deserialize, Serialize};
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Error Type
+// API marker, client alias, and constructors (one per API)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-#[derive(Debug, thiserror::Error)]
-pub enum SchematicError {
-    #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+/// The OpenAI API: ...
+///
+/// This type is never constructed. It names the API, so that its
+/// client sends only this API's requests, and it holds the API's
+/// constants and constructors.
+pub enum OpenAI {}
 
-    #[error("JSON deserialization failed: {0}")]
-    Json(#[from] serde_json::Error),
+/// A client for the [`OpenAI`] API.
+pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
 
-    #[error("API error (status {status}): {body}")]
-    ApiError { status: u16, body: String },
-
-    #[error("Unsupported HTTP method: {0}")]
-    UnsupportedMethod(String),
-
-    #[error("Failed to serialize request body: {0}")]
-    SerializationError(String),
-
-    #[error("{message}")]
-    AuthenticationRequired {
-        message: String,
-        explicit_methods: Vec<String>,
-        env_fallback_vars: Vec<String>,
-    },
+impl schematic_runtime::Api for OpenAI {
+    const NAME: &'static str = "OpenAI";
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Request Structs (one per endpoint)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+impl OpenAI {
+    pub const BASE_URL: &'static str = "https://api.openai.com/v1";
+    pub const DOCS_URL: Option<&'static str> = None;
 
-/// Request for `ListModels` endpoint.
-///
-/// ## Example
-///
-/// ```ignore
-/// use schematic_schema::openai::ListModelsRequest;
-///
-/// let request = ListModelsRequest::default();
-/// ```
-#[derive(Debug, Clone, Default)]
-pub struct ListModelsRequest {}
+    /// What the API tells the runtime: its base URL, how it accepts
+    /// credentials, its cross-origin policy, its secret names, and its
+    /// request-id header.
+    pub fn definition() -> schematic_runtime::ApiDefinition {
+        schematic_runtime::ApiDefinition::new(Self::BASE_URL)
+            .auth(
+                schematic_runtime::AuthConfig::none()
+                    .accept(schematic_runtime::CredentialPlacement::Bearer { header: None }),
+            )
+            .request_id_header("x-request-id")
+    }
 
-impl ListModelsRequest {
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
+    /// A client builder seeded from `definition()` and the API's default headers.
+    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
+        schematic_runtime::Client::builder(Self::definition())
+    }
+
+    /// A client with every default.
+    pub fn new() -> Result<OpenAIClient, schematic_runtime::BuildError> {
+        Self::builder().build()
     }
 }
 
-/// Request for RetrieveModel endpoint.
-#[derive(Debug, Clone, Default)]
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Request structs (one per endpoint)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Request for `RetrieveModel` endpoint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
     /// Path parameter: model
     pub model: String,
@@ -455,156 +450,157 @@ impl RetrieveModelRequest {
     pub fn new(model: impl Into<String>) -> Self {
         Self { model: model.into() }
     }
-
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
-        let query: Vec<(String, String)> = Vec::new();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
-    }
 }
 
 // From<&str> and From<String> for single-param, no-body requests
-impl From<&str> for RetrieveModelRequest {
-    fn from(param: &str) -> Self { Self { model: param.to_string() } }
-}
-impl From<String> for RetrieveModelRequest {
-    fn from(param: String) -> Self { Self { model: param } }
-}
+impl From<&str> for RetrieveModelRequest { ... }
+impl From<String> for RetrieveModelRequest { ... }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Request Enum (unifies all endpoints)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
+    type Api = OpenAI;
+    type Success = Model;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<Model>;
 
-pub enum OpenAIRequest {
-    ListModels(ListModelsRequest),
-    RetrieveModel(RetrieveModelRequest),
-    DeleteModel(DeleteModelRequest),
-}
+    const ENDPOINT_ID: &'static str = "RetrieveModel";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
 
-impl OpenAIRequest {
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        match self {
-            Self::ListModels(req) => req.into_parts(),
-            Self::RetrieveModel(req) => req.into_parts(),
-            Self::DeleteModel(req) => req.into_parts(),
-        }
+    fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
     }
 }
-
-// From impls for ergonomic conversion
-impl From<ListModelsRequest> for OpenAIRequest { ... }
-impl From<RetrieveModelRequest> for OpenAIRequest { ... }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// API Client Struct
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-pub struct OpenAI {
-    client: reqwest::Client,
-    base_url: String,
-    env_auth: Vec<String>,
-    auth_strategy: schematic_define::AuthStrategy,
-    auth_policy: schematic_define::AuthPolicy,
-    env_username: Option<String>,
-    headers: schematic_define::Headers,
-    api_key_param: Option<schematic_define::SensitiveString>,
-    // ...
-}
-
-// `Debug` prints only `base_url` and `auth_policy` (`shared::debug_client`);
-// header credentials and the `ApiKeyParam` key are never printed.
-
-impl OpenAI {
-    pub const BASE_URL: &'static str = "https://api.openai.com/v1";
-    /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some("https://platform.openai.com/docs/api-reference");
-
-    pub fn new() -> Self { ... }
-    pub fn with_base_url(base_url: impl Into<String>) -> Self { ... }
-    pub fn with_client(client: reqwest::Client) -> Self { ... }
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self { ... }
-
-    /// Create a variant builder with optional response hooks
-    pub fn variant(&self) -> OpenAIVariantBuilder<'_> { ... }
-    pub fn variant_with(
-        &self,
-        base_url: impl Into<String>,
-        env_auth: Vec<String>,
-        strategy: UpdateStrategy
-    ) -> Self { ... }
-    pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self { ... }
-
-    /// Access the underlying HTTP client for custom requests
-    pub fn http_client(&self) -> &reqwest::Client { ... }
-
-    /// Get the base URL for this client
-    pub fn api_base_url(&self) -> &str { ... }
-
-    /// Get the API key header name and value (if using ApiKey auth)
-    pub fn api_key_header(&self) -> Option<(String, String)> { ... }
-
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request<T: serde::de::DeserializeOwned>(
-        &self,
-        request: impl Into<OpenAIRequest>,
-    ) -> Result<T, SchematicError> { ... }
-}
 ```
+
+What each part of the `EndpointSpec` impl means:
+
+- **`type Api`** scopes the request to its API. An `OpenAIClient` accepts only
+  requests whose `Api` is `OpenAI`, so passing another API's request to
+  `send`, `send_raw`, or `mutate_response` does not compile.
+- **`type Success` and `type Decoder`** come from the endpoint's
+  `ApiResponse`. The codec, not the response's `Content-Type`, judges the
+  body: a JSON endpoint that receives HTML reports a `MalformedSuccess` error
+  in the envelope with the body kept, and valid JSON under a misleading
+  `Content-Type` still decodes.
+
+  | `ApiResponse` | `Success` | `Decoder` |
+  |---------------|-----------|-----------|
+  | `Json(schema)` | the schema's type | `schematic_runtime::Json<T>` |
+  | `Text` | `String` | `schematic_runtime::Text` |
+  | `Binary` | `bytes::Bytes` | `schematic_runtime::Binary` |
+  | `Empty` | `()` | `schematic_runtime::Empty` |
+
+- **`type Failure`** is always `NoDeclaredError`: no definition declares an
+  error body, so every non-2xx reply is an undeclared API error in the
+  envelope.
+- **`into_parts`** describes the request as a `RequestParts` struct, or
+  returns an `InvalidArgument` (a JSON body that fails to serialize, a static
+  `Cookie` header that cannot be merged) that `send` reports before any
+  network work. See [Request-Side Inputs](../docs/generation/request-side.md).
+
+`definition()` leaves out every setting equal to the runtime's default: a
+`same_origin` cross-origin policy, no extra secret names, no request-id
+header. A definition's `CrossOrigin` value maps onto the `OriginPolicy`
+constructor of the same name. The API's static headers other than `Cookie`
+become `.default_header(..)` calls in `builder()`; an API-level `Cookie` is
+folded into every endpoint's static headers instead, because the runtime
+refuses a default header that can carry a credential.
 
 ## Using Generated Code
 
 ```rust
-use schematic_schema::{OpenAI, ListModelsRequest, ListModelsResponse, Model, RetrieveModelRequest};
+use schematic_schema::prelude::*;
+use schematic_schema::openai::{ListModelsRequest, RetrieveModelRequest};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAI::new();
+    let client = OpenAI::new()?;
+    let options = CallOptions::new();
 
-    // List all models (no path params - use Default)
-    let models: ListModelsResponse = client
-        .request(ListModelsRequest::default())
-        .await?;
+    // `send` returns Ok(Response) whenever an HTTP response head arrived,
+    // whatever its status; Err(TransportError) only when none did.
+    let response = client.send(ListModelsRequest::default(), &options).await?;
+    let models = response.into_result()?; // ListModelsResponse, or the ApiError
 
-    // Retrieve a specific model - type-safe construction with new()
-    let model: Model = client
-        .request(RetrieveModelRequest::new("gpt-4"))
-        .await?;
+    // Type-safe construction with new(), or From<&str> for single-param requests
+    let model = client.send(RetrieveModelRequest::new("gpt-4"), &options).await?;
+    let model = client.send(RetrieveModelRequest::from("gpt-4"), &options).await?;
 
-    // Ergonomic: use From<&str> for single-param requests
-    let model: Model = client
-        .request(RetrieveModelRequest::from("gpt-4"))
-        .await?;
-
-    // Alternative: struct literal (still works for flexibility)
-    let model: Model = client
-        .request(RetrieveModelRequest {
-            model: "gpt-4".to_string(),
-        })
-        .await?;
-
-    // Use custom base URL (for testing/proxies)
-    let test_client = OpenAI::with_base_url("http://localhost:8080/v1");
+    // Configure the client through the runtime's builder
+    let test_client = OpenAI::builder()
+        .base_url("http://localhost:8080/v1")
+        .timeout(std::time::Duration::from_secs(10))
+        .credentials(Credential::access_token("sk-..."))
+        .build()?;
 
     Ok(())
 }
 ```
 
+`send_raw` returns the reply without decoding it. The envelope, its
+metadata, transport errors, deadlines, and redirects are described in the
+runtime's crate documentation ([`runtime/src/lib.rs`](../runtime/src/lib.rs)).
+
 ## Authentication Strategies
 
-The generator supports both the legacy single-strategy auth model and the new multi-method auth policy.
+Generation translates the definition's **effective** auth policy
+(`RestApi::effective_auth_policy()`, so an explicit `auth_policy` wins over
+the legacy `auth` strategy) into the runtime's `AuthConfig` inside
+`definition()`. The generated code reads no environment variable itself and
+adds no credential setters: the runtime resolves a credential for every
+send.
 
-Runtime precedence is always:
+| Definition method | Accepted runtime placement |
+|-------------------|----------------------------|
+| `BearerToken { header }` | `CredentialPlacement::Bearer { header }` |
+| `ApiKey { header, value_prefix }` | `CredentialPlacement::ApiKeyHeader { header, prefix }` |
+| `ApiKeyParam { name, location: Query }` | `CredentialPlacement::ApiKeyQuery { name }` |
+| `ApiKeyParam { name, location: Cookie }` | `CredentialPlacement::ApiKeyCookie { name }` |
+| `Basic` | `CredentialPlacement::Basic` |
+| `OAuth2(..)` | `CredentialPlacement::Bearer { header: None }`: an access token the caller supplies, never read from the environment |
 
-1. Explicit auth already set on `Headers`
-2. Explicit auth configured through generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, `.oauth_token(...)`, or `.with_api_key_param(...)`
-3. Environment fallback from the effective policy: a header resolved through `EnvMapping`, or for `ApiKeyParam` the first non-empty variable named by `env_auth`
-4. `SchematicError::AuthenticationRequired`
+The policy's env fallback becomes an `EnvFallback` over the variables the
+definition's environment mapping names (`RestApi::default_env_mapping()`;
+for `ApiKeyParam`, the definition's `env_auth`; for `Basic`, the password
+variables plus `username_vars`). A fallback with no variable to read is
+dropped, so the API reads nothing from the environment. LM Studio and
+Eversolo, for example, set an empty mapping, so their `env_auth` variable is
+never read.
 
-Any explicit credential disables every environment fallback. The policy is always `RestApi::effective_auth_policy()`, so an explicit `auth_policy` overrides the legacy `auth` field.
+Runtime precedence, for every placement:
 
-`RestApi::env_auth` and `env_username` remain authoring conveniences. Generated REST clients normalize them into `EnvMapping` for header credentials; an `ApiKeyParam` key has no `EnvMapping` field, so the client reads `env_auth` for it directly (temporary; see below).
+1. a per-call credential (`CallOptions::new().credential(..)`)
+2. the client credential (`ClientBuilder::credentials(..)`)
+3. the first non-empty configured environment variable (`ClientBuilder::env_order([..])` replaces the definition's order)
+4. none: the request is sent anonymously and its metadata records `AuthMethod::Anonymous`
 
-The resolution logic is emitted once, into the generated `shared.rs` (`shared::resolve_request_auth`); each client passes it its policy, headers, `env_auth`, and explicit parameter key. A client's `Debug` output prints only its base URL and auth policy, never a credential.
+There is no missing-credential error; a server that requires one answers
+(typically with 401) inside the response envelope. `CallOptions::anonymous()`
+removes every credential source for one call. A credential is never
+injected over a request value of the same name: a request that already sets
+the credential header, the API-key query parameter, or the API-key cookie
+fails with `TransportErrorKind::InvalidArgument` before anything is sent.
+
+```rust
+use schematic_schema::prelude::*;
+
+// Per call
+let options = CallOptions::new().credential(Credential::api_key("key"));
+
+// Per client
+let client = GitLab::builder().credentials(Credential::access_token("token")).build()?;
+
+// Environment, in a custom order
+let client = GitLab::builder().env_order(["MY_GITLAB_TOKEN", "GITLAB_TOKEN"]).build()?;
+```
 
 ### Bearer Token
 
@@ -616,22 +612,7 @@ RestApi {
 }
 ```
 
-Generated code (`shared::resolve_request_auth`):
-
-```rust
-let mut key = explicit_api_key_param(policy, api_key_param);
-let explicit = headers.has_explicit_auth() || key.is_some();
-
-if !explicit {
-    headers = apply_env_fallback(policy, headers);
-    key = env_api_key_param(policy, env_auth);
-}
-
-let required = !policy.explicit.is_empty() || policy.env_fallback.is_some();
-if required && !explicit && key.is_none() && !headers_satisfy_fallback(policy, &headers) {
-    return Err(authentication_required_error(policy, &headers, env_auth));
-}
-```
+Accepts `Credential::access_token(..)`, sent as `Authorization: Bearer <token>`.
 
 ### API Key
 
@@ -643,11 +624,8 @@ RestApi {
 }
 ```
 
-Generated code:
-
-```rust
-headers = headers.header("X-API-Key", key);
-```
+Accepts `Credential::api_key(..)`, sent as `X-API-Key: <key>`, preceded by
+the method's `value_prefix` when it declares one.
 
 ### API Key in a Query Parameter or Cookie
 
@@ -662,12 +640,9 @@ RestApi {
 }
 ```
 
-The client gets `.with_api_key_param(key)`. The key, explicit or from the
-first non-empty `env_auth` variable, is sent as the `api_key` query pair
-(replacing a declared pair of that name) or merged into the one `Cookie`
-header (replacing a cookie of that name). **Temporary:** the setter and the
-environment scan are interim and will be replaced when credentials move to a
-shared runtime. See `schematic/docs/generation/request-side.md`.
+Accepts `Credential::api_key(..)`. The key, from any source above, is
+appended as the `api_key` query pair or to the one `Cookie` header. See
+[Request-Side Inputs](../docs/generation/request-side.md#api-keys-in-a-query-parameter-or-cookie).
 
 ### Basic Auth
 
@@ -680,11 +655,8 @@ RestApi {
 }
 ```
 
-Generated code:
-
-```rust
-headers = headers.use_basic_auth(username, password);
-```
+Accepts `Credential::basic(username, password)`. The env fallback needs a
+non-empty username variable and a non-empty password variable.
 
 ### No Authentication
 
@@ -696,7 +668,8 @@ RestApi {
 }
 ```
 
-No authentication headers are added.
+`definition()` configures no authentication; every request is anonymous,
+and a per-call credential is refused as `InvalidArgument`.
 
 ### OAuth2
 
@@ -713,10 +686,11 @@ RestApi {
 }
 ```
 
-Generated code points OAuth-enabled callers to `schematic-oauth` when no acceptable credential is available. Users obtain tokens there and inject them programmatically:
+The client accepts a bearer access token. Obtain it with `schematic-oauth`
+and supply it per client or per call:
 
 ```rust
-let client = Api::new().oauth_token(token);
+let client = Api::builder().credentials(Credential::access_token(token)).build()?;
 ```
 
 ### Multi-Method Auth
@@ -744,21 +718,25 @@ RestApi {
 }
 ```
 
-That generates first-class helpers such as `.api_key(...)` and `.oauth_token(...)` on the same client.
+`definition()` then accepts both placements, so the same client takes
+`Credential::api_key(..)` (sent as `PRIVATE-TOKEN`) or
+`Credential::access_token(..)` (sent as `Authorization: Bearer`), and reads
+only `GITLAB_TOKEN` from the environment.
 
 ## HTTP Methods
 
-All standard HTTP methods are supported:
+All standard HTTP methods are supported. Each request's `EndpointSpec::METHOD`
+names the runtime's method constant:
 
-| Method | Generated String | reqwest Method |
-|--------|------------------|----------------|
-| GET | `"GET"` | `client.get()` |
-| POST | `"POST"` | `client.post()` |
-| PUT | `"PUT"` | `client.put()` |
-| PATCH | `"PATCH"` | `client.patch()` |
-| DELETE | `"DELETE"` | `client.delete()` |
-| HEAD | `"HEAD"` | `client.head()` |
-| OPTIONS | `"OPTIONS"` | `client.request(Method::OPTIONS)` |
+| Method | `EndpointSpec::METHOD` |
+|--------|------------------------|
+| GET | `schematic_runtime::Method::GET` |
+| POST | `schematic_runtime::Method::POST` |
+| PUT | `schematic_runtime::Method::PUT` |
+| PATCH | `schematic_runtime::Method::PATCH` |
+| DELETE | `schematic_runtime::Method::DELETE` |
+| HEAD | `schematic_runtime::Method::HEAD` |
+| OPTIONS | `schematic_runtime::Method::OPTIONS` |
 
 ## Path Parameters
 
@@ -786,15 +764,26 @@ impl GetMessageRequest {
             message_id: message_id.into(),
         }
     }
+}
 
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+impl schematic_runtime::EndpointSpec for GetMessageRequest {
+    // type Api, Success, Failure, Decoder; ENDPOINT_ID; METHOD ...
+
+    fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = format!(
             "/threads/{}/messages/{}",
             urlencoding::encode(&self.thread_id.to_string()),
             urlencoding::encode(&self.message_id.to_string()),
         );
         let query: Vec<(String, String)> = Vec::new();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
     }
 }
 
@@ -805,9 +794,10 @@ let request = GetMessageRequest::new("thread-123", "msg-456");
 ## Query Parameters
 
 Declared query parameters become optional fields with `with_*` builders.
-`into_parts()` returns them as unencoded `(name, value)` pairs in the fifth
-element of `RequestParts`, apart from the path, and the client encodes them
-once when it builds the URL (`shared::append_query_pairs`). See
+`into_parts()` returns them in `RequestParts::query` as unencoded
+`(name, value)` pairs, apart from the path, and the runtime encodes each pair
+once when it builds the URL (a space is `%20`, never `+`), appending them
+with `&` after any query already in the path template. See
 [`docs/generation/request-side.md`](../docs/generation/request-side.md).
 
 ## Request Bodies
@@ -833,13 +823,24 @@ impl CreateCompletionRequest {
     pub fn new(body: CreateCompletionBody) -> Self {
         Self { body }
     }
+}
 
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
+    // type Api, Success, Failure, Decoder; ENDPOINT_ID; METHOD ...
+
+    fn into_parts(self) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/completions".to_string();
-        let body = serde_json::to_string(&self.body)
-            .map_err(|e| SchematicError::SerializationError(e.to_string()))?;
-        let query: Vec<(String, String)> = Vec::new();
-        Ok(("POST", path, crate::shared::RequestBody::Json(body), vec![], query))
+        let body = serde_json::to_string(&self.body).map_err(|_| {
+            schematic_runtime::InvalidArgument::new("the request body cannot be serialized as JSON")
+        })?;
+        // ...
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(body),
+        })
     }
 }
 
@@ -880,19 +881,24 @@ let request = CreateMessageRequest::new("thread-123", CreateMessageBody {
 A text body (`ApiRequest::Text { content_type }`) is a `body: String` field and
 a binary body (`ApiRequest::Binary { content_type }`) a `body: Vec<u8>` field.
 Both become `RequestBody::Raw`: the bytes are sent unchanged with the declared
-`Content-Type`.
+`Content-Type`. A multipart form's file fields use the generated
+`shared::FormFile`, which `into_part(name)` turns into a
+`schematic_runtime::FormPart`.
 
 ## Header and Cookie Parameters
 
 `EndpointParams.header` and `EndpointParams.cookie` entries become optional
-fields with `with_*` builders, sent under their exact declared names in the
-headers element of `RequestParts`. A set header parameter replaces a static
-endpoint header of the same name (case-insensitive); arrays are joined with
-`,`. Cookie values are percent-encoded where RFC 6265 requires and merged,
-with the API's and the endpoint's static cookies and any cookie API key, into
-one `Cookie` header (`shared::combine_cookie_headers`). Every header is
-parsed through the HTTP types before sending, so an invalid value fails
-without a request and without echoing the value. See
+fields with `with_*` builders, sent under their exact declared names in
+`RequestParts::headers`. A set header parameter replaces a static endpoint
+header of the same name (case-insensitive); arrays are joined with `,`.
+Cookie values are percent-encoded where RFC 6265 requires
+(`shared::encode_cookie_value`) and merged, with the API's and the
+endpoint's static cookies, into one `Cookie` header
+(`shared::combine_cookie_headers`). A cookie API key is appended to that
+header by the runtime. The runtime parses every header through the HTTP
+types before sending, so an invalid value fails with
+`TransportErrorKind::InvalidArgument` without a request and without echoing
+the value. See
 [`docs/generation/request-side.md`](../docs/generation/request-side.md).
 
 ## Module Reference
@@ -903,15 +909,15 @@ Code generation for individual components:
 
 | Generator | Description |
 |-----------|-------------|
-| `generate_error_type()` | Creates `SchematicError` enum |
-| `generate_request_struct(&endpoint)` | Creates request struct for an endpoint |
-| `generate_request_enum(&api)` | Creates unified request enum |
-| `generate_api_struct(&api)` | Creates API client struct |
-| `generate_request_method(&api)` | Creates async `request()` method |
-| `generate_request_parts_type()` | Creates `RequestParts` type alias |
-| `generate_variant_types()` | Creates VariantBuilder, ResponseContext, EndpointSpec types |
+| `generate_api_struct(&api)` | Creates an API's marker type, `{Api}Client` alias, `Api` impl, constants, `definition()`, `builder()`, and `new()` |
+| `generate_request_struct(&endpoint)` | Creates the request struct and its `EndpointSpec` impl for an endpoint, naming the placeholder API marker |
+| `generate_request_struct_with_suffix(&endpoint, suffix)` | The same, with a custom struct-name suffix |
+| `generate_request_struct_with_options(&endpoint, suffix, module_path, api_marker)` | The same, with the module path used in doc examples and the API marker `EndpointSpec::Api` names; generated modules use this form |
+| `PLACEHOLDER_API_MARKER` | The marker (`Api`) named by request structs generated without an API |
+| `generate_request_helpers()` | Creates the request helpers of `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
 | `generate_paginated_trait()` | Creates `Paginated` marker trait |
 | `generate_paginated_impl(&endpoint, suffix)` | Creates `impl Paginated` for paginated endpoints |
+| `ModuleDocBuilder` | Builds a generated module's `//!` documentation |
 
 ### `output`
 
@@ -922,8 +928,8 @@ Assembly, validation, and file writing:
 | `assemble_api_code(&api)` | Combines all generators into one `TokenStream` |
 | `assemble_api_module(&api)` | Assembles a single API module |
 | `assemble_combined_api_module(&apis)` | Combines multiple APIs sharing a module path into one `TokenStream` |
-| `assemble_lib_rs(&apis)` | Generates lib.rs with module declarations |
-| `assemble_shared_module()` | Generates shared.rs with common types |
+| `assemble_lib_rs(&apis)` | Generates lib.rs with module declarations and the runtime ABI marker and check |
+| `assemble_shared_module()` | Generates shared.rs with the request helpers and the `Paginated` trait |
 | `assemble_prelude(&apis)` | Generates prelude.rs with convenient re-exports |
 | `generate_and_write(&api, &dir, dry_run)` | Full generation of one API (the API is the whole crate) |
 | `generate_and_write_all(&apis, &dir, dry_run)` | Full generation: `apis` is the whole crate; obsolete generated modules are deleted |
@@ -965,6 +971,9 @@ Generator error types (used by the generator itself):
 | `OutputDirNotFound` | Output directory doesn't exist |
 | `ConfigError` | Invalid configuration |
 | `Validation` | An output's validator reported errors; nothing of that output was written |
+| `UnsafeOutput` | The output holds paths the generator cannot account for or does not own; nothing was changed |
+| `RequiresFullGeneration` | A partial run would keep modules while the runtime ABI recorded in `lib.rs` or a shared file changes; nothing was changed |
+| `PublicationFailed` | A write or deletion failed after publication started; lists completed and pending mutations |
 | `OutputsFailed` | At least one requested output failed; names failed and succeeded outputs |
 
 ### `validation`
@@ -988,17 +997,31 @@ Module path inference utilities:
 |----------|-------------|
 | `infer_module_path(&name)` | Infers module path from API name (for recognized suffixes: Native, Client, Service, Hub, Api, Sdk) |
 
-Generated runtime error types (`SchematicError`):
+### Runtime compatibility
 
-| Variant | Description |
-|---------|-------------|
-| `Http` | HTTP request failed (network, timeout) |
-| `Json` | JSON deserialization failed |
-| `ApiError` | Non-2xx status code from API |
-| `UnsupportedMethod` | Unknown HTTP method (should never occur) |
-| `SerializationError` | Request body serialization failed |
-| `AuthenticationRequired` | No explicit auth or env fallback satisfied the client policy |
-| `InternalError` | Internal runtime error (type mismatch in variant hooks) |
+`schematic_gen::RUNTIME_ABI` is the `schematic_runtime::ABI` the generator
+emits code for; a unit test keeps the two equal. Generated `lib.rs` declares
+it and checks it at compile time:
+
+```rust
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+const _: () = assert!(
+    schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
+    "schematic-schema was generated for schematic-runtime ABI 1, but ...; regenerate the crate ..."
+);
+pub use schematic_runtime;
+```
+
+Building generated code against a runtime of another ABI fails to compile
+with that message. Partial generation reads the same marker before keeping
+any module; see
+[shared runtime compatibility](../docs/generation/partial-generation.md#shared-runtime-compatibility).
+
+Generated code defines no error type of its own. Sends report
+`schematic_runtime::TransportError` when no response head arrived, and
+everything else (any status, decode failures, hook failures) inside the
+`schematic_runtime::Response` envelope; constructors report
+`schematic_runtime::BuildError`.
 
 ## Ergonomic Conversions
 
@@ -1036,11 +1059,15 @@ The generator supports pagination with the `Paginated` marker trait:
 - The `Paginated` trait is defined in `shared.rs` and can be used for generic pagination utilities
 
 ```rust
+use schematic_schema::schematic_runtime::EndpointSpec;
 use schematic_schema::shared::Paginated;
 
-// Generic pagination helper
-fn fetch_all_pages<R: Paginated>(client: &OpenAI) -> Vec<R::Response> {
-    // Implementation that handles pagination automatically
+// Generic pagination helper over any paginated endpoint of OpenAI
+async fn fetch_all_pages<R>(client: &OpenAIClient, first: R) -> Vec<R::Success>
+where
+    R: Paginated + EndpointSpec<Api = OpenAI>,
+{
+    // Implementation that handles pagination
 }
 ```
 
@@ -1051,35 +1078,32 @@ fn fetch_all_pages<R: Paginated>(client: &OpenAI) -> Vec<R::Response> {
 - **Atomic writes**: Uses temp file + rename to prevent partial writes
 - **No panics**: Production code paths use `Result` types, no `unwrap()`/`expect()`
 
-## Variant API (Response Hooks)
+## Response Hooks
 
-The generated clients support creating variant configurations with response hooks:
+Hooks are configured on the runtime's client builder, not on generated code:
 
 ```rust
-// Create a variant with response hooks
-let variant = client.variant()
+use schematic_schema::prelude::*;
+use schematic_schema::openai::ListModelsRequest;
+
+let client = OpenAI::builder()
     .base_url("https://staging.example.com/v1")
-    .pre_response_json(|ctx, json| {
-        // Transform JSON before deserialization
+    .pre_response_json(|meta, json| {
+        // Reshape a successful JSON body before it is decoded
         Ok(json)
     })
-    .mutate_response::<ListModelsRequest>(|ctx, response| {
-        // Mutate response after deserialization
+    .mutate_response::<ListModelsRequest, _>(|meta, models| {
+        // Adjust the decoded success value of this one endpoint
         Ok(())
     })
-    .build();
+    .build()?;
 ```
 
-### Variant Types (in `shared.rs`)
-
-| Type | Description |
-|------|-------------|
-| `ResponseContext` | Metadata about HTTP response (endpoint_id, method, path, url, status, headers) |
-| `EndpointSpec` | Trait associating request types with response types and endpoint IDs |
-| `PreResponseJsonHook` | Type alias for JSON transformation hooks |
-| `AnyResponseMutator` | Type-erased trait for response mutation hooks |
-| `TypedMutator<T, F>` | Concrete wrapper for typed response mutators |
-| `VariantHooks` | Container for all configured hooks and mutators |
+Both run only for a 2xx reply to a JSON endpoint. `mutate_response` accepts
+only a request type of the same API whose codec supports hooks, so naming
+another API's request or a text, binary, or empty endpoint does not compile.
+The hook order and failure handling are described in the runtime's `hooks`
+module ([`runtime/src/hooks.rs`](../runtime/src/hooks.rs)).
 
 ## OpenAPI Import Pipeline
 
@@ -1163,7 +1187,7 @@ APIs that share a generated Rust module are exported as one OpenAPI document
 using the module filename. For example, `OllamaNative` and `OllamaOpenAI`
 produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
 
-> **Note**: All 16 APIs now have complete schema registries for OpenAPI export. Missing a registry for a new API will produce an error (use `--no-openapi` to skip).
+> **Note**: Every API has a complete schema registry for OpenAPI export. Missing a registry for a new API will produce an error (use `--no-openapi` to skip).
 
 ### Module Reference: `import_pipeline`
 
@@ -1212,25 +1236,35 @@ The current test suite verifies:
 1. **Syntax validity** - Generated code parses as valid Rust via `syn`
 2. **Formatting** - Output is properly formatted via `prettyplease`
 3. **Individual generators** - Each generator function has unit tests
-4. **Auth strategies** - All authentication patterns generate correct code
-5. **Response method generation** - E2E tests verify `request_bytes()`/`request_text()`/`request_empty()` generation and emitted `response.bytes()`/`response.text()` calls
-6. **Fresh-output guard** - The `slow_*` tests in `tests/l1/fresh_output_compile.rs` (`just test-fresh-output`, part of `just test`) generate all 18 APIs plus fixture APIs into temporary crates and run `cargo check --offline --locked`; the fixture crate also runs wiremock tests that assert the bytes each request puts on the wire
+4. **Auth translation** - Every authentication pattern produces the expected runtime `AuthConfig` in `definition()`
+5. **Runtime ABI** - A unit test keeps `RUNTIME_ABI` equal to `schematic_runtime::ABI`, and partial-generation tests cover matching, different, missing, and malformed `lib.rs` markers
+6. **Fresh-output guard** - The `slow_*` tests in `tests/l1/fresh_output_compile.rs` (`just test-fresh-output`, part of `just test`) generate fresh crates into temporary directories and:
+    - compile the fixture APIs and run 19 wiremock tests that send through the runtime and assert the bytes each request puts on the wire, credential sourcing and refusal, codec selection, hooks, and definition settings (request-id header, secret names, cross-origin policy)
+    - compile all 18 real APIs, including their WebSocket modules, with `cargo check --offline --locked`
+    - check, in one `cargo check --tests --keep-going` run, that 10 misuses fail to compile: a wrong success type, a request impl missing its codec, a non-request type, another API's request passed to `send`, `send_raw`, or `mutate_response`, a mutator on a text endpoint, and the removed `request` method, request enum, and `with_client_and_base_url` constructor
+    - build against a doctored runtime copy with another ABI and assert the build fails with the readable assertion message
+    - compare the query request lines with a recorded baseline
+
+Sending itself (envelope, transport errors, timeouts and deadlines,
+redirects, credential resolution, redaction, hooks) is tested in the
+runtime crate's own suite (`runtime/tests/`).
 
 ### What Tests DO NOT Cover
 
-**Live HTTP behavior is NOT tested!** Specifically:
+**Live HTTP behavior against real providers is NOT tested!** Specifically:
 
 1. **Provider integration** - No tests exercise real API endpoints
-2. **Network-layer behavior** - No tests cover retries, timeouts, or transport failures; request encoding is checked against wiremock only in the fixture crate
+2. **Generated request encoding for real APIs** - Wire bytes are checked against wiremock for the fixture APIs and for the query baseline only
 3. **Auth at runtime** - No end-to-end test validates real credential sourcing against external services
 
 ### Known Failure Modes
 
 | Scenario | What Goes Wrong | How to Catch It |
 |----------|-----------------|-----------------|
-| Binary endpoint with JSON code | Runtime failure: JSON deserialize of binary data | `grep "request_bytes" generated_file.rs` |
+| Wrong `ApiResponse` in a definition (e.g. `Json` for an audio endpoint) | The `Json` codec reports a `MalformedSuccess` error in the envelope, with the body kept | Check the endpoint's `type Decoder` in the generated `requests.rs` (or module file) |
 | Module path mismatch | Compile failure: unresolved import | `just test-fresh-output` |
 | Shared module missing `request_suffix` | Compile failure: duplicate struct names | `just test-fresh-output` |
+| Generated crate built against another runtime | Compile failure naming both ABIs and `just generate` | Regenerate with the matching `schematic-gen` |
 
 ### Required Manual Verification
 
@@ -1240,44 +1274,22 @@ When modifying response handling or module generation:
 # 1. Generate code
 cargo run -p schematic-gen -- generate --api elevenlabs --output schematic/schema/src
 
-# 2. Verify correct methods generated for non-JSON endpoints
-grep -n "pub async fn request" schematic/schema/src/elevenlabs/client.rs
-# Should see: request<T>, request_bytes, request_text, request_empty (as applicable)
+# 2. Verify the codec chosen for non-JSON endpoints
+grep -n "type Decoder" schematic/schema/src/elevenlabs/requests.rs
+# Should see Json<T>, Text, Binary, or Empty as the definition declares
 
-# 3. Verify convenience methods for binary endpoints
-grep -n "pub async fn create_speech\|pub async fn stream_speech" schematic/schema/src/elevenlabs/client.rs
-
-# 4. Check it compiles (schematic-schema is excluded from the workspace)
+# 3. Check it compiles (schematic-schema is excluded from the workspace)
 cargo check --manifest-path schematic/schema/Cargo.toml
 
-# 5. Run tests, including the fresh-output guard (necessary but not sufficient!)
+# 4. Run tests, including the fresh-output guard (necessary but not sufficient!)
 just -f schematic/justfile test
-```
-
-### Response Type Method Generation
-
-The generator produces different methods based on `ApiResponse`:
-
-| `ApiResponse` Variant | Method Generated | Runtime Call |
-|-----------------------|------------------|--------------|
-| `Json(Schema)` | `request<T>()` | `response.json::<T>()` |
-| `Binary` | `request_bytes()` | `response.bytes()` |
-| `Text` | `request_text()` | `response.text()` |
-| `Empty` | `request_empty()` | (discards body) |
-
-Additionally, non-JSON endpoints get **convenience methods** with specific types:
-
-```rust
-// For Binary endpoint "CreateSpeech"
-pub async fn create_speech(&self, req: CreateSpeechRequest) -> Result<bytes::Bytes, SchematicError>
 ```
 
 ### Future Work
 
 To close the testing gap, we need:
 
-1. **Response-side runtime tests** - Mock HTTP server returning binary data, verify correct handling
-2. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
+1. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
 
 ## Dependencies
 
@@ -1287,9 +1299,9 @@ The generated code requires these runtime dependencies (automatically included i
 [dependencies]
 bytes = "1"
 futures-util = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "rustls"] }
-schematic-define = { version = "0.1.0", path = "..." }
-schematic-definitions = { version = "0.1.0", path = "..." }
+schematic-define = { version = "0.1.0", path = "../define" }
+schematic-definitions = { version = "0.1.0", path = "../definitions" }
+schematic-runtime = { version = "0.1.0", path = "../runtime" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
@@ -1303,7 +1315,9 @@ serial_test = "3"
 wiremock = "0.6"
 ```
 
-The template lives in `src/cargo_gen.rs`.
+REST requests are sent by `schematic-runtime`, so the generated crate does
+not depend on an HTTP client directly; the WebSocket modules use
+`tokio-tungstenite`. The template lives in `src/cargo_gen.rs`.
 
 ## License
 

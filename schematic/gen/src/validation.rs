@@ -66,7 +66,6 @@ use schematic_define::{
 };
 use schematic_definitions::registry::SchemaRegistry;
 
-use crate::codegen::client::to_snake_case;
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
@@ -85,13 +84,7 @@ pub const QUERY_IN_PATH_SEVERITY: Severity = Severity::Warning;
 /// Names every generated module brings into scope with `use`.
 ///
 /// A generated item with one of these names would clash with the import.
-const IMPORTED_TYPE_NAMES: &[&str] = &[
-    "Deserialize",
-    "Serialize",
-    "RequestParts",
-    "SchematicError",
-    "Paginated",
-];
+const IMPORTED_TYPE_NAMES: &[&str] = &["Deserialize", "Serialize", "Paginated"];
 
 /// Generated crate files a REST module name must not reuse.
 const RESERVED_MODULE_NAMES: &[&str] = &["lib", "shared", "prelude", "ws_shared"];
@@ -367,7 +360,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         }
     }
 
-    // The API name becomes the client type and `{name}Request`.
+    // The API name becomes the marker type and `{name}Client`.
     if let Err(reason) = check_type_ident(&api.name) {
         diagnostics.push(error(
             None,
@@ -378,7 +371,6 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
 
     check_module_path(api, diagnostics);
     check_api_key_param(api, diagnostics);
-    check_convenience_methods(api, diagnostics);
 
     for endpoint in &api.endpoints {
         let id = Some(endpoint.id.as_str());
@@ -727,92 +719,6 @@ fn duplicate_names(entries: &[(String, String)], kind: &str) -> Vec<String> {
         .collect()
 }
 
-/// Checks the convenience methods generated on the client struct.
-///
-/// Non-JSON endpoints get an inherent method named after the snake-cased
-/// endpoint id. It must not repeat another endpoint's method or a method the
-/// client always has. The check counts the inherent methods of the client
-/// the emitters generate for this API, so it cannot drift from them.
-fn check_convenience_methods(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
-    let convenience: Vec<(&str, String)> = api
-        .endpoints
-        .iter()
-        .filter(|endpoint| !endpoint.response.is_json())
-        .map(|endpoint| (endpoint.id.as_str(), to_snake_case(&endpoint.id)))
-        .collect();
-    // Emitting the client needs a valid name, suffix, and endpoint ids;
-    // invalid ones are already reported.
-    let suffix_valid = api
-        .request_suffix
-        .as_deref()
-        .is_none_or(|suffix| !suffix.is_empty() && suffix.chars().all(char::is_alphanumeric));
-    if convenience.is_empty()
-        || check_type_ident(&api.name).is_err()
-        || !suffix_valid
-        || convenience.iter().any(|(id, _)| check_type_ident(id).is_err())
-    {
-        return;
-    }
-
-    let generated = client_method_counts(api);
-    let mut first_owner: HashMap<&str, &str> = HashMap::new();
-    for (id, method) in &convenience {
-        let from_endpoints = convenience.iter().filter(|(_, m)| m == method).count();
-        let always_present = generated.get(method).copied().unwrap_or(0) > from_endpoints;
-        let clash = if always_present {
-            Some("a method every generated client has".to_string())
-        } else {
-            first_owner
-                .get(method.as_str())
-                .map(|first| format!("the method of endpoint `{first}`"))
-        };
-        if let Some(clash) = clash {
-            diagnostics.push(ValidationDiagnostic::new(
-                Severity::Error,
-                &api.name,
-                Some(id),
-                Feature::GeneratedNameCollision,
-                Output::Rust,
-                format!("client method `{method}` repeats {clash}"),
-            ));
-        }
-        first_owner.entry(method).or_insert(id);
-    }
-}
-
-/// Counts the inherent methods of the client generated for `api` by name.
-fn client_method_counts(api: &RestApi) -> HashMap<String, usize> {
-    let suffix = get_request_suffix(api);
-    let tokens = {
-        let client = crate::codegen::generate_api_struct(api);
-        let request = crate::codegen::generate_request_method_with_suffix(api, &suffix);
-        quote::quote! { #client #request }
-    };
-    let Ok(file) = syn::parse2::<syn::File>(tokens) else {
-        return HashMap::new();
-    };
-
-    let mut counts = HashMap::new();
-    for item in file.items {
-        let syn::Item::Impl(item_impl) = item else {
-            continue;
-        };
-        let is_client = matches!(
-            &*item_impl.self_ty,
-            syn::Type::Path(path) if path.path.segments.last().is_some_and(|s| s.ident == api.name)
-        );
-        if item_impl.trait_.is_some() || !is_client {
-            continue;
-        }
-        for impl_item in item_impl.items {
-            if let syn::ImplItem::Fn(function) = impl_item {
-                *counts.entry(function.sig.ident.to_string()).or_insert(0) += 1;
-            }
-        }
-    }
-    counts
-}
-
 /// Checks the type names a module group emits into one Rust module.
 ///
 /// APIs sharing a module path are generated into one namespace, so raw
@@ -834,9 +740,8 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
     for api in group {
         let suffix = get_request_suffix(api);
         let api_items = [
-            (api.name.clone(), "client struct"),
-            (format!("{}Request", api.name), "request enum"),
-            (format!("{}VariantBuilder", api.name), "variant builder"),
+            (api.name.clone(), "API marker type"),
+            (format!("{}Client", api.name), "client alias"),
         ];
         for (name, role) in api_items {
             emitted.entry(name).or_default().push(Owner {
@@ -1338,35 +1243,11 @@ mod tests {
             (
                 "endpoint struct clashes with an import",
                 RestApi {
-                    request_suffix: Some("Parts".to_string()),
-                    ..api_with(vec![get("Request")])
+                    request_suffix: Some("ated".to_string()),
+                    ..api_with(vec![get("Pagin")])
                 },
                 Feature::GeneratedNameCollision,
-                Some("Request"),
-            ),
-            (
-                "snake-cased convenience methods collide",
-                api_with(vec![
-                    Endpoint {
-                        response: ApiResponse::Text,
-                        ..get("FooBar")
-                    },
-                    Endpoint {
-                        response: ApiResponse::Text,
-                        ..endpoint("Foo_bar", RestMethod::Get, "/foo_bar2")
-                    },
-                ]),
-                Feature::GeneratedNameCollision,
-                Some("Foo_bar"),
-            ),
-            (
-                "convenience method repeats a fixed client method",
-                api_with(vec![Endpoint {
-                    response: ApiResponse::Empty,
-                    ..get("RequestEmpty")
-                }]),
-                Feature::GeneratedNameCollision,
-                Some("RequestEmpty"),
+                Some("Pagin"),
             ),
             (
                 "text request body with a control character in its content type",

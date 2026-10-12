@@ -1,12 +1,16 @@
-//! API struct and variant assembly for generated code modules.
+//! API module assembly for generated code modules.
+//!
+//! An API module holds the API's marker type, client alias, and
+//! constructors, one request struct per endpoint with its
+//! `schematic_runtime::EndpointSpec` implementation, and the re-exported
+//! definition types. It has no send methods: the runtime client sends.
 
 use proc_macro2::TokenStream;
-use quote::quote;
-use schematic_define::RestApi;
+use quote::{format_ident, quote};
+use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_paginated_impl,
-    generate_request_enum_with_suffix, generate_request_method_with_suffix,
     generate_request_struct_with_options,
 };
 
@@ -19,42 +23,86 @@ pub const SPLIT_THRESHOLD_LINES: usize = 2000;
 
 /// Parts produced when splitting a large API module into submodules.
 pub struct SplitApiParts {
+    /// Module docs, submodule declarations, re-exports, and each API's
+    /// marker type, client alias, and constructors.
     pub mod_rs: TokenStream,
+    /// Request structs, their `EndpointSpec` and `Paginated` impls, and form
+    /// bodies.
     pub requests_rs: TokenStream,
+    /// The re-exported definition types.
     pub responses_rs: TokenStream,
-    pub client_rs: TokenStream,
+}
+
+/// The request structs and `Paginated` impls of one API.
+///
+/// An API-level `Cookie` header cannot be a client default header: the
+/// runtime refuses a default header that can carry a credential. So the API's
+/// `Cookie` headers are folded into every endpoint's static headers here,
+/// ahead of the endpoint's own, where they merge with its cookies and cookie
+/// parameters into one `Cookie` header. `generate_api_struct` leaves them out
+/// of the default headers.
+fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
+    let suffix = get_request_suffix(api);
+    let api_cookies: Vec<(String, String)> = api
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+        .cloned()
+        .collect();
+
+    let mut tokens = TokenStream::new();
+    for endpoint in &api.endpoints {
+        let endpoint = with_api_cookies(endpoint, &api_cookies);
+        tokens.extend(generate_request_struct_with_options(
+            &endpoint,
+            &suffix,
+            Some(module_path),
+            &api.name,
+        ));
+    }
+    for endpoint in &api.endpoints {
+        tokens.extend(generate_paginated_impl(endpoint, &suffix));
+    }
+    tokens
+}
+
+fn with_api_cookies(endpoint: &Endpoint, api_cookies: &[(String, String)]) -> Endpoint {
+    let mut endpoint = endpoint.clone();
+    if !api_cookies.is_empty() {
+        let mut headers = api_cookies.to_vec();
+        headers.append(&mut endpoint.headers);
+        endpoint.headers = headers;
+    }
+    endpoint
+}
+
+fn has_paginated(apis: &[&RestApi]) -> bool {
+    apis.iter().any(|api| {
+        api.endpoints
+            .iter()
+            .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()))
+    })
+}
+
+fn shared_import(apis: &[&RestApi]) -> TokenStream {
+    if has_paginated(apis) {
+        quote! { use crate::shared::Paginated; }
+    } else {
+        TokenStream::new()
+    }
 }
 
 /// Assembles an API module with configurable options.
-///
-/// ## Arguments
-///
-/// * `api` - The API definition to generate code for
-/// * `options` - Output generation options
 ///
 /// ## Returns
 ///
 /// A TokenStream containing the complete API module code.
 pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
-    let api_name_lower = get_module_path(api);
-    let suffix = get_request_suffix(api);
-
-    let request_structs: TokenStream = api
-        .endpoints
-        .iter()
-        .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&api_name_lower)))
-        .collect();
-
-    let paginated_impls: TokenStream = api
-        .endpoints
-        .iter()
-        .map(|ep| generate_paginated_impl(ep, &suffix))
-        .collect();
-
-    let request_enum = generate_request_enum_with_suffix(api, &suffix);
+    let module_path = get_module_path(api);
+    let requests = api_requests(api, &module_path);
     let api_struct = generate_api_struct(api);
-    let request_method = generate_request_method_with_suffix(api, &suffix);
     let module_docs = ModuleDocBuilder::new(api).build();
+    let shared_import = shared_import(&[api]);
 
     let definitions_import = if options.standalone {
         quote! {
@@ -62,18 +110,7 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
             pub use crate::types::*;
         }
     } else {
-        build_definitions_import(&api_name_lower)
-    };
-
-    let has_paginated = api
-        .endpoints
-        .iter()
-        .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()));
-
-    let shared_import = if has_paginated {
-        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
-    } else {
-        quote! { use crate::shared::{RequestParts, SchematicError}; }
+        build_definitions_import(&module_path)
     };
 
     quote! {
@@ -83,42 +120,17 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
 
         #definitions_import
 
-        // Import shared types
         #shared_import
-
-        #request_structs
-
-        #paginated_impls
-
-        #request_enum
 
         #api_struct
 
-        #request_method
+        #requests
     }
 }
 
-/// Assembles the API module code (e.g., openai.rs).
-///
-/// This function generates code for a single API module, containing:
-/// - Rich module documentation (intro, auth, features, example)
-/// - Import statements
-/// - Re-exports from definitions
-/// - Per-endpoint request structs
-/// - Request enum (unifying all endpoints)
-/// - API client struct
-/// - Request method implementation
-///
-/// The error type (`SchematicError`) is imported from the shared module
-/// rather than being duplicated in each API module.
-///
-/// ## Arguments
-///
-/// * `api` - The REST API definition to generate code for
-///
-/// ## Returns
-///
-/// A TokenStream containing the API module code.
+/// Assembles the API module code (e.g., openai.rs): module documentation,
+/// the re-exported definition types, the API's marker type and client, and
+/// its request structs.
 pub fn assemble_api_module(api: &RestApi) -> TokenStream {
     assemble_api_module_with_options(api, &OutputOptions::default())
 }
@@ -128,14 +140,6 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
 /// When two or more APIs share a `module_path` (e.g., `OllamaNative` and `OllamaOpenAI`
 /// both use `"ollama"`), this function generates a single `.rs` file containing all
 /// of their types.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions sharing the same module path
-///
-/// ## Returns
-///
-/// A TokenStream containing the combined module code.
 ///
 /// ## Panics
 ///
@@ -148,55 +152,18 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
 
     let module_path = get_module_path(apis[0]);
     let combined_docs = build_combined_module_docs(apis);
-
     let definitions_import = build_definitions_import(&module_path);
+    let shared_import = shared_import(apis);
 
-    let per_api_code: Vec<TokenStream> = apis
-        .iter()
-        .map(|api| {
-            let suffix = get_request_suffix(api);
+    let per_api_code = apis.iter().map(|api| {
+        let api_struct = generate_api_struct(api);
+        let requests = api_requests(api, &module_path);
+        quote! {
+            #api_struct
 
-            let request_structs: TokenStream = api
-                .endpoints
-                .iter()
-                .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&module_path)))
-                .collect();
-
-            let paginated_impls: TokenStream = api
-                .endpoints
-                .iter()
-                .map(|ep| generate_paginated_impl(ep, &suffix))
-                .collect();
-
-            let request_enum = generate_request_enum_with_suffix(api, &suffix);
-            let api_struct = generate_api_struct(api);
-            let request_method = generate_request_method_with_suffix(api, &suffix);
-
-            quote! {
-                #request_structs
-
-                #paginated_impls
-
-                #request_enum
-
-                #api_struct
-
-                #request_method
-            }
-        })
-        .collect();
-
-    let has_paginated = apis.iter().any(|api| {
-        api.endpoints
-            .iter()
-            .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()))
+            #requests
+        }
     });
-
-    let shared_import = if has_paginated {
-        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
-    } else {
-        quote! { use crate::shared::{RequestParts, SchematicError}; }
-    };
 
     quote! {
         #combined_docs
@@ -205,7 +172,6 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
 
         #definitions_import
 
-        // Import shared types
         #shared_import
 
         #(#per_api_code)*
@@ -242,35 +208,14 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 
 /// Assembles a single API module split into submodules for large APIs.
 ///
-/// Produces four TokenStreams intended for:
-/// - `mod.rs` - module docs, submodule declarations, re-exports, client struct + constructor impl
-/// - `requests.rs` - all request structs, EndpointSpec impls, paginated impls, request enums
+/// Produces three TokenStreams intended for:
+/// - `mod.rs` - module docs, submodule declarations, re-exports, and the
+///   API's marker type, client alias, and constructors
+/// - `requests.rs` - all request structs with their `EndpointSpec` and
+///   `Paginated` impls
 /// - `responses.rs` - definitions re-exports
-/// - `client.rs` - HTTP method impl blocks
-///
-/// ## Arguments
-///
-/// * `api` - The API definition to generate code for
-/// * `options` - Output generation options
 pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> SplitApiParts {
-    let api_name_lower = get_module_path(api);
-    let suffix = get_request_suffix(api);
-
-    let request_structs: TokenStream = api
-        .endpoints
-        .iter()
-        .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&api_name_lower)))
-        .collect();
-
-    let paginated_impls: TokenStream = api
-        .endpoints
-        .iter()
-        .map(|ep| generate_paginated_impl(ep, &suffix))
-        .collect();
-
-    let request_enum = generate_request_enum_with_suffix(api, &suffix);
-    let api_struct = generate_api_struct(api);
-    let request_method = generate_request_method_with_suffix(api, &suffix);
+    let module_path = get_module_path(api);
     let module_docs = ModuleDocBuilder::new(api).build();
 
     let definitions_import = if options.standalone {
@@ -278,63 +223,10 @@ pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> Spli
             pub use crate::types::*;
         }
     } else {
-        build_definitions_import(&api_name_lower)
+        build_definitions_import(&module_path)
     };
 
-    let has_paginated = api
-        .endpoints
-        .iter()
-        .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()));
-
-    let shared_import = if has_paginated {
-        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
-    } else {
-        quote! { use crate::shared::{RequestParts, SchematicError}; }
-    };
-
-    let mod_rs = quote! {
-        #module_docs
-
-        pub mod requests;
-        pub mod responses;
-        pub mod client;
-
-        pub use requests::*;
-        pub use responses::*;
-
-        #api_struct
-    };
-
-    let requests_rs = quote! {
-        use serde::{Deserialize, Serialize};
-
-        #shared_import
-
-        use super::responses::*;
-
-        #request_structs
-
-        #paginated_impls
-
-        #request_enum
-    };
-
-    let responses_rs = definitions_import;
-
-    let client_rs = quote! {
-        use super::*;
-        use super::requests::*;
-        use crate::shared::SchematicError;
-
-        #request_method
-    };
-
-    SplitApiParts {
-        mod_rs,
-        requests_rs,
-        responses_rs,
-        client_rs,
-    }
+    split_parts(&[api], module_docs, definitions_import, &module_path)
 }
 
 /// Assembles a combined API module split into submodules for large APIs.
@@ -342,10 +234,6 @@ pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> Spli
 /// This is the split version of [`assemble_combined_api_module`] for when
 /// multiple APIs share the same module path and the combined output exceeds
 /// the threshold.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions sharing the same module path
 ///
 /// ## Panics
 ///
@@ -359,62 +247,30 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
     let module_path = get_module_path(apis[0]);
     let combined_docs = build_combined_module_docs(apis);
     let definitions_import = build_definitions_import(&module_path);
+    split_parts(apis, combined_docs, definitions_import, &module_path)
+}
 
-    let has_paginated = apis.iter().any(|api| {
-        api.endpoints
-            .iter()
-            .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()))
-    });
-
-    let shared_import = if has_paginated {
-        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
-    } else {
-        quote! { use crate::shared::{RequestParts, SchematicError}; }
-    };
-
-    let mut all_structs = TokenStream::new();
-    let mut all_paginated = TokenStream::new();
-    let mut all_enums = TokenStream::new();
-    let mut all_structs_and_builders = TokenStream::new();
-    let mut all_request_methods = TokenStream::new();
-
-    for api in apis {
-        let suffix = get_request_suffix(api);
-
-        let request_structs: TokenStream = api
-            .endpoints
-            .iter()
-            .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&module_path)))
-            .collect();
-
-        let paginated_impls: TokenStream = api
-            .endpoints
-            .iter()
-            .map(|ep| generate_paginated_impl(ep, &suffix))
-            .collect();
-
-        let request_enum = generate_request_enum_with_suffix(api, &suffix);
-        let api_struct = generate_api_struct(api);
-        let request_method = generate_request_method_with_suffix(api, &suffix);
-
-        all_structs.extend(request_structs);
-        all_paginated.extend(paginated_impls);
-        all_enums.extend(request_enum);
-        all_structs_and_builders.extend(api_struct);
-        all_request_methods.extend(request_method);
-    }
+fn split_parts(
+    apis: &[&RestApi],
+    docs: TokenStream,
+    definitions_import: TokenStream,
+    module_path: &str,
+) -> SplitApiParts {
+    let shared_import = shared_import(apis);
+    let markers: Vec<_> = apis.iter().map(|api| format_ident!("{}", api.name)).collect();
+    let api_structs = apis.iter().map(|api| generate_api_struct(api));
+    let requests = apis.iter().map(|api| api_requests(api, module_path));
 
     let mod_rs = quote! {
-        #combined_docs
+        #docs
 
         pub mod requests;
         pub mod responses;
-        pub mod client;
 
         pub use requests::*;
         pub use responses::*;
 
-        #all_structs_and_builders
+        #(#api_structs)*
     };
 
     let requests_rs = quote! {
@@ -423,29 +279,15 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
         #shared_import
 
         use super::responses::*;
+        use super::{#(#markers),*};
 
-        #all_structs
-
-        #all_paginated
-
-        #all_enums
-    };
-
-    let responses_rs = definitions_import;
-
-    let client_rs = quote! {
-        use super::*;
-        use super::requests::*;
-        use crate::shared::SchematicError;
-
-        #all_request_methods
+        #(#requests)*
     };
 
     SplitApiParts {
         mod_rs,
         requests_rs,
-        responses_rs,
-        client_rs,
+        responses_rs: definitions_import,
     }
 }
 
