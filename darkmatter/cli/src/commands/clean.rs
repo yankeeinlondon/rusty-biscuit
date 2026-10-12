@@ -13,8 +13,8 @@
 //!   only when it differs, followed by a delta report.
 //! - `Declined`: the original is printed and `--save` writes nothing; the
 //!   `clean.fidelity-fallback` finding is reported and the exit code is `0`.
-//! - `Invalid`: frontmatter that would be emitted is not valid YAML; nothing
-//!   is saved and the run fails (exit `1`).
+//! - `Invalid`: Darkmatter cannot load the frontmatter that would be
+//!   emitted; nothing is saved and the run fails (exit `1`).
 //!
 //! This module owns what is specific to the `md` binary: flags as explicit
 //! rule overrides, schema flags and the request contexts they resolve in,

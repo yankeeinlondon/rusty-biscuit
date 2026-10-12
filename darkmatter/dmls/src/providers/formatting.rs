@@ -10,9 +10,9 @@
 //!
 //! The transaction either accepts the whole candidate or keeps the source, so
 //! the provider returns one whole-document edit only for
-//! [`CleanOutcome::Changed`]. A refusal (`Declined`), unparseable frontmatter
-//! (`Invalid`), or a repair error returns no edits and one warning for the
-//! router to show; the provider itself sends nothing. Warning positions are
+//! [`CleanOutcome::Changed`]. A refusal (`Declined`), frontmatter Darkmatter
+//! cannot load (`Invalid`), or a repair error returns no edits and one warning
+//! for the router to show; the provider itself sends nothing. Warning positions are
 //! converted from source bytes into the client's negotiated position
 //! encoding.
 
