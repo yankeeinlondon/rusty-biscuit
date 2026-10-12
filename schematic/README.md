@@ -423,19 +423,23 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
 
 **Current tests verify:**
 - ✅ Generated code is syntactically valid Rust
-- ✅ Code compiles (`cargo check`)
+- ✅ Freshly generated code compiles: `just test` ends with the fresh-output guard (`just test-fresh-output`), which generates all 18 APIs and a set of fixture APIs into temporary crates outside the checkout and runs `cargo check --offline --locked` on them
+- ✅ The fresh 18-API Rust output matches the committed `schema/src`, and the exported OpenAPI and Postman documents match `openapi/` and `postman/` (`just check-drift`)
+- ✅ The query strings the generated Gitea, GitLab, and OpenAI clients put on the wire match recorded request lines, captured by a local listener
 - ✅ Unit test coverage for individual generators
 
 **Current tests DO NOT verify:**
-- ❌ Runtime behavior (binary responses actually call `.bytes()`)
+- ❌ Runtime behavior of response decoding (binary responses actually call `.bytes()`)
 - ❌ Integration with real APIs
 - ❌ Runtime behavior of combined shared-module APIs
+
+The guard needs the dependencies of `schema/Cargo.lock` in the local Cargo cache, because it never goes online. If it fails with an offline-resolution error, run `cargo fetch --manifest-path schematic/schema/Cargo.toml` once.
 
 **Before submitting changes:**
 
 ```bash
-# 1. Run unit tests
-cargo test -p schematic-define -p schematic-definitions -p schematic-gen
+# 1. Run the tests, including the fresh-output guard
+just -f schematic/justfile test
 
 # 2. Regenerate all schemas
 just -f schematic/justfile generate

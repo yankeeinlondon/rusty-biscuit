@@ -60,6 +60,7 @@ We use the `just` runner to provide the most common operations you'll need when 
 
 - `just build {args}` - will build all schematic packages
 - `just test {args}` - will run unit and integration tests on the schematic packages
+- `just test-fresh-output` - the part of `just test` that generates client crates outside the checkout and compiles them offline (all 18 APIs plus fixture APIs); CI runs it on the build job
 - `just lint {args}` - will use the clippy linter to look for non-idiomatic code
 - `just gen` - will generate the API definitions in `schematic-definitions` into API clients in `schematic-schema`
 
