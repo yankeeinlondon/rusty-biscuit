@@ -10,6 +10,7 @@
 mod common;
 
 mod context_construction_guard;
+mod core_schema_types;
 mod entry_point_parity;
 mod level1_graph_index;
 mod level1_wiki;
