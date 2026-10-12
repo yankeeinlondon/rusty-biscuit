@@ -200,3 +200,50 @@ fn counter_observes_repeated_parses() {
     });
     assert_eq!(parses, 3, "the parse counter must actually count parses");
 }
+
+mod guarded_body {
+    use super::{CLASSES, measure};
+    use crate::markdown::cleanup::rules::{FixedWidth, Leaf, MarkdownRuleOverrides, ResolvedMarkdownRules, resolve};
+    use crate::markdown::cleanup::{CleanOutcome, clean_body};
+
+    fn width(columns: u16, body_rules_off: bool) -> ResolvedMarkdownRules {
+        let mut overrides =
+            if body_rules_off { MarkdownRuleOverrides::all_body_rules_off() } else { MarkdownRuleOverrides::default() };
+        overrides.fixed_width = Leaf::Value(FixedWidth::Columns(columns));
+        resolve(&overrides, None, None)
+    }
+
+    #[test]
+    fn an_unchanged_body_is_parsed_once() {
+        let rules = ResolvedMarkdownRules::all_body_rules_off();
+        for (label, fixture) in CLASSES {
+            let (cleaned, parses) = measure(|| clean_body(fixture, &rules));
+            assert_eq!(cleaned.outcome, CleanOutcome::Unchanged, "{label}");
+            assert_eq!(parses, 1, "{label}: an unchanged body needs no verification parse");
+        }
+    }
+
+    #[test]
+    fn a_changed_body_is_parsed_twice() {
+        // The planning parse doubles as the input side of the comparison; the
+        // second parse verifies the final candidate.
+        let (cleaned, parses) = measure(|| clean_body(super::NESTED_LIST, &ResolvedMarkdownRules::defaults()));
+        assert_eq!(cleaned.outcome, CleanOutcome::Changed);
+        assert_eq!(parses, 2);
+    }
+
+    #[test]
+    fn rewrapping_adds_at_most_one_parse_and_verifies_after_it() {
+        for (label, fixture) in CLASSES {
+            let (cleaned, parses) = measure(|| clean_body(fixture, &width(30, false)));
+            assert_ne!(cleaned.outcome, CleanOutcome::Declined, "{label}: {:?}", cleaned.diagnostics);
+            assert!(parses <= 3, "{label}: {parses} parses");
+        }
+        // With no first-stage edit (one long line, nothing to join) the input
+        // parse serves the re-wrap stage.
+        let long_line = "one two three four five six seven eight nine ten eleven twelve\n";
+        let (cleaned, parses) = measure(|| clean_body(long_line, &width(30, true)));
+        assert_eq!(cleaned.outcome, CleanOutcome::Changed);
+        assert_eq!(parses, 2);
+    }
+}

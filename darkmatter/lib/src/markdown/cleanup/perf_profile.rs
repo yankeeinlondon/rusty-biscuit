@@ -128,15 +128,13 @@ fn profile_fixture(harness: &Harness, label: &str, raw: &str) {
         extract_additional_paragraph_contexts(&content, &events_with_ranges, opaque_body_lines);
     let protected_markers =
         extract_indented_code_markers(&events_with_ranges, opaque_body_lines);
-    let preferred_style = get_preferred_emphasis_style();
     harness.single(&format!("f25-{label}-stage1-preserve-emphasis"), || {
         black_box(preserve_original_emphasis(
             &content,
             &events_with_ranges,
-            preferred_style,
         ));
     });
-    let events = preserve_original_emphasis(&content, &events_with_ranges, preferred_style);
+    let events = preserve_original_emphasis(&content, &events_with_ranges);
 
     // `add_text_language_to_empty_code_blocks` and `align_tables_in_stream`
     // consume their stream, so each sample must clone it back;

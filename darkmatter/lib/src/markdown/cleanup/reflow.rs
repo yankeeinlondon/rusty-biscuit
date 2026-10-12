@@ -549,7 +549,7 @@ fn join_separator(prev_line: &str, next_body: &str) -> Option<char> {
 /// Tibetan. Hangul is excluded because Korean is space-delimited. Non-letters
 /// (punctuation, symbols, emoji) are never spaceless, so they fall through to
 /// the space-delimited join rule.
-fn is_spaceless_letter(c: char) -> bool {
+pub(super) fn is_spaceless_letter(c: char) -> bool {
     if !c.is_alphabetic() {
         return false;
     }

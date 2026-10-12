@@ -1,19 +1,34 @@
-//! Markdown cleanup implementation using an explicit two-stage pass pipeline.
+//! Markdown cleanup.
 //!
-//! Cleanup first transforms the pulldown-cmark event stream, then applies ordered
-//! string passes to the serialized Markdown. Incidental-newline stripping and
+//! [`clean_body`] is the guarded engine: the `style.markdown` rules
+//! ([`rules`]) run as bounded edits of the authored bytes, directive lines and
+//! expressions are fixed points, and one final comparison returns the input
+//! unchanged (with a `clean.fidelity-fallback` finding) whenever the result
+//! would differ in meaning.
+//!
+//! The `cleanup_content*` functions, `cleanup_to_fixed_width`, and the
+//! `Markdown::cleanup*` methods still run the older pipeline, which
+//! re-serializes the pulldown-cmark event stream and then applies ordered
+//! string passes; they are unguarded. Incidental-newline stripping and
 //! fixed-width reflow are kept in the reflow module but remain public here.
 
 mod blockquote;
+mod body;
 mod brackets;
+mod compare;
 pub mod diagnostic;
+mod edits;
 mod emphasis;
 pub mod frontmatter;
 mod lists;
 mod opaque;
+mod protect;
 mod reflow;
 pub mod rules;
+mod structure;
 mod tables;
+mod transform;
+mod wrap;
 
 #[cfg(test)]
 mod perf_profile;
@@ -27,7 +42,7 @@ use std::ops::Range;
 use blockquote::fix_blockquote_formatting;
 use brackets::unescape_brackets;
 use emphasis::{
-    get_preferred_emphasis_style, preserve_original_emphasis, restore_backslash_placeholders,
+    preserve_original_emphasis, restore_backslash_placeholders,
     restore_emphasis_placeholders, unescape_emphasis_chars,
 };
 use lists::{
@@ -36,6 +51,9 @@ use lists::{
     fix_list_indentation, normalize_list_spacing, protect_opaque_directive_bodies,
     restore_list_markers, restore_opaque_directive_bodies,
 };
+#[cfg(any(test, feature = "cleanup-test-hooks"))]
+pub use body::test_hooks;
+pub use body::{BodyCleanup, CleanOutcome, Fallback, clean_body};
 pub use reflow::{reflow_to_width, strip_incidental_newlines};
 use tables::align_tables_in_stream;
 
@@ -84,15 +102,6 @@ pub(super) mod parse_count {
     }
 }
 
-/// Emphasis style used for italics in markdown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmphasisStyle {
-    /// Use asterisk for emphasis: `*text*` for italics, `**text**` for bold
-    Asterisk,
-    /// Use underscore for emphasis: `_text_` for italics, `__text__` for bold
-    Underscore,
-}
-
 /// Controls whether cleanup collapses fixed-width prose wrapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentalNewlineMode {
@@ -102,23 +111,6 @@ pub enum IncidentalNewlineMode {
     Preserve,
 }
 
-impl EmphasisStyle {
-    /// Returns the emphasis token character for this style.
-    pub fn token(&self) -> char {
-        match self {
-            EmphasisStyle::Asterisk => '*',
-            EmphasisStyle::Underscore => '_',
-        }
-    }
-
-    /// Returns the strong (bold) token string for this style.
-    pub fn strong_token(&self) -> &'static str {
-        match self {
-            EmphasisStyle::Asterisk => "**",
-            EmphasisStyle::Underscore => "__",
-        }
-    }
-}
 /// Cleans up markdown content by normalizing formatting.
 ///
 /// This preserves the source document's nested list indentation style.
@@ -325,19 +317,12 @@ fn cleanup_content_internal(
     let protected_markers =
         extract_indented_code_markers(&events_with_ranges, opaque_body_lines);
 
-    // Determine emphasis style:
-    // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
-    // 2. Otherwise, preserve original markers (no standardization)
-    // Note: PREFER_ITALICS only affects emphasis (italics), NOT strong (bold)
-    let preferred_style = get_preferred_emphasis_style();
-
     // Transform events: replace emphasis/strong events with placeholder characters.
     // This prevents cmark from normalizing them or escaping literal underscores/asterisks.
-    // If preferred_style is set, emphasis will be standardized; strong always preserves original.
     let collapsed_events = (incidental_newlines == IncidentalNewlineMode::Strip)
         .then(|| reflow::collapse_incidental_soft_break_events(content, &events_with_ranges));
     let cleanup_events = collapsed_events.as_deref().unwrap_or(&events_with_ranges);
-    let events: Vec<Event> = preserve_original_emphasis(content, cleanup_events, preferred_style);
+    let events: Vec<Event> = preserve_original_emphasis(content, cleanup_events);
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
