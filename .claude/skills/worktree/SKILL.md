@@ -26,6 +26,7 @@ facts and traps, not user docs.
 | Shell wrapper (`--completions`, `WT_SHELL_WRAPPER`, `cd:` protocol), exit codes, interactivity, the base directory (`WT`, `~/.worktree.json`, setup), worktree name resolution | [cli-contracts.md](cli-contracts.md) |
 | `wt create`, fork-origin records, `.worktreeinclude`, include copying and copy records | [create-and-include.md](create-and-include.md) |
 | `wt remove`: inventory fingerprint, safety tiers, handoff, `--force-remote` endpoint checks | [remove.md](remove.md) |
+| `wt remove`'s activity observer: watched scopes, lost coverage, inotify adapter, handle registration | [observation.md](observation.md) |
 | `wt list` local pipeline, comparison cache, caption, table, columns, `--ff`, `--ignore-api` | [list.md](list.md) |
 | `wt list` background worker, PR store, live-head store, receipts, the wait and its budgets | [list-remote.md](list-remote.md) |
 | The `wt list` git graph: gathering, classification, layout, Kitty L2, graph perf | [git-graph.md](git-graph.md) |

@@ -452,6 +452,48 @@ or a recovery record.
 - Tests for codes a host cannot produce (drvfs, another volume, a denied open)
   go through `classify(Stage, &io::Error)`, which is `pub(crate)`.
 
+## Quarantine move with Git association (`remove::quarantine::association`)
+
+`naming::quarantine_path(original, operation)` gives
+`<parent>/.wt-remove-<ascii-slug>-<first 16 hex of the operation id>`.
+`plan_move` checks and fixes it; `move_to_quarantine(base, &plan,
+activity_observed)` re-runs every check, renames, rewrites the admin `gitdir`,
+and verifies with a fresh `git worktree list`. Phase 10 writes the recovery
+record between the two calls.
+
+- **Only the admin `gitdir` is rewritten, byte for byte except the checkout's
+  name** (`rewrite_back_reference`): absolute or relative, separators, and
+  line ending are kept, so Git's own spelling (`C:/…` on Windows) survives.
+  A record that does not end in `<sep><name><sep>.git` refuses. The file is
+  replaced by temp + rename and keeps its permissions (not the store's 0600).
+- **The `.git` file is never touched.** It must be absolute, or relative with
+  only leading `..` steps; `../x/../…` resolves through the checkout's own
+  name and breaks after the move, so it refuses. Lexical comparison would
+  accept it — do not "simplify" to that.
+- **Refusals match Git's `validate_no_submodules`:** an admin `modules`
+  entry, or a `160000` gitlink in the worktree's index (read with
+  `GIT_INDEX_FILE`, from the base). Any entry named `locked` in the admin
+  directory refuses; the lock is never removed.
+- **Rollback** happens only when the moved directory still has the planned
+  identity, `activity_observed()` is false, and nothing is at the original
+  path. It moves back with `rename_no_replace` (never over a recreated
+  original), restores the exact `gitdir` bytes, and re-verifies. Otherwise
+  `MoveError::Stranded` carries an observed `MoveState`.
+- **Exit classes (`MoveError::class`):** `Refused` (3); rename `Sharing` and
+  `Unsupported` → `BlockedByEnvironment` (4); every other rename failure, a
+  rollback, and a stranded move → `Failed`. `nothing_changed()` is true for
+  all but `Stranded`.
+- **Test seam:** `move_with(.., &Faults)` fails or replaces the `gitdir`
+  write and runs a hook after the rename. The relative-format test skips on
+  Git < 2.48 (build-linux has 2.47.3).
+- **macOS test trap:** a `TestRepo` path is `/var/…` while Git's listing (and
+  so `plan.original`) is `/private/var/…`; compare with `same_location` or
+  with `plan.original`, never with the path `add_worktree` returned.
+
+## Activity observer
+
+See [observation.md](observation.md).
+
 ## Tests
 
 See [testing.md](testing.md#wt-remove).

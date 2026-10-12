@@ -31,6 +31,25 @@ Retry by the original worktree name will use a verified recovery record even
 when Git has already unregistered it, reassessing usage and consent for retained
 content. New files will not inherit earlier discard approval.
 
+While the checkout is moved, Git keeps it registered as the same worktree at
+the hidden path: `git worktree list` shows it at the new path with its branch,
+`git status` works inside it, and `git worktree prune` leaves it alone. Only
+Git's record of the location changes. If that record cannot be updated, the
+checkout is moved back when nothing has appeared at the original path and no
+activity was seen; otherwise it stays at the hidden path and the report says
+so.
+
+Watching covers three places: the folder holding the checkout (only the
+checkout's own name and the hidden name, so busy sibling worktrees never stop a
+removal), every directory in the checkout, and the files in Git's record of the
+worktree that hold its identity and staged changes (`HEAD`, `gitdir`,
+`locked`, `index`, `index.lock`, and split-index `sharedindex.*` files). If
+the system drops change notifications, or a watch ends unexpectedly, coverage
+is lost and removal stops; it never continues on partial watching. On Linux,
+each directory in the checkout uses one inotify watch, so a checkout with more
+directories than `fs.inotify.max_user_watches` allows, or a user already at
+`fs.inotify.max_user_instances`, cannot be watched and exits 4.
+
 Deletion and observation cannot be atomic with all possible writers. A report
 will identify partial deletion and coverage limits rather than promise that
 every concurrent write was preserved.
@@ -39,6 +58,10 @@ Some checkouts will be refused before anything changes:
 
 - A checkout containing submodules, or holding a FIFO, a device, a nested
   mount, or an unsupported reparse point, exits 3.
+- A locked worktree (`git worktree lock`) exits 3. `wt` never unlocks it; run
+  `git worktree unlock <path>` yourself if the lock is stale.
+- A checkout whose `.git` file uses a relative link that would break after
+  the move (anything other than leading `..` steps) exits 3.
 - A checkout that can no longer be identified when usage is checked (it
   vanished, or its path is no longer a directory) exits 3; run the command
   again.
