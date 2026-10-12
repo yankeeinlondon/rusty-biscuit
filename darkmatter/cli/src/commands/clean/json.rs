@@ -6,7 +6,7 @@
 
 use biscuit_file::{SourceSpan, YamlCertainty, YamlRepair};
 use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
-use darkmatter::markdown::cleanup::frontmatter::FrontmatterRepair;
+use darkmatter::markdown::cleanup::{CleanOutcome, CleanResult};
 use darkmatter::markdown::span::line_col_of_offset;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ pub struct CleanJsonReport {
     pub frontmatter: CleanJsonFrontmatter,
     pub diagnostics: Vec<CleanJsonDiagnostic>,
     pub applied: Vec<CleanJsonRepair>,
-    /// Whether either frontmatter repair or Markdown cleanup changed the
-    /// document emitted by this invocation.
+    /// Whether the emitted document differs from the source (outcome
+    /// `Changed`). A declined or invalid run is always `false`.
     pub changed: bool,
 }
 
@@ -75,13 +75,12 @@ pub struct CleanJsonRepair {
     pub explanation: String,
 }
 
-/// Builds the `--json` envelope for a repair outcome over `document_source`,
+/// Builds the `--json` envelope for a clean result over `document_source`,
 /// the document exactly as it was read.
 pub fn json_report(
-    repair: &FrontmatterRepair,
+    result: &CleanResult,
     path: Option<PathBuf>,
     document_source: &str,
-    changed: bool,
 ) -> CleanJsonReport {
     let source = CleanJsonSource {
         kind: if path.is_some() {
@@ -92,21 +91,21 @@ pub fn json_report(
         path,
     };
     let frontmatter = CleanJsonFrontmatter {
-        present: repair.frontmatter_span.is_some(),
-        span: repair.frontmatter_span.as_ref().map(json_span),
+        present: result.frontmatter_span.is_some(),
+        span: result.frontmatter_span.as_ref().map(json_span),
     };
 
     CleanJsonReport {
         version: 1,
         source,
         frontmatter,
-        diagnostics: repair
+        diagnostics: result
             .diagnostics
             .iter()
             .map(|entry| json_diagnostic(entry, document_source))
             .collect(),
-        applied: repair.applied.iter().map(json_repair).collect(),
-        changed,
+        applied: result.applied.iter().map(json_repair).collect(),
+        changed: result.outcome == CleanOutcome::Changed,
     }
 }
 

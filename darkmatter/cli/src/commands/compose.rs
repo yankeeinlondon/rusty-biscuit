@@ -11,7 +11,7 @@ use crate::io::{load_markdown, open_argument, resolve_file_path};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::cleanup::ListSpacingMode;
+use darkmatter::markdown::cleanup::rules::{Indentation, ListItemPadding};
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
@@ -158,7 +158,7 @@ pub fn run_compose(
     output: OutputFormat,
     show: bool,
     include_frontmatter: bool,
-    list_spacing: ListSpacingMode,
+    list_spacing: ListItemPadding,
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
@@ -405,8 +405,9 @@ pub fn run_compose(
     if let Some(cache_root) = cache_root {
         options = options.with_cache_root(cache_root);
     }
-    if let Some(size) = indent {
-        options = options.with_indent_size(size);
+    // `--indent` only parses 2, 4, or 8.
+    if let Some(indentation) = indent.and_then(Indentation::from_spaces) {
+        options = options.with_indentation(indentation);
     }
     // Share one single-flight remote-fetch runtime between the pre-flight
     // approval walk and the compose pass so each remote URL is fetched once,

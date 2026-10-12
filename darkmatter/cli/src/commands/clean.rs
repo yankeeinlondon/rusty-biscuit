@@ -1,38 +1,44 @@
 //! `md clean` subcommand implementation.
 //!
-//! `clean` runs the library's raw-source frontmatter repair
-//! ([`repair_frontmatter`]) *before* it builds a [`Markdown`], so documents
-//! whose frontmatter does not parse can still be repaired. Output is assembled
-//! from the repaired frontmatter block verbatim plus the cleaned body, which
-//! keeps untouched frontmatter ranges — comments, key order, quote style —
-//! byte-identical rather than reserialized.
+//! `clean` hands the raw document to the library's clean transaction
+//! ([`clean_document`]): frontmatter repair, the document's `style.markdown`
+//! rules, and guarded body formatting, checked once as a whole. The emitted
+//! text is either the original document byte for byte or a fully accepted
+//! result; untouched frontmatter (comments, key order, quote style, empty
+//! blocks) and line terminators are never reserialized.
 //!
-//! This module owns what is specific to the `md` binary: schema flags and the
-//! request contexts they resolve in, terminal suggestions, and (in [`json`])
-//! the version-1 JSON envelope.
+//! Per outcome:
+//!
+//! - `Changed`/`Unchanged`: the text is printed, or under `--save` written
+//!   only when it differs, followed by a delta report.
+//! - `Declined`: the original is printed and `--save` writes nothing; the
+//!   `clean.fidelity-fallback` finding is reported and the exit code is `0`.
+//! - `Invalid`: frontmatter that would be emitted is not valid YAML; nothing
+//!   is saved and the run fails (exit `1`).
+//!
+//! This module owns what is specific to the `md` binary: flags as explicit
+//! rule overrides, schema flags and the request contexts they resolve in,
+//! terminal findings, and (in [`json`]) the version-1 JSON envelope.
 
 mod json;
 
 use crate::io::{OpenedArgument, open_argument};
 use crate::request::MdRequest;
-use color_eyre::eyre::{Context, Report, Result, eyre};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::markdown::cleanup::diagnostic::CleanDiagnostic;
-use darkmatter::markdown::cleanup::frontmatter::{
-    FrontmatterRepair, FrontmatterRepairError, repair_frontmatter,
+use color_eyre::eyre::{Context, Report, Result, eyre};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::cleanup::diagnostic::{CleanDiagnostic, CleanStage};
+use darkmatter::markdown::cleanup::frontmatter::FrontmatterRepairError;
+use darkmatter::markdown::cleanup::rules::{
+    FixedWidth, Indentation, Leaf, ListItemPadding, MarkdownRuleOverrides,
 };
-use darkmatter::markdown::cleanup::{
-    DEFAULT_INDENT, ListSpacingMode, cleanup_content_with_indent_compact_preserving_incidental,
-    cleanup_content_with_indent_loose_preserving_incidental,
-    cleanup_content_with_indent_preserving_incidental, reflow_to_width,
-};
+use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::schemas::CleanSchemaConfig;
-use darkmatter::markdown::Markdown;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -62,13 +68,21 @@ struct DocumentRequest<'a> {
 }
 
 /// Everything `md clean` needs beyond its input path.
-#[derive(Debug, Clone)]
+///
+/// The formatting fields are explicit overrides: `None`/`false` leaves the
+/// rule to the document's `style.markdown` and then the runtime default.
+#[derive(Debug, Clone, Default)]
 pub struct CleanOptions {
     /// Write the cleaned document back in place and print a delta report.
     pub save: bool,
+    /// `--indent N` (2, 4, or 8): the `indentation` rule.
     pub indent: Option<usize>,
-    pub list_spacing: ListSpacingMode,
+    /// `--compact` (`None`) or `--loose` (`One`): the `list-item-padding` rule.
+    pub list_item_padding: Option<ListItemPadding>,
+    /// `--fixed-width N`: the `fixed-width` rule, which implies `unwrap`.
     pub fixed_width: Option<usize>,
+    /// `--ignore-incidental-newlines`: `unwrap: false` and `fixed-width:
+    /// false`, overriding a width the document selects.
     pub ignore_incidental_newlines: bool,
     pub verbose: bool,
     /// Emit the machine-readable diagnostic envelope on STDOUT instead of the
@@ -77,28 +91,41 @@ pub struct CleanOptions {
     pub schema: CleanSchemaFlags,
 }
 
-impl Default for CleanOptions {
-    fn default() -> Self {
-        Self {
-            save: false,
-            indent: None,
-            list_spacing: ListSpacingMode::Normal,
-            fixed_width: None,
-            ignore_incidental_newlines: false,
-            verbose: false,
-            json: false,
-            schema: CleanSchemaFlags::default(),
-        }
+/// The `list-item-padding` override `--compact`/`--loose` select, if any.
+pub(crate) fn resolve_list_spacing(compact: bool, loose: bool) -> Option<ListItemPadding> {
+    match (compact, loose) {
+        (true, _) => Some(ListItemPadding::None),
+        (_, true) => Some(ListItemPadding::One),
+        _ => None,
     }
 }
 
-/// Converts CLI flags to a `ListSpacingMode`.
-pub(crate) fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
-    match (compact, loose) {
-        (true, _) => ListSpacingMode::Compact,
-        (_, true) => ListSpacingMode::Loose,
-        _ => ListSpacingMode::Normal,
+/// The rule overrides this invocation's flags state explicitly.
+///
+/// ## Errors
+///
+/// An `indent` other than 2, 4, or 8, or a `fixed_width` outside `u16`;
+/// the command-line parsers already reject both.
+fn rule_overrides(options: &CleanOptions) -> Result<MarkdownRuleOverrides> {
+    let mut overrides = MarkdownRuleOverrides::default();
+    if let Some(spaces) = options.indent {
+        let indentation = Indentation::from_spaces(spaces)
+            .ok_or_else(|| eyre!("indent must be one of: 2, 4, 8 (got {spaces})"))?;
+        overrides.indentation = Leaf::Value(indentation);
     }
+    if let Some(padding) = options.list_item_padding {
+        overrides.list_item_padding = Leaf::Value(padding);
+    }
+    if let Some(width) = options.fixed_width {
+        let columns = u16::try_from(width)
+            .map_err(|_| eyre!("--fixed-width must be between 1 and 1000 (got {width})"))?;
+        overrides.fixed_width = Leaf::Value(FixedWidth::Columns(columns));
+    }
+    if options.ignore_incidental_newlines {
+        overrides.unwrap = Leaf::Value(false);
+        overrides.fixed_width = Leaf::Value(FixedWidth::Off);
+    }
+    Ok(overrides)
 }
 
 #[instrument(skip_all)]
@@ -118,69 +145,60 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         (false, _) => None,
     };
     let raw = read_source(resolved.as_ref())?;
+    let overrides = rule_overrides(options)?;
 
     let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
-    let repair = repair_document(&raw, resolved.as_deref(), &options.schema, &document_request)?;
+    let result = clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request)?;
 
-    // Building the document is what enforces the unrepairable-YAML contract.
-    // JSON mode reports that domain failure through its machine channel before
-    // preserving the existing exit code; human mode keeps the normal renderer.
-    let original = match Markdown::try_from_content(repair.source.clone()) {
-        Ok(markdown) => markdown,
-        Err(_error) if options.json => {
-            let report = json_report(&repair, resolved, &raw, false);
-            println!("{}", serde_json::to_string_pretty(&report)?);
+    if options.json {
+        let report = json_report(&result, resolved, &raw);
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if result.outcome == CleanOutcome::Invalid {
             io::stdout().flush()?;
             std::process::exit(1);
         }
-        Err(error) => return Err(error.into()),
-    };
-    let mut cleaned = original.clone();
-    apply_cleanup(
-        &mut cleaned,
-        options.indent,
-        options.list_spacing,
-        options.fixed_width,
-        options.ignore_incidental_newlines,
-    );
-    let output = assemble(&repair.source, &cleaned);
-    let changed = output != raw;
-
-    let Some(path) = save_path else {
-        if options.json {
-            let report = json_report(&repair, resolved, &raw, changed);
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            report_suggestions(&repair.diagnostics, &Terminal::new());
-            print!("{}", output);
+        if let Some(path) = save_path {
+            write_if_changed(&path, &result)?;
         }
         return Ok(());
-    };
-
-    if output != raw {
-        std::fs::write(&path, &output)
-            .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", path))?;
     }
 
-    if options.json {
-        let report = json_report(&repair, resolved, &raw, changed);
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
+    if result.outcome == CleanOutcome::Invalid {
+        // The error the document itself reports keeps the message today's
+        // users see for unrepairable YAML.
+        return Err(match Markdown::try_from_content(raw) {
+            Err(error) => error.into(),
+            Ok(_) => eyre!("the frontmatter is not valid YAML"),
+        });
     }
 
     let terminal = Terminal::new();
-    report_suggestions(&repair.diagnostics, &terminal);
-    if repair.repaired {
-        // `original` is built from the *repaired* source, so the delta below is
-        // blind to the frontmatter rewrite and would report "No changes" for a
-        // file that was in fact modified. Say so at the text level instead of
-        // pretending a baseline `Markdown` existed for unparseable input.
+    report_findings(&result.diagnostics, &terminal);
+
+    let Some(path) = save_path else {
+        print!("{}", result.text);
+        return Ok(());
+    };
+    if result.outcome == CleanOutcome::Declined {
+        return Ok(());
+    }
+
+    write_if_changed(&path, &result)?;
+    if !result.applied.is_empty() {
+        // The delta below compares bodies; frontmatter repairs are reported
+        // here instead.
         println!(
             "{}",
             Prose::new("Frontmatter: repairs applied").render(&terminal)
         );
     }
+    let cleaned = Markdown::try_from_content(result.text.clone())?;
+    let original = baseline(&raw, &result.text)?;
     let delta = original.delta(&cleaned);
+    if !result.applied.is_empty() && delta.is_unchanged() {
+        // A body-only "No changes" would contradict the repair notice above.
+        return Ok(());
+    }
     let mut report = DeltaReport::new(delta).with_documents(original, cleaned);
     if options.verbose {
         report = report.verbose();
@@ -189,23 +207,62 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     Ok(())
 }
 
-/// Runs the library frontmatter repair with this invocation's schema
-/// configuration, keeping each failure's original error so messages are
-/// unchanged.
-fn repair_document(
+/// Writes a `Changed` result to `path`; any other outcome leaves the file
+/// untouched.
+fn write_if_changed(path: &Path, result: &CleanResult) -> Result<()> {
+    if result.outcome == CleanOutcome::Changed {
+        std::fs::write(path, &result.text)
+            .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", path))?;
+    }
+    Ok(())
+}
+
+/// The delta report's "before" document.
+///
+/// Raw frontmatter that does not parse was repaired, so the baseline pairs
+/// the cleaned frontmatter with the raw body and the delta covers only the
+/// body.
+fn baseline(raw: &str, cleaned: &str) -> Result<Markdown> {
+    if let Ok(markdown) = Markdown::try_from_content(raw.to_string()) {
+        return Ok(markdown);
+    }
+    // Repairs edit only the YAML, so the raw body is a suffix of both texts.
+    let raw_body = &raw[body_offset(raw)..];
+    let mut spliced = cleaned[..body_offset(cleaned)].to_string();
+    spliced.push_str(raw_body);
+    Ok(Markdown::try_from_content(spliced)?)
+}
+
+fn body_offset(text: &str) -> usize {
+    match extract_frontmatter_block(text) {
+        Ok(Some(extraction)) => extraction.body_span.start,
+        _ => 0,
+    }
+}
+
+/// Runs the library clean transaction with this invocation's overrides and
+/// schema configuration, keeping each failure's original error so messages
+/// are unchanged.
+fn clean(
     raw: &str,
+    overrides: &MarkdownRuleOverrides,
     document_path: Option<&Path>,
     flags: &CleanSchemaFlags,
     request: &DocumentRequest<'_>,
-) -> Result<FrontmatterRepair> {
-    repair_frontmatter(raw, document_path, || {
-        schema_config(flags, document_path, request)
-    })
-    .map_err(|error| match error {
-        FrontmatterRepairError::Extraction(error) => Report::new(error),
-        FrontmatterRepairError::Schema(error) => Report::new(error),
-        FrontmatterRepairError::Context(error) => error,
-    })
+) -> Result<CleanResult> {
+    let clean_request = CleanRequest {
+        source: raw,
+        overrides,
+        workspace: None,
+        document_path,
+    };
+    clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
+        |error| match error {
+            FrontmatterRepairError::Extraction(error) => Report::new(error),
+            FrontmatterRepairError::Schema(error) => Report::new(error),
+            FrontmatterRepairError::Context(error) => error,
+        },
+    )
 }
 
 /// Builds the schema configuration for this `clean` invocation.
@@ -245,19 +302,34 @@ fn schema_config(
     Ok(config.with_trigger_schemas(!flags.no_trigger_schemas))
 }
 
-/// Renders report-only findings to STDERR as suggestions.
+/// Renders report-only findings to STDERR: frontmatter suggestions, then
+/// Markdown cleanup findings (`clean.invalid-rules`,
+/// `clean.fidelity-fallback`).
 ///
-/// Suggestions deliberately do not affect the exit code: `md clean` runs in
+/// Findings deliberately do not affect the exit code: `md clean` runs in
 /// pre-commit hooks and agent loops, where a new failure mode would be more
 /// disruptive than the smells it reports.
-fn report_suggestions(diagnostics: &[CleanDiagnostic], terminal: &Terminal) {
+fn report_findings(diagnostics: &[CleanDiagnostic], terminal: &Terminal) {
+    let frontmatter = diagnostics.iter().filter(|entry| {
+        matches!(entry.stage, CleanStage::Syntax | CleanStage::Schema)
+            && !entry.classification.is_auto_apply_eligible()
+    });
+    report_section("frontmatter suggestions (not applied)", frontmatter, terminal);
+
+    let markdown = diagnostics
+        .iter()
+        .filter(|entry| matches!(entry.stage, CleanStage::Rules | CleanStage::Fidelity));
+    report_section("markdown cleanup", markdown, terminal);
+}
+
+fn report_section<'a>(
+    header: &str,
+    entries: impl Iterator<Item = &'a CleanDiagnostic>,
+    terminal: &Terminal,
+) {
     let mut list = UnorderedList::empty();
     let mut reported = 0_usize;
-
-    for entry in diagnostics {
-        if entry.classification.is_auto_apply_eligible() {
-            continue;
-        }
+    for entry in entries {
         reported += 1;
         list.add(Prose::new(format!(
             "<b>{}</b>. {}",
@@ -265,17 +337,13 @@ fn report_suggestions(diagnostics: &[CleanDiagnostic], terminal: &Terminal) {
             escape_prose(&entry.message)
         )));
     }
-
     if reported == 0 {
         return;
     }
 
     // `Prose`/`UnorderedList` render without a trailing newline, so the header
     // and the list need their own line breaks or they arrive glued together.
-    eprintln!(
-        "{}",
-        Prose::new("frontmatter suggestions (not applied)").render(terminal)
-    );
+    eprintln!("{}", Prose::new(header).render(terminal));
     eprintln!("{}", list.render(terminal));
 }
 
@@ -283,26 +351,6 @@ fn report_suggestions(diagnostics: &[CleanDiagnostic], terminal: &Terminal) {
 /// spans it marks with backticks stay literal.
 fn escape_prose(text: &str) -> String {
     Prose::escape_text_outside_code_spans(text)
-}
-
-/// Rebuilds the document from its repaired frontmatter block and cleaned body.
-///
-/// The block is copied verbatim out of `source` rather than reserialized from
-/// the parsed frontmatter, which is what makes repairs format-preserving and
-/// makes `md clean` a fixed point: re-cleaning this output reproduces it byte
-/// for byte. Authored delimiter whitespace and line terminators remain part of
-/// that preserved block; only accepted YAML edits and ordinary body cleanup
-/// can change the assembled document.
-fn assemble(source: &str, cleaned: &Markdown) -> String {
-    match extract_frontmatter_block(source) {
-        Ok(Some(extraction)) if !extraction.yaml.trim().is_empty() => {
-            let mut out = String::with_capacity(source.len());
-            out.push_str(&source[extraction.block_span.clone()]);
-            out.push_str(cleaned.content());
-            out
-        }
-        _ => cleaned.content().to_string(),
-    }
 }
 
 /// Opens the input argument through the shared reference reader.
@@ -337,45 +385,55 @@ fn read_source(path: Option<&PathBuf>) -> Result<String> {
     }
 }
 
-fn apply_cleanup(
-    md: &mut Markdown,
-    indent: Option<usize>,
-    mode: ListSpacingMode,
-    fixed_width: Option<usize>,
-    ignore_incidental_newlines: bool,
-) {
-    if ignore_incidental_newlines {
-        apply_cleanup_no_strip(md, indent, mode);
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_flags_override_nothing() {
+        let overrides = rule_overrides(&CleanOptions::default()).unwrap();
+        assert!(overrides.is_empty());
     }
 
-    match (indent, mode) {
-        (Some(size), ListSpacingMode::Compact) => md.cleanup_with_indent_compact(size),
-        (Some(size), ListSpacingMode::Loose) => md.cleanup_with_indent_loose(size),
-        (Some(size), ListSpacingMode::Normal) => md.cleanup_with_indent(size),
-        (None, ListSpacingMode::Compact) => md.cleanup_compact(),
-        (None, ListSpacingMode::Loose) => md.cleanup_loose(),
-        (None, ListSpacingMode::Normal) => md.cleanup(),
-    };
-
-    if let Some(width) = fixed_width {
-        let reflowed = reflow_to_width(md.content(), width);
-        *md.content_mut() = reflowed;
+    #[test]
+    fn flags_become_explicit_overrides() {
+        let options = CleanOptions {
+            indent: Some(2),
+            list_item_padding: resolve_list_spacing(true, false),
+            fixed_width: Some(80),
+            ..CleanOptions::default()
+        };
+        let overrides = rule_overrides(&options).unwrap();
+        assert_eq!(overrides.indentation, Leaf::Value(Indentation::Two));
+        assert_eq!(overrides.list_item_padding, Leaf::Value(ListItemPadding::None));
+        assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Columns(80)));
+        assert_eq!(overrides.unwrap, Leaf::Absent);
     }
-}
 
-fn apply_cleanup_no_strip(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode) {
-    let indent_size = indent.unwrap_or(DEFAULT_INDENT);
-    let cleaned = match mode {
-        ListSpacingMode::Compact => {
-            cleanup_content_with_indent_compact_preserving_incidental(md.content(), indent_size)
-        }
-        ListSpacingMode::Loose => {
-            cleanup_content_with_indent_loose_preserving_incidental(md.content(), indent_size)
-        }
-        ListSpacingMode::Normal => {
-            cleanup_content_with_indent_preserving_incidental(md.content(), indent_size)
-        }
-    };
-    *md.content_mut() = cleaned;
+    #[test]
+    fn ignore_incidental_newlines_turns_unwrap_and_width_off() {
+        let options = CleanOptions {
+            ignore_incidental_newlines: true,
+            ..CleanOptions::default()
+        };
+        let overrides = rule_overrides(&options).unwrap();
+        assert_eq!(overrides.unwrap, Leaf::Value(false));
+        assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Off));
+    }
+
+    #[test]
+    fn unsupported_indent_is_an_error() {
+        let options = CleanOptions {
+            indent: Some(3),
+            ..CleanOptions::default()
+        };
+        assert!(rule_overrides(&options).is_err());
+    }
+
+    #[test]
+    fn list_spacing_flags_map_to_padding() {
+        assert_eq!(resolve_list_spacing(false, false), None);
+        assert_eq!(resolve_list_spacing(true, false), Some(ListItemPadding::None));
+        assert_eq!(resolve_list_spacing(false, true), Some(ListItemPadding::One));
+    }
 }
