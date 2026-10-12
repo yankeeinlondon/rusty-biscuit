@@ -1,0 +1,12 @@
+error[E0277]: the trait bound `typed_send_spike::runtime::GraphQl<typed_send_spike::api::ViewerReposData>: Decode<typed_send_spike::api::GhError>` is not satisfied
+ --> tests/ui/impl_graphql_wrong_failure.rs:8:19
+  |
+8 |     type Decode = GraphQl<ViewerReposData>;
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Decode<typed_send_spike::api::GhError>` is not implemented for `typed_send_spike::runtime::GraphQl<typed_send_spike::api::ViewerReposData>`
+      but trait `Decode<GraphQlFailure<typed_send_spike::api::ViewerReposData>>` is implemented for it
+ --> /kache/workspace/src/runtime.rs:681:0
+  = help: for that trait implementation, expected `GraphQlFailure<typed_send_spike::api::ViewerReposData>`, found `typed_send_spike::api::GhError`
+note: required by a bound in `typed_send_spike::runtime::Endpoint::Decode`
+ --> /kache/workspace/src/runtime.rs:36:4

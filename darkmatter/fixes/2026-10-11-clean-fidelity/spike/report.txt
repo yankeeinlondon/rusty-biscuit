@@ -1,0 +1,102 @@
+### E1 protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="4. step\n\n    > lead:\n    > \n    > - a\n    > - b\n\n5. next\n"
+  lang: same=true idempotent=true parses=3 out="4. step\n\n    > lead:\n    > \n    > - a\n    > - b\n\n5. next\n"
+  unwrap: same=true idempotent=true parses=3 out="4. step\n\n    > lead:\n    > \n    > - a\n    > - b\n\n5. next\n"
+  indent2: DECLINED E1: semantic mismatch
+ in: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "End(Item)", "Start(Item)", "Start(Paragraph)", "Text(\"next\")", "End(Paragraph)", "End(Item)", "End(List(true))"]
+out: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "End(BlockQuote(None))", "End(Item)", "End(List(true))", "Start(BlockQuote(None))", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "List(Some(5))", "Start(Item)", "Text(\"next\")", "End(Item)", "End(List(true))"]
+  indent4: DECLINED E1: semantic mismatch
+ in: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "End(Item)", "Start(Item)", "Start(Paragraph)", "Text(\"next\")", "End(Paragraph)", "End(Item)", "End(List(true))"]
+out: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "End(BlockQuote(None))", "End(Item)", "End(List(true))", "Start(BlockQuote(None))", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "List(Some(5))", "Start(Item)", "Text(\"next\")", "End(Item)", "End(List(true))"]
+  indent8: DECLINED indent 8 needs parent marker padding
+  all: DECLINED E1: semantic mismatch
+ in: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "End(Item)", "Start(Item)", "Start(Paragraph)", "Text(\"next\")", "End(Paragraph)", "End(Item)", "End(List(true))"]
+out: ["List(Some(4))", "Start(Item)", "Start(Paragraph)", "Text(\"step\")", "End(Paragraph)", "Start(BlockQuote(None))", "Start(Paragraph)", "Text(\"lead:\")", "End(Paragraph)", "End(BlockQuote(None))", "End(Item)", "End(List(true))", "Start(BlockQuote(None))", "List(None)", "Start(Item)", "Text(\"a\")", "End(Item)", "Start(Item)", "Text(\"b\")", "End(Item)", "End(List(false))", "End(BlockQuote(None))", "List(Some(5))", "Start(Item)", "Text(\"next\")", "End(Item)", "End(List(true))"]
+### D1 protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="1. top\n    - Example:\n\n        ```\n        code\n        ```\n\n        after\n2. next\n"
+  lang: same=false idempotent=true parses=3 out="1. top\n    - Example:\n\n        ```text\n        code\n        ```\n\n        after\n2. next\n"
+  unwrap: same=true idempotent=true parses=3 out="1. top\n    - Example:\n\n        ```\n        code\n        ```\n\n        after\n2. next\n"
+  indent2: same=false idempotent=true parses=3 out="1. top\n   - Example:\n\n       ```\n       code\n       ```\n\n       after\n2. next\n"
+  indent4: same=true idempotent=true parses=3 out="1. top\n    - Example:\n\n        ```\n        code\n        ```\n\n        after\n2. next\n"
+  indent8: DECLINED indent 8 needs parent marker padding
+  all: same=false idempotent=true parses=3 out="1. top\n   - Example:\n\n       ```text\n       code\n       ```\n\n       after\n2. next\n"
+### C1 protected=[] inline=[15..26]
+  off: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  lang: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  unwrap: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  indent2: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  indent4: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  indent8: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+  all: same=true idempotent=true parses=3 out="- item:\n\n    > {{message}}\n\n- next\n"
+### A1 protected=[0..17, 25..37] inline=[]
+  off: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  lang: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  unwrap: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  indent2: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  indent4: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  indent8: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+  all: same=true idempotent=true parses=3 out="::block when=\"a\"\n\n> note\n::end-block\n"
+### B1 protected=[9..26, 39..51] inline=[]
+  off: same=true idempotent=true parses=3 out="1. first\n::block when=\"m\"\n    - nested\n::end-block\n2. second\n"
+  lang: same=true idempotent=true parses=3 out="1. first\n::block when=\"m\"\n    - nested\n::end-block\n2. second\n"
+  unwrap: same=true idempotent=true parses=3 out="1. first\n::block when=\"m\"\n    - nested\n::end-block\n2. second\n"
+  indent2: same=false idempotent=true parses=3 out="1. first\n::block when=\"m\"\n   - nested\n::end-block\n2. second\n"
+  indent4: same=true idempotent=true parses=3 out="1. first\n::block when=\"m\"\n    - nested\n::end-block\n2. second\n"
+  indent8: DECLINED indent 8 needs parent marker padding
+  all: same=false idempotent=true parses=3 out="1. first\n::block when=\"m\"\n   - nested\n::end-block\n2. second\n"
+### F1 protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  lang: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  unwrap: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  indent2: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  indent4: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  indent8: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+  all: same=true idempotent=true parses=3 out="> a\n>\n> b\n"
+### QSHELL protected=[13..65] inline=[]
+  off: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  lang: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  unwrap: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  indent2: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  indent4: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  indent8: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+  all: same=true idempotent=true parses=3 out="> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n"
+### EXPR protected=[] inline=[6..17, 27..34]
+  off: same=true idempotent=true parses=3 out="Hello {{ name\n }} and\nmore {{ x }}\n"
+  lang: same=true idempotent=true parses=3 out="Hello {{ name\n }} and\nmore {{ x }}\n"
+  unwrap: same=false idempotent=true parses=3 out="Hello {{ name\n }} and more {{ x }}\n"
+  indent2: same=true idempotent=true parses=3 out="Hello {{ name\n }} and\nmore {{ x }}\n"
+  indent4: same=true idempotent=true parses=3 out="Hello {{ name\n }} and\nmore {{ x }}\n"
+  indent8: same=true idempotent=true parses=3 out="Hello {{ name\n }} and\nmore {{ x }}\n"
+  all: same=false idempotent=true parses=3 out="Hello {{ name\n }} and more {{ x }}\n"
+### REFDEF protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="Text here\nand there.\n\n[unused]: https://example.com \"T\"\n"
+  lang: same=true idempotent=true parses=3 out="Text here\nand there.\n\n[unused]: https://example.com \"T\"\n"
+  unwrap: same=false idempotent=true parses=3 out="Text here and there.\n\n[unused]: https://example.com \"T\"\n"
+  indent2: same=true idempotent=true parses=3 out="Text here\nand there.\n\n[unused]: https://example.com \"T\"\n"
+  indent4: same=true idempotent=true parses=3 out="Text here\nand there.\n\n[unused]: https://example.com \"T\"\n"
+  indent8: same=true idempotent=true parses=3 out="Text here\nand there.\n\n[unused]: https://example.com \"T\"\n"
+  all: same=false idempotent=true parses=3 out="Text here and there.\n\n[unused]: https://example.com \"T\"\n"
+### MIXED protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n"
+  lang: same=true idempotent=true parses=3 out="one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n"
+  unwrap: same=false idempotent=true parses=3 out="one two three\r\n\r\n- a\n- b\r\n"
+  indent2: same=true idempotent=true parses=3 out="one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n"
+  indent4: same=true idempotent=true parses=3 out="one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n"
+  indent8: same=true idempotent=true parses=3 out="one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n"
+  all: same=false idempotent=true parses=3 out="one two three\r\n\r\n- a\n- b\r\n"
+### DIRECTIVE_CODE protected=[] inline=[]
+  off: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  lang: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  unwrap: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  indent2: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  indent4: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  indent8: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+  all: same=true idempotent=true parses=3 out="```md\n::block when=\"x\"\n```\n"
+### PARA_DIRECTIVE protected=[9..23] inline=[]
+  off: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  lang: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  unwrap: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  indent2: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  indent4: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  indent8: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"
+  all: same=true idempotent=true parses=3 out="para one\n::file ./x.md\npara two\n"

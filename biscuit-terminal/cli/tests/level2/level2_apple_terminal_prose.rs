@@ -39,16 +39,8 @@ use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use serial_test::serial;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use test_toolkit::{Backend, Level, require_level};
-
-/// Extra settle time after spawning a Terminal.app shell to absorb the
-/// AppleScript dispatch latency before sending commands. Apple Terminal's
-/// `do script` returns immediately, but `exec bash -l` then has to source
-/// the user's profile (which can include slow plugins / completions /
-/// custom prompts), so we wait substantially longer than the WezTerm /
-/// Kitty defaults.
-const SHELL_READY_MS: u64 = 2500;
 
 /// Process-shared Apple Terminal window reused across the prose tests in
 /// this file. Initialized with `preserve_capabilities(true)` so `bt`
@@ -69,6 +61,21 @@ fn bounded_output(plain: &str) -> Option<&str> {
     Some(bounded)
 }
 
+/// Clears the window and waits until no earlier test's sentinel-bounded
+/// output is visible.
+///
+/// The wait matters only in a shared window, where the previous test's
+/// region is still on screen until `clear` runs; a capture taken before
+/// that would satisfy this test's own sentinel wait with stale output. A
+/// fresh window passes on the first capture. Lines sent afterwards queue
+/// behind `clear` on the tab's input, so they always run after it.
+fn clear_window(harness: &mut AppleTerminalHarness) {
+    harness.send_text(b"clear\n").expect("send_text failed");
+    common::capture_until(harness, Duration::from_secs(10), |frame| {
+        bounded_output(&frame.plain).is_none()
+    });
+}
+
 // ------------------------------------------------------------------
 // AC-1 — OSC8 link fallback is visible in Apple Terminal
 // ------------------------------------------------------------------
@@ -87,7 +94,6 @@ fn level2_apple_terminal_link_fallback_visible() {
         AppleTerminalHarness::shared_or_else(|| {
             let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
             h.spawn_shell()?;
-            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
             Ok(h)
         })
         .expect("attach/spawn Apple Terminal")
@@ -95,8 +101,7 @@ fn level2_apple_terminal_link_fallback_visible() {
     let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
     // this run's capture window.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
+    clear_window(harness);
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -177,14 +182,12 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
         AppleTerminalHarness::shared_or_else(|| {
             let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
             h.spawn_shell()?;
-            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
             Ok(h)
         })
         .expect("attach/spawn Apple Terminal")
     });
     let harness = guard.as_mut().expect("shared Apple Terminal harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
+    clear_window(harness);
 
     let bt = common::bt_command(
         "prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'",
@@ -260,7 +263,6 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
         AppleTerminalHarness::shared_or_else(|| {
             let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
             h.spawn_shell()?;
-            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
             Ok(h)
         })
         .expect("attach/spawn Apple Terminal")
@@ -268,8 +270,7 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
     let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
     // this run's capture window.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
+    clear_window(harness);
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -348,10 +349,12 @@ fn level2_apple_terminal_harness_lifecycle() {
     require_level!(Level::L2, AppleTerminalHarness::available(), Backend::AppleTerminal);
 
     // Skip under a shared broker window. This is the only Apple-Terminal
-    // test that spawns its *own* window (to exercise Drop cleanup), and
-    // Terminal's `do script` can reuse the idle frontmost window — i.e. the
+    // test that spawns its *own* window (to exercise Drop cleanup). Spawns
+    // made with `do script` could reuse the idle frontmost window — i.e. the
     // shared window — which this test would then close, breaking every
-    // sibling test that attaches to it. The Drop/cleanup semantics are
+    // sibling test that attaches to it; the spawn no longer uses `do
+    // script`, but the skip keeps the shared window out of this test's
+    // reach. The Drop/cleanup semantics are
     // exercised in the non-broker run (no shared window to corrupt), so
     // skipping here is loss-free. See
     // `.claude/skills/rust-testing/apple-terminal-harness-pitfalls.md`.
@@ -393,15 +396,18 @@ fn level2_apple_terminal_harness_lifecycle() {
         // forced-color env keeps it consistent with the image / color tests.
         let mut harness = AppleTerminalHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
 
         harness
             .send_text(b"echo HARNESS_LIFECYCLE_OK\n")
             .expect("send_text failed");
-        harness.settle();
-        std::thread::sleep(Duration::from_millis(400));
-
-        let frame = harness.capture().expect("capture failed");
+        // Wait for the echoed output line itself; the command-line echo
+        // also carries the sentinel, but never alone on its line.
+        let frame = common::capture_until(&mut harness, Duration::from_secs(10), |frame| {
+            frame
+                .plain
+                .lines()
+                .any(|line| line.trim() == "HARNESS_LIFECYCLE_OK")
+        });
         assert!(
             frame.plain.contains("HARNESS_LIFECYCLE_OK"),
             "expected sentinel `HARNESS_LIFECYCLE_OK` in capture. plain:\n{}",
@@ -424,10 +430,9 @@ fn level2_apple_terminal_harness_lifecycle() {
             .expect("harness should have created at least one new Terminal.app window");
 
         // Tell the shell to exit so the window is closeable without a
-        // confirmation prompt.
+        // confirmation prompt, and wait until it has.
         harness.send_text(b"exit\n").expect("send_text failed");
-        harness.settle();
-        std::thread::sleep(Duration::from_millis(600));
+        wait_for_shell_exit(harness_id, Duration::from_secs(10));
         harness_id
         // <-- harness goes out of scope here; Drop closes the window.
     };
@@ -449,14 +454,13 @@ fn level2_apple_terminal_harness_lifecycle() {
     // the window does not actually disappear so a human can spot a
     // stuck window during interactive runs.
     let mut still_present = true;
-    for _ in 0..25 {
-        std::thread::sleep(Duration::from_millis(200));
-        match window_id_exists(harness_window_id) {
-            Some(false) => {
-                still_present = false;
-                break;
-            }
-            Some(true) | None => continue,
+    for attempt in 0..26 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        if window_id_exists(harness_window_id) == Some(false) {
+            still_present = false;
+            break;
         }
     }
 
@@ -477,6 +481,40 @@ fn level2_apple_terminal_harness_lifecycle() {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+}
+
+/// Waits up to `timeout` for the shell in Terminal.app window `id` to exit:
+/// its selected tab lists no processes, or the window is gone.
+///
+/// Best-effort, like the close that follows it: a timeout returns and lets
+/// `Drop` attempt the close anyway.
+fn wait_for_shell_exit(id: i64, timeout: Duration) {
+    let script = format!(
+        "tell application \"Terminal\"\n\
+         if (count of (every window whose id is {id})) is 0 then return 0\n\
+         return count of (processes of selected tab of (first window whose id is {id}))\n\
+         end tell"
+    );
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = Command::new("osascript")
+            .args(["-e", &script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .parse::<i64>()
+                    .ok()
+            });
+        if remaining == Some(0) || Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 

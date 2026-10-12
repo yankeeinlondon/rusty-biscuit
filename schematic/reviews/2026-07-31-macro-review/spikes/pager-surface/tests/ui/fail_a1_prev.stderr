@@ -1,0 +1,8 @@
+error[E0599]: the method `prev` exists for struct `Pages1<pager_surface::generated::ListIssues>`, but its trait bounds were not satisfied
+ --> tests/ui/fail_a1_prev.rs:3:41
+  |
+3 |     Pager1::<ListIssues>::new().pages().prev();
+  |                                         ^^^^ method cannot be called on `Pages1<pager_surface::generated::ListIssues>` due to unsatisfied trait bounds
+  |
+  = note: the following trait bounds were not satisfied:
+          `pager_surface::generated::ListIssues: HasPrev`

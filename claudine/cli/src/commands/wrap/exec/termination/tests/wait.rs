@@ -34,7 +34,7 @@ fn disconnected_watchdog_channel_warns_and_returns_on_child_exit() {
 
     let result = wait_with_signal_and_early_termination(
         &mut child,
-        true,
+        ChildInterrupts::install(true).unwrap(),
         early_rx,
         Some(watchdog_rx),
         Duration::from_secs(1),
@@ -80,7 +80,7 @@ fn early_termination_signal_reaps_child_and_reports_timed_out() {
 
     let result = wait_with_signal_and_early_termination(
         &mut child,
-        true,
+        ChildInterrupts::install(true).unwrap(),
         early_rx,
         Some(watchdog_rx),
         Duration::from_millis(100),
@@ -122,7 +122,7 @@ fn completion_termination_reaps_child_and_reports_completed() {
 
     let result = wait_with_signal_early_termination_and_completion(
         &mut child,
-        true,
+        ChildInterrupts::install(true).unwrap(),
         early_rx,
         None,
         Some(completion_rx),
@@ -176,7 +176,7 @@ fn non_unix_wait_loop_returns_on_child_exit() {
 
     let result = wait_with_signal_and_early_termination(
         &mut child,
-        false,
+        ChildInterrupts::install(false).unwrap(),
         early_rx,
         Some(watchdog_rx),
         Duration::from_secs(1),
@@ -216,7 +216,7 @@ fn windows_completion_termination_uses_job_object_path() {
 
     let result = wait_with_signal_early_termination_and_completion(
         &mut child,
-        true,
+        ChildInterrupts::install(true).unwrap(),
         early_rx,
         None,
         Some(completion_rx),
@@ -258,7 +258,7 @@ fn interrupt_feedback_is_queued_by_the_wait_loop_not_written_by_the_handler() {
         std::thread::spawn(move || {
             let result = wait_with_signal_and_early_termination(
                 &mut child,
-                true,
+                ChildInterrupts::install(true).unwrap(),
                 early_rx,
                 None,
                 Duration::from_secs(1),
@@ -290,5 +290,42 @@ fn interrupt_feedback_is_queued_by_the_wait_loop_not_written_by_the_handler() {
                 && bytes.as_slice() == super::super::INTERRUPT_FEEDBACK_FIRST
         }),
         "the first press's feedback was queued: {written:?}"
+    );
+}
+
+/// A press between `spawn` and the wait loop is not lost: `ChildInterrupts`
+/// counts it from before the child exists, and the wait loop forwards it the
+/// moment it starts, rather than the child running out its 30s sleep.
+#[cfg(unix)]
+#[test]
+fn a_press_before_the_wait_loop_still_interrupts_the_child() {
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+    use std::sync::mpsc::channel;
+
+    let interrupts = ChildInterrupts::install(true).expect("install the SIGINT handler");
+    let mut child = Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .expect("sleep must be available on PATH");
+    unsafe { libc::raise(libc::SIGINT) };
+
+    let (_early_tx, early_rx) = channel::<EarlyTermination>();
+    let started = Instant::now();
+    let (_, termination, _) = wait_with_signal_and_early_termination(
+        &mut child,
+        interrupts,
+        early_rx,
+        None,
+        Duration::from_secs(1),
+        false,
+    )
+    .expect("wait loop must return once the child is interrupted");
+
+    assert_eq!(termination, claudine::harness::ProcessTermination::Interrupted);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the early press must reach the child, not wait out its 30s sleep"
     );
 }

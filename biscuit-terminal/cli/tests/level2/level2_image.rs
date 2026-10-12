@@ -34,7 +34,7 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{
     find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows, parse_debug_image_height,
 };
-use common::{bt_command, send_bt_command};
+use common::{bt_command, clear_to_row, run_to_end_marker, send_bt_command};
 use serial_test::serial;
 use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
@@ -54,14 +54,6 @@ fn fixture_path(name: &str) -> String {
         .join(name)
         .display()
         .to_string()
-}
-
-/// Positions the cursor at a known row using `tput` so that image
-/// rendering starts from a predictable position.
-fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
-    let cmd = format!("tput cup {row} 0\n");
-    harness.send_text(cmd.as_bytes()).expect("tput failed");
-    harness.settle();
 }
 
 /// Counts the lines that contain at least one printable, non-prompt
@@ -100,17 +92,16 @@ fn level2_image_renders_in_wezterm() {
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear screen and position cursor high so image doesn't scroll.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    position_cursor(harness, 5);
-
-    let pre = harness.capture().expect("pre-capture failed");
+    let pre = clear_to_row(harness, 5);
     let pre_rows = occupied_row_count(&pre.plain);
 
     let path = fixture_path("tiny.png");
-    send_bt_command(harness, &format!("image --debug {path}"));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = biscuit_test_harness::send_command_settled(
+        harness,
+        &bt_command(&format!("image --debug {path}")),
+        &[],
+    )
+    .expect("bt command did not settle");
 
     // Strategy A: assert iTerm2 OSC bytes are present in the raw
     // capture. WezTerm relays the protocol intact in some host
@@ -178,22 +169,19 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
     // the bottom row" by at least a couple of rows.
     let target_row = pane_size.rows.saturating_sub(3);
 
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    position_cursor(harness, target_row);
+    clear_to_row(harness, target_row);
 
     let path = fixture_path("tiny.png");
     send_bt_command(harness, &format!("image --debug {path}"));
 
     // Append a sentinel printf so we can locate the next user-visible
     // line *after* the image renders.
-    harness
-        .send_text(b"printf 'SENTINEL_AFTER_SCROLL\\n'\n")
-        .expect("send_text failed");
-    harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = biscuit_test_harness::send_command_settled(
+        harness,
+        "printf 'SENTINEL_AFTER_SCROLL\\n'",
+        &[],
+    )
+    .expect("sentinel did not settle");
 
     // The renderer's debug output must report that scroll compensation
     // was needed (it predicts the image would extend past the bottom
@@ -255,12 +243,10 @@ fn level2_warp_uses_floor_rounding() {
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    position_cursor(harness, 5);
+    clear_to_row(harness, 5);
 
     // Spoof Warp detection so bt uses floor rounding. Scoping the env
-    // var to a single command via send_command_with_env avoids POSIX
+    // var to a single command with a `KEY='value'` prefix avoids POSIX
     // `export` syntax leaking into the test (portable across shells).
     //
     // We force an odd character width (41) so that the raw height in
@@ -268,14 +254,7 @@ fn level2_warp_uses_floor_rounding() {
     // the test actually distinguishes the rounding branches.
     let path = fixture_path("13x13.png");
     let cmd = bt_command(&format!("image --debug --width 41 {path}"));
-    harness
-        .send_command_with_env(
-            &cmd,
-            &[("TERM_PROGRAM", "WarpTerminal")],
-        )
-        .expect("send_command_with_env failed");
-
-    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
+    let frame = run_to_end_marker(harness, &format!("TERM_PROGRAM='WarpTerminal' {cmd}"));
 
     let (_raw, ceil, floor) = parse_debug_image_height(&frame.plain).unwrap_or_else(|| {
         panic!(
@@ -319,22 +298,15 @@ fn level2_image_default_uses_ceil_rounding() {
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    position_cursor(harness, 5);
+    clear_to_row(harness, 5);
 
-    // Default WezTerm path → ceil rounding. We invoke via
-    // send_command_with_env with an empty env list so no Warp-spoofing
-    // env can leak from a previous test in the same shell session
-    // (each command runs in a freshly forked subshell that does not
-    // inherit a polluted parent env).
+    // Default WezTerm path → ceil rounding. No env prefix, so no
+    // Warp-spoofing env can reach this command: the Warp test scopes its
+    // `TERM_PROGRAM` to its own command line, which does not change the
+    // shell session's environment.
     let path = fixture_path("13x13.png");
     let cmd = bt_command(&format!("image --debug {path}"));
-    harness
-        .send_command_with_env(&cmd, &[])
-        .expect("send_command_with_env failed");
-
-    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
+    let frame = run_to_end_marker(harness, &cmd);
     let (_raw, ceil, floor) = parse_debug_image_height(&frame.plain).unwrap_or_else(|| {
         panic!(
             "could not parse `image height:` from debug output. plain:\n{}",
@@ -368,13 +340,15 @@ fn level2_image_meta_to_stderr() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
+    clear_to_row(harness, 0);
 
     let path = fixture_path("tiny.png");
-    send_bt_command(harness, &format!("image --meta {path}"));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = biscuit_test_harness::send_command_settled(
+        harness,
+        &bt_command(&format!("image --meta {path}")),
+        &[],
+    )
+    .expect("bt command did not settle");
     let joined: String = frame.plain.lines().collect();
     assert!(
         joined.contains("\"cache_hit\"") && joined.contains("\"render_time_ms\""),

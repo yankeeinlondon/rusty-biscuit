@@ -75,14 +75,14 @@ the compose pipeline.
 
 **Inline Post** (serial):
 
-- **Cleanup** - Normalizes markdown formatting. It strips incidental single
-  newlines from top-level and list-item prose by default, removing source-only
-  list continuation indentation before applying list/indent cleanup. It can
-  reflow complete logical prose blocks with
-  `ComposeOptions::with_fixed_width(...)`; newly wrapped list continuations
-  retain their complete list and blockquote container prefix. Use
-  `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`
-  to keep source single newlines.
+- **Cleanup** - The guarded cleanup engine (`cleanup_content_with`) under
+  explicit overrides built from `ComposeOptions`, never the document's
+  `style.markdown`: `unwrap` on by default
+  (`with_incidental_newline_mode(IncidentalNewlineMode::Preserve)` turns it
+  off), `with_fixed_width(...)` (implies unwrap), `with_indentation`
+  (default 4), `with_list_spacing` (`ListItemPadding`, default preserve). It
+  leaves the body unchanged on refusal and no longer strips trailing
+  whitespace or forces a final newline. See [cleanup.md](cleanup.md).
 - **Normalization** - Adjusts heading levels
 
 **Finalization** (root-only serial):

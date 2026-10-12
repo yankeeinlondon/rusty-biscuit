@@ -40,6 +40,10 @@ pub enum StyleParseError {
         reason: &'static str,
     },
 
+    /// A `style.markdown` cleanup rule is invalid.
+    #[error("Invalid formatting rule at `{path}`: {reason}")]
+    InvalidRule { path: String, reason: String },
+
     /// Strict mode: schema-validation warnings (`UnknownKey` or `Deprecated`)
     /// were promoted to an error.
     #[error("Strict mode: {} schema warning(s)", warnings.len())]

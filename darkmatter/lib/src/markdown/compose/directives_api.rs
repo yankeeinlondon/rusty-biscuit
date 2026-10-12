@@ -159,6 +159,16 @@ pub(crate) fn scan_darkmatter_directives_in(
     data: Option<&super::body_origin::DataRanges>,
 ) -> Vec<ParsedDirective> {
     let code_regions = find_code_regions(&super::parse_utils::structural_view(source, data));
+    scan_darkmatter_directives_with_code_regions(source, data, &code_regions)
+}
+
+/// [`scan_darkmatter_directives_in`] with `code_regions` (every inline code
+/// span and code block of the structural view) already computed by the caller.
+pub(crate) fn scan_darkmatter_directives_with_code_regions(
+    source: &str,
+    data: Option<&super::body_origin::DataRanges>,
+    code_regions: &[(usize, usize)],
+) -> Vec<ParsedDirective> {
     let bytes = source.as_bytes();
     let mut directives = Vec::new();
 
@@ -183,7 +193,7 @@ pub(crate) fn scan_darkmatter_directives_in(
         let trimmed = trimmed.trim_end();
 
         if let Some((kind, kw_len)) = match_keyword(trimmed)
-            && !is_in_code_region(trimmed_start, &code_regions)
+            && !is_in_code_region(trimmed_start, code_regions)
             && super::parse_utils::authored_directive(data, line_start, trimmed_start + kw_len)
         {
             directives.push(parse_directive_line(

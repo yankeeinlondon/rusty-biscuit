@@ -55,11 +55,11 @@ pub enum Command {
         )]
         indent: Option<usize>,
 
-        /// Remove all blank lines between list items
+        /// Remove blank lines between sibling list items (`list-item-padding: none`)
         #[arg(long, conflicts_with = "loose")]
         compact: bool,
 
-        /// Add blank lines between all list items
+        /// Put one blank line between sibling list items (`list-item-padding: one`)
         #[arg(long, conflicts_with = "compact")]
         loose: bool,
 
@@ -73,7 +73,7 @@ pub enum Command {
         )]
         fixed_width: Option<usize>,
 
-        /// Preserve source single newlines instead of collapsing incidental wrapping
+        /// Keep source single newlines, overriding a document's `unwrap` and `fixed-width`
         ///
         /// The original spec proposed `--ignore-incidental-carraige-returns`;
         /// this ships as `--ignore-incidental-newlines` because Markdown uses

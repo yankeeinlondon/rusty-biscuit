@@ -5094,8 +5094,14 @@ fn empty_execution_matrices_skip_before_expansion() {
 #[test]
 fn the_worker_policy_survives_the_area_restructure() {
     let package_ci = workflow("_package-ci.yml");
+    let devops = read("just/devops.just");
+    let l2_policy = devops
+        .split("\n_test_l2_threads:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("devops.just defines `_test_l2_threads`");
     assert!(
-        package_ci.contains("just _test_threads"),
+        package_ci.contains("just _test_l2_threads") && l2_policy.contains("just _test_threads"),
         "the CI worker policy must still come from the shared `_test_threads` recipe"
     );
     let test_job = job_block("_package-ci.yml", "  test:");
@@ -5110,8 +5116,10 @@ fn the_worker_policy_survives_the_area_restructure() {
         .next()
         .unwrap_or_default();
     assert!(
-        l2_branch.contains("l2-parallel-self-spawn") && l2_branch.contains("BISCUIT_L2_THREADS"),
-        "only a declared self-isolating L2 suite may use the shared worker budget"
+        l2_branch.contains("l2-serial")
+            && l2_branch.contains("just _test_l2_threads")
+            && l2_branch.contains("BISCUIT_L2_THREADS"),
+        "L2 must use the parallel L2 worker budget unless the package declares `l2-serial`"
     );
     assert!(
         l2_branch.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
