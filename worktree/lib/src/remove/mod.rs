@@ -7,8 +7,9 @@
 //! `.git` file is repaired and verified ([`repair`]) or a missing directory's
 //! surviving index is checked ([`missing`]). A contention-aware removal
 //! reports a typed [`outcome`] and keeps durable [`recovery`] state; [`usage`]
-//! is its decisive check that no other process is using the checkout, and
-//! [`quarantine`] moves the checkout aside without replacing anything.
+//! is its decisive check that no other process is using the checkout,
+//! [`quarantine`] moves the checkout aside without replacing anything, and
+//! [`observation`] watches both locations while that happens.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -19,6 +20,7 @@ pub mod handoff;
 pub mod included;
 pub mod inventory;
 pub mod missing;
+pub mod observation;
 pub mod outcome;
 pub mod quarantine;
 pub mod recovery;

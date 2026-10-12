@@ -254,6 +254,11 @@
   without replacement and `FileIdInfo` directory identities.
   `std::fs::rename` is not used for it because it may replace an existing
   destination.
+  `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
+  features, so no tokio stream) on Linux only, the same crate `notify` builds
+  on. `notify` itself is not used: it hides overflow and lost watches on
+  Windows, drops the watch on a directory `wt` moves on Linux, and offers no
+  flush on macOS, so it cannot report lost coverage.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
   only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
   URL, the default branch, branch-name validity, `core.sshCommand`, and ref

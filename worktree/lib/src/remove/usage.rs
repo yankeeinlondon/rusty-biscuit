@@ -69,6 +69,11 @@ impl OwnedHandles {
         self.handles.insert((kind, descriptor));
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_registered(&self, kind: EvidenceKind, descriptor: u64) -> bool {
+        self.handles.contains(&(kind, descriptor))
+    }
+
     /// Whether `evidence` is a registered handle of `record`.
     ///
     /// A live process's PID cannot be reused, so a record with this PID is
