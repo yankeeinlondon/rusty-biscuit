@@ -14,11 +14,31 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/macos.md
   - .claude/skills/os/linux.md
   - .claude/skills/worktree/remove.md
+source_files_during_phase_2:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/record.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/lock.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+docs_updated_during_phase_2:
+  - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/macos.md
 packages:
   - worktree
 ---
 
-# Implementation Log for 2026-10-05-graceful-file-contention (8 phases)
+# Implementation Log for 2026-10-05-graceful-file-contention (12 phases)
 
 ## Phase 1
 
@@ -337,3 +357,211 @@ Not run: `just test-l2` (not required for a phase without source changes)
 and cross-OS package suites (nothing compiled changed).
 
 Phase 1 is complete; ready for review.
+
+## Phase 2
+
+Started and finished 2026-10-12. Phase 2 adds the library contracts: typed
+outcomes, the recovery record, the deletion journal, the operation lock, and
+the store that ties them together. Nothing here moves or deletes a checkout
+yet. Everything runs against temp directories.
+
+### What was built
+
+All of it is in `worktree/lib/src/remove/`:
+
+| File | Contents |
+| --- | --- |
+| `outcome.rs` | `RemovalOutcome` (`usage_refused`, `removed`, `activity_detected`, `cleanup_failed`, `state_unverified`). `OperationReport` (`report_version` 1, persisted as `report.json`) with the original and quarantine states, Git registration, timeline, discovery runs (Sniff `PathUsageReport` or typed failure), observed activity (receipt times, no PID), journal summary, branch outcomes, errors, and truncation counts. Its lists are capped at 200 and keep exact omitted counts |
+| `recovery/mod.rs` | `OperationId` (128-bit `getrandom`, 32 lowercase hex; reuses `handoff::new_token`, whose `is_token` became `pub(crate)`). The module docs state the crash guarantees |
+| `recovery/record.rs` | `RecoveryRecord` (`record_version` 1) and the strict `parse`: the version is read first through `strict_json::members`, then the typed struct with `deny_unknown_fields`, then semantic validation. `check_binding` compares repository and admin-record identity |
+| `recovery/journal.rs` | The JSON Lines journal (header, intent, and results lines), its strict `parse`, `JournalLog::replay` into `Deleted` / `ExternallyAbsent` / `Kept` / `Planned` / `Uncertain`, `summarize`, and `JournalWriter` behind an injectable `JournalSink` |
+| `recovery/lock.rs` | The `fs4` lock on `wt-removal/locks/<blake3(admin name)>.lock`, through the existing `cache::try_lock_sidecar` |
+| `recovery/storage.rs` (private) | Owner-only creation (0o700/0o600), no-follow validation (symlink and reparse-point refusal, owner and mode checks, open-then-compare identity), durable replace (temp file, flush, rename, directory flush) |
+| `recovery/store.rs` | `RecoveryStore` (`open`, `lock`, `begin`, `pending`, `read_record`, `recover`) and `Operation` (`journal`, `advance`, `save_report`, `complete`, with a bookkeeping warning when the journal cannot be cleared) |
+
+`worktree/lib/Cargo.toml` gains `libc = "0.2"` for Unix only (already in the
+workspace graph; Phase 4 needs it for `renameat2`/`renamex_np` anyway). It is
+used for `geteuid`, `O_NOFOLLOW`, and Apple `fsync`. The change is recorded in
+`docs/dependencies.md`.
+
+### Decisions and departures
+
+None of these changes a spec requirement. They settle details the plan left
+open, or that came up while building.
+
+1. **Journal format.** The journal is JSON Lines, one object per line with a
+   single key: `header` (`journal_version`, `operation_id`), `intent`
+   (`batch`, `entries` of `{path, kind}`), or `results` (`batch`, `entries` of
+   `{path, state}`, aligned with the intent in order). Paths are relative to
+   the quarantine and stored as Sniff `NativeString`s. A batch number must
+   follow the previous one, results must follow their own intent, and a new
+   intent cannot open while a batch is unresolved.
+2. **"Empty" in the journal matrix** means a header-only journal, which is
+   valid ("nothing attempted"). A batch whose `entries` is `[]` is invalid, as
+   is a zero-byte journal: `begin` writes the header before the operation
+   directory exists, so a committed operation always has one.
+3. **Torn final line.** Any unterminated last line is dropped and flagged as
+   `torn_tail`. A torn intent means that batch never started; its intent was
+   not durable, so nothing was unlinked. A torn results line leaves its batch
+   unresolved, so absent entries replay as `Uncertain` and present ones as
+   `Planned`.
+4. **Storage limit.** `DEFAULT_JOURNAL_LIMIT` is 64 MiB. An intent is refused
+   (`LimitReached`, nothing written) unless the batch's worst-case results
+   line still fits, so confirmed results are never lost to the limit.
+5. **The batch bound** (R7: one directory, at most 256 entries) is enforced by
+   both the writer and the reader.
+6. **Detached checkouts** use `"branch": "detached"` (an externally tagged
+   enum, `{"named": "…"}` otherwise), so the record has no nullable field. Every
+   record field is required; `aliases: []` is valid, while absent `aliases` is
+   not.
+7. **An unreadable record blocks every new removal in the repository,** not
+   only one for the same worktree, because it could describe that worktree.
+   Phase 6 must turn this into guidance (where the record is, how to inspect
+   it).
+8. **Atomic operation directory.** `begin` builds `.<id>.tmp`, writes the
+   journal header and record, flushes, and renames it into place. A crash
+   before the rename leaves a hidden directory that `pending()` ignores, and
+   nothing has been mutated at that point. Hidden staging directories are not
+   cleaned up automatically, consistent with the spec's "no background
+   deletion".
+9. **Windows.** The journal is closed before that rename and reopened for
+   appending afterwards (`JournalWriter::after_header`), because S1 showed
+   Windows refuses to rename a directory with an open file inside it. The
+   first version of `begin` had this bug; the code review of my own diff
+   caught it before any Windows run. Windows has no owner or mode check: files
+   inherit the Git directory's ACL, as R7 states. Reparse points are refused.
+   Directories cannot be flushed on Windows, which the crash guarantees in
+   `recovery/mod.rs` state.
+10. **macOS flush.** std's `sync_all`/`sync_data` issue `F_FULLFSYNC` on Apple
+    platforms, at about 25 ms per call. `storage::flush` uses plain `fsync`
+    there. R7 asks for `fsync`, and the spec claims process-termination
+    durability, not power-loss durability. Measured on this host: the
+    recovery tests took 0.3–4 s each with std's call and about 30 ms with
+    `fsync`. Phase 5 makes two journal flushes per batch, so this also bounds
+    deletion cost on macOS. Recorded in the `os` skill.
+11. **Timestamps** are `u64` milliseconds since the Unix epoch (`at_ms`,
+    `received_at_ms`, `created_at_ms`), avoiding a `chrono` dependency in
+    `worktree`. The embedded Sniff report keeps its own RFC 3339 times.
+12. **Deferred to the phase that owns the inputs:**
+    - **The exit-code mapping goes to Phase 6.** Exit 4 (sharing failure,
+      missing wrapper) and cancel-0 are not operation outcomes, so the mapping
+      belongs to the lifecycle. `OperationReport::branch_failed` is the
+      "checkout removed, branch failed → 1" input.
+    - **Journal resume after a crash goes to Phase 6.** Phase 2 can recover
+      and replay a journal, but cannot reopen it and continue deleting.
+    - **The inventory goes to Phase 5,** which persists it with the journal.
+      The journal has no inventory line yet, and adding one changes the
+      format (see the message to the next agent).
+    - **A `usage_refused` report goes to Phase 6.** It has no operation
+      directory to be saved in; Phase 6 decides whether it is persisted.
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in the `worktree` library (`just test` selects
+them; none carries a tier marker). They are in-process and each runs in
+under 0.1 s.
+
+| Requirement (plan Phase 2 / spec) | Test |
+| --- | --- |
+| Typed outcomes and report model round-trip, versioned, unknown fields refused | `outcome::tests::a_stopped_report_round_trips_through_json`, `an_unknown_report_field_is_refused` |
+| Lossless native paths in reports | `outcome::tests::a_non_utf8_path_survives_the_report_losslessly` (Unix) |
+| Truncation never loses counts | `outcome::tests::activity_past_the_cap_is_counted_not_listed`, `retained_entries_keep_an_exact_count_past_the_listing_cap` |
+| Branch failure visible on a removed checkout | `outcome::tests::a_failed_branch_action_is_visible_on_a_removed_checkout` |
+| Operation ID: random, never a path | `recovery::tests::generated_ids_parse_and_differ`, `an_id_that_could_name_another_path_never_parses` |
+| Owner-only permissions, durable replace, no-follow reads | `storage::tests::created_storage_is_owner_only`, `storage_others_can_reach_is_refused`, `links_are_never_followed`, `a_durable_write_replaces_the_file_and_leaves_no_temporary`, `a_missing_file_is_reported_as_missing` |
+| Record: robustness matrix (every load-bearing field × absent, null, wrong type, empty, duplicate key, invalid content; array element cells; inner duplicate key; trailing content; unknown field; control) and the three semantic refusals (unsupported version, operation mismatch, identity mismatch) | `store::tests::record_robustness_matrix` |
+| Journal: robustness matrix (`path`, `kind`, `state` × every shape; entries element cells; empty batch; trailing content and blank line; header absent, repeated, other version, other operation; wrong batch; misaligned results; valid header-only; torn intent; torn results) | `store::tests::journal_robustness_matrix` |
+| Planned, confirmed, externally absent, kept, and uncertain distinguished; crash between unlink and result is uncertain | `journal::tests::confirmed_results_and_an_interrupted_batch_recover_distinctly`, `a_torn_results_line_leaves_its_batch_uncertain` |
+| Journal write failure stops destructive work (injected append and flush failures; poisoned writer) | `journal::tests::a_failed_intent_flush_refuses_the_batch_and_every_later_write`, `a_torn_results_line_leaves_its_batch_uncertain` |
+| Storage limit stops deletion without discarding confirmations (boundary −1 / exact) | `journal::tests::the_limit_refuses_an_intent_while_its_results_still_fit` |
+| Batch bound and shape | `journal::tests::batches_outside_the_bound_are_refused_by_writer_and_reader` |
+| Journal bound to its operation | `journal::tests::another_operations_journal_is_refused`, matrix "header: other operation" |
+| Empty journal = nothing attempted | `journal::tests::a_header_only_journal_means_nothing_was_attempted`, matrix "empty: header only" |
+| Durable, owner-only pending operation reads back | `store::tests::begin_makes_an_owner_only_pending_operation_that_reads_back` |
+| OS-held lock; a stale lock file is not an active operation | `store::tests::a_held_lock_refuses_a_second_removal_and_a_stale_lock_file_does_not` |
+| Lock keyed by the admin record | `store::tests::the_lock_covers_only_the_worktree_it_was_taken_for` |
+| A pending record blocks a new operation on the same target | `store::tests::a_pending_record_blocks_a_new_operation_on_the_same_worktree_only` |
+| A malformed record is never ignored | `store::tests::an_unreadable_record_blocks_every_new_operation` |
+| A crash before commit leaves no operation | `store::tests::a_staging_directory_left_by_a_crash_is_not_an_operation` |
+| A record that cannot be created refuses before mutation | `store::tests::a_record_that_cannot_be_created_leaves_no_operation` (Unix) |
+| Phase persistence moves only forward; a failed write keeps the last durable phase | `store::tests::advance_persists_each_phase_and_only_forward`, `a_failed_phase_write_keeps_the_earlier_phase_on_disk_and_in_memory` (Unix) |
+| Completion persisted before clearing; report kept; journal deleted; completed record never authorizes again | `store::tests::completion_keeps_the_report_drops_the_journal_and_never_authorizes_again` |
+| Clearing failure is a bookkeeping warning | `store::tests::a_journal_that_cannot_be_cleared_is_a_warning_after_completion` |
+| Storage validated without following replacement links | `store::tests::a_linked_operation_directory_is_never_read` |
+
+Smell check: in `recovery/` there is no `#[serde(default)]`, no `Option` on a
+deserialized field, and no `.ok()`, `unwrap_or_default()`, or `filter_map` on
+a load-bearing parse. The one `unwrap_or_default` is on `split(...).pop()`,
+which always yields a piece. The two matrix tests were confirmed
+load-bearing by their control rows.
+
+Not covered here: real process-termination tests. The plan schedules them
+for Phase 6 with the lifecycle; Phase 2's crash windows are covered by the
+injected-failure sink and by hand-built torn journals.
+
+### Verification
+
+Gates in `worktree/` on macOS, 2026-10-12, after the final change:
+
+- `just test`: 1207 passed, 14 skipped (the area's existing skips), 0 failed.
+- `just lint`: clean for `worktree` and `worktree-cli`.
+
+Cross-OS runs (`just cross-check worktree --os <os> remove::recovery
+remove::outcome`):
+
+| OS | Result |
+| --- | --- |
+| macOS (local) | 34 passed |
+| Linux (`build-linux`) | 34 passed |
+| native Windows (`build-win-native`) | 29 passed (the 5 Unix-only tests are not compiled there) |
+| WSL2 | not run: it runs the same Unix code as Linux, and nothing in this phase depends on the filesystem type |
+
+The Windows run includes `begin` with the reopen-after-rename fix, which the
+first draft would have failed.
+
+Two caveats:
+
+- `storage::tests::links_are_never_followed` and
+  `store::tests::a_linked_operation_directory_is_never_read` return early
+  when Windows refuses to create a symlink (no Developer Mode or privilege).
+  The pass on `build-win-native` does not show which path ran.
+- One earlier cross-check attempt failed before any test ran, because the
+  remote `just` recipe could not parse a `-E 'test(/…/)'` filter. Pass
+  substring filters instead.
+
+Not run: `just test-l2`. No terminal-facing code changed, and Phase 2 adds no
+L2 tests.
+
+Phase 2 is complete; ready for review.
+
+## Author rulings and renumbering
+
+Recorded 2026-10-12, between Phases 2 and 3. These close every item Phase 1
+left "pending confirmation"; no `human_review` is needed for them.
+
+| Item | Ruling |
+| --- | --- |
+| R1 Git association | Confirmed: option 1, as refined by S3 |
+| R2 Local observation | Confirmed: option 1 |
+| R3 Sniff budget | Confirmed: the landed contract, no flag, no retry |
+| R4 Watcher adapters | Confirmed: three native adapters; adds `inotify` and `fsevent-sys` |
+| R5 WSL drvfs | Confirmed: refuse before mutation; exit 4; no placeholder fallback |
+| Windows code 5/32 | Confirmed: from the rename after a successful `DELETE` open means in use, exit 4; from the open means permission error |
+| Exit codes before mutation (new) | Environment limits (unsupported rename, observation setup, recovery storage) exit 4; ineligible content (FIFO, device, nested mount, unsupported reparse point, submodule checkout) exits 3; exit 1 only after a move or with uncertain state |
+| Order of query and observation (new) | Observation and inventory first, then the decisive Sniff query excluding the operation's own watch handles, then binding rechecks, record, move. The spec's flowchart was corrected to match its text |
+
+The spec records these under its new **Decisions** section and moved from
+`draft-spec` to `planned`.
+
+The plan was split from 8 phases to 12 so each phase fits one session with
+at most one OS-specific FFI surface. Phase 1 and 2 text above uses the old
+numbers:
+
+| Old phase | New phase(s) |
+| --- | --- |
+| 3 | 3 |
+| 4 | 4 (rename backends), 5 (naming, association, rollback) |
+| 5 | 6 (observer type, injected observer, inotify), 7 (FSEvents), 8 (ReadDirectoryChangesW), 9 (inventory, deletion engine, final verification) |
+| 6 | 10 |
+| 7 | 11 |
+| 8 | 12 |

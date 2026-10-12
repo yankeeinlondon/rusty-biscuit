@@ -19,7 +19,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
+status: planned
 implemented: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -29,38 +29,47 @@ depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: false
 message_to_agent: |-
-  Phase 1 (rulings and spikes) is closed. Read implementation-log.md "## Phase 1"
-  before starting: its rulings supersede the plan's proposals where they differ.
-  Nothing Phase 1 found blocks Phase 2 (records, journal, typed outcomes). Two
-  inputs for Phase 2: the deletion batch bound is "one directory or 256 entries,
-  whichever is smaller", and the operation ID is a 128-bit getrandom token in
-  lowercase hex.
+  Phases 1 and 2 are closed. The plan was renumbered to 12 phases on
+  2026-10-12 (old 4 -> 4-5, old 5 -> 6-9, old 6/7/8 -> 10/11/12); the log's
+  Phase 1-2 text uses the old numbers, and its "Author rulings and
+  renumbering" section maps them. Every author decision is made: see
+  "## Decisions" below. Do not set human_review for them again.
 
-  Four decisions still need the author before the phase each one gates. Carry
-  them forward, and set human_review with plain-language items at the close of
-  Phase 3 at the latest if the author has not confirmed them:
-  (1) R1/R2/R3 are still "proceeding on the spec's recommendation" (gate
-  Phases 3-6).
-  (2) R4: notify 8.2 fails the coverage contract on every OS. Windows overflow
-  and lost watches are silent; on Linux notify drops a recursive watch when its
-  root is renamed; FSEvents drops 2,000-event bursts and delivers out of order
-  against a marker. So Phase 5 uses three focused native adapters (inotify,
-  FSEvents with FSEventStreamFlushSync, ReadDirectoryChangesW) behind one
-  internal observer type, adding the inotify (ISC) and fsevent-sys (MIT) crates.
-  (3) R5: renameat2(RENAME_NOREPLACE) returns EINVAL on WSL drvfs (/mnt/<drive>),
-  so such checkouts will be refused instead of removed (gates Phase 4).
-  (4) Windows: a directory rename blocked by an in-use subtree returns
-  ERROR_ACCESS_DENIED, the same code as an ACL denial. The ruling classifies a
-  5 or 32 from the rename call (after a successful DELETE open) as "in use"
-  (exit 4), and a 5 or 32 from the open as a permission error (gates Phase 4).
+  Read implementation-log.md "## Phase 1" (spike findings) and "## Phase 2"
+  (decisions 1-12) only as far as the phase you are running needs.
 
-  Phase 4 rules from S3: never use `git worktree move` (it replaces an existing
-  empty directory). Do a native no-replacement rename to a same-depth sibling,
-  rewrite only the admin gitdir in the record's existing link format (a
-  relative gitdir is relative to the admin directory itself), and leave the
-  .git file unchanged. The final unregister deletes content with .git last,
-  rmdirs the quarantine, and then reuses missing.rs remove_missing_record (a
-  plain `git worktree remove` of the absent path); never pass --force.
+  Phase 2 built the library contracts in worktree/lib/src/remove/: outcome.rs
+  (RemovalOutcome, OperationReport) and recovery/ (OperationId, record.rs,
+  journal.rs, lock.rs, store.rs, private storage.rs). Use them; do not add a
+  second store or lock. Facts that bear on later phases:
+  - RecoveryStore::begin is the "record intent before mutation" step. It
+    refuses while any record is pending for the same worktree record, or while
+    any record is unreadable. Phase 10 turns those refusals (StoreError::
+    Pending, StoreError::Record) into user guidance.
+  - The store flushes with storage::flush. On macOS that is plain fsync, not
+    std's F_FULLFSYNC (~25 ms a call). Do not call File::sync_all or sync_data
+    in per-batch code. The journal flushes twice per batch.
+  - Windows refuses to rename a directory with an open file anywhere inside
+    it. Close handles inside the checkout before the quarantine move.
+  - Phase 9 persists the deletion inventory with the journal. The journal
+    format (version 1) has header/intent/results lines only. Add an inventory
+    line and bump JOURNAL_VERSION, extend the reader's ordering rules (where
+    the inventory may appear), and add the new line's fields to
+    journal_robustness_matrix in recovery/store/tests.rs.
+  - Not built yet: reopening an existing journal to continue deleting after a
+    crash, and the exit-code mapping (both Phase 10;
+    OperationReport::branch_failed covers "checkout removed, branch failed").
+  - Every record field is required and nothing is nullable. A new field needs
+    matrix cells in record_robustness_matrix.
+
+  Rules from S3 (Phases 4-5): never use `git worktree move` (it replaces an
+  existing empty directory). Do a native no-replacement rename to a
+  same-depth sibling, rewrite only the admin gitdir in the record's existing
+  link format (a relative gitdir is relative to the admin directory itself),
+  and leave the .git file unchanged. The final unregister deletes content
+  with .git last, rmdirs the quarantine, and then reuses missing.rs
+  remove_missing_record (a plain `git worktree remove` of the absent path);
+  never pass --force.
 ---
 
 # Graceful removal under filesystem contention
@@ -75,10 +84,10 @@ to a unique temporary sibling and deletes there while observing both locations.
 Unexpected activity causes a recoverable stop and an accurate report of what
 was moved, deleted, retained, and changed in Git.
 
-This is planned behavior. Implementation must wait for the author to resolve
-the Git transition and observation choices in **Open Questions**. The dependent
-Sniff specification also has an unresolved timing contract; this specification
-accepts the shared scan budget recommended there, subject to that API decision.
+This is planned behavior. The author resolved the Git transition, observation,
+and platform choices on 2026-10-12; see **Decisions**. The dependent Sniff
+specification landed with the shared two-second scan budget this
+specification adopts.
 
 The existing branch-safety, file-discard consent, protected include, worktree
 identity, locked-worktree, submodule, remote-endpoint, and shell-handoff rules
@@ -218,9 +227,10 @@ Discovery is partial; FSEvents subscriptions cannot be enumerated on macOS.
 
 ```mermaid
 flowchart TD
-    A[Existing safety and consent checks] --> B[Fresh Sniff usage query]
+    A[Existing safety and consent checks] --> O[Start activity observation and capture inventory]
+    O --> B[Fresh Sniff usage query, excluding own watch handles]
     B -->|Usage observed| C[Refuse and identify processes]
-    B -->|No usage observed| D[Record intent and start activity observation]
+    B -->|No usage observed| D[Recheck bindings and record intent]
     D --> E[Move to unique sibling and verify identity and Git association]
     E --> F[Delete approved content while observing both paths]
     F -->|Unexpected activity or failure| G[Stop and preserve remnants; report recovery]
@@ -284,19 +294,19 @@ directory itself remains ineligible.
 ### Git association and rename
 
 Treat this as removal of the originally inspected checkout, preserving its
-registered/admin identity and index protections. Prefer a supported Git move
-where it satisfies the contract. Git cannot move worktrees containing submodules;
-an alternative same-filesystem rename and association update requires explicit
-verification of the target's forward/back references and all existing submodule
-and locked-worktree safeguards. Do not disguise a moved checkout as an ordinary
+registered/admin identity and index protections. Do not use `git worktree
+move`: it replaces an existing empty destination directory. Use a native
+same-filesystem rename and association update, with explicit verification of
+the target's forward/back references and all existing locked-worktree
+safeguards. Refuse checkouts containing submodules before mutation. Do not disguise a moved checkout as an ordinary
 missing worktree to bypass those checks. Avoid repair that silently mutates
 unrelated worktree records.
 
 Git's [worktree command contract](https://git-scm.com/docs/git-worktree)
 does not provide a record-only deletion mode for an existing checkout. A
 successful move therefore does not solve the interruptible-deletion requirement.
-The author must select the move and final unregister strategy under **Open
-Questions** before implementation enables deletion. If a checkout topology
+The move and final unregister strategy is decision 1 under **Decisions**.
+If a checkout topology
 cannot be moved safely, refuse before destructive work with an explanation.
 A failed native rename leaves the original intact. After a successful rename
 but failed association update, attempt a verified rollback only
@@ -420,7 +430,9 @@ that exits 3 and 4 removed nothing:
 | Situation | Exit | Required report |
 | --- | --- | --- |
 | Usage or changed approved state detected before mutation | 3 | Files, registration, and branches kept; mention any earlier link repair |
+| Content that cannot be removed safely, found before mutation (FIFO, device, nested mount, unsupported reparse point, submodule checkout) | 3 | Nothing removed; name the entry and why it is ineligible |
 | Missing wrapper, invalid/expired handoff, or Windows sharing failure before move | 4 | Nothing removed; explain the environment remedy |
+| Environment cannot support the lifecycle, found before mutation (no-replacement rename unsupported, e.g. WSL drvfs; activity observation cannot be established; recovery storage cannot be created) | 4 | Nothing removed; explain the limit and a manual alternative |
 | Activity, lost coverage, I/O failure, or uncertain state after move | 1 | Both paths, partial deletion, registration, and branches in their actual state |
 | Checkout removed, later branch action fails | 1 | Checkout removed; completed and pending branch actions identified |
 | Verified completion, or consent declined before mutation | 0 | Existing completion or cancellation report |
@@ -538,11 +550,49 @@ Successful removal adds no discovery chatter to today's report. Partial
 reports always show both locations and the saved report path, and distinguish
 "kept" from "already removed" when a later step fails.
 
-## Open Questions
+## Decisions
+
+Made by the author on 2026-10-12, after spikes S1-S3 (findings in the
+implementation log). Each was the recommendation offered.
+
+1. **Git association (R1):** option 1 below, controlled deletion with
+   registration retained. Never `git worktree move`; a native no-replacement
+   rename to a same-depth sibling plus a checked rewrite of only the admin
+   `gitdir`; content deleted with `.git` last; a final plain
+   `git worktree remove` of the absent path, never `--force`. Submodule
+   checkouts refuse (exit 3).
+2. **Local observation (R2):** option 1 below, native notifications plus one
+   inventory and targeted checks.
+3. **Sniff budget (R3):** accept the landed `query_path_usage` contract as
+   written under **Preflight and refusal**: default budget, no flag, no
+   automatic retry, typed errors matched by variant.
+4. **Watcher adapters (R4):** three focused native adapters behind one
+   internal observer type (Linux inotify, macOS FSEvents with
+   `FSEventStreamFlushSync`, Windows `ReadDirectoryChangesW`), not `notify`,
+   which loses coverage silently on every OS. Adds the `inotify` (ISC) and
+   `fsevent-sys` (MIT) crates.
+5. **WSL drvfs (R5):** a checkout on a filesystem without an atomic
+   no-replacement rename (WSL `/mnt/<drive>`) is refused before mutation with
+   exit 4 and a manual alternative. No placeholder fallback.
+6. **Windows access denied:** `ERROR_ACCESS_DENIED` (5) or
+   `ERROR_SHARING_VIOLATION` (32) from the rename, after a successful `DELETE`
+   open, is "in use" (exit 4, Sniff annotates PIDs). The same codes from the
+   open are a permission error. A rare ACL denial may be reported as in use;
+   "nothing removed" stays true.
+7. **Exit codes before mutation:** exit 1 means a move happened or state is
+   uncertain. Environment limits found before mutation exit 4; ineligible
+   content exits 3 (rows added to the exit table above).
+8. **Order:** start observation and capture the inventory first, then run
+   the decisive Sniff query excluding the operation's own watch handles, then
+   recheck bindings, record intent, and move (flowchart above). Starting
+   observation first leaves no window in which a new writer is seen by
+   neither mechanism.
+
+The options considered are kept below for the record.
 
 ### How should Git stay associated while file deletion can be stopped?
 
-**Requires author decision before implementation.** The Worktree library's
+**Decided: option 1 (see Decisions).** The Worktree library's
 [`remove_worktree`](../../lib/src/remove/mod.rs) currently lets Git delete
 the directory and unregister it in one command. This fix needs to stop between
 entries and preserve the index; merely moving the path first does not supply
@@ -592,7 +642,7 @@ repository already records that it can change unrelated broken links.
 
 ### What local observation strategy is sufficient during deletion?
 
-**Requires author decision before implementation.** Native notifications can
+**Decided: option 1 (see Decisions).** Native notifications can
 be delayed, combined, lost, or invalidated by rename. They also do not reliably
 identify the writing process. The Worktree library needs a stated minimum
 coverage contract so an implementation cannot silently treat a broken observer

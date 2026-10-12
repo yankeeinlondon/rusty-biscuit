@@ -1,7 +1,7 @@
 ---
-total_phases: 8
+total_phases: 12
 created: 2026-10-11
-phase: 1
+phase: 2
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -15,6 +15,26 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/macos.md
   - .claude/skills/os/linux.md
   - .claude/skills/worktree/remove.md
+source_files_during_phase_2:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/record.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/lock.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+docs_updated_during_phase_2:
+  - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/macos.md
 packages:
   - worktree
 ---
@@ -79,11 +99,12 @@ checkouts with a contention-aware lifecycle in the Worktree library:
    coordination is kept.
 
 The work stays inside `worktree/lib/src/remove/` (new modules proposed:
-`usage.rs`, `outcome.rs`, `recovery/`, `quarantine.rs`, `observation/`,
+`usage.rs`, `outcome.rs`, `recovery/`, `quarantine/`, `observation/`,
 `lifecycle.rs`), `worktree/cli/src/commands/remove/`, the area's docs/skills,
 and tests. Sniff is consumed as-is; no `sniff` CLI spawn, no OS process
 discovery duplicated. New dependencies are limited to what R4-R6 select
-(likely `notify` plus thin `libc`/`windows-sys` rename bindings) and must be
+(`inotify` and `fsevent-sys` for the R4 adapters, `libc` and
+`windows-sys` for rename and Windows watch bindings) and must be
 recorded in dependency docs.
 
 ### Done means
@@ -92,7 +113,7 @@ recorded in dependency docs.
       cross-OS evidence for macOS, Linux, native Windows, and WSL2 is recorded
       per the `os` skill, and `just ci-local --plan` shows no unexpected scope.
 - [ ] Every acceptance item (1-12) in the spec maps to a named test (see the
-      traceability table written in Phase 8).
+      traceability table written in Phase 12).
 - [ ] Controlled writers reproduce retained-cwd writes into the quarantine and
       absolute-path recreation at the original; both stop with preserved
       remnants, honest partial-deletion reports, and no branch operations.
@@ -126,12 +147,18 @@ validation checkpoint passes.
 | 2 | 2 | Typed outcomes; record schema + strict reader; journal format (parallel) |
 | 3 | 2 | Record store (atomic writes, permissions, lock); journal writer; robustness-matrix tests |
 | 4 | 3 | Library usage module + typed refusal; CLI refusal rendering (parallel) |
-| 5 | 4 | No-replacement rename backends (per OS, parallel); quarantine naming; association update + rollback |
-| 6 | 5 | Watcher session; deletion inventory with identity capture (parallel) |
-| 7 | 5 | Checked deletion engine + stop conditions + final verification |
-| 8 | 6 | Lifecycle orchestration; crash recovery and retry resolution |
-| 9 | 7 | CLI partial/recovery reporting, retry wiring, channel discipline |
-| 10 | 8 | Docs, skills, dependency records, cross-OS validation, CI scope review |
+| 5 | 4 | No-replacement rename backends (per OS, parallel) |
+| 6 | 5 | Quarantine naming; association update + rollback; submodule/lock refusals |
+| 7 | 6 | Observer type; injected observer; Linux inotify adapter |
+| 8 | 7, 8 | macOS FSEvents adapter; Windows ReadDirectoryChangesW adapter (concurrent) |
+| 9 | 9 | Deletion inventory (journal v2); checked deletion engine; final verification |
+| 10 | 10 | Lifecycle orchestration; crash recovery and retry resolution |
+| 11 | 11 | CLI partial/recovery reporting, retry wiring, channel discipline |
+| 12 | 12 | Docs, skills, dependency records, cross-OS validation, CI scope review |
+
+Phases were renumbered on 2026-10-12 from 8 to 12 (old 4 became 4-5, old 5
+became 6-9, old 6/7/8 became 10/11/12). Phase 1-2 text in the
+implementation log uses the old numbers.
 
 ## Phase 1: Rulings, spikes, and scaffolding decisions
 
@@ -144,7 +171,7 @@ The spec leaves these unresolved or only recommends an answer. Each needs the
 marked ruling before the phase it gates starts; outcomes and author overrides
 are recorded in `implementation-log.md` and the spec file stays unchanged.
 
-- [x] **R1 - Git association strategy (author decision; gates Phases 4-6).**
+- [x] **R1 - Git association strategy (author decision, confirmed 2026-10-12; gates Phases 4-10).**
       The spec's first Open Question. This plan proceeds on the recommended
       **Option 1: controlled deletion with registration retained** — a move
       backend that enforces no replacement and verifies the same admin links
@@ -157,7 +184,7 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       checkouts initially refuse; the final unregister step carries the
       identity/recreation/index checks. Options 2 and 3 weaken the contract
       and are rejected unless the author overrides.
-- [x] **R2 - Local observation strategy (author decision; gates Phase 5).**
+- [x] **R2 - Local observation strategy (author decision, confirmed 2026-10-12; gates Phases 6-9).**
       The spec's second Open Question. Proceed on the recommended
       **Option 1: native notifications plus one inventory and targeted
       checks**. Unusable local observation refuses before mutation as an
@@ -165,14 +192,14 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       permits continuation). Options 2 (polling) and 3 (repeated hashing)
       reduce protection or re-read ignored build output and are rejected
       unless the author overrides.
-- [x] **R3 - Sniff latency contract (author confirmation; gates Phase 3).**
+- [x] **R3 - Sniff latency contract (author confirmation, given 2026-10-12; gates Phase 3).**
       `wt` adopts `query_path_usage` under the dependent spec's finalized
       Option 1: the two-second budget stops scheduling work; a native call
       already running may overrun it; no scanning threads outlive the query.
       The fix spec already accepts this subject to that API decision, which
       landed as Option 1 — confirm and record. Typed `PathUsageError`s are
       matched by variant, never by message text.
-- [x] **R4 - Watcher adapter (planning ruling from spike S2; gates Phase 5).**
+- [x] **R4 - Watcher adapter (planning ruling from spike S2, confirmed 2026-10-12; gates Phases 6-8).**
       Proposed default: the maintained portable adapter `notify` 8 with its
       per-backend capabilities recorded, or focused native adapters where
       `notify` cannot surface overflow/lost-watch or rename invalidation.
@@ -233,12 +260,12 @@ are recorded in `implementation-log.md` and the spec file stays unchanged.
       file-side query already measured in the dependent feature's log). Any
       wider measurement (deletion throughput on very large trees, watcher
       overhead) is the author's separate decision; none is scheduled here.
-- [x] **R11 - CI scope (planning ruling; verified in Phase 8).** All new tests
+- [x] **R11 - CI scope (planning ruling; verified in Phase 12).** All new tests
       are self-contained in temp directories with fixture-owned child
       processes and stand-in remotes; no `[package.metadata.ci.tests]
       source-inputs`, no prompts, no terminal focus. Verify with
       `just ci-local --plan` before pushing.
-- [x] **R12 - Self-exclusion mechanics (planning ruling; gates Phase 3/5).**
+- [x] **R12 - Self-exclusion mechanics (planning ruling; gates Phases 3 and 6).**
       Exclusions are matched by specifically identified operation-owned
       handles (the current `wt` process's own watcher/session handles,
       registered when created) using PID plus process-lifetime identity where
@@ -266,7 +293,7 @@ ruling it feeds (R4, R5, R6). Hosts follow the `os` skill.
       overflow and lost watches surfaced; can the admin dir's `index` and
       `sharedindex.*` be watched alongside the tree; what happens at
       platform watch limits; what is the bounded-queue behavior? Gates R4 and
-      Phase 5.
+      Phases 6-8.
 - [x] **S3 - Git move and final-unregister semantics (host: macOS, current
       Git).** Question: does `git worktree move` satisfy the no-replacement
       and scoped-update contract (which files it rewrites, how it refuses
@@ -291,7 +318,7 @@ ruling it feeds (R4, R5, R6). Hosts follow the `os` skill.
       subagent briefs repeat that the session tree is non-interactive.
 
 Checkpoint: R1-R3 answered or explicitly accepted as "proceeding on
-recommendation"; R4-R6 decided by S1-S3 and logged. Do not start Phase 4 or 5
+recommendation"; R4-R6 decided by S1-S3 and logged. Do not start Phases 4-9
 work without them.
 
 ## Phase 2: Recovery records, journal, and typed outcomes (library contracts)
@@ -302,7 +329,7 @@ yet; everything is exercisable against temp directories.
 
 ### Wave 2 (parallel)
 
-- [ ] **Typed outcomes** - `outcome.rs`: the operation-level outcome enum
+- [x] **Typed outcomes** - `outcome.rs`: the operation-level outcome enum
       (`usage_refused`, `removed`, `activity_detected`, `cleanup_failed`,
       `state_unverified`), the moved/deleted/retained state description, and
       the operation report model (timeline, discovery evidence with coverage,
@@ -311,7 +338,7 @@ yet; everything is exercisable against temp directories.
       user-facing JSON CLI option.
       - Complexity: the report doubles as the persisted `report.json`; keep
         the serde model versioned from the start.
-- [ ] **Record schema and reader** - `recovery/record.rs`: serde model binding
+- [x] **Record schema and reader** - `recovery/record.rs`: serde model binding
       operation ID, original/quarantine native paths and identity,
       repository/admin identity, branch and approved tip, consent fingerprint,
       discovery report, requested name and aliases, intended actions, record
@@ -321,7 +348,7 @@ yet; everything is exercisable against temp directories.
       duplicate JSON keys, and trailing content; validate the storage
       directory without following replacement links.
       - Prerequisite: R7.
-- [ ] **Journal format** - `recovery/journal.rs`: the entry model
+- [x] **Journal format** - `recovery/journal.rs`: the entry model
       distinguishing planned, confirmed operation-owned deletions, externally
       absent, and uncertain attempted deletions, with types (file, directory,
       link) and directory-entry-deletion vs bytes-destroyed wording retained
@@ -330,18 +357,18 @@ yet; everything is exercisable against temp directories.
 
 ### Wave 3 (parallel; depends on Wave 2 types)
 
-- [ ] **Record store and lock** - `recovery/store.rs` + `lock.rs`: atomic
+- [x] **Record store and lock** - `recovery/store.rs` + `lock.rs`: atomic
       write with owner-restricted permissions and fsync (R7's primitive,
       crash guarantees documented at the module level); OS-backed exclusive
       lock via the existing `fs4` dependency keyed by repository/admin
       identity, held for the operation's duration; pending-record detection;
       completion persistence and journal clearing with the bookkeeping-warning
       path when clearing fails.
-- [ ] **Journal writer** - Persistence of batch intent before unlinking and
+- [x] **Journal writer** - Persistence of batch intent before unlinking and
       confirmed results afterward per R7's fsync points; the crash window
       between unlink and result persistence recovers as `uncertain`; append
       and fsync behaviors tested against injected write failures.
-- [ ] **Robustness matrix tests** - One test per format (record, journal)
+- [x] **Robustness matrix tests** - One test per format (record, journal)
       walks the matrix below from a real fixture written by the code's own
       writer, one edit per cell, asserting through the public
       validate/recover outcome (never the parser's return value), plus a
@@ -396,7 +423,7 @@ tests green on macOS; record/journal code compiles for all targets
   with coverage retained for the operation report. Injection seam (like the
   existing `PrSource` pattern) so policy tests never depend on host
   watchers.
-      - Prerequisites: R3, R12; the decisive call site lands in Phase 6's
+      - Prerequisites: R3, R12; the decisive call site lands in Phase 10's
         orchestration, behind this module's seam from the start.
 - [ ] **CLI refusal rendering** - In `cli/src/commands/remove/`: render the
       typed refusal through `biscuit-terminal` `Prose` per the spec's example
@@ -414,76 +441,145 @@ root-error × exclusion rules; CLI rendering snapshot-tested (in an
 integration test, per the double-target trap in the worktree skill); exits 3
 and 4 still remove nothing.
 
-## Phase 4: Quarantine move and Git association
+## Phase 4: No-replacement rename backends
 
-### Wave 5 (parallel)
+Small and self-contained: one FFI surface per OS behind one function. Nothing
+here touches Git.
 
-- [ ] **Rename backends** - `remove/quarantine.rs` with per-OS primitives
-      (R5): no-replacement atomic rename, returning typed error kinds
-      (collision / sharing violation (Windows) / cross-device / permission /
-      other I/O). Per-OS tests: an existing destination is never replaced; a
-      failed rename leaves the original intact; identity survives the move;
-      a multi-step mover inspects both locations before claiming the original
-      was kept.
-      - Prerequisite: R5 (S1).
+### Wave 5 (per-OS backends in parallel)
+
+- [ ] **Rename backends** - `remove/quarantine/rename.rs` with per-OS
+      primitives (R5): Linux `renameat2(RENAME_NOREPLACE)`, macOS
+      `renamex_np(RENAME_EXCL)`, Windows `SetFileInformationByHandle`
+      (`FileRenameInfo`, `ReplaceIfExists = FALSE`) after a `DELETE` open.
+      Typed error kinds: collision, unsupported (`EINVAL`, e.g. WSL drvfs),
+      cross-device, permission, Windows sharing (5/32 from the rename after a
+      successful open; 5/32 from the open is permission), other I/O. Windows
+      directory identity from `GetFileInformationByHandleEx(FileIdInfo)`.
+      Adds `windows-sys` 0.61 (workspace version) for Windows.
+- [ ] **Tests** - Per OS: an existing destination (empty directory, file,
+      non-empty directory, dangling link) is never replaced; a failed rename
+      leaves the original intact; identity survives the move; each error kind
+      maps as above. Windows: an open file in the subtree yields the sharing
+      kind.
+
+Checkpoint: rename tests green on macOS locally and on Linux and native
+Windows via `just cross-check worktree --os <os> quarantine` (substring
+filters, not `-E`); WSL2 runs the Linux code (drvfs `EINVAL` covered by an
+injected error). `just test` and `just lint` pass.
+
+## Phase 5: Quarantine naming, Git association, and rollback
+
+### Wave 6
+
 - [ ] **Quarantine naming** - Collision-resistant hidden sibling selection
-      (`.wt-remove-<slug>-<token>` beside the target, per R7's Windows
-      hidden-attribute note); same-filesystem by construction; never a global
-      temp dir; never copy-and-delete; the destination is created only by the
-      no-replacement move itself.
+      (`.wt-remove-<slug>-<token>` beside the target, same depth;
+      `FILE_ATTRIBUTE_HIDDEN` on Windows per R7); same filesystem by
+      construction; never a global temp dir; never copy-and-delete; the
+      destination is created only by the Phase 4 move itself.
 - [ ] **Association update and rollback** - Under R1/R6: re-list and validate
       lock status and admin/checkout links immediately before moving; perform
-      the move; update exactly the target's own links with verification of
-      forward/back references (or the verified `git worktree move`); never
-      unlock a locked worktree, never repeat `--force`; refuse submodule and
-      unsupported topologies before any mutation with the documented
-      explanation. After a successful rename but failed association update:
-      verified rollback only when the original path is still absent, no
-      destructive work occurred, and no unexpected activity was observed;
-      otherwise preserve the quarantine and report actual state. Map the
-      Windows sharing failure to exit 4; permission/collision/other I/O to
-      operational errors explicitly not labeled as process usage.
-      - Prerequisite: R1, R6 (S3); overlaps the rename backend task only at
-        the interface, so it can develop against a manual move.
+      the move; rewrite exactly the admin `gitdir` in the record's existing
+      format (absolute, or relative to the admin directory itself), verified
+      by reading it back with Git; leave the `.git` file unchanged and refuse
+      a record whose `.git` file would need rewriting; never unlock a locked
+      worktree, never pass `--force`; refuse submodule checkouts and
+      unsupported topologies before any mutation (exit 3). After a successful
+      rename but failed association update: verified rollback only when the
+      original path is still absent, no destructive work occurred, and no
+      unexpected activity was observed; otherwise preserve the quarantine and
+      report actual state. Unsupported rename (drvfs) is exit 4 before
+      mutation; the Windows sharing kind is exit 4; collision, permission,
+      and other I/O are operational errors never labeled as process usage.
 
-Checkpoint: per-OS rename tests green (macOS locally; Windows/Linux legs
-exercised per the `os` skill or their CI environment); association tests show
-Git reading the quarantine under its retained registration, submodule and
-locked-worktree refusals with nothing changed, and rollback rules holding;
-acceptance item 5's rename-collision/failure cases pass.
+Checkpoint: association tests show Git reading the quarantine under its
+retained registration (absolute and relative link formats, Git 2.47 and
+current), `prune --dry-run` leaving it alone, submodule and locked-worktree
+refusals with nothing changed, and rollback rules holding; acceptance item
+5's rename collision/failure cases pass.
 
-## Phase 5: Activity observation and checked deletion
+## Phase 6: Observer type, injected observer, and Linux inotify adapter
 
-### Wave 6 (parallel)
+Fixes the observer contract that Phases 7-9 build on.
 
-- [ ] **Watcher session** - `remove/observation/watcher.rs` per R4: bounded
-      queues; watch the original's parent (recreation), the captured
-      checkout/quarantine (descendant activity) with explicit handling of
-      platform watch invalidation across the rename, and the admin-dir files
-      behind the target's identity and approved index (split-index and entry
-      flags included). Overflow, lost watches, and unestablishable
-      observation are surfaced as lost coverage — never a silent downgrade;
-      the session registers its handles with Phase 3's exclusion registry;
-      events carry receipt times and are matched narrowly by path, kind, and
-      captured identity, with operation-owned rename/unlink/metadata events
-      distinguished from unexplained creates, replacements, and
-      modifications; parent events outside the two target trees do not stop
-      removal.
-      - Prerequisite: R2, R4 (S2).
+### Wave 7
+
+- [ ] **Observer type** - `remove/observation/mod.rs`: one internal observer
+      type per R4 with: watch the original's parent (recreation), the
+      checkout/quarantine (descendant activity), and the admin files behind
+      the target's identity and approved index (`index`, `index.lock`,
+      `sharedindex.*`, `HEAD`, `gitdir`, `locked`); `relabel` when the
+      operation reports its own move; `drain` (a barrier: every event
+      caused before the call has been delivered); a bounded queue fed by a
+      never-blocking handler (a full queue is lost coverage); events carrying
+      receipt times; lost coverage (overflow, lost watch, setup failure) as a
+      typed signal, never a silent downgrade; handle registration with Phase
+      3's exclusion registry; no thread left after the session ends.
+      Unestablishable observation is exit 4 before mutation.
+- [ ] **Injected observer** - A test observer driven by the test (events,
+      overflow, lost watch, delayed delivery) so Phase 9's engine and the
+      policy tests never depend on host timing.
+- [ ] **Linux adapter** - inotify via the `inotify` 0.11 crate (ISC): parent
+      non-recursive, checkout recursive, admin directory; watch descriptors
+      follow inodes across the move (relabel, no gap); `IN_Q_OVERFLOW` and an
+      unexpected `IN_IGNORED` are lost coverage; drain is a marker per root
+      read until `EAGAIN`; `EMFILE` at the instance limit is a setup failure.
+
+Checkpoint: observer contract tests run against the injected observer and
+the Linux adapter (on `build-linux` and WSL2); `just test` and `just lint`
+pass on macOS (the adapter is `cfg`-gated, the contract compiles everywhere).
+
+## Phase 7: macOS FSEvents adapter
+
+### Wave 8 (Phases 7 and 8 may run concurrently)
+
+- [ ] **macOS adapter** - FSEvents via `fsevent-sys` 4.1 (MIT): one stream
+      covering the checkout and quarantine paths (path-based, so the move
+      does not invalidate it), the parent, and the admin directory; nonzero
+      latency with file events (not `NoDefer`); drain is
+      `FSEventStreamFlushSync`, never a marker; `MustScanSubDirs` and either
+      `Dropped` flag are lost coverage; event kind alone never classifies an
+      operation-owned unlink (coalesced flags); the run-loop thread is stopped
+      and joined when the session ends, and drop never blocks on a full
+      queue. No self-exclusion entry is needed (fseventsd holds the watch).
+
+Checkpoint: the Phase 6 contract tests pass against the FSEvents adapter on
+macOS, including a 2,000-file burst that must surface as lost coverage or
+deliver completely, never silently partial.
+
+## Phase 8: Windows ReadDirectoryChangesW adapter
+
+- [ ] **Windows adapter** - `ReadDirectoryChangesW` via `windows-sys` 0.61:
+      the parent with the subtree flag (one handle; S1 shows it does not block
+      the move) and the admin directory; a large buffer on local volumes; a
+      zero-byte completion, `ERROR_NOTIFY_ENUM_DIR`, or any completion error
+      other than the session's own cancel is lost coverage; drain is a marker
+      (FIFO per handle); the admin handle is closed before the final
+      unregister. Verify whether an open watch handle leaves a deleted
+      directory delete-pending, and record the answer in the `os` skill.
+
+Checkpoint: the Phase 6 contract tests pass against the Windows adapter on
+`build-win-native`, including the overflow case S2 showed `notify` hiding.
+
+## Phase 9: Deletion inventory, checked deletion engine, and final verification
+
+Built and tested against the injected observer first, then run against each
+real adapter.
+
+### Wave 9
+
 - [ ] **Deletion inventory** - `remove/observation/inventory.rs`: after
-      observation is active and before moving, capture every entry approved
-      for deletion (ignored content included, FIFOs/devices detected as
-      ineligible rather than opened), per-entry native identity, type,
-      relevant metadata, and link target; content hashes for the existing
-      consent-sensitive fingerprint paths via the existing
-      fingerprint/`biscuit-hash` machinery; never directory mtime or entry
-      count alone; a finishing consistency check refuses before mutation if
-      entries changed or cannot be inspected; persist the inventory with the
-      journal before the move so restart recovery can compare retained
-      entries to their original identities.
-
-### Wave 7 (depends on Wave 6)
-
+      observation is active and before the decisive usage query and the move,
+      capture every entry approved for deletion (ignored content included,
+      FIFOs/devices/nested mounts detected as ineligible, exit 3, rather than
+      opened), per-entry native identity, type, relevant metadata, and link
+      target; content hashes for the existing consent-sensitive fingerprint
+      paths via the existing fingerprint/`biscuit-hash` machinery; never
+      directory mtime or entry count alone; a finishing consistency check
+      refuses before mutation if entries changed or cannot be inspected.
+      Persist it with the journal before the move: add an inventory line,
+      bump `JOURNAL_VERSION`, extend the reader's ordering rules, and add the
+      line's fields to `journal_robustness_matrix`.
 - [ ] **Checked deletion engine** - `remove/observation/deletion.rs`:
       children-first, bounded batches (R7), cap-std parent-directory handles
       and relative operations (no following links; an approved link itself
@@ -491,41 +587,45 @@ acceptance item 5's rename-collision/failure cases pass.
       immediately before unlink, drain and inspect exact affected paths
       between batches and after the final batch, stop before deleting a
       newly appeared or detectably changed entry (modifications and
-      replacements of existing files included), record an externally
-      disappeared approved entry as already absent while an unexplained
-      disappearance stops the operation, journal updates at each boundary,
-      and `.git` plus the administrative index kept until ordinary content
-      cleanup finishes where the chosen strategy permits. No arbitrary sleep
-      as proof, no retry-until-the-writer-loses.
-- [ ] **Final verification** - Both locations checked (quarantine absence,
-      no original-path recreation through the final observation drain and
-      identity/inventory checks); index bytes and Git's interpreted entries
-      re-bound to the approved state before unregistering; the report states
-      the concurrent-write limit and identifies already deleted content.
+      replacements included), record an externally disappeared approved
+      entry as already absent while an unexplained disappearance stops the
+      operation, journal updates at each boundary, and `.git` deleted last.
+      No arbitrary sleep as proof, no retry-until-the-writer-loses.
+- [ ] **Final verification** - `rmdir` of the quarantine root (fails if
+      anything reappeared); both locations checked (quarantine absence, no
+      original-path recreation through the final drain and identity checks);
+      index bytes and Git's interpreted entries re-bound to the approved
+      state; then `missing.rs` `remove_missing_record`. The report states the
+      concurrent-write limit and identifies already deleted content.
 
 Checkpoint: controlled-writer tests (child readiness handshakes, never
 sleeps; guaranteed cleanup of children, handles, and watches on failure)
 reproduce retained-cwd writes into the quarantine and absolute-path
 recreation at the original, both stopping with preserved remnants and honest
-reports; overflow/invalidation injection stops with lost coverage; structural
-checks (no whole-tree rescan per entry, no unconditional hashing) hold;
-acceptance items 3 and 4 pass at library level.
+reports, on macOS, Linux, and native Windows; overflow/invalidation injection
+stops with lost coverage; structural checks (no whole-tree rescan per entry,
+no unconditional hashing) hold; acceptance items 3 and 4 pass at library
+level.
 
-## Phase 6: Lifecycle orchestration, crash recovery, and retry
+## Phase 10: Lifecycle orchestration, crash recovery, and retry
 
-### Wave 8 (parallel tasks, integrated at the phase checkpoint)
+### Wave 10 (parallel tasks, integrated at the phase checkpoint)
 
 - [ ] **Operation lifecycle** - `remove/lifecycle.rs`: one flow binding the
       existing guards/preparation/questions/fingerprint checks, the fresh
       usage query (Phase 3), durable record creation (Phase 2), the move
-      (Phase 4), checked deletion and final verification (Phase 5), the
+      (Phases 4-5), checked deletion and final verification (Phases 6-9), the
       targeted unregister, branch and remote actions only after verified
       checkout completion (existing expected-tip and endpoint rules), copy
       record removal only after verification, completion persistence before
       clearing pending state, and interruption handling at entry boundaries.
-      Typed outcomes feed the exit-code mapping (R9) and the operation
-      report.
-      - Prerequisite: Phases 2-5.
+      Order (spec decision 8): observation and inventory, then the decisive
+      usage query excluding the operation's own watch handles, then the
+      binding rechecks, `RecoveryStore::begin`, and the move. Typed outcomes
+      feed the exit-code mapping (R9 plus spec decision 7: environment limits
+      before mutation exit 4, ineligible content exit 3, exit 1 only after a
+      move or with uncertain state) and the operation report.
+      - Prerequisite: Phases 2-9.
 - [ ] **Crash recovery** - On any start, a pending record blocks a new
       operation on the same target; restart inspects actual state to resolve
       the interrupted phase and never treats a saved completed-phase value as
@@ -556,9 +656,9 @@ unregistering works by original name; changed identities, new content, and
 ambiguous reuse refuse; completed records never authorize a second removal;
 acceptance items 6, 7 (recovery half), 10, and 11 pass at library level.
 
-## Phase 7: CLI reporting and recovery UX
+## Phase 11: CLI reporting and recovery UX
 
-### Wave 9
+### Wave 11
 
 - [ ] **Wire the operation** - `cli/src/commands/remove/`: `execute`'s
       healthy-checkout path calls the lifecycle instead of
@@ -592,9 +692,9 @@ Checkpoint: acceptance items 1, 2, 8, 9 pass through the real binary;
 existing remove/handoff/wrapper tests still green; `just test`, `just
 test-l2`, `just lint` pass locally.
 
-## Phase 8: Docs, skills, and cross-OS validation
+## Phase 12: Docs, skills, and cross-OS validation
 
-### Wave 10 (parallel)
+### Wave 12 (parallel)
 
 - [ ] **Docs** - Rewrite `worktree/docs/cli/remove.md`'s planned section into
       current behavior (exit-code meanings, eligible topologies and
