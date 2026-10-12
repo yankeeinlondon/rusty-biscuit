@@ -386,6 +386,11 @@ the ones that cost time.
   `Option` and no `serde(default)`. A detached checkout is the enum value
   `"detached"`, not a null branch. Sniff's internally tagged `FileIdentity`
   refuses an integer `kind` and a repeated inner key (both are matrix cells).
+- **Journal (version 2):** line 2 is the operation-start `DeletionInventory`,
+  written by `begin` in the staging directory, so an operation always has
+  one. A batch may only plan inventory entries, with the same kind; the
+  reader refuses anything else. The size limit counts batch lines only (the
+  inventory is as large as the checkout).
 - **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
   worst-case results line for the batch would still fit, so a confirmation is
   never lost to the size limit. An unterminated last line is a torn write and is
@@ -396,7 +401,9 @@ the ones that cost time.
   `RecoveryStore::recover`. A cell rewrites its file with `fs::write`, not
   `write_durable`, to skip the flush.
 - `OperationReport` is written, never read back by `wt`. Its lists are capped
-  (`MAX_REPORTED_ACTIVITY`, `MAX_REPORTED_RETAINED`) with exact omitted counts.
+  (`MAX_REPORTED_ACTIVITY`, `MAX_REPORTED_RETAINED`, `MAX_REPORTED_DELETED`)
+  with exact omitted counts. `OperationReport::record_deletion` adds
+  `ReportNote::ConcurrentWriteLimit` once anything was deleted.
   The journal is never truncated. The exit-code mapping is not in `outcome`;
   the lifecycle owns it, because exits 4 and cancel-0 are not operation
   outcomes.
@@ -458,8 +465,8 @@ or a recovery record.
 `<parent>/.wt-remove-<ascii-slug>-<first 16 hex of the operation id>`.
 `plan_move` checks and fixes it; `move_to_quarantine(base, &plan,
 activity_observed)` re-runs every check, renames, rewrites the admin `gitdir`,
-and verifies with a fresh `git worktree list`. Phase 10 writes the recovery
-record between the two calls.
+and verifies with a fresh `git worktree list`. The lifecycle writes the
+recovery record between the two calls ([lifecycle.md](lifecycle.md)).
 
 - **Only the admin `gitdir` is rewritten, byte for byte except the checkout's
   name** (`rewrite_back_reference`): absolute or relative, separators, and
@@ -490,9 +497,15 @@ record between the two calls.
   so `plan.original`) is `/private/var/…`; compare with `same_location` or
   with `plan.original`, never with the path `add_worktree` returned.
 
-## Activity observer
+## Activity observer, deletion inventory, and checked deletion
 
-See [observation.md](observation.md).
+See [observation.md](observation.md). The final unregister
+(`quarantine::unregister::unregister_quarantine`) drains once more, confirms
+both paths are empty, re-binds the index and HEAD with
+`missing::IndexBinding` (taken by `bind_index` before the move), releases the
+admin watch, and calls `missing::remove_missing_record` for the quarantine's
+registration. That deletes the copy record keyed by the quarantine path, not
+the original's; the lifecycle removes the original's copy record.
 
 ## Tests
 

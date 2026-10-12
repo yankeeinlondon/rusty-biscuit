@@ -1,8 +1,9 @@
 # Activity observer (`remove::observation`)
 
 The watcher `wt remove` runs from before the quarantine move until the
-removal ends (`2026-10-05-graceful-file-contention`, Phases 6-9). User-facing
-behavior is in `worktree/docs/cli/remove.md`.
+removal ends, and the deletion inventory and checked deletion engine built on
+it (`2026-10-05-graceful-file-contention`, Phases 6-9). User-facing behavior
+is in `worktree/docs/cli/remove.md`.
 
 `Observation::start(Targets::new(original, quarantine, admin)?, options)`
 watches the parent (only the original's and the quarantine's names), every
@@ -63,7 +64,7 @@ deletion engine decides which are the operation's own.
   - Stream registration is serialized by fseventsd: concurrent test streams
     each took up to 5 s to start, so the macOS native tests run in the
     nextest group `fsevents-l1` (`max-threads = 1`, `.config/nextest.toml`).
-    Name a new native test `native_*` in `observation/tests.rs` or put it in
+    Name a new native test `native_*` (any `remove::…` module) or put it in
     `fsevents/tests.rs` so the group's filter selects it.
 - **Windows (`read_directory_changes.rs`)** opens two overlapped
   `ReadDirectoryChangesW` handles, the parent with the subtree flag (1 MiB
@@ -102,6 +103,11 @@ deletion engine decides which are the operation's own.
 - `Sink::push` and its `targets` field carry `expect(dead_code)` off Linux
   (macOS and Windows feed `EventQueue`, not the sink), so an adapter that
   pushes into the sink must widen it.
+- **A resumed removal starts with the tree already moved:**
+  `Observation::start_at_quarantine` (each adapter's `start` takes the tree's
+  current location: inotify watches it, FSEvents resolves it, and
+  `ReadDirectoryChangesW` requires it and maps the parent's entries from
+  `moved = true`). Tests use `Observation::injected_at_quarantine`.
 - **Test seams:** `Observation::injected(targets, options)` returns an
   `Injector` (`event`, `delayed`/`deliver_delayed`, `overflow`, `lose_watch`,
   `hold_handle`) feeding the same `EventQueue` a threaded adapter uses.
@@ -109,3 +115,52 @@ deletion engine decides which are the operation's own.
   `inotify/tests.rs`; FSEvents flags through `Shared::deliver` in
   `fsevents/tests.rs`. A real `IN_Q_OVERFLOW` needs `max_queued_events` ≤ 32,768:
   WSL2 has 16,384 and runs it; build-linux (8,388,608) skips it.
+
+## Deletion inventory and engine (`inventory.rs`, `deletion.rs`)
+
+The order a caller follows (`remove::lifecycle` runs it; see
+[lifecycle.md](lifecycle.md)): consent and `Inventory::consent_sensitive_paths()` first (they run
+`git status`, which may rewrite the index), then `Observation::start`,
+`DeletionInventory::capture(original, &sensitive)`, `confirm(original,
+&observation.drain())`, `missing::bind_index`, `RecoveryStore::begin(lock,
+record, Arc<inventory>)` (the inventory is journal line 2), the move,
+`moved_to_quarantine()`, then `delete_content` and `unregister_quarantine`.
+
+- **The move's own events reach the next drain:** `Original("")` moved away,
+  `Quarantine("")` moved in, and `Admin("gitdir")` from the association
+  rewrite. The engine explains the first two by kind and absence; an admin
+  event is always activity to it, so the lifecycle must drain after the move
+  and check the `gitdir` bytes before calling `delete_content`.
+- **Compared fields:** identity, type, and for files size, mtime, permission
+  bits (Windows: read-only/hidden/system), plus BLAKE3 for consent-sensitive
+  files; a link's target. Never ctime or link count: deleting one Cargo hard
+  link (`target/debug/<bin>` ↔ `deps/`) changes both on the other. Never a
+  directory's mtime: the operation's own deletions change it.
+- **Identity on Windows is by path** (`rename::identity`, 128-bit file ID),
+  one handle open per entry in both capture and revalidation; a directory
+  handle's identity uses `rename::handle_identity`. That costs about 0.5 ms an
+  entry on build-win-native (600 files took ~1.2 s per test); keep Windows
+  fixtures small.
+- **Drains are per depth level** (plus every `DEFAULT_DRAIN_EVERY` = 2,048
+  entries), never per batch or entry: a macOS drain is ~11 ms. Journal batches
+  stay one directory, at most 256 entries. `.git` and everything under it are
+  deleted after all other content.
+- **Event resolution is by exact path, not kind:** a path the engine deleted
+  must be absent, and its kinds must be `Removed`/`Metadata` (`Modified` too
+  for a directory, which Windows reports when its children go). With
+  `DeletionOptions::cumulative_kinds` (default on macOS) any kinds that
+  include `Removed` (or, at the original, `MovedFrom`) are the deletion's
+  history. A write-like kind otherwise is `Stop::Uncertain`. An approved entry
+  not yet reached is re-checked against the inventory. Anything else is
+  activity.
+- **Found the hard way (macOS):** FSEvents reported the original path's move
+  with a `Created` flag from the fixture's creation moments earlier, so the
+  native tests stopped on their own move until `own_move` applied the
+  cumulative rule there too.
+- **Test seams:** `delete_content_with(.., before_batch)` acts at a known
+  batch; `Injector::drains()` counts drains for the structural test.
+  `test_support::link_dir` makes a directory symlink, or on Windows a
+  junction when symlinks need Developer Mode. Controlled writers are `sh`/`cmd`
+  children that read a line, act, and print `done` (`Writer` in
+  `deletion/tests.rs`). The nextest group `fsevents-l1` selects every
+  `remove::…::native_*` test.

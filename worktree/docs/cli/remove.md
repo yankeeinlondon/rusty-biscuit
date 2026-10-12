@@ -60,8 +60,8 @@ every earlier change been reported. A check that is not confirmed within 5
 seconds counts as lost coverage, and so does the folder holding the checkout,
 or Git's record of the worktree, being moved or deleted while watching runs.
 macOS can report a folder's removal or rename in place of changes inside it
-that happened just before, so `wt` checks for activity before each such step
-of its own (**planned**: the deletion steps that need it are not built yet).
+that happened just before, so `wt` checks for activity after deleting a
+folder's contents and before removing the folder itself.
 
 On Windows, watching uses one watch on the folder holding the checkout,
 covering everything below it, and one on Git's record of the worktree.
@@ -77,11 +77,65 @@ Git's record before the step that removes it, so that step is never blocked.
 Windows reports a change to a file's attributes the same way as a change to its
 content. On a ReFS volume (such as a Dev Drive), a folder deleted by some
 tools is not reported at all. `wt` therefore checks every entry again
-before deleting it (**planned**: the deletion steps are not built yet).
+before deleting it.
 
-Deletion and observation cannot be atomic with all possible writers. A report
-will identify partial deletion and coverage limits rather than promise that
-every concurrent write was preserved.
+Before moving anything, `wt` lists everything it is about to delete,
+including ignored build output: each file, folder, and link with its identity
+on disk, size, modification time, and permissions, and a link's target. Only
+the files you were asked about (changed, untracked, and protected included
+files) are also hashed; ignored output is never read. If anything changes
+while the list is taken, or an entry is a FIFO, socket, device, mount point,
+or unsupported reparse point, nothing is moved and `wt` exits 3. The list is
+saved in the removal's recovery record before the move, so a later retry can
+compare what is left with what was approved.
+
+Deletion then works from the deepest folders up, `.git` last:
+
+```mermaid
+flowchart TD
+    L[Next level, deepest first] --> R[Recheck each entry against the list]
+    R -->|Matches| U[Delete it; record the result]
+    R -->|Changed, new, or gone| S[Stop; keep it and everything not yet deleted]
+    U --> C[After the level: check every reported change]
+    C -->|Only its own deletions| L
+    C -->|Anything else| S
+    L -->|No levels left| F[Remove the hidden folder; confirm both paths are empty]
+```
+
+- Every entry is compared with the list immediately before it is deleted, by
+  identity and metadata, and a hashed file by its content. A file that grew,
+  was rewritten, or was replaced stops removal and is kept. So does a file
+  that someone else already deleted: it is recorded as already absent, never
+  as deleted by `wt`.
+- Folders are opened one at a time from the checkout down, and each is checked
+  to be the folder in the list. A folder replaced by a link is never entered,
+  so nothing outside the checkout is deleted. A link in the checkout is
+  deleted itself; its target is untouched.
+- Reported changes are checked after each level (and after every 2,048
+  entries): a change at a path `wt` deleted must still be a deletion, a
+  change to an entry not yet reached must leave it matching the list, and
+  anything else at either location, or in Git's record of the worktree, stops
+  removal. A folder whose contents are gone but which cannot be removed (a new
+  file appeared in it) also stops removal.
+- Each batch of up to 256 entries from one folder is written to the
+  recovery record before it is deleted, and its results after. A crash between
+  the two leaves those entries marked uncertain, not deleted.
+- When the hidden folder is gone, `wt` confirms that nothing exists at either
+  path, checks that Git's record of the worktree still has the index and
+  `HEAD` that were approved (a change staged after you answered is new work),
+  stops watching that record, and only then unregisters the worktree with
+  `git worktree remove`.
+
+For example, if an editor still running in `checkout/target` writes
+`build.log` after the move, the file appears in
+`.wt-remove-checkout-<token>/target/`; the next check finds it, and removal
+stops with `target/build.log` and every entry not yet deleted still in place.
+
+Deletion and observation cannot be atomic with all possible writers: a write
+that lands between an entry's last check and its deletion is deleted with it,
+and a writer can start after the final check. Every report of a removal that
+deleted anything states this limit and lists the entries it deleted, rather
+than promise that every concurrent write was preserved.
 
 Some checkouts will be refused before anything changes:
 
@@ -103,6 +157,49 @@ Some checkouts will be refused before anything changes:
 
 Exits 3 and 4 will keep meaning "nothing removed". A stop after the checkout
 has moved exits 1, even if no file was deleted yet.
+
+Each removal keeps its state in `<git-common-dir>/wt-removal/<operation-id>/`:
+`record.json` (what the removal set out to do), `journal.jsonl` (the list of
+approved entries, then each deletion batch), and `report.json` (the full
+report). While the record is pending, starting another removal of the same
+worktree exits 3. A completed record keeps `record.json` and `report.json`
+for reference, never authorizes another removal, and its journals are
+deleted.
+
+A retry uses the name you removed, even when Git no longer lists anything by
+that name (while the checkout is moved, Git lists it at the hidden path; after
+the checkout is gone, not at all). The name is matched against live worktrees
+and pending removals together. If it matches a pending removal and a
+different live worktree, for example a new worktree created at the original
+path or one that now has the old branch checked out, `wt` lists both and
+exits 3 rather than choose. The hidden folder's own name reaches the same
+pending removal, never a second way around it.
+
+What the retry does depends on what it finds on disk and in Git, never on the
+step the record says was last finished:
+
+```mermaid
+flowchart TD
+    P[Pending removal] --> O{Something new at the original path?}
+    O -->|Yes| K[Keep both locations; exit 3 until you resolve it]
+    O -->|No| M{Where is the checkout?}
+    M -->|Never moved| N[Close the record; remove as usual]
+    M -->|Moved, Git still records the original path| B[Move it back; remove as usual]
+    M -->|Moved, Git follows it| Q[Check usage, list what is left, ask again, delete]
+    M -->|Moved, its .git link already deleted| X[Keep everything; show what is left]
+    M -->|Gone, Git still lists the hidden path| R[Check its staged changes, ask again, remove the record]
+    M -->|Gone and unregistered| BR[Ask again about the branches, then finish]
+```
+
+- A retry approves everything again: it lists what is left, asks about
+  changed and untracked files (a file written after the stop is new work and
+  needs your answer), checks usage, and reassesses branch safety and the
+  remote branch. No earlier answer is reused.
+- Something new at the original path is never deleted or entered, and the
+  moved checkout is left as it is until you have moved or saved that content.
+- If the hidden folder is no longer the moved checkout, or what is left of it
+  has lost its `.git` link, nothing is cleaned up or repaired; the report lists
+  what remains so you can save it and delete the folder yourself.
 
 ```mermaid
 flowchart LR
