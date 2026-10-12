@@ -107,7 +107,7 @@ fn fixture_files() -> Vec<PathBuf> {
     }
     let mut found = Vec::new();
     walk(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/symbols"),
+        &biscuit_test_harness::manifest_dir!().join("tests/fixtures/symbols"),
         &mut found,
     );
     found.sort();

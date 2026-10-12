@@ -243,7 +243,7 @@ mod tests {
     /// missing and error nodes, has its [`Node::parent`] as indexed parent.
     #[test]
     fn indexed_parents_match_node_parents_over_the_symbols_fixtures() {
-        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/symbols");
+        let fixtures = biscuit_test_harness::manifest_dir!().join("tests/fixtures/symbols");
         let mut pending = vec![fixtures];
         let mut files = Vec::new();
         while let Some(dir) = pending.pop() {

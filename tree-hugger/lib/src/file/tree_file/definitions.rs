@@ -999,7 +999,7 @@ mod tests {
             from_definitions.len()
         }
 
-        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let fixtures = biscuit_test_harness::manifest_dir!().join("tests/fixtures");
         let mut pending = vec![fixtures];
         let (mut files, mut imports) = (0, 0);
         while let Some(path) = pending.pop() {
