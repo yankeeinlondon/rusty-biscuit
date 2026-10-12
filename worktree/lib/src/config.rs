@@ -4,6 +4,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::WorktreeError;
 
+/// Where a base-directory value came from, so errors can name it and give
+/// the remedy that applies to that source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseDirSource {
+    /// The `WT` environment variable.
+    Env,
+    /// `base_dir` in the config file at this path (normally `~/.worktree.json`).
+    ConfigFile(PathBuf),
+    /// A choice made during interactive setup.
+    Prompt,
+}
+
+impl std::fmt::Display for BaseDirSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Env => f.write_str("the WT environment variable"),
+            Self::ConfigFile(path) => write!(f, "the config file {}", path.display()),
+            Self::Prompt => f.write_str("the setup prompt"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WorktreeConfig {
     pub base_dir: String,
@@ -62,14 +84,16 @@ pub fn resolve_base_dir() -> Result<PathBuf, WorktreeError> {
     {
         let path = PathBuf::from(wt);
         if !path.exists() {
-            return Err(WorktreeError::BaseDirectoryNotFound(
-                path.display().to_string(),
-            ));
+            return Err(WorktreeError::BaseDirectoryNotFound {
+                value: path.display().to_string(),
+                origin: BaseDirSource::Env,
+            });
         }
         if path.join(".git").exists() {
-            return Err(WorktreeError::BaseDirectoryIsGitRepo(
-                path.display().to_string(),
-            ));
+            return Err(WorktreeError::BaseDirectoryIsGitRepo {
+                value: path.display().to_string(),
+                origin: BaseDirSource::Env,
+            });
         }
         return Ok(path);
     }
@@ -100,9 +124,10 @@ pub fn resolve_base_dir() -> Result<PathBuf, WorktreeError> {
     }
 
     if !path.exists() {
-        return Err(WorktreeError::BaseDirectoryNotFound(
-            path.display().to_string(),
-        ));
+        return Err(WorktreeError::BaseDirectoryNotFound {
+            value: config.base_dir,
+            origin: BaseDirSource::ConfigFile(config_path),
+        });
     }
 
     Ok(path)
@@ -137,7 +162,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(WorktreeError::BaseDirectoryNotFound(_))
+            Err(WorktreeError::BaseDirectoryNotFound { origin: BaseDirSource::Env, .. })
         ));
     }
 
@@ -153,7 +178,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(WorktreeError::BaseDirectoryIsGitRepo(_))
+            Err(WorktreeError::BaseDirectoryIsGitRepo { origin: BaseDirSource::Env, .. })
         ));
     }
 }

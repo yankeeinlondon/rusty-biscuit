@@ -6,7 +6,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{InquireError, Select, Text};
 use worktree::WorktreeError;
-use worktree::config::{config_path, considered_dirs, resolve_base_dir, save_config};
+use worktree::config::{BaseDirSource, config_path, considered_dirs, resolve_base_dir, save_config};
 use worktree::git::repo_info;
 use worktree::include::copy::SkipReason;
 use worktree::worktree::{IncludeOutcome, create_worktree};
@@ -226,9 +226,10 @@ fn prompt_for_base_dir(terminal: &Terminal) -> Result<PathBuf, WorktreeError> {
         );
         eprintln!();
         eprintln!("{}", Prose::new(msg).render(terminal));
-        return Err(WorktreeError::BaseDirectoryIsGitRepo(
-            path.display().to_string(),
-        ));
+        return Err(WorktreeError::BaseDirectoryIsGitRepo {
+            value: path.display().to_string(),
+            origin: BaseDirSource::Prompt,
+        });
     }
 
     save_config(&path)?;
