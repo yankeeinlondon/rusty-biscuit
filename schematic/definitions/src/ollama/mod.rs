@@ -28,7 +28,7 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvMapping, RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all Ollama response types.
@@ -268,6 +268,9 @@ pub fn define_ollama_native_api() -> RestApi {
         request_suffix: Some("NativeRequest".to_string()),
         version: None,
         env_mapping: Some(EnvMapping::default()),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -356,6 +359,9 @@ pub fn define_ollama_openai_api() -> RestApi {
         request_suffix: Some("OaiRequest".to_string()),
         version: None,
         env_mapping: Some(EnvMapping::default()),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

@@ -45,7 +45,7 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
@@ -512,6 +512,10 @@ pub fn define_github_api() -> RestApi {
             ])),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        // GitHub sends its request id in `X-GitHub-Request-Id`.
+        request_id_header: Some("x-github-request-id".to_string()),
+        secret_names: vec![],
     }
 }
 

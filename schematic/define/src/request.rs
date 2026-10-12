@@ -493,6 +493,7 @@ impl From<Schema> for ApiRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cross_origin::CrossOrigin;
 
     #[test]
     fn form_field_text_is_required_by_default() {
@@ -782,6 +783,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         assert_eq!(api.name, "FileService");

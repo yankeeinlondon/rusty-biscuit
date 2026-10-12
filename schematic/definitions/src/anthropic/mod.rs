@@ -43,8 +43,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi,
-    RestMethod,
+    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping,
+    RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all Anthropic response types.
@@ -182,6 +182,9 @@ pub fn define_anthropic_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

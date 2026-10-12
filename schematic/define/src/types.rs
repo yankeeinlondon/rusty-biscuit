@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::{AuthPolicy, AuthStrategy, EnvAuthStrategy};
+use crate::cross_origin::CrossOrigin;
 use crate::headers::{EnvList, EnvMapping};
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
@@ -83,7 +84,7 @@ pub enum RestMethod {
 /// Create a simple API with no authentication:
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 ///
 /// let api = RestApi {
 ///     name: "SimpleApi".to_string(),
@@ -112,6 +113,9 @@ pub enum RestMethod {
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
 /// };
 ///
 /// assert_eq!(api.name, "SimpleApi");
@@ -144,8 +148,8 @@ pub struct RestApi {
     /// Environment variable names for authentication credentials.
     ///
     /// For `BearerToken` and `ApiKey` auth strategies, this is a fallback chain.
-    /// The first env var that is set will be used. If none are set, the request
-    /// will fail with a `MissingCredential` error.
+    /// The first env var that is set will be used. If none is set, the request
+    /// is sent anonymously.
     ///
     /// Example: `vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()]`
     pub env_auth: Vec<String>,
@@ -188,7 +192,7 @@ pub struct RestApi {
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -211,9 +215,22 @@ pub struct RestApi {
     ///         api_key: None,
     ///         ..Default::default()
     ///     }),
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
     /// };
     /// ```
     pub env_mapping: Option<EnvMapping>,
+    /// Governs redirects and followed next-page links that leave the base
+    /// origin. Defaults to same-origin; endpoints cannot override it.
+    pub cross_origin: CrossOrigin,
+    /// Response header carrying the provider's request id, matched
+    /// case-insensitively. `None` when the provider is not known to send one.
+    pub request_id_header: Option<String>,
+    /// Extra header names (matched case-insensitively) and query names
+    /// (matched exactly) whose values are never stored in metadata or shown,
+    /// beyond the built-in names and the API's authentication names.
+    pub secret_names: Vec<String>,
 }
 
 impl RestApi {
@@ -231,7 +248,7 @@ impl RestApi {
     /// With explicit env_mapping:
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -254,6 +271,9 @@ impl RestApi {
     ///         api_key: None,
     ///         ..Default::default()
     ///     }),
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -263,7 +283,7 @@ impl RestApi {
     /// With legacy fields (backward compatible):
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy};
+    /// use schematic_define::{RestApi, AuthStrategy, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -280,6 +300,9 @@ impl RestApi {
     ///     request_suffix: None,
     ///     version: None,
     ///     env_mapping: None,
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -556,6 +579,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping.clone()),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -583,6 +609,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -613,6 +642,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -641,6 +673,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -667,6 +702,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -709,6 +747,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping.clone()),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -744,6 +785,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let mapping1 = api.default_env_mapping();

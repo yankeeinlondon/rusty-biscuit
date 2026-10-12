@@ -40,8 +40,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi,
-    RestMethod,
+    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping,
+    RestApi, RestMethod,
     params::{EndpointParams, QueryParamType},
 };
 
@@ -185,6 +185,9 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -229,6 +232,9 @@ pub fn define_artificial_analysis_critpt_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

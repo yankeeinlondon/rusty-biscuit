@@ -50,7 +50,9 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 #[cfg(test)]
 use schematic_define::RestMethod;
-use schematic_define::{ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi};
+use schematic_define::{
+    ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+};
 
 /// Creates a schema registry containing all GitLab response types.
 ///
@@ -186,6 +188,9 @@ pub fn define_gitlab_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

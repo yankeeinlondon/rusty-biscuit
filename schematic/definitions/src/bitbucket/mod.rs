@@ -56,8 +56,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, EndpointParams, EnvList, EnvMapping, PaginationStyle,
-    RestApi, RestMethod,
+    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, EnvList, EnvMapping,
+    PaginationStyle, RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all Bitbucket response types.
@@ -365,6 +365,9 @@ pub fn define_bitbucket_api() -> RestApi {
             basic_pass: Some(EnvList::new(vec!["BITBUCKET_APP_PASSWORD".to_string()])),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

@@ -5082,6 +5082,9 @@ pub fn define_openai_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: Some("x-request-id".to_string()),
+        secret_names: vec![],
     }
 }
 /// Builds a schema registry holding all 1394 generated model types.

@@ -24,6 +24,9 @@
 //!     request_suffix: None,
 //!     version: None,
 //!     env_mapping: None,
+//!     cross_origin: CrossOrigin::default(),
+//!     request_id_header: None,
+//!     secret_names: vec![],
 //! };
 //! ```
 //!
@@ -46,6 +49,7 @@
 //! ```
 
 pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
+pub use crate::cross_origin::CrossOrigin;
 pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use crate::pagination::{PaginationResponse, PaginationStyle};
 pub use crate::params::EndpointParams;

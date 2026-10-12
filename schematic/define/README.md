@@ -27,6 +27,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `PkceRequirement` | PKCE requirement level (Required, Supported, NotUsed) |
 | `OAuth2ClientAuthMethod` | Client credential delivery method (ClientSecretBasic, ClientSecretPost, None) |
 | `UpdateStrategy` | Strategy for updating auth in API variants (NoChange, ChangeTo) |
+| `CrossOrigin` | API-level policy for redirects and next-page links to other origins |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
 | `FormField` | Form field definition for multipart/URL-encoded requests |
@@ -272,7 +273,11 @@ let api = RestApi {
     # endpoints: vec![],
     # module_path: None,
     # request_suffix: None,
+    # version: None,
     # env_mapping: None,
+    # cross_origin: schematic_define::CrossOrigin::default(),
+    # request_id_header: None,
+    # secret_names: vec![],
 };
 ```
 
@@ -514,6 +519,45 @@ The `RestApi::default_env_mapping()` method returns an `EnvMapping` built from:
 1. Explicit `env_mapping` if set
 2. Legacy `env_auth` / `env_username` fields otherwise
 
+## Cross-Origin Policy, Request IDs, and Secret Names
+
+Three API-level fields describe how the runtime treats responses and what it
+must never record. Endpoints cannot override them.
+
+| Field | Meaning |
+|-------|---------|
+| `cross_origin` | Which origins a redirect or followed next-page link may reach; defaults to same-origin |
+| `request_id_header` | Response header carrying the provider's request id (case-insensitive); `None` when unknown |
+| `secret_names` | Extra header names (case-insensitive) and query names (exact) whose values are never stored or shown |
+
+`CrossOrigin` has five policies:
+
+| Constructor | Follows |
+|-------------|---------|
+| `CrossOrigin::same_origin()` (default) | Only the base origin (scheme, host, effective port) |
+| `CrossOrigin::allow_origins([...])` | The base plus these exact origins, with credentials; no wildcards |
+| `CrossOrigin::allow_without_credentials()` | Anywhere; credentials are stripped when the origin differs from the base |
+| `CrossOrigin::danger_allow_any()` | Anywhere, with credentials |
+| `CrossOrigin::deny()` | No redirects and no cross-origin links; same-origin next-page links still pass |
+
+A caller may only tighten the definition's policy (to `deny`, `same_origin`,
+or a subset of an `allow_origins` list; over `deny`, only `deny`). The runtime
+enforces the policy.
+
+```rust
+use schematic_define::CrossOrigin;
+
+let api = RestApi {
+    // ...
+    cross_origin: CrossOrigin::same_origin(),
+    request_id_header: Some("x-request-id".to_string()),
+    secret_names: vec![],
+};
+```
+
+`secret_names` adds to the built-in secret names and the API's own
+authentication header or query name, which are always treated as secret.
+
 ## Request Types
 
 Endpoints can accept different request body formats via `ApiRequest`:
@@ -728,7 +772,7 @@ WebSocket connections can define special lifecycle messages:
 A basic health-check API with no authentication:
 
 ```rust
-use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 
 let api = RestApi {
     name: "HealthService".to_string(),
@@ -762,6 +806,9 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
 };
 ```
 
@@ -771,7 +818,7 @@ A user management API with CRUD operations:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, CrossOrigin
 };
 
 let api = RestApi {
@@ -845,6 +892,9 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
 };
 ```
 
@@ -854,7 +904,8 @@ A file storage API demonstrating multipart form-data uploads:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, FormField
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, FormField,
+    CrossOrigin,
 };
 
 let api = RestApi {
@@ -932,6 +983,9 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
 };
 ```
 

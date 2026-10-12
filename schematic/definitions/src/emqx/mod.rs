@@ -62,7 +62,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+    RestMethod,
 };
 
 /// Creates a schema registry containing all EMQX response types.
@@ -200,6 +201,9 @@ pub fn define_emqx_basic_api() -> RestApi {
             basic_pass: Some(EnvList::single("EMQX_API_SECRET")),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -270,6 +274,9 @@ pub fn define_emqx_bearer_api() -> RestApi {
             bearer_token: Some(EnvList::single("EMQX_TOKEN")),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

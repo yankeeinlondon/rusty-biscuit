@@ -28,7 +28,7 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvMapping, RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all LM Studio response types.
@@ -192,6 +192,9 @@ pub fn define_lmstudio_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: Some(EnvMapping::default()),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

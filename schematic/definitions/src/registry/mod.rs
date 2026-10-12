@@ -283,6 +283,7 @@ mod tests {
         openapi_registry as openai_registry,
     };
     use crate::samsung_smart_tv::define_samsung_smart_tv_api;
+    use schematic_define::CrossOrigin;
 
     // =============================================
     // SchemaRegistry::new() tests
@@ -468,6 +469,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::same_origin(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let registry = SchemaRegistry::new();
@@ -509,6 +513,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::same_origin(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let registry = SchemaRegistry::new();
@@ -572,6 +579,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::same_origin(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let registry = SchemaRegistry::new();

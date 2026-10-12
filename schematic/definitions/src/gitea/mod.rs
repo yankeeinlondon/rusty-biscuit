@@ -54,7 +54,7 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod,
+    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
@@ -446,6 +446,9 @@ pub fn define_gitea_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

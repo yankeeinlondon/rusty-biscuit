@@ -30,8 +30,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField, RestApi,
-    RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, FormField,
+    RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all Unfolded Circle Core REST response types.
@@ -221,6 +221,9 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
             api_key: None,
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

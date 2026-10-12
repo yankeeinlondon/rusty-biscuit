@@ -34,6 +34,7 @@ pub(super) fn map_servers(api: &RestApi) -> Vec<openapiv3::Server> {
 mod tests {
     use super::*;
     use crate::auth::AuthStrategy;
+    use crate::cross_origin::CrossOrigin;
     use crate::headers::{EnvList, EnvMapping};
 
     fn create_test_api() -> RestApi {
@@ -55,6 +56,9 @@ mod tests {
                 bearer_token: Some(EnvList::single("TEST_API_KEY")),
                 ..Default::default()
             }),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

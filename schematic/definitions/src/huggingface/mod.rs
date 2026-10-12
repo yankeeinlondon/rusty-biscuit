@@ -58,7 +58,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+    RestMethod,
 };
 
 /// Creates a schema registry containing all Hugging Face response types.
@@ -462,6 +463,9 @@ pub fn define_huggingface_hub_api() -> RestApi {
             ])),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
