@@ -504,6 +504,37 @@ fn schema_validate_assignment_satisfies_required_property() {
 }
 
 #[test]
+fn schema_validate_assignment_reads_digits_as_alphanumeric_text() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(
+        tmp,
+        "slug.md",
+        "---\n$schema:\n  slug: 'alphanumeric(required)'\n---\nBody\n",
+    );
+
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("slug=123")
+        .assert()
+        .success();
+    // A native number in the document itself is still a type mismatch.
+    let native = write_file(
+        tmp,
+        "native.md",
+        "---\n$schema:\n  slug: 'alphanumeric(required)'\nslug: 123\n---\nBody\n",
+    );
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&native)
+        .assert()
+        .code(1);
+}
+
+#[test]
 fn schema_validate_assignment_parses_yaml_scalar_types() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();

@@ -518,3 +518,92 @@ fn shipped_external_schema_example_names_its_sibling_explicitly() {
         .code(1)
         .stdout(predicate::str::contains("name"));
 }
+
+/// The dialect triggers `md schema triggers` reports as matched for `document`,
+/// in fixture order.
+fn matched_dialects(process: &CliProcessFixture, document: &Path) -> Vec<&'static str> {
+    let output = process.command().args(["schema", "triggers"]).arg(document).output().unwrap();
+    assert!(output.status.success(), "schema triggers failed: {}", String::from_utf8_lossy(&output.stderr));
+    let trace = compact(&strip_ansi(&stdout_of(&output)));
+    let matched: Vec<&'static str> = ["claudine", "inline-compose", "sequence"]
+        .into_iter()
+        .filter(|dialect| trace.contains(&format!("{dialect}.trigger.yaml—matched")))
+        .collect();
+    for dialect in ["claudine", "inline-compose", "sequence"] {
+        assert!(
+            trace.contains(&format!("/{dialect}.trigger.yaml—")) || trace.contains(&format!("\\{dialect}.trigger.yaml—")),
+            "the trace must evaluate {dialect}: {trace}"
+        );
+    }
+    matched
+}
+
+/// The registry decision for a malformed or edge-case `steps` value under the
+/// shipped dialect triggers, whose `steps` condition is `unknown[](required)`:
+/// a list (empty, mixed, or all-scalar items) is present, while null, absence,
+/// a scalar, or a mapping is not. A non-list value therefore no longer
+/// excludes a document through a `none` guard, and the target schema then
+/// enforces its own required key; with no trigger selected the document
+/// validates against nothing. `required` is the key the selected target
+/// reports missing, or `None` when validation succeeds.
+macro_rules! steps_registry_decision {
+    ($($name:ident: $frontmatter:literal => [$($dialect:literal),*], $required:expr;)+) => {$(
+        #[test]
+        fn $name() {
+            let process = CliProcessFixture::new();
+            dialect_fixture(&process);
+            let document = write(process.cwd(), "docs/case.md", concat!("---\n", $frontmatter, "---\nBody\n"));
+            let expected: Vec<&str> = vec![$($dialect),*];
+            assert_eq!(matched_dialects(&process, &document), expected, "registry decision");
+            let validate = process.command().args(["schema", "validate"]).arg(&document).assert();
+            let required: Option<&str> = $required;
+            match required {
+                Some(key) => {
+                    validate.code(1).stdout(predicate::str::contains(key));
+                }
+                None => {
+                    validate.success();
+                }
+            }
+        }
+    )+};
+}
+
+steps_registry_decision! {
+    steps_empty_list_selects_sequence: "steps: []\n" => ["sequence"], Some("sequence_name");
+    steps_mixed_list_selects_sequence: "steps: [1, \"a\"]\n" => ["sequence"], Some("sequence_name");
+    steps_all_scalar_items_select_sequence: "steps: [5]\n" => ["sequence"], Some("sequence_name");
+    steps_mapping_selects_no_trigger: "steps: {a: 1}\n" => [], None;
+    steps_scalar_selects_no_trigger: "steps: oops\n" => [], None;
+    steps_empty_scalar_selects_no_trigger: "steps: \"\"\n" => [], None;
+    steps_null_selects_no_trigger: "steps: null\n" => [], None;
+    steps_list_keeps_excluding_inline_compose: "prompt: x\nsteps: []\n" => [], None;
+    steps_scalar_no_longer_excludes_inline_compose: "prompt: x\nsteps: oops\n" => ["inline-compose"], Some("output");
+    steps_null_does_not_exclude_inline_compose: "prompt: x\nsteps: null\n" => ["inline-compose"], Some("output");
+    steps_number_no_longer_excludes_claudine: "kind: claudine\nsteps: 5\n" => ["claudine"], Some("provider");
+    steps_list_keeps_excluding_claudine: "kind: claudine\nsteps: []\n" => [], None;
+}
+
+/// A duplicated `steps` key is a YAML load error on both surfaces, never a
+/// last-wins value that selects (or escapes) a trigger.
+#[test]
+fn duplicate_steps_key_is_a_load_error_not_a_last_wins_selection() {
+    let process = CliProcessFixture::new();
+    dialect_fixture(&process);
+    let document = write(process.cwd(), "docs/case.md", "---\nprompt: x\nsteps: []\nsteps: oops\n---\nBody\n");
+    process
+        .command()
+        .args(["schema", "triggers"])
+        .arg(&document)
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("matched").not());
+    // Exit 3 is an unreadable document; 1 would be a validation failure.
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&document)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("duplicate entry with key \"steps\""));
+}
