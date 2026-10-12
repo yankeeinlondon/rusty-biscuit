@@ -161,11 +161,120 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/schematic/SKILL.md
     - schematic/skill/SKILL.md
+source_files_during_phase_6:
+    - schematic/definitions/src/bitbucket/types/common.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/helpers.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/shared.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/errors.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/send.rs
+docs_updated_during_phase_6:
+    - schematic/gen/README.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/request-side.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - schematic/skill/SKILL.md
+source_files_during_phase_7:
+    - Cargo.lock
+    - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src (regenerated: every REST module, lib.rs, prelude.rs, shared.rs)
+    - schematic/openapi/elevenlabs.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/tests/common/mod.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - homelab/lib/Cargo.toml
+    - homelab/lib/src/lib.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/eversolo-integration/Cargo.toml
+    - homelab/eversolo-integration/src/dispatch.rs
+    - homelab/eversolo-integration/src/discovery.rs
+    - homelab/server/src/lib.rs
+    - homelab/server/src/error.rs
+    - homelab/server/src/handlers/eversolo.rs
+    - homelab/server/src/handlers/samsung_tv.rs
+    - homelab/cli/src/main.rs
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/tests/elevenlabs_http.rs
+    - model-citizen/lib/Cargo.toml
+docs_updated_during_phase_7:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - sniff/docs/repos/repo-tech-design.md
+    - sniff/docs/cli/repo_remote.md
+    - homelab/docs/eversolo-design.md
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/dependencies.md
+    - model-citizen/lib/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/biscuit-speaks/providers.md
+    - .claude/skills/model-citizen/SKILL.md
+    - .claude/skills/schematic-define/schematic/definitions.md
 packages:
     - schematic-runtime
     - schematic-define
     - schematic-definitions
     - schematic-gen
+    - schematic-schema
+    - sniff
+    - homelab
+    - eversolo-integration
+    - homelab-server
+    - homelab-cli
+    - biscuit-speaks
+    - model-citizen
 ---
 
 # Schematic Runtime Envelope Implementation Plan
@@ -338,12 +447,12 @@ Entry: Phase 5 runtime ABI is stable; generator changes target fixtures and isol
 
 ### Wave 11 — Generator Changes (parallel with disjoint ownership)
 
-- [ ] **Emit Typed Clients**
+- [x] **Emit Typed Clients**
   - Own REST codegen and its golden tests: per-request runtime `EndpointSpec` impl with API marker, success/failure/codec/endpoint constants; translate effective auth policy, CrossOrigin, secret names, and request-ID configuration.
   - Emit thin per-API client wrappers with builder/new, typed send/raw, and scoped hook access. Remove generic request, injected-client constructors, shared REST-runtime definitions, generator-local environment scans, temporary API-key injection, non-JSON convenience send paths, and ResponseKind guard.
   - Keep erasing request enum only if private construction requires it. Emit no per-endpoint forwarding wrappers; retain request-side feature fidelity (R1, R2, R17, R20, R28, R31).
   - Handle generator fixture churn within this task; do not concurrently edit the checked-in schema.
-- [ ] **Integrate Runtime Compatibility**
+- [x] **Integrate Runtime Compatibility**
   - Own generated manifest/lib ABI emission, prerequisite inventory compatibility reader, and fresh-output harness; coordinate file boundaries with codegen task before edits.
   - Generate the path runtime dependency so both actual excluded schema and isolated output resolve correctly. Embed the ABI expected by this generator build; mismatched runtime fails compilation with readable assertion.
   - Make ABI mismatch refuse partial generation and require full generation before writing outputs. Exercise the generated Rust marker cases from Phase 1 through public generator-result tests, preserving inventory and no-mutation checks (R32).
@@ -351,7 +460,7 @@ Entry: Phase 5 runtime ABI is stable; generator changes target fixtures and isol
 
 ### Wave 12 — Fresh Output Proof (sequential)
 
-- [ ] **Validate Generated Surface**
+- [x] **Validate Generated Surface**
   - Compile fresh complete output including WebSockets. Assert generated shared modules contain runtime references, not REST-runtime definitions; removed constructors/guard/free request and endpoint wrappers are absent.
   - Compile-fail wrong success type, missing associated type, arbitrary foreign type, actual request from API A sent through API B for typed/raw sends, forbidden hook registration, removed request API, and removed injected-client construction.
   - Test doctored ABI failure and incompatible-marker partial-generation refusal. Run generated-Rust marker refusal tests, verifying no partial output changes on invalid input.
@@ -365,30 +474,30 @@ This is one coordinated phase: the temporary breaking state between regeneration
 
 ### Wave 13 — Schema Regeneration (sequential)
 
-- [ ] **Regenerate Schema**
+- [x] **Regenerate Schema**
   - Regenerate all clients and generator-owned manifest/exports using the area generation recipe or its exact non-interactive generator invocation. Never hand-edit schema source or manifest. Preserve hand-maintained schema tests in their designated locations.
   - Record generated API differences and provide migration-ready examples for JSON/text/binary/empty sends, envelope extraction, status/header inspection, explicit anonymous calls, hooks, and managed builders.
   - Run fresh schema compilation before delegating consumers. Repeat the one compile-time sample under Phase 1's documented conditions; report the observation without an unsupported performance threshold.
 
 ### Wave 14 — Consumer Migration (parallel, four independent write sets)
 
-- [ ] **Migrate Sniff Providers**
+- [x] **Migrate Sniff Providers**
   - Own sniff generated-client uses/tests/docs. Rebuild 401 auth-required, 403/429/rate-limit, 404-absent, Retry-After, and request-ID evidence policy on envelopes, preserving undecodable/interrupted response distinctions.
   - Keep anonymous retry as an explicit second consumer call using forced anonymous options; assert the runtime made no retry and that the anonymous call cannot resend rejected client/env/header credentials.
   - Audit log/evidence paths to use redacted metadata, including redirect/header URL data. Migrate exhaustive old-error matches without losing classification (R33, R34).
-- [ ] **Migrate Homelab Clients**
+- [x] **Migrate Homelab Clients**
   - Own all five homelab crates and their related tests/docs. Migrate Eversolo and Samsung constructor injection to managed builders, preserving Samsung's 5-second connect and 10-second request timeouts and HTTPS-only invalid-certificate opt-in.
   - Migrate generic/convenience request calls and error handling; preserve device behavior with existing mock fixtures, never real-device requests. Cover all five crates even where changes are indirect (R33).
-- [ ] **Migrate Model Consumers**
+- [x] **Migrate Model Consumers**
   - Own biscuit-speaks and model-citizen uses/tests/docs. Extract ElevenLabs binary output from the typed envelope and preserve relevant status/error handling.
   - Confirm model-citizen's actual usage; if manifest-only, verify dependency/build/test compatibility without unnecessary source edits. Document any required manifest/runtime imports (R33).
-- [ ] **Migrate Schema Tests**
+- [x] **Migrate Schema Tests**
   - Own hand-maintained generated-crate tests and test wiring; do not edit generated files. Add generated-client integration for metadata/request IDs, credential precedence/anonymous 401, absolute-link enforcement, hooks, and malformed success evidence.
   - Register tests under `test-schema`; list migrated existing hook/guard tests. Demonstrate API-to-API rejection using actual generated types and verify WebSocket modules still compile (R2, R4, R14, R23, R28, R29, R35).
 
 ### Wave 15 — Migration Closure (sequential)
 
-- [ ] **Close Consumer Inventory**
+- [x] **Close Consumer Inventory**
   - Match every Phase 1 inventory row to its migrated location and passing test or explicit review note. Search affected consumers/generated REST code for removed request/constructor/error/temp-auth paths, filtering unrelated reqwest and legitimately retained WebSocket symbols.
   - Run L1 and lint in all affected package areas, explicitly including all eight dependent crates and schema's excluded-manifest gates. Review migrated logging for secret bypasses; list behavior changes or non-mechanical migrations.
   - Rerun generation and compare before/after content diffs to prove no drift while preserving intentional schema test additions and existing unrelated work.

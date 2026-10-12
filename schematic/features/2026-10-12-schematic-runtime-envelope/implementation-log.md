@@ -160,11 +160,120 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/schematic-define/schematic/SKILL.md
     - schematic/skill/SKILL.md
+source_files_during_phase_6:
+    - schematic/definitions/src/bitbucket/types/common.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/helpers.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/shared.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/errors.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/tests/l1/send.rs
+docs_updated_during_phase_6:
+    - schematic/gen/README.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/request-side.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - schematic/skill/SKILL.md
+source_files_during_phase_7:
+    - Cargo.lock
+    - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src (regenerated: every REST module, lib.rs, prelude.rs, shared.rs)
+    - schematic/openapi/elevenlabs.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/tests/common/mod.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - homelab/lib/Cargo.toml
+    - homelab/lib/src/lib.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/eversolo-integration/Cargo.toml
+    - homelab/eversolo-integration/src/dispatch.rs
+    - homelab/eversolo-integration/src/discovery.rs
+    - homelab/server/src/lib.rs
+    - homelab/server/src/error.rs
+    - homelab/server/src/handlers/eversolo.rs
+    - homelab/server/src/handlers/samsung_tv.rs
+    - homelab/cli/src/main.rs
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/tests/elevenlabs_http.rs
+    - model-citizen/lib/Cargo.toml
+docs_updated_during_phase_7:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - sniff/docs/repos/repo-tech-design.md
+    - sniff/docs/cli/repo_remote.md
+    - homelab/docs/eversolo-design.md
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/dependencies.md
+    - model-citizen/lib/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/biscuit-speaks/providers.md
+    - .claude/skills/model-citizen/SKILL.md
+    - .claude/skills/schematic-define/schematic/definitions.md
 packages:
     - schematic-runtime
     - schematic-define
     - schematic-definitions
     - schematic-gen
+    - schematic-schema
+    - sniff
+    - homelab
+    - eversolo-integration
+    - homelab-server
+    - homelab-cli
+    - biscuit-speaks
+    - model-citizen
 ---
 
 # Implementation Log for 2026-10-12-schematic-runtime-envelope (8 phases)
@@ -1941,3 +2050,894 @@ item 5); nothing in this phase touches them.
    `SupportsHooks for Json` impl). Changing those lines means regenerating
    the fixtures with `TRYBUILD=overwrite`, after checking that the new
    diagnostics are still the intended ones.
+
+## Phase 6
+
+Started and finished 2026-10-12 on macOS. Linux and native Windows evidence
+came through `just cross-check`. Phase 6 changes what `schematic-gen` emits:
+REST clients are now thin, and `schematic-runtime` sends their requests. The
+checked-in `schematic/schema` crate and the eight consumers are **unchanged**
+and still build: Phase 7 regenerates and migrates them.
+
+I did the generator and harness work myself. Three subagents took disjoint
+work, each with its own files:
+
+- the assertion churn in the fast generator tests (seven test files);
+- the partial-generation tests, including the new ABI-marker cases;
+- the documentation and skill rewrites, done in two runs.
+
+Two of them were started in the background by mistake. I kept working on
+other files and did not finish until both had reported.
+
+### Wave 11 — Emit Typed Clients (`gen/src/codegen/`, `gen/src/output/assemble/`)
+
+**Generated surface, per API** (`codegen/api_struct/mod.rs`):
+
+```rust
+pub enum OpenAI {}                                    // marker, never constructed
+pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
+impl schematic_runtime::Api for OpenAI { const NAME: &'static str = "OpenAI"; }
+impl OpenAI {
+    pub const BASE_URL: &'static str = "…";
+    pub const DOCS_URL: Option<&'static str> = …;
+    pub fn definition() -> schematic_runtime::ApiDefinition { … }   // translated definition data
+    pub fn builder() -> schematic_runtime::ClientBuilder<Self> { … } // + API default headers
+    pub fn new() -> Result<OpenAIClient, schematic_runtime::BuildError> { Self::builder().build() }
+}
+```
+
+**Per endpoint** (`codegen/request_structs/endpoint_spec.rs`, `into_parts.rs`):
+the request struct is unchanged (fields, `new`, `with_*`, `From`), and its
+`into_parts` moved into `impl schematic_runtime::EndpointSpec`. That impl
+fixes:
+
+- `Api` (the marker);
+- `Success` and `Decoder`: `T`/`Json<T>`, `String`/`Text`, `bytes::Bytes`/`Binary`,
+  or `()`/`Empty`;
+- `Failure = NoDeclaredError`, because no definition declares an error body;
+- `ENDPOINT_ID` and `METHOD`.
+
+`into_parts` returns the runtime's `RequestParts` struct or an
+`InvalidArgument`. That covers a JSON body that does not serialize, and a
+static `Cookie` header that cannot be merged.
+
+**Translation** (`codegen/api_struct/auth.rs`, `helpers.rs`):
+
+- `definition()` spells the definition's *effective* auth policy out in runtime
+  terms:
+  - each explicit method becomes an accepted `CredentialPlacement`;
+  - OAuth2 becomes a bearer access token, never read from the environment;
+  - duplicate placements are listed once;
+  - the env fallback becomes an `EnvFallback` over the variables the
+    definition's env mapping names. `ApiKeyParam` uses `env_auth`, and Basic
+    adds `username_vars`.
+- A fallback that names no variable is dropped. This preserves current
+  behavior: LM Studio and Eversolo set an empty `EnvMapping`, so the old
+  client never read their `env_auth` variable either. The module docs' auth
+  section now uses the same translation, so it no longer claims the
+  variable is read.
+- `CrossOrigin` maps 1:1 to `OriginPolicy`. The match is exhaustive and has no
+  wildcard, because `CrossOrigin` is deliberately not `#[non_exhaustive]`.
+- `secret_names` and `request_id_header` pass through.
+- Runtime defaults are left out.
+
+**Removed from generated output:**
+
+- the request enum (PD13, below);
+- `request<T>`, `request_text`, `request_bytes`, `request_empty`, and every
+  per-endpoint convenience method;
+- `build_and_send_request`, the `ResponseKind` guard (R28), and `SchematicError`;
+- the `RequestParts` tuple and `append_query_pairs`;
+- `resolve_request_auth` and every generator-local `std::env` read;
+- the temporary `with_api_key_param`, and the `api_key`, `bearer_token`,
+  `basic_auth`, and `oauth_token` setters;
+- `with_client`, `with_client_and_base_url`, `with_base_url`, `variant*`, and
+  the accessors;
+- the generated hook types and the `reqwest` / `schematic_define`
+  re-exports.
+
+`shared.rs` keeps only `encode_cookie_value`, `combine_cookie_headers` (now
+returning `InvalidArgument`), `FormFile` (with `into_part`), and
+`Paginated`.
+
+**Layout:** a split module is now `mod.rs` + `requests.rs` + `responses.rs`.
+`client.rs` held only send methods, so it is gone; an owned stale
+`client.rs` is removed by the existing cleanup. The marker stays in
+`mod.rs`, where a non-glob item shadows a same-named definitions type. The
+generated output went from 1299 to 419 lines for LM Studio. GitHub and Ollama
+now fit in a single file.
+
+**Validation:** `check_convenience_methods` was deleted because there are no
+convenience methods any more. The group-name collision check now reserves
+`{Api}` and `{Api}Client`, and the imported names are now
+`Deserialize`, `Serialize`, and `Paginated`.
+
+### Wave 11 — Integrate Runtime Compatibility (`gen/src/output/`, `gen/src/cargo_gen.rs`, `gen/tests/common/`)
+
+- **ABI.** `schematic_gen::RUNTIME_ABI = 1` is the generator's embedded value.
+  The unit test `runtime_abi_tests::the_generator_emits_the_abi_of_the_workspace_runtime`
+  reads `runtime/src/lib.rs` (via `include_str!`, so CI sees the input) and
+  checks equality. I chose this over a dependency on the runtime. Generated
+  `lib.rs` declares the marker, asserts it, and re-exports the runtime:
+
+  ```rust
+  pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+  const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, "schematic-schema was generated for schematic-runtime ABI 1, but …; regenerate … (`just generate` in schematic/)");
+  pub use schematic_runtime;
+  ```
+- **Partial generation.** `inventory::read_rust_inventory` reads the marker
+  with `syn`, and `RustInventory::abi` is the result. Exactly one top-level
+  `const SCHEMATIC_RUNTIME_ABI: u32 = <integer literal>` counts. Anything
+  else is `Missing`, or `Malformed` with a reason: not a literal, not `u32`,
+  or declared N times.
+
+  `shared_runtime_compatibility(root, planned, retained, &abi)` refuses with
+  `RequiresFullGeneration` when modules are retained and the marker is not
+  the generator's. It **still** compares `shared.rs` and `ws_shared.rs` byte
+  for byte; see design choice 4. The error text now says "the shared runtime
+  would change (…)", and each `lib.rs` entry describes the marker found.
+- **Manifest.** The generated `Cargo.toml` gains
+  `schematic-runtime = { version = "0.1.0", path = "../runtime" }` and drops
+  `reqwest`. `generate_cargo_toml_with_paths` takes the runtime path as a third
+  argument.
+- **Harness** (`tests/common/fresh_output.rs`, extended, not duplicated):
+  - `FreshCrate::generate_with_runtime` for a doctored runtime copy;
+  - `doctored_runtime()` copies the package and its normal dependencies
+    only, and rewrites `pub const ABI`;
+  - `cargo_check_tests()` runs `cargo check --tests --keep-going`.
+
+  The checkout witness now also lists `runtime/`. Offline resolution worked
+  unchanged: `cargo update --workspace --offline` added the runtime and its
+  dependencies to the copied lock from the local cache.
+
+### Wave 12 — Validate Generated Surface
+
+All runs below use fresh output in temp crates outside the checkout.
+
+- **Fixture crate (F2):** 19 wiremock tests run through the runtime. They were
+  rewritten from the old API: text and binary bodies, header and cookie
+  parameters, the merged Cookie, query and cookie keys, env order, Debug, and
+  form and OAuth. New tests cover:
+  - the D56 anonymous send (rewritten from `a_missing_key_is_authentication_required…`,
+    as Phase 1 required);
+  - a same-name credential collision being refused;
+  - an anonymous call stripping a client credential;
+  - codecs judging the body, not the content type;
+  - a mutator registered through generated types;
+  - definition settings: request id, secret names redacted while the server
+    still receives the values, and `deny` refusing a redirect.
+
+  A new fixture API, `FixtureSettings`, carries the last case.
+- **Real APIs:** all 18 REST APIs plus the six WebSocket modules compile
+  (R35). The fixture-crate edits made before the partial run now target
+  `ollama.rs`.
+- **Misuse (compile-fail, F1):** a positive control plus 10 misuses, in one
+  Cargo run:
+  - a wrong success type → E0308;
+  - an `EndpointSpec` impl without `Decoder` → E0046;
+  - `String` sent → E0277;
+  - another API's real generated request through `send`, `send_raw`, and
+    `mutate_response` → E0271;
+  - a mutator on a text endpoint → E0277 `SupportsHooks`;
+  - removed `request` → E0599;
+  - removed request enum → E0433;
+  - removed `with_client_and_base_url` → E0599.
+
+  The run went from 117 s with one Cargo run per case to **5.9 s** with
+  `--keep-going`. Locations match either path separator, so the test works on
+  Windows.
+- **Doctored ABI (R32):** a runtime copy with `ABI = 2` fails the generated
+  crate's build with the assertion message (3.4 s).
+- **R1, fast:** `generated_rest_code_references_the_runtime_and_defines_none_of_it`
+  generates all 18 APIs in-process. It asserts that no REST file defines any of
+  34 runtime or removed items, that `lib.rs` re-exports the runtime and
+  asserts the ABI, and that every API module refers to `schematic_runtime::`.
+- **ABI marker through public partial generation (subagent):** these tests
+  start from real full-generation output and make one `lib.rs` edit each:
+  - control: the unedited output is accepted;
+  - differing marker;
+  - missing marker (legacy output);
+  - non-literal value;
+  - `u64` type;
+  - marker declared twice;
+  - a matching marker that still fails the export check (`UnsafeOutput`);
+  - nothing retained, so a missing marker does not matter.
+
+  Every refusal asserts `RequiresFullGeneration`, a `lib.rs` entry, the
+  retained modules, and a byte-identical tree afterwards.
+- **WebSocket:** `ws_shared.rs` and the `*_ws.rs` modules are untouched. They
+  never referred to `crate::shared`, so no legacy compatibility symbol was
+  needed or kept.
+
+### Design choices for review (Human review agenda item 2)
+
+1. **The per-API type is an uninhabited marker plus a `{Name}Client` alias,
+   not a wrapper struct.**
+   - A wrapper holding `Client<Self>` needs either a forwarding builder (≈15
+     methods × 18 APIs) or `Deref`, plus `From` glue. Otherwise
+     `ClientBuilder::build()` returns `Client<A>`, not the wrapper.
+   - The alias forwards nothing (R31, D53). The marker keeps today's
+     `GitHub::BASE_URL` spelling and hosts `new()`/`builder()`.
+   - Cost: consumers name `GitHubClient` in fields instead of `GitHub`.
+   - `new()` returns `Result`, because building the HTTP client can fail. It
+     was infallible before, with a silent fallback client.
+2. **API-level `Cookie` headers are folded into every endpoint's static
+   headers, not sent as default headers.**
+   - The runtime refuses a credential-bearing default header
+     (`BuildError::AuthBearingDefaultHeader`). An API-level Cookie would
+     make `build()` fail, and the fixture showed that it did.
+   - No shipped definition has one. Folding keeps the old wire bytes: the API
+     cookie is first, merged with the endpoint's cookies and parameters into
+     one header.
+   - Other API headers become `default_header` calls. Any other
+     credential-named API header would still fail `build()`; no definition
+     has one, and none is validated (review item 3).
+3. **Query encoding moved to the runtime and was changed to percent-encoding
+   (`%20`, never `+`)** (`runtime/src/client.rs::append_query`).
+   - Phase 3's runtime used `form_urlencoded`, which would have changed the
+     generated clients' request lines. The prerequisite's wire baseline
+     forbids that.
+   - The same encoder now builds the API-key query value and rebuilds a query
+     when secrets are stripped. The runtime test now asserts
+     `q=x%20y%26z%2B~%C3%A9`.
+   - A mutation check reverted the encoder to `+`, and the runtime test caught
+     it.
+4. **Partial generation keeps the `shared.rs` byte comparison beside the ABI
+   marker.** The plan said to "replace" it, but retained modules still call the
+   generated request helpers in `shared.rs`. A matching ABI with changed
+   helpers would leave them stale. The two checks answer different questions.
+5. **The ABI equality check reads `runtime/src/lib.rs` with `syn`** instead of
+   adding `schematic-runtime` as a generator dependency. That avoids building
+   reqwest and rustls into the generator.
+6. **Generated `prelude.rs` re-exports the common runtime types**
+   (`CallOptions`, `Credential`, `Deadline`, `OriginPolicy`, `RawResponse`,
+   `Response`, `TransportError`), and `lib.rs` re-exports `schematic_runtime`.
+   Consumers therefore need no direct runtime dependency.
+7. **`EndpointSpec::into_parts` is the only `into_parts`.** No inherent
+   duplicate is emitted, so there is one definition of the parts. An inherent
+   `impl` block is emitted only when the struct has a constructor or builder.
+
+### PD dispositions touched in this phase (agenda item 1)
+
+| PD | Matched the planned disposition? |
+|---|---|
+| PD8 | Yes. `{Api}::builder()` is seeded from `definition()` and the API default headers; `{Api}::new()` covers the all-defaults case. API cookies are the exception (design choice 2) |
+| PD11 | Yes. Path dependency, `pub const ABI` checked by a generated `const _: () = assert!(…)` with a readable message, and partial generation refuses a differing marker. The marker is the named constant `SCHEMATIC_RUNTIME_ABI` that the assertion reads |
+| PD12 | Yes. Generated code holds request types, their `EndpointSpec` impls and constants, and the thin per-API marker/alias; no per-endpoint wrappers |
+| PD13 | **Removed.** Private construction and per-client scoping need nothing from the erasing request enum (`EndpointSpec::Api` scopes), so it is deleted. A compile-fail case proves `FixtureBearerRequest` is gone |
+| PD22 | Yes. Every generated `Failure` is `NoDeclaredError` |
+| PD25 | Yes. `request_id_header`, `secret_names`, and `cross_origin` pass from each definition into `definition()`, as Phase 4 populated them |
+| PD26 | Yes. No `ResponseKind` guard is emitted; the misuse and codec tests replace it |
+| PD29 | Yes. The generator translates `CrossOrigin` → `OriginPolicy` |
+
+### Deviations from the plan
+
+- **The checked-in schema is unchanged, so two "matches the committed output"
+  checks are transitional.**
+  - Affected: `cargo_gen::tests::default_manifest_matches_the_committed_schema_manifest`
+    and the comparison in `slow_real_apis_compile_offline`.
+  - While the committed `schema/src/lib.rs` has no `SCHEMATIC_RUNTIME_ABI`,
+    the manifest test instead asserts that the committed manifest lacks the
+    runtime and the generated one has it. The real-API test skips its
+    comparison, but still compiles and checks WebSocket.
+  - Both branches are marked TEMPORARY. **Phase 7 must delete them** after
+    regenerating. They also become dead automatically once the regenerated
+    `lib.rs` has the marker.
+- **Wire baseline, one line changed.** `base-url-with-query` (a base URL
+  carrying its own `?tenant=…`) now continues with `&page=1`, where the
+  generated code emitted a second `?page=1`. No shipped API has a base-URL
+  query. Every other request line is byte-identical, which
+  `slow_query_wire_matches_pre_split_baseline` checks.
+- **One definitions fix.** Bitbucket's `PaginatedResponse<T>` gained
+  `#[serde(bound(deserialize = "T: Deserialize<'de>"))]`. This is a
+  serde attribute, not a derive.
+  - Cause: `#[serde(default)]` on `values: Vec<T>` made the derive require
+    `T: Default`, so four declared response types (comment, issue-comment,
+    issue-change, and repository pages) could never deserialize.
+  - The old caller-chosen `request::<T>` hid this; the typed contract made it a
+    compile error in fresh output.
+  - Regression test: `bitbucket::types::common::tests::pages_of_items_without_default_decode`.
+    It decodes each type with and without `values`, and checks that a
+    non-list `values` is an error. Without the bound, the test does not
+    compile (E0277).
+- **Credential collisions are refusals now.** The old fixture asserted that
+  an explicit query key *replaced* a declared `api_key` parameter, and that a
+  cookie key replaced `sid=static`. The runtime (spec: "do not append
+  duplicate credentials") refuses both with `InvalidArgument`, and the tests
+  assert that. The fixture's API cookie lost its `sid=static` so that the
+  env-appended cookie case stays testable.
+- **The old modules could not be deleted.** The permission classifier
+  blocked file deletion in this session (both `git rm` and `rm`). The obsolete
+  modules are no longer declared, so nothing compiles them, but they are
+  still on disk and **need deleting by a human**:
+  - `gen/src/codegen/api_struct/{constructors,fields,request_method,variant}.rs`
+  - `gen/src/codegen/client/{mod,helpers,methods,shared_auth,tests}.rs`
+  - `gen/src/codegen/{error,request_enum,variant}.rs`
+
+  `.claude/skills/schematic-define/schematic/gen.md` notes they are
+  uncompiled; remove that note when they go.
+
+### Requirement-to-test mapping (Phase 6 share)
+
+**Boundary.** The generator's public output: generated Rust files and the
+manifest. Two fidelity levels apply:
+
+- **F1:** in-process generation with text and `syn` assertions.
+- **F2:** the generated crate compiled offline outside the checkout and run
+  against wiremock or a raw TCP recorder.
+
+All tests are L1 in `schematic-gen`'s `l1` binary or unit tests. The Cargo
+tests carry `slow_` and are run by `just test-fresh-output`, which `just test`
+invokes.
+
+**Input-robustness matrix.** The only reader added is the `lib.rs` ABI marker,
+and it parses generated Rust with `syn`. The plan's compatibility section rules
+the configuration matrix out for this grammar. Its shapes are nevertheless all
+covered, each by edit-one-thing tests from real output:
+
+- absent → Missing;
+- wrong type → `u64`;
+- wrong value form → `1 + 0`, string, `1u8`, and overflow;
+- duplicate → declared twice;
+- control → unedited output.
+
+No configuration file format was added.
+
+| Requirement (part) | Tests |
+|---|---|
+| R1: generated code defines none of the runtime; it references the runtime | `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it`; `http_client::{module_has_no_send_path_of_its_own, shared_module_holds_no_transport_or_auth_resolution}`; `cargo_gen::tests::generated_crate_sends_through_the_runtime_not_its_own_http_client` |
+| R2: typed send; the response type is fixed by the request; foreign, other-API, and missing-type impls fail; no `request<T>` | `fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time` (10 cases + control) |
+| R17: no injected client constructor | same misuse test (`with_client_and_base_url`); R1 scan (`fn with_client`) |
+| R20: CrossOrigin, secret names, and request id are translated and enforced | `api_struct::tests::every_cross_origin_policy_and_the_redaction_settings_reach_the_definition`; child test `request_id_secret_names_and_cross_origin_policy_come_from_the_definition` |
+| R14–R16 (generator share): the effective policy is translated; env order; anonymous; precedence | `api_struct::tests::{every_legacy_strategy_translates_…, an_explicit_policy_wins_over_the_legacy_strategy, a_mapping_that_names_no_variable_reads_none, the_translated_policy_is_emitted_in_runtime_terms}`; child tests `env_query_key_…`, `the_first_non_empty_env_variable_…`, `a_missing_key_sends_the_request_anonymously`, `an_anonymous_call_sends_no_credential_from_any_source`, `a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter`, `a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name`, `a_policy_without_env_fallback_reads_no_variable`, `header_key_oauth_and_form_bodies_reach_the_server` |
+| R28: no guard; the codec judges the body | child test `each_endpoint_decodes_with_its_declared_codec`; R1 scan (`enum ResponseKind`) |
+| R29/R30 (generated share): a mutator through generated types; forbidden registrations | child test `a_mutator_registered_for_a_generated_request_runs_only_for_that_endpoint`; misuse cases (text endpoint, other API) |
+| R31: thin output (no wrapper per endpoint); fresh compile | R1 scan (`fn request_*`); `e2e_generation::*_declares_*_decoder` tests; `slow_fixture_apis_compile_and_send_offline`, `slow_real_apis_compile_offline` |
+| R32: ABI mismatch fails the build; a marker drives partial refusal | `slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message`; `partial_generation::{abi_marker_control_…, refuses_differing_abi_marker, refuses_missing_legacy_abi_marker, refuses_abi_marker_that_is_not_an_integer_literal, refuses_abi_marker_of_the_wrong_type, refuses_conflicting_abi_marker_declarations, matching_abi_marker_does_not_bypass_the_export_check, missing_abi_marker_is_irrelevant_when_nothing_is_retained}`; `inventory::tests::{an_abi_marker_other_than_the_generators_requires_full_generation, the_abi_marker_is_read_only_from_its_exact_form}`; `runtime_abi_tests::the_generator_emits_the_abi_of_the_workspace_runtime` |
+| R35: WebSocket modules compile | `slow_real_apis_compile_offline` (asserts the 6 WebSocket files are in the compiled crate) |
+| Wire preservation (prerequisite contract) | `slow_query_wire_matches_pre_split_baseline` (+ child `into_parts_returns_unencoded_query_pairs_apart_from_the_path`); runtime `send::query_order_duplicates_and_a_template_query_reach_the_server` |
+| Cookie merge without parameters (found while testing) | child test `unset_cookie_parameters_still_merge_api_and_endpoint_cookies` |
+| Bitbucket pages decode | `schematic-definitions` `bitbucket::types::common::tests::pages_of_items_without_default_decode` |
+
+**Mutation checks** (temporary edits, each restored and verified with `diff`):
+
+| Mutation | Caught by |
+|---|---|
+| A misuse made valid (removed `request` replaced by `send`) | `slow_generated_types_reject_misuse_at_compile_time` names the case |
+| Runtime query encoder back to `+` | `send::query_order_duplicates_and_a_template_query_reach_the_server` |
+| `PaginatedResponse` without the serde bound | the regression test fails to compile (E0277) |
+
+**Timing.** The slowest non-Cargo test is the R1 scan, at 0.6 s. Cargo
+tests:
+
+| Test | Time |
+|---|---|
+| fixture | 25 s cold, 6 s warm |
+| misuse | 5.9 s |
+| ABI | 3.4 s |
+| real APIs | 9.8 s warm |
+| wire | 12 s |
+
+### Gates (all on the final tree)
+
+| Gate | Result |
+|---|---|
+| `just test` (`schematic/`) | PASS: L1 1864 / 0 failed / 12 skipped; fresh-output 6 / 0; compile-fail 1 / 0 |
+| `just lint` (`schematic/`) | PASS |
+| `cargo clippy -p schematic-gen -p schematic-runtime -p schematic-definitions --all-targets -- -D warnings` | PASS |
+| Fresh full output: `cargo clippy --all-targets -- -D warnings` (manual, temp crate) | PASS |
+| `RUSTDOCFLAGS='-D warnings' cargo doc -p schematic-runtime --no-deps` | PASS |
+| `cargo check` of the checked-in schema and all 8 consumers (`--all-targets`) | PASS (unchanged schema; the definitions change is a relaxed bound) |
+| `just cross-check schematic-gen --os linux` / `--os windows` | PASS 553 / 553 / PASS 551 / 551 |
+| `just cross-check schematic-runtime --os linux` / `--os windows` | PASS 157 / 157 / PASS 153 / 153 |
+| `just cross-check schematic-definitions --os linux` | PASS 568 / 568 |
+
+Notes on the gates:
+
+- The cross-checks run the L1 filter, which excludes `slow_`. The
+  fresh-output Cargo tests ran on macOS only, and CI's build job runs them on
+  Linux.
+- WSL2 was not run. The runtime change is one encoder already proven on Linux,
+  and WSL2 runs on the nightly schedule.
+- Pre-existing, untouched failures:
+  - `cargo doc -D warnings` for `schematic-gen`: `parser.rs`, `ws_codegen/mod.rs`.
+  - `cargo doc -D warnings` for `schematic-definitions`: `bitbucket/types/tags.rs`.
+  - `just doctest`: the four `schematic-definitions` endpoint-count doctests
+    (Phase 4 review item 5).
+
+### Review items found in Phase 6
+
+1. **Design choices 1–3 above.** Choice 1 (marker + `{Name}Client`) shapes
+   every consumer migration in Phase 7.
+2. **Obsolete generator modules await deletion** (list above). The
+   permission classifier blocked file deletion in this run.
+3. **API-level static headers that carry credentials.** Only `Cookie` is
+   handled, by folding it into requests. Any other credential-named API
+   header (built-in secret names, the API's auth header, or its secret names)
+   would make `build()` fail at runtime. No definition has one, and adding a
+   generator validation error for it would be a small follow-up.
+4. **The consumer-facing `schematic/README.md` usage guide and
+   `docs/headers/README.md` still describe the old generated client.** They
+   document the checked-in crate, which changes in Phase 7. The plan gives
+   them to Phase 8 ("Complete Schematic Docs").
+   `.claude/skills/schematic-define/schematic/headers.md` may also describe
+   `Headers`-based auth, and a pre-existing link in
+   `.claude/skills/schematic-define/SKILL.md` names a dated review spec.
+5. **There is no `schematic/runtime/README.md`.** The generator docs link the
+   runtime crate directory and its crate docs instead. Phase 8 owns the
+   runtime README.
+
+## Phase 7
+
+Started and finished 2026-10-12 on macOS, with native Windows and Linux
+evidence produced through `just cross-check`. I did Waves 13 and 15 myself.
+Wave 14 ran as four foreground subagents with disjoint write sets
+(sniff; homelab; biscuit-speaks and model-citizen; the schema's hand tests).
+They shared one brief that described the new surface, and none of them
+edited generated, runtime, or generator code.
+
+### Wave 13 — Regenerate Schema
+
+- **Command.** `cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman -v`.
+  This is the body of `just generate`, run without its desktop notification.
+  No schema source or manifest was edited by hand.
+- **Generated differences.** 48 files changed in `schema/src`, with
+  +9 944 / −43 834 lines.
+  - Every `client.rs` is gone.
+  - Eight split modules collapsed into single files: `artificial_analysis`,
+    `bitbucket`, `eversolo`, `gitea`, `github`, `gitlab`, `huggingface`, and
+    `ollama`. The generator removed the stale directories itself.
+  - `elevenlabs`, `emqx`, and `openai` remain split
+    (`mod.rs` + `requests.rs` + `responses.rs`).
+  - `shared.rs` keeps only the cookie helpers, `FormFile`, and `Paginated`.
+  - `lib.rs` declares and asserts `SCHEMATIC_RUNTIME_ABI` and re-exports
+    `schematic_runtime`.
+  - `prelude.rs` re-exports the runtime types and every `{Api}`/`{Api}Client`.
+  - `Cargo.toml` swaps `reqwest` for the `schematic-runtime` path dependency.
+  - The WebSocket modules are byte-identical.
+- **OpenAPI and Postman exports** were byte-identical to the committed ones
+  until the ElevenLabs change below.
+- **One definition change was needed for migration**
+  (`definitions/src/elevenlabs/endpoints/voices.rs`).
+  - `ListVoices` now declares the optional query parameters `page_size`
+    (integer) and `page_token` (string). These are exactly the names
+    biscuit-speaks' hand-rolled pager sent.
+  - Without them, the only replacement for the removed
+    `http_client()`/`api_key_header()` accessors would have been a
+    bypass of the managed client (Phase 1 open question 1).
+  - After regeneration, `openapi/elevenlabs.json` and
+    `postman/elevenlabs.postman_collection.json` each gained the two
+    parameters (+32 lines).
+- **Removed the TEMPORARY branches.** Both Phase 6 transitional branches are
+  deleted, and the comparisons are now unconditional again:
+  - `cargo_gen::tests::default_manifest_matches_the_committed_schema_manifest`;
+  - the `schema/src` comparison inside `slow_real_apis_compile_offline`.
+
+  Both pass against the regenerated tree.
+- **Fresh compile before delegation.** `cargo build --manifest-path schema/Cargo.toml --lib`
+  passed. The two old hand tests failed to compile, as expected
+  (`with_base_url`, request enums, `SchematicError`); Wave 14 migrated them.
+- **Compile-time sample, repeated under Phase 1's conditions** (same host and
+  toolchain, `dev` `--lib`, dependencies warm, schema package cleaned,
+  `RUSTC_WRAPPER=` to bypass kache):
+
+  ```sh
+  cargo clean -p schematic-schema --manifest-path schematic/schema/Cargo.toml
+  time RUSTC_WRAPPER= cargo build --manifest-path schematic/schema/Cargo.toml --lib
+  ```
+
+  **Result: 5.85 s** (6.57 s user, 5.89 s wall). The Phase 1 baseline was
+  14.63 s. This is a single observation and sets no threshold. The
+  generated source shrank from about 75 k to 41.6 k lines.
+- **Obsolete generator modules are still on disk.** The permission
+  classifier again blocked deleting the uncompiled files listed in Phase 6
+  (`rm`: "Irreversible Local Destruction"). The note in
+  `.claude/skills/schematic-define/schematic/gen.md` is still accurate and
+  stays. A human needs to delete them.
+
+#### Migration-ready examples (the surface consumers now use)
+
+```rust
+use schematic_schema::prelude::*;                       // CallOptions, Credential, {Api}, {Api}Client, …
+use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome};
+
+// Managed builder (replaces new()/with_base_url/with_client_and_base_url/variant())
+let client: GitHubClient = GitHub::builder()
+    .base_url(api_url)                                  // optional
+    .connect_timeout(Duration::from_secs(5))            // optional
+    .timeout(Duration::from_secs(10))                   // optional
+    .credentials(Credential::access_token(token))       // optional client credential
+    .build()?;                                          // BuildError
+let codeberg = Gitea::builder().base_url(url).env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]).build()?;
+
+// JSON send + envelope extraction (replaces request::<T>)
+let reply = client.send(GetRepositoryRequest::new(owner, repo), &CallOptions::default()).await?; // Err = TransportError (no head)
+match reply.outcome {
+    Outcome::Success(repo) => { /* typed */ }
+    Outcome::Failure(error) => {
+        let status = reply.meta.status;                  // any non-2xx is Ok(Response) now
+        let retry_after = reply.meta.headers.get("retry-after");
+        let request_id = reply.meta.request_id.as_deref();
+        let raw_body = &error.body;                      // never redacted; Display never prints it
+        if matches!(error.kind, ErrorKind::MalformedSuccess) { /* 2xx that did not decode */ }
+    }
+}
+let value = client.send(req, &CallOptions::default()).await?.into_result()?; // drops the metadata
+
+// Text / binary / empty endpoints use the same send; the type follows the endpoint
+let text: String = client.send(GetRepositoryContentRawRequest::new(..), &opts).await?.into_result()?;
+let bytes: bytes::Bytes = bitbucket.send(GetSourceRequest::new(..), &opts).await?.into_result()?;
+let (): () = tv.send(CloseAppRequest::new(..), &opts).await?.into_result()?;
+
+// Explicit anonymous call (sniff's retry is a second consumer call; the runtime never retries)
+if matches!(reply.meta.status.as_u16(), 401 | 403) && reply.meta.request.auth != AuthMethod::Anonymous {
+    let second = client.send(req_again, &CallOptions::anonymous()).await?;
+}
+
+// Per-call credential, JSON hooks, raw send
+let opts = CallOptions::new().credential(Credential::api_key(key));
+let hooked = HuggingFaceHub::builder()
+    .pre_response_json(|value: &mut serde_json::Value| Ok(()))
+    .mutate_response::<WhoAmIRequest, _>(|user: &mut UserInfo| Ok(()))
+    .build()?;
+let raw = client.send_raw(req, &CallOptions::default()).await?;   // status(), headers(), body kept unchanged
+```
+
+### Wave 14 — Consumer Migration
+
+#### Sniff providers (`sniff/lib/src/remote/`)
+
+- **One shared classifier.** The new `remote/envelope.rs` has
+  `Replies` and a per-provider `REPLIES`. It replaces the four non-exhaustive
+  `map_schematic_error` functions, classifying a `Response`'s status, headers,
+  and raw body, plus `TransportError`. It keeps the Phase 1 §4 baseline table:
+  - **401, per provider:** GitHub gives `InvalidCredentials` with the
+    body's `message`. The others give `MissingCredentials` with
+    "VARS (API returned 401: body)".
+  - **403:** rate-limit evidence gives `RateLimited`; anything else is
+    `RemoteApi{403, body}`.
+  - **429:** `RateLimited`.
+  - **404:** `RemoteApi{404, "Not found"}`.
+  - **Any other status:** `RemoteApi{status, body}`.
+- **Constructors.** `{Api}::builder()…build()` replaces
+  `new`/`with_base_url`/`variant()`, and `BuildError` maps to
+  `SniffError::RemoteInit`. Codeberg is `Gitea::builder().base_url(CODEBERG_API_URL).env_order(["CODEBERG_TOKEN","GITEA_TOKEN"])`.
+  The `Default` impls (unit-test use only) call `new().expect(..)` and
+  document `## Panics`.
+- **Anonymous retry (PD31).**
+  - All four `unauthenticated_client()` variants are deleted, along with
+    their `MissingCredential`/`AuthenticationRequired` retry branches in
+    `list_pull_requests`. Under D56 those branches have no trigger: a missing
+    credential already sends anonymously, so the method makes one request.
+  - GitHub `list_workflow_runs` keeps one explicit second call with
+    `CallOptions::anonymous()`, made only on a 401/403 **and** when the first
+    send carried a credential (`meta.request.auth != AuthMethod::Anonymous`).
+- **Non-JSON endpoints and empty-result rules.**
+  - The text endpoints (GitHub/Gitea `get_file_content`) return `String`.
+  - Bitbucket `GetSource` returns `Bytes`, and the local directory-listing
+    decode is kept. `decode_directory_listing` now builds its `SniffError`
+    directly, with the message unchanged.
+  - Bitbucket `list_issues` still returns empty on a 404, and its downloads
+    still return empty on any failure.
+  - Tree continuations still skip a prefix on failure.
+- **Intentional behavior changes:**
+  - `RateLimited.retry_after` is now read from `Retry-After`
+    delta-seconds, on a 429 or a rate-limited 403. An HTTP-date value gives
+    `None`.
+  - A 403 with `x-ratelimit-remaining: 0` is `RateLimited`, as in
+    `remote/focused.rs`.
+  - A 2xx body that does not decode reads "success response body could not
+    be decoded (N body bytes)". An interrupted body reads "response body was
+    interrupted (N body bytes)", which keeps the two distinct; the runtime
+    exposes no serde text.
+  - A transport error uses the runtime's redacted Display. The reqwest
+    Display it replaces included the URL.
+- **A real defect found and fixed: GitLab double encoding.**
+  - sniff percent-encoded the project id and file path, and the generated
+    client then encoded them again, so the wire carried `owner%252Frepo`.
+  - `encode_project_id` became `project_path`, which passes `owner/repo`
+    and lets the client encode once.
+  - The old tests used `path_regex(.*)`, so they never saw it. The new
+    exact-path test `gitlab_tests::get_file_content_decodes_the_base64_content`
+    pins it.
+- **Docs and skill.**
+  - `sniff/docs/repos/repo-tech-design.md`: the code fences now show the new
+    surface, plus new "Error classification" and "Anonymous requests and the
+    one retry" sections.
+  - `sniff/docs/cli/repo_remote.md`: removed two statements that were
+    already false ("credentials are required", "providers with no
+    credentials are skipped").
+  - `.claude/skills/sniff/remote-and-repository.md`.
+- **Unchanged:** the bench fixture and `sniff-cli` still compile, because
+  the `GitHubRemote::with_base_url` signature is the same.
+
+#### Homelab clients (`homelab/**`)
+
+- **Shared helper.** The new `homelab/lib/src/rest.rs` provides:
+  - `device_builder()`, which applies the base URL, `CONNECT_TIMEOUT` = 5 s,
+    and `REQUEST_TIMEOUT` = 10 s;
+  - `RestError`, with the variants `Build`, `Transport`,
+    `Status{status, body}`, and `Response{status, ApiError}`;
+  - a `send` helper.
+- **Eversolo.** The 24 Eversolo sites go through it.
+  `EversoloError::Api(#[from] RestError)` and `SamsungTvError::Api` keep
+  their variant names and Display prefixes.
+- **Samsung.** `rest_builder` sets `danger_accept_invalid_certificates()`
+  **only** when `use_https`. `get_server_logs` returns `String`, the four
+  empty endpoints return `()`, and a non-2xx reply is an `Err`.
+- **Constructors now return `Result`:** `Eversolo::new`, `SamsungTv::new`,
+  and `SamsungTv::with_https`. `build()` validates the base URL up front, so
+  the old `.expect` would now panic on a bad host. All 8 callers were already
+  in `Result`/`Option` contexts. Discovery and the server probes keep their
+  "not a device" and "off" outcomes. eversolo-integration's `build_client`
+  propagates with `?`, so it still takes the asleep → Wake-on-LAN path.
+- **Behavior preserved (Phase 1 §3.4).** Every Eversolo failure (non-2xx,
+  transport, malformed 2xx) is still `Err(EversoloError)`.
+- **Send futures are boxed** (`Box::pin` in `rest::send`).
+  - Without the box, the new eversolo-integration tests overflowed the
+    2 MiB debug test-thread stack: `execute_operation`'s future was 59 KB
+    inline, because `fetch_snapshot` joins eight sends. Boxed, it is 5.1 KB.
+  - **The runtime's `Client::send` future is large.** This is a review
+    item for Phase 8 and the author (below).
+- **Small side effect:** `homey samsung discover` now builds the REST
+  client before branching, so an invalid `--host` fails that subcommand.
+- **Docs.** `homelab/docs/eversolo-design.md` is rewritten for the new client
+  and error table. The homelab skill never described the generated client.
+- **WebSocket-only crates** (arcam, sony, unfolded-helper) are unchanged.
+  They build and pass.
+
+#### Model consumers
+
+- **biscuit-speaks** (`providers/cloud/elevenlabs.rs`).
+  - **Key handling.** The provider reads `ELEVEN_LABS_API_KEY`, then
+    `ELEVENLABS_API_KEY`. This is the generated env-fallback order. It passes
+    the key explicitly with `builder().credentials(Credential::api_key(key))`,
+    so the env read happens once and the pre-check cannot disagree with the
+    key that is sent.
+  - **Sends.** `create_speech` ×2 and `create_sound_effect` extract `Bytes`
+    from the envelope, and `list_models` is a typed JSON send.
+  - **`list_voices_raw`** is now a typed paginated `send` of
+    `ListVoicesRequest { page_size: Some(100), page_token }`. It no longer
+    makes any direct reqwest call.
+  - **Error mapping.** `map_api_error(status, &ApiError)` and
+    `map_transport_error` map as follows:
+    - 402 → `PaidPlanRequired` with the body;
+    - another non-2xx → "API error ({status}): {body}";
+    - a malformed 2xx → "Failed to parse response: …";
+    - a transport error → its redacted Display.
+  - **Behavior changes:**
+    - `MissingApiKey` now comes only from construction, never at call
+      time.
+    - An invalid base URL is `HttpError("Failed to build HTTP client: …")`.
+    - A voices page with `has_more = true` and no `next_page_token` now
+      ends the loop. Before, it re-requested page 1 forever.
+    - The status text dropped its reason phrase (`500` instead of
+      `500 Internal Server Error`).
+  - **Doc and skill fixes.**
+    - Corrected the README's variable precedence, which was already wrong.
+    - Corrected the `## Errors` sections.
+    - Updated `.claude/skills/biscuit-speaks/providers.md`.
+    - Added the dependency note to `biscuit-speaks/docs/dependencies.md`.
+- **model-citizen.** Phase 1 found the dependency manifest-only, and a
+  search confirmed it: there is no Rust use. `schematic-schema` was
+  **removed** from `model-citizen/lib/Cargo.toml`, and the stale README line
+  ("HuggingFace API client") and the skill's dependency entry went with it.
+  The Rust code uses `schematic-definitions` only.
+
+#### Schema hand tests (`schematic/schema/tests/`)
+
+- **Migrated files.**
+  - `artificial_analysis_client.rs` and `huggingface_client.rs` now use the
+    builder, `send`, and envelope assertions.
+  - The old `missing_auth_returns_authentication_required_error` became
+    `missing_credential_sends_anonymously_and_returns_the_401` (D56).
+  - The old `explicit_api_key_overrides_env_fallback` became
+    `client_api_key_overrides_env_fallback`. Its env value is now real, so
+    the override proves something.
+  - The old `test_api_error_handling` became
+    `not_found_is_an_envelope_failure_with_status_and_body`.
+  - The HF env test is now `#[serial]` with an `EnvGuard`.
+  - Neither old file had any hook, guard, or variant-builder tests to
+    migrate.
+- **New files:**
+  - `github_client.rs`: metadata and request id on success and on failure;
+    the full credential precedence ladder; anonymous 401; anonymous options
+    despite client and env credentials; `check_link`; same- and cross-origin
+    redirects; malformed success; and the type-level `EndpointSpec::Api`
+    assertion.
+  - `non_json_endpoints.rs`: text, binary, empty, and `send_raw`.
+  - `common/mod.rs`: a minimal `EnvGuard`. The generated manifest has no
+    test-toolkit dependency.
+- **New hook tests** in `huggingface_client.rs`.
+- **Registration.** `just test-schema` discovers the files automatically,
+  because the schema manifest keeps the default `autotests`.
+
+### Wave 15 — Close Consumer Inventory
+
+**Inventory closure (Phase 1 §3).** Every row is accounted for:
+
+- **§3.1 sniff:**
+  - every GitHub, GitLab, Gitea, and Bitbucket row maps to its migrated
+    `send` site;
+  - `unauthenticated_client` ×4 is deleted, with the retry semantics
+    re-tested in `anonymous_request_tests::*`;
+  - `map_schematic_error` ×4 became `envelope::Replies`
+    (`envelope::tests::*` plus provider wiremock tests);
+  - `decode_directory_listing` is a direct `SniffError`;
+  - `from_shorthand`/`from_url`/`sniff-cli`/bench are unchanged and green.
+- **§3.2 biscuit-speaks:** all 9 rows are migrated. `list_voices_raw`
+  became a typed paginated send, and the ignored diagnostic test now uses the
+  crate's own `reqwest` dev-dependency.
+- **§3.3 homelab:**
+  - the Eversolo constructor, its 24 sites, and its error;
+  - the Samsung constructor, JSON, text, and empty endpoints, and its error;
+  - the CLI and server indirect callers.
+
+  The WebSocket connect is unchanged.
+- **§3.4 eversolo-integration:** the asleep → WoL path is re-tested
+  (`asleep_device_tests::*`), `build_client` uses `?`, and discovery uses
+  `.ok()?`.
+- **§3.5 WebSocket-only crates:** unchanged; they build and pass.
+- **§3.6 model-citizen:** dependency removed.
+- **§8 doc drift:** fixed in sniff, homelab, and model-citizen.
+- **§9 test gaps:** all closed. The one exception is biscuit-speaks
+  `generate_to_cache`, which shares `send` with `generate_audio` but is
+  reached through `speak()` only with playback, so it has no direct test.
+
+**Search for removed names.** I searched `sniff`, `biscuit-speaks`,
+`model-citizen`, `homelab`, `schematic/schema/src`, and `schematic/schema/tests`,
+over `*.rs` and `*.md`, excluding `target/`, plans, features, and fixes. The
+pattern was:
+
+`SchematicError|\.request::<|\.request\(|request_text|request_bytes|request_empty|with_client_and_base_url|with_client\(|with_api_key_param|resolve_request_auth|ResponseKind|unauthenticated_client|api_key_header\(|http_client\(\)|api_base_url\(|shared::reqwest|AuthenticationRequired|MissingCredential\b|\.variant\(\)`
+
+It found two kinds of hit, both legitimate:
+
+- `.request(...)` in `schema/tests/ws_runtime.rs`, which is the WebSocket
+  request API and is retained;
+- `with_client` in the completed sniff review snapshot
+  `sniff/reviews/_completed/2026-04-03-better-types/plan.md`, which is about
+  unrelated `AiCli`/`TtsClient` types.
+
+No legacy REST use remains.
+
+**Safe-log review (R34).** No migrated consumer formats `ResponseMeta.headers`,
+a `RequestMeta`, a reqwest error, or the `Debug` of a `Response`/`ApiError`.
+Transport failures use the redacted `TransportError` Display, and other
+failure kinds use `ApiError` Display (kind and byte count). Headers are read
+for exactly two values (`retry-after`, `x-ratelimit-remaining`).
+
+Each consumer has a sentinel test:
+
+- sniff: `secret_redaction_tests::a_sent_token_never_appears_in_a_classified_error`
+  (401 and 500; it first proves the sentinel was sent) and
+  `a_sent_token_never_appears_in_a_transport_error`;
+- biscuit-speaks: `api_key_never_appears_in_error_display_or_debug`;
+- homelab: Eversolo's `key` query is redacted by the runtime.
+
+**Residual, unchanged from baseline:** sniff `RemoteApi.message`,
+biscuit-speaks `HttpError`, and homelab `RestError::Status` still embed the
+provider's response **body** text, as they did before. A provider that echoes
+a credential in its body would expose it there (review item 4).
+
+**Determinism.** I regenerated again after all edits and compared a
+content hash of `schema/src`, `schema/Cargo.toml`, `openapi/`, and
+`postman/`. The two hashes were identical (`5c04317…`). The intentional
+schema test additions live in `schema/tests/`, which generation never
+touches.
+
+### Requirement-to-test mapping (Phase 7 share)
+
+**Boundary.** These are consumer crates calling the regenerated
+`schematic-schema` across the crate boundary, over local HTTP. Fidelity is
+**F2**: wiremock or a local TCP listener, through each consumer's public
+methods, never real services or devices. All tests are L1. sniff's are in
+its declared `tests/l1/` binary and unit modules. biscuit-speaks' are in an
+auto-discovered `tests/elevenlabs_http.rs`; the crate has no
+`autotests = false`. homelab's are unit modules. The schema's tests run
+under `just test-schema`.
+
+**Input-robustness matrix.** It does not apply. Phase 7 adds no reader of a
+file format or configuration. The ListVoices change adds two query
+parameters to a definition, and the generator's existing query codegen
+tests cover how they are emitted.
+
+| Requirement (part) | Tests |
+|---|---|
+| R2 — actual generated requests are typed to their own API | `schema/tests/github_client::generated_requests_belong_to_their_own_api` (positive); negative E0271 cases stay in `schematic-gen` `slow_generated_types_reject_misuse_at_compile_time` over real generated output (the schema crate has no trybuild and its manifest is generated) |
+| R4 — metadata, request id, status, and headers on success and failure | `github_client::{success_metadata_carries_request_id_status_and_headers, failure_metadata_carries_request_id_status_and_headers}` |
+| R14–R16 — precedence, anonymous sends, anonymous 401 | `github_client::{credential_precedence_per_call_client_env_anonymous, no_credential_sends_anonymously_and_returns_the_401, anonymous_call_options_send_no_credential_despite_client_and_env}`; AA `missing_credential_sends_anonymously_and_returns_the_401`, `client_api_key_overrides_env_fallback`, `env_api_key_is_used_when_no_explicit_key`; HF `auth_header_present_from_env_fallback`; sniff `gitea::tests::codeberg_credentials::*` (env order) |
+| R23 — absolute links and redirects under the API policy | `github_client::{check_link_accepts_same_origin_and_rejects_a_foreign_origin, redirects_follow_the_same_origin_policy}` |
+| R28 — codec, not a guard; malformed success evidence | `github_client::undecodable_success_body_is_malformed_success_with_raw_bytes`; `non_json_endpoints::{text_endpoint_decodes_into_string, binary_endpoint_decodes_into_bytes, empty_endpoint_decodes_into_unit, send_raw_returns_status_headers_and_body_unchanged}` |
+| R29 — hooks on generated types | `huggingface_client::{pre_response_json_reshapes_body_before_decode, mutate_response_runs_only_for_its_endpoint, refusing_hook_yields_hook_failure_with_original_body, pre_response_json_skips_error_replies_and_text_endpoints}` |
+| R33 — sniff: status policy (401/403/429/404, Retry-After) | `envelope::tests::*` (7); `github_tests::{error_401_unauthorized, error_403_rate_limited_in_body, error_403_with_a_spent_quota_is_rate_limited, error_403_without_rate_limit_evidence_keeps_the_body, error_429_rate_limited, error_429_reads_retry_after_seconds, error_404_not_found}` and the per-provider equivalents |
+| R33 — sniff: anonymous retry is an explicit second call, sent only after a credential was sent, and never resends the credential | `anonymous_request_tests::{github_list_workflow_runs_retries_anonymously_when_token_gets_401, …_403, github_list_workflow_runs_sends_anonymously_when_token_missing, github_list_workflow_runs_is_not_retried_when_an_anonymous_request_is_rejected, *_list_pull_requests_sends_anonymously_when_token_missing, github_list_pull_requests_returns_invalid_credentials_when_anonymous_rejected}` |
+| R33 — sniff: undecodable and interrupted reported distinctly | `github_tests::an_undecodable_body_and_an_interrupted_body_are_reported_distinctly` (TCP listener: `content-length: 100`, then an early close) |
+| R33 — sniff: text, binary, and JSON file content; continuations; downloads | `github_tests::{get_file_content_returns_the_raw_text, get_file_content_maps_a_missing_file_to_not_found}`, `gitea_tests::{get_file_content_returns_the_raw_text, a_truncated_tree_continues_for_document_and_ci_prefixes}`, `gitlab_tests::get_file_content_decodes_the_base64_content` (also pins the double-encoding fix), `bitbucket_tests::get_tags_and_releases_treats_a_failed_downloads_listing_as_empty`, `snapshot_reuse_tests::a_truncated_github_tree_continues_for_document_and_ci_prefixes` (now asserts `recursive=true`) |
+| R33 — homelab: managed builder, timeouts, HTTPS-only invalid certificates | `rest::tests::{device_builder_sets_the_request_timeout, device_builder_sets_a_connect_timeout}`, `eversolo::client_tests::{new_targets_plain_http_with_the_device_timeouts, new_reports_a_host_that_forms_no_base_url_as_an_error}`, `samsung_tv::rest_tests::{the_rest_base_url_scheme_follows_use_https, invalid_certificates_are_accepted_only_over_https, an_https_client_does_not_speak_plain_http}` |
+| R33 — homelab: every failure is still an error; asleep → WoL | `eversolo::client_tests::{set_volume_returns_the_decoded_json_reply, a_non_success_status_is_an_error_carrying_status_and_body, a_malformed_success_body_is_an_error, a_connection_closed_before_any_reply_is_an_error}`; `samsung_tv::rest_tests::{get_server_logs_returns_the_text_body, empty_endpoints_succeed_on_a_success_status, empty_endpoints_fail_on_a_non_success_status}`; eversolo-integration `asleep_device_tests::{power_on_*, power_toggle_*}` (4); server `device_rest_errors_map_to_bad_gateway_with_their_codes` |
+| R33 — biscuit-speaks: binary extraction, pagination, 402, and errors | `elevenlabs_http::{generate_audio_returns_exact_response_bytes_and_sends_key_header, create_sound_effect_returns_exact_response_bytes, list_models_decodes_json_response, list_voices_raw_follows_page_token_and_aggregates, list_voices_raw_maps_402_to_paid_plan_required_with_body, generate_audio_maps_402_to_paid_plan_required_with_body, list_models_maps_500_to_http_error_with_status_and_body, list_models_maps_malformed_success_body_to_parse_error, transport_failure_maps_to_http_error_without_key, with_base_url_without_key_is_missing_api_key, alternate_key_variable_is_sent_when_preferred_is_unset}` plus 3 rewritten units |
+| R33 — model-citizen | dependency removed; `just test` 170/170 (baseline 170) |
+| R34 — sentinel never leaks | sniff `secret_redaction_tests::{a_sent_token_never_appears_in_a_classified_error, a_sent_token_never_appears_in_a_transport_error}`; biscuit-speaks `api_key_never_appears_in_error_display_or_debug`; plus the review above |
+| R35 — WebSocket modules compile | `schema/tests/ws_runtime.rs` (4) under `just test-schema`; `just lint-schema --all-targets`; `slow_real_apis_compile_offline`, now comparing against the committed tree unconditionally |
+| Phase 6 transitional checks are now unconditional | `cargo_gen::tests::default_manifest_matches_the_committed_schema_manifest`, `slow_real_apis_compile_offline` |
+
+### Gates (all on the final tree)
+
+| Gate | Result |
+|---|---|
+| `just test` (`schematic/`) | PASS: L1 1864 / 0 / 12 skipped; fresh-output 6 / 0 (49 s); compile-fail 1 / 0 |
+| `just lint` (`schematic/`) | PASS |
+| `just test-schema` (`schematic/`) | PASS 37 / 37 |
+| `just lint-schema` (`schematic/`) | PASS |
+| `just test` / `just lint` (`sniff/`) | PASS 3374 / 0 / 33 skipped; lint PASS |
+| `just test` / `just lint` (`homelab/`, all 7 crates) | PASS Rust 243 / 0 / 8 skipped; vitest 22 / 22; lint PASS |
+| `just test` / `just lint` (`biscuit-speaks/`) | PASS 505 / 0 / 19 skipped; lint PASS |
+| `just test` / `just lint` (`model-citizen/`) | PASS 170 / 0 / 0; lint PASS |
+| `just cross-check {biscuit-speaks, sniff, homelab, eversolo-integration} --os windows` | PASS 386 / 386, 2335 / 2335, 48 / 48, 32 / 32 |
+| `just cross-check {biscuit-speaks, homelab, eversolo-integration, homelab-server, sniff} --os linux` | PASS 387 / 387, 48 / 48, 32 / 32, 70 / 70, 2379 / 2379 |
+
+All eight dependents build and pass. arcam-amp-integration,
+sony-receiver-integration, and unfolded-integration-helper run inside
+`homelab/`'s `just test`. WSL2 was not run: it is scheduled nightly, and
+nothing in this phase is WSL-specific.
+
+The Windows cross-checks are where the closed-port and early-close tests
+matter (the `os` skill's ~2 s refusal trap), and they passed:
+
+- homelab uses an accept-then-drop listener;
+- biscuit-speaks uses a released port, with no deadline that depends on
+  how fast the refusal comes;
+- sniff uses an early-close listener.
+
+**Pre-existing, unchanged:** the `cargo doc -D warnings` failures in
+`schematic-gen` and `schematic-definitions`; the four `just doctest`
+endpoint-count doctests; and `rustfmt --check` diffs in untouched files
+(`sniff/lib/src/remote/{blocking,check_status}.rs`, two spots in
+`biscuit-speaks/.../elevenlabs.rs`, `homelab/cli/src/main.rs:3638-3643`).
+
+### Deviations from the plan
+
+- **The ListVoices definition change in Wave 13.** The plan assumed the
+  schema could be regenerated as-is. The cleanest way to retire
+  biscuit-speaks' accessor bypass was to declare the two query parameters
+  it really sends, rather than adding a raw escape hatch.
+- **Formatting rule.** Two subagents ran `rustfmt` (never `cargo fmt`) on
+  files they owned:
+  - homelab applied its whitespace and trailing-comma output to
+    `homelab/lib/src/{eversolo,samsung_tv}.rs`, both of which this phase
+    rewrote heavily;
+  - the schema agent formatted its own new and migrated test files.
+
+  No other file was formatted. The merge risk is limited to those files.
+- **Obsolete generator files are still not deleted** (classifier block, as
+  in Phase 6).
+
+### Review items found in Phase 7
+
+1. **The runtime's `Client::send` future is large.** A consumer that joins
+   several sends in one future can overflow a 2 MiB debug stack. homelab
+   hit this and boxes every send.
+   - Options: box inside the runtime (`send` returns a boxed future, one
+     allocation per call), or document the size and let consumers box.
+   - Phase 8's runtime docs should state whichever is chosen. sniff joins
+     several sends too, but its tests pass on default stacks.
+2. **Deleting the obsolete generator modules needs a human** (list in
+   Phase 6).
+3. **The GitLab double-encoding fix changes sniff's wire behavior.** It
+   corrects requests a real GitLab answered with 404. It is worth knowing
+   if anyone relied on the old (broken) GitLab metadata or file paths.
+4. **Consumers still embed provider response bodies in their error text**
+   (sniff, biscuit-speaks, homelab), as they did before. Whether error
+   Display should drop bodies is a cross-consumer policy question, not a
+   regression.
+5. **sniff's GitLab doc comment** still says the client lacks a
+   `GetProject` endpoint. The schema now has `GetProjectRequest`, so the
+   metadata stub could use it (a follow-up, not a migration need). The
+   Gitea 401 message names `GITEA_TOKEN` even for Codeberg, which is
+   baseline behavior.
+6. **Phase 8 docs.** These still describe the old generated client and are
+   now visibly stale against the regenerated crate:
+   - `schematic/README.md`'s usage guide;
+   - `schematic/docs/headers/README.md`;
+   - `.claude/skills/schematic-define/schematic/headers.md`.
