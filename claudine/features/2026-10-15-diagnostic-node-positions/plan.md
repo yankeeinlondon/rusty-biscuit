@@ -4,6 +4,11 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Diagnostic Node Positions Implementation Plan
@@ -32,14 +37,14 @@ Successful completion means the nested `sya` fixture reports line 5, column 9 th
 
 Tasks in this wave are sequential: finish the contract inventory before the spike. This wave establishes the boundary that subsequent parallel work will share.
 
-- [ ] **Contract Inventory**
+- [x] **Contract Inventory**
   - Inspect `darkmatter/lib/src/markdown/schemas/validate.rs`, `schemas/mod.rs::positions_for`, and `schemas/simplified/source.rs`. Inventory every repository `PositionMap` construction, insertion, lookup, and iteration with a Rust-scoped search, including tests and DMLS's empty-map calls.
   - Trace `positions_for()` through validation/coercion and composition; confirm the original loaded snapshot survives assignments and both composition validation passes. Inspect `Markdown::loaded_source()` and the byte-preserving frontmatter extractor before selecting the source.
   - Record a minimal representation that holds distinct key/value/root starts, legacy top-level fallback positions, and the shared line index. Prefer wrapping the existing located tree over introducing a second parser or new dependencies. Specify empty construction and how one source-relative line offset reaches every position.
   - Identify actual public-map consumers separately from locator consumers: `markdown/hash/write.rs` and `markdown/compose/frontmatter_interpolation.rs` share the locator and must retain their behavior.
   - Review the relevant Darkmatter/schema/testing skills and repository Test Toolkit. Before downstream package discovery, use the sniff skill and Sniff; use GitNexus only when its caller graph resolves a remaining question faster than source reads.
 
-- [ ] **Locator Spike**
+- [x] **Locator Spike**
   - **Prerequisite:** Contract Inventory. Run a small, local probe using the existing locator on compact mappings in sequences, flow collections, escaped/empty/numeric keys, block scalars, leading comments, LF/CRLF, and valid unsupported YAML. Inspect key/value/root spans and confirm which token marks a mapping or scalar start.
   - Probe the boundary between structural projection and actual authored semantics, especially unsupported/ambiguous forms and decoded scalar descendants. Determine a conservative way to reject unsafe nested projection without evaluating expressions, resolving files, or parsing YAML for every diagnostic.
   - Record expected offsets and the chosen source/index representation. Keep useful cases as eventual L1 fixtures; do not add a permanent benchmark or repeat this spike later.

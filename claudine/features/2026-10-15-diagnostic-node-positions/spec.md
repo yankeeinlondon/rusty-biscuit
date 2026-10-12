@@ -30,6 +30,25 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+    Phase 1 produced no source changes; its binding design is in the
+    implementation log under "Chosen design (binding for Phase 2)". Key points:
+    (1) Project positions from `Markdown::loaded_source()` via
+    `extract_frontmatter_block` + `locate_frontmatter_value(block.yaml,
+    block.yaml_span.start)`, but ONLY when `frontmatter().raw_source().is_some()`
+    — `From<String>` keeps loaded text even when frontmatter parsing failed.
+    (2) The semantic map may come from `parse_yaml_with_fallbacks` (tab
+    normalization, `$(…)`/`{{ … }}` protection), so accept the located tree only
+    if it matches `Frontmatter::mapping_orders()` (same keys in order at every
+    mapping pointer, same mapping count) and contains no alias scalar
+    (`yaml_scalar::alias_token`); otherwise use the legacy top-level scan. This
+    witness is what rejects aliases and merge keys.
+    (3) Index lines over the loaded frontmatter block so lines are document
+    lines and the delimiter offset is applied once by construction.
+    (4) Do not change `simplified/source.rs`; the hash writer and frontmatter
+    interpolation share the locator. The spike confirmed no locator change is
+    needed. Two `validate.rs` unit tests `insert` into `PositionMap` directly
+    and must be migrated when the alias becomes a struct.
 pipeline_step: 5
 related:
     - 2026-10-17-content-policy-base-schema
