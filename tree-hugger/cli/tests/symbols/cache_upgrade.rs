@@ -898,7 +898,7 @@ fn entry_from_extractor_revision_eleven_is_not_served_after_the_repairs() {
         key: OldKey::Computed,
         file: FILE,
         language: "typescript",
-        source: format!("{TYPESCRIPT_FIXTURE}{}", crate::filters::FENCED_DEPRECATION_TS),
+        source: format!("export function exportedFunction() {{}}\n{}", crate::filters::FENCED_DEPRECATION_TS),
         sentinel: "exportedFunction",
         probe: fenced_deprecation,
         repaired: Value::from(vec![false, true]),

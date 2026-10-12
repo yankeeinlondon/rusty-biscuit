@@ -631,7 +631,15 @@ fn on_demand_and_single_name_import_producers_preserve_parity() {
 
 #[test]
 fn java_single_segment_on_demand_imports_keep_the_strict_json_shape_matrix() {
-    for written in ["import p.*; class W { void f(){} }", "import static p.*; class W { void f(){} }", "import p /*c*/ . /*d*/ *; class W { void f(){} }"] {
-        run_matrix(("java", written, "p", Some("p"), Some("p"), Some("*")));
-    }
+    run_matrix(("java", "import p.*; class W { void f(){} }", "p", Some("p"), Some("p"), Some("*")));
+}
+
+#[test]
+fn java_static_single_segment_on_demand_imports_keep_the_strict_json_shape_matrix() {
+    run_matrix(("java", "import static p.*; class W { void f(){} }", "p", Some("p"), Some("p"), Some("*")));
+}
+
+#[test]
+fn java_commented_single_segment_on_demand_imports_keep_the_strict_json_shape_matrix() {
+    run_matrix(("java", "import p /*c*/ . /*d*/ *; class W { void f(){} }", "p", Some("p"), Some("p"), Some("*")));
 }

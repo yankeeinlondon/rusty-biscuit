@@ -21,6 +21,33 @@ use tempfile::TempDir;
 use crate::cache_upgrade::{only_entry, read_json, rename_record};
 use crate::{JAVA_FIXTURE, PYTHON_FIXTURE, Scratch, json_of, stdout_of};
 
+/// One `#[test]` per named row of a shared table, each calling `$check` with
+/// its row's name, and `LISTED`, the names in generation order.
+macro_rules! matrix_row_tests {
+    ($check:path; $($test:ident => $row:literal),* $(,)?) => {
+        pub(super) const LISTED: &[&str] = &[$($row),*];
+        $(#[test] fn $test() { $check($row); })*
+    };
+}
+
+
+macro_rules! language_edit_tests {
+    ($check:path; $edits:ident; $($test:ident => $file:literal),* $(,)?) => {
+        pub(super) const LISTED: &[&str] = &[$($file),*];
+        $(mod $test {
+            use super::*;
+            fn check(edit: &str) { $check($file, edit); }
+            $edits!(check);
+        })*
+        pub(super) fn edits() -> &'static [&'static str] {
+            let mut listed = None;
+            $(let rows = $test::LISTED;
+              assert!(listed.is_none_or(|previous| previous == rows));
+              listed = Some(rows);)*
+            listed.expect("language rows")
+        }
+    };
+}
 const FILE: &str = "python.py";
 const CACHED_ARGS: [&str; 3] = ["--json-full", "symbols", FILE];
 const UNCACHED_ARGS: [&str; 4] = ["--json-full", "symbols", "--no-cache", FILE];
@@ -874,8 +901,7 @@ fn has_sentinel(output: &Value) -> bool {
         .any(|record| record["identity"]["name"] == SENTINEL_TO)
 }
 
-#[test]
-fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
+fn check_persisted_symbol_column(name: &str) {
     let source = format!("{PYTHON_FIXTURE}\nclass MatrixBase: pass\nclass MatrixGeneric[T: MatrixBase](MatrixBase): pass\n");
     let scratch = Scratch::new(&[(FILE, &source)]);
     let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
@@ -891,31 +917,10 @@ fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
         .to_path_buf();
     let original = read_json(&entry);
 
-    // Columns run concurrently, each against its own copy of the cache
-    // directory; cells within a column run in order.
-    let columns = columns();
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = columns
-            .iter()
-            .map(|column| {
-                let (scratch, original, uncached) = (&scratch, &original, &uncached);
-                let relative_entry = relative_entry.as_path();
-                scope.spawn(move || {
-                    let base = column_base(original, column);
-                    check_column(scratch, &CACHED_ARGS, &base, uncached, relative_entry, column)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|handle| handle.join().expect("column thread"))
-            .collect()
-    });
-    assert!(
-        failures.is_empty(),
-        "cache reader matrix:\n{}",
-        failures.join("\n")
-    );
+    let column = columns().into_iter().find(|column| column.name == name).expect("listed column");
+    let base = column_base(&original, &column);
+    let failures = check_column(&scratch, &CACHED_ARGS, &base, &uncached, &relative_entry, &column);
+    assert!(failures.is_empty(), "cache reader matrix:\n{}", failures.join("\n"));
 }
 
 const MEMBER_FILE: &str = "java.java";
@@ -984,8 +989,7 @@ fn member_columns() -> Vec<Column> {
 /// The same reader contract as
 /// [`persisted_symbol_fields_are_served_or_recomputed_per_shape`], for each
 /// member of a stored attribute and modifier.
-#[test]
-fn attribute_and_modifier_members_are_served_or_recomputed_per_shape() {
+fn check_attribute_or_modifier_column(name: &str) {
     let source = format!("{JAVA_FIXTURE}{MEMBER_SOURCE}");
     let scratch = Scratch::new(&[(MEMBER_FILE, &source)]);
     let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", MEMBER_FILE]));
@@ -1007,24 +1011,9 @@ fn attribute_and_modifier_members_are_served_or_recomputed_per_shape() {
         .to_path_buf();
     let original = read_json(&entry);
 
-    let columns = member_columns();
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = columns
-            .iter()
-            .map(|column| {
-                let (scratch, original, uncached) = (&scratch, &original, &uncached);
-                let relative_entry = relative_entry.as_path();
-                scope.spawn(move || {
-                    let base = field_base(original.clone(), column);
-                    check_column(scratch, &MEMBER_ARGS, &base, uncached, relative_entry, column)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|handle| handle.join().expect("column thread"))
-            .collect()
-    });
+    let column = member_columns().into_iter().find(|column| column.name == name).expect("listed member column");
+    let base = field_base(original, &column);
+    let failures = check_column(&scratch, &MEMBER_ARGS, &base, &uncached, &relative_entry, &column);
     assert!(failures.is_empty(), "attribute and modifier member matrix:\n{}", failures.join("\n"));
 }
 
@@ -1164,8 +1153,7 @@ fn the_cache_entry_records_the_coverage_it_holds() {
 /// negative count, a count past `u32::MAX`, a Boolean and an object reject
 /// the entry (recomputed), while `u32::MAX` itself is served. These are the
 /// wrong-type cells the matrix's one `WrongType` (a string) does not reach.
-#[test]
-fn metrics_counts_serve_only_a_u32() {
+fn check_metric_count(key: &str) {
     let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
     let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
     json_of(&scratch.stdout(&CACHED_ARGS));
@@ -1179,7 +1167,7 @@ fn metrics_counts_serve_only_a_u32() {
     let temp = TempDir::new().expect("cell temp");
     let cell_entry = temp.path().join(&relative_entry);
     std::fs::create_dir_all(cell_entry.parent().expect("entry parent")).expect("create shard");
-    for key in ["lines", "cyclomatic"] {
+    {
         for (value, served) in [
             (json!(3.5), false),
             (json!(-1), false),
@@ -1630,58 +1618,22 @@ fn written_evidence() -> (Scratch, Value, std::path::PathBuf, Value) {
     (scratch, uncached, relative_entry, original)
 }
 
-/// Every cell of `columns` over the written evidence entry, one thread per
-/// column.
-fn check_evidence_columns(
-    scratch: &Scratch,
-    original: &Value,
-    uncached: &Value,
-    relative_entry: &Path,
-    columns: &[Column],
-) -> Vec<String> {
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = columns
-            .iter()
-            .map(|column| {
-                scope.spawn(move || {
-                    let base = field_base(original.clone(), column);
-                    check_column(scratch, &EVIDENCE_ARGS, &base, uncached, relative_entry, column)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|handle| handle.join().expect("column thread"))
-            .collect()
-    })
-}
-
-/// The leaves of the evidence's references, each shape of each one a miss
-/// equal to an uncached run; the unedited entry is served.
-#[test]
-fn reference_evidence_reference_leaves_are_served_only_when_consistent() {
+/// Checks every shape of one evidence field against the written entry.
+fn check_evidence_column(columns: Vec<Column>, name: &str) {
     let (scratch, uncached, relative_entry, original) = written_evidence();
-    let failures = check_evidence_columns(&scratch, &original, &uncached, &relative_entry, &reference_leaf_columns());
-    assert!(failures.is_empty(), "reference leaf matrix:\n{}", failures.join("\n"));
-}
-
-/// The leaves of the evidence's spans, each shape of each one a miss equal to
-/// an uncached run; the unedited entry is served.
-#[test]
-fn reference_evidence_span_leaves_are_served_only_when_consistent() {
-    let (scratch, uncached, relative_entry, original) = written_evidence();
-    let failures = check_evidence_columns(&scratch, &original, &uncached, &relative_entry, &span_leaf_columns());
-    assert!(failures.is_empty(), "span leaf matrix:\n{}", failures.join("\n"));
+    let column = columns.into_iter().find(|column| column.name == name).expect("listed column");
+    let base = field_base(original, &column);
+    let failures = check_column(&scratch, &EVIDENCE_ARGS, &base, &uncached, &relative_entry, &column);
+    assert!(failures.is_empty(), "evidence matrix:\n{}", failures.join("\n"));
 }
 
 /// The cache reader's contract for the reference evidence of an entry that
-/// claims the occurrences capability: each matrix shape of each evidence
-/// field, and each internally inconsistent edit, is a miss whose output
-/// equals an uncached run, never evidence read as empty; the unedited entry,
-/// and a file that truly has no occurrences, are served.
+/// claims the occurrences capability: the control contains each resolution
+/// shape, and a file that truly has no occurrences serves empty evidence.
+/// Field shapes and inconsistent edits are checked by the generated matrices.
 #[test]
 fn reference_evidence_is_served_only_when_consistent() {
-    let (scratch, uncached, relative_entry, original) = written_evidence();
+    let (_scratch, uncached, _relative_entry, original) = written_evidence();
 
     // The cells name these entries by position.
     let stored = |list: &str, index: &str| original[list][index.parse::<usize>().expect("index")].clone();
@@ -1708,44 +1660,6 @@ fn reference_evidence_is_served_only_when_consistent() {
     assert_eq!(scoped(IMPORTED), (json!("uses_import"), json!("external"), false));
     assert_eq!(scoped(UNREPORTED), (json!("shadow"), json!("helper"), false));
     assert_eq!(stored("reference_coverage", EMPTY_CALLABLE)["owner"]["name"], "helper");
-
-    let mut failures = check_evidence_columns(&scratch, &original, &uncached, &relative_entry, &evidence_columns());
-
-    let mut base = original.clone();
-    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
-    // Each edit chunk serves its edits from its own temp directory.
-    let edit_failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = INCONSISTENT_EVIDENCE
-            .chunks(INCONSISTENT_EVIDENCE.len().div_ceil(4))
-            .map(|edits| {
-                let (scratch, base, uncached) = (&scratch, &base, &uncached);
-                let relative_entry = relative_entry.as_path();
-                scope.spawn(move || {
-                    let temp = TempDir::new().expect("edit temp");
-                    let edited_path = temp.path().join(relative_entry);
-                    std::fs::create_dir_all(edited_path.parent().expect("entry parent")).expect("create shard");
-                    let mut failures = Vec::new();
-                    for (label, edit) in edits {
-                        let mut edited = base.clone();
-                        edit(&mut edited);
-                        std::fs::write(&edited_path, serde_json::to_string(&edited).expect("serialize"))
-                            .expect("write entry");
-                        let output =
-                            json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &EVIDENCE_ARGS), &EVIDENCE_ARGS));
-                        if has_sentinel(&output) {
-                            failures.push(format!("{label}: expected rejected, entry was served"));
-                        } else if output != *uncached {
-                            failures.push(format!("{label}: rejected, but output differs from an uncached run"));
-                        }
-                    }
-                    failures
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("edit thread")).collect()
-    });
-    failures.extend(edit_failures);
-    assert!(failures.is_empty(), "reference evidence matrix:\n{}", failures.join("\n"));
 
     // An empty list is servable when the file truly has no occurrences.
     let quiet = Scratch::new(&[("quiet.ts", "function module_function(): void {}\n")]);
@@ -1864,16 +1778,16 @@ fn lookup_of(stderr: &[u8]) -> &'static str {
 /// entry below is a miss whose output equals an uncached run, and the
 /// unedited entry is a hit. Scala's primary fixture has no named callable
 /// without occurrences; only the resolving languages have `Scoped` targets.
-#[test]
-fn every_kind_evidence_identities_name_retained_declarations_in_every_language() {
+fn check_identity_language(name: &str, selected: &str) {
     let sources: Vec<(&str, String)> = LANGUAGE_FIXTURES
         .iter()
+        .filter(|(file, _, _)| *file == name)
         .map(|&(file, source, probe)| (file, if probe { format!("{source}{MEMBER_PROBE}") } else { source.to_string() }))
         .collect();
     let files: Vec<(&str, &str)> = sources.iter().map(|(file, source)| (*file, source.as_str())).collect();
     let scratch = Scratch::new(&files);
     let mut write_args = vec!["--json-full", "symbols"];
-    write_args.extend(LANGUAGE_FIXTURES.iter().map(|(file, _, _)| *file));
+    write_args.extend(files.iter().map(|(file, _)| *file));
     scratch.stdout(&write_args);
     let written: Vec<(String, std::path::PathBuf, Value)> = crate::cache_entries(scratch.temp.path())
         .into_iter()
@@ -1888,63 +1802,51 @@ fn every_kind_evidence_identities_name_retained_declarations_in_every_language()
             (file, relative, entry)
         })
         .collect();
-    assert_eq!(written.len(), LANGUAGE_FIXTURES.len(), "one entry per language");
+    assert_eq!(written.len(), 1, "one entry per language");
 
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = written
-            .chunks(written.len().div_ceil(4))
-            .map(|chunk| {
-                let scratch = &scratch;
-                scope.spawn(move || {
-                    let temp = TempDir::new().expect("cell temp");
-                    let mut failures = Vec::new();
-                    for (file, relative, original) in chunk {
-                        let args = ["--verbose", "--json-full", "symbols", file.as_str()];
-                        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file.as_str()]));
-                        let serve = |entry: &Value| {
-                            let path = temp.path().join(relative);
-                            std::fs::create_dir_all(path.parent().expect("entry parent")).expect("create shard");
-                            std::fs::write(&path, serde_json::to_vec(entry).expect("serialize")).expect("write entry");
-                            let output = scratch.hug_with_temp(temp.path(), &args);
-                            let lookup = lookup_of(&output.stderr);
-                            (lookup, json_of(&stdout_of(output, &args)))
-                        };
-                        let (lookup, output) = serve(original);
-                        if lookup != "hit" || output != uncached {
-                            failures.push(format!("{file}: unedited: {lookup}, equal output: {}", output == uncached));
-                        }
-                        for (label, edit) in IDENTITY_EDITS {
-                            let mut edited = original.clone();
-                            let applicable = edit(&mut edited).is_some();
-                            let expected = match label {
-                                "phantom ownerless established target ID" | "phantom named-owner target ID" => {
-                                    RESOLVING.contains(&file.as_str())
-                                }
-                                "removed empty named callable region" => file != "scala.scala",
-                                _ => true,
-                            };
-                            if applicable != expected {
-                                failures.push(format!("{file}: {label}: site present {applicable}, expected {expected}"));
-                                continue;
-                            }
-                            if !applicable {
-                                continue;
-                            }
-                            let (lookup, output) = serve(&edited);
-                            if lookup != "miss" {
-                                failures.push(format!("{file}: {label}: expected a miss, entry was served"));
-                            } else if output != uncached {
-                                failures.push(format!("{file}: {label}: missed, but output differs from an uncached run"));
-                            }
-                        }
-                    }
-                    failures
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("language thread")).collect()
-    });
-    assert!(failures.is_empty(), "every-kind identity matrix:\n{}", failures.join("\n"));
+    let temp = TempDir::new().expect("cell temp");
+    let mut failures = Vec::new();
+    for (file, relative, original) in &written {
+        let args = ["--verbose", "--json-full", "symbols", file.as_str()];
+        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file.as_str()]));
+        let serve = |entry: &Value| {
+            let path = temp.path().join(relative);
+            std::fs::create_dir_all(path.parent().expect("entry parent")).expect("create shard");
+            std::fs::write(&path, serde_json::to_vec(entry).expect("serialize")).expect("write entry");
+            let output = scratch.hug_with_temp(temp.path(), &args);
+            let lookup = lookup_of(&output.stderr);
+            (lookup, json_of(&stdout_of(output, &args)))
+        };
+        let (lookup, output) = serve(original);
+        if lookup != "hit" || output != uncached {
+            failures.push(format!("{file}: unedited: {lookup}, equal output: {}", output == uncached));
+        }
+        for &(label, edit) in IDENTITY_EDITS.iter().filter(|row| row.0 == selected) {
+            let mut edited = original.clone();
+            let applicable = edit(&mut edited).is_some();
+            let expected = match label {
+                "phantom ownerless established target ID" | "phantom named-owner target ID" => {
+                    RESOLVING.contains(&file.as_str())
+                }
+                "removed empty named callable region" => file != "scala.scala",
+                _ => true,
+            };
+            if applicable != expected {
+                failures.push(format!("{file}: {label}: site present {applicable}, expected {expected}"));
+                continue;
+            }
+            if !applicable {
+                continue;
+            }
+            let (lookup, output) = serve(&edited);
+            if lookup != "miss" {
+                failures.push(format!("{file}: {label}: expected a miss, entry was served"));
+            } else if output != uncached {
+                failures.push(format!("{file}: {label}: missed, but output differs from an uncached run"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "language matrix: {}", failures.join("\n"));
 }
 
 /// What each language's primary fixture gains for the source-fact edits:
@@ -2051,11 +1953,11 @@ const SOURCE_FACT_EDITS: [SourceFactEdit; 4] = [
 /// equal to an uncached run), with the refusal named on stderr; in the
 /// thirteen languages without binding rules a fabricated summary edge is
 /// refused too.
-#[test]
-fn retained_geometry_written_paths_and_candidate_order_are_checked_in_every_language() {
+fn check_geometry_language(name: &str, selected: &str) {
     let sources: Vec<(&str, String)> = LANGUAGE_FIXTURES
         .iter()
         .zip(CANDIDATE_PROBES)
+        .filter(|((file, _, _), _)| *file == name)
         .map(|(&(file, source, _), (probe_file, probe))| {
             assert_eq!(file, probe_file);
             let source = match source.rsplit_once("return Widget") {
@@ -2083,60 +1985,48 @@ fn retained_geometry_written_paths_and_candidate_order_are_checked_in_every_lang
             (file, relative, entry)
         })
         .collect();
-    assert_eq!(written.len(), LANGUAGE_FIXTURES.len(), "one entry per language");
+    assert_eq!(written.len(), 1, "one entry per language");
 
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = written
-            .chunks(written.len().div_ceil(4))
-            .map(|chunk| {
-                let scratch = &scratch;
-                scope.spawn(move || {
-                    let temp = TempDir::new().expect("cell temp");
-                    let mut failures = Vec::new();
-                    for (file, relative, original) in chunk {
-                        let args = ["--verbose", "--json-full", "symbols", file.as_str()];
-                        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file.as_str()]));
-                        let serve = |entry: &Value| {
-                            let path = temp.path().join(relative);
-                            std::fs::create_dir_all(path.parent().expect("entry parent")).expect("create shard");
-                            std::fs::write(&path, serde_json::to_vec(entry).expect("serialize")).expect("write entry");
-                            let output = scratch.hug_with_temp(temp.path(), &args);
-                            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                            (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
-                        };
-                        let (lookup, _, served) = serve(original);
-                        if lookup != "hit" || served != uncached {
-                            failures.push(format!("{file}: unedited: {lookup}, equal output: {}", served == uncached));
-                            continue;
-                        }
-                        for (label, reason, edit) in SOURCE_FACT_EDITS {
-                            let mut edited = original.clone();
-                            let applicable = edit(&mut edited).is_some();
-                            let expected = label != "fabricated edge" || !RESOLVING.contains(&file.as_str());
-                            if applicable != expected {
-                                failures.push(format!("{file}: {label}: site present {applicable}, expected {expected}"));
-                                continue;
-                            }
-                            if !applicable {
-                                continue;
-                            }
-                            let (lookup, stderr, output) = serve(&edited);
-                            if lookup != "miss" {
-                                failures.push(format!("{file}: {label}: expected a miss, entry was served"));
-                            } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
-                                failures.push(format!("{file}: {label}: refused for another reason: {stderr}"));
-                            } else if output != served {
-                                failures.push(format!("{file}: {label}: missed, but output differs from the original"));
-                            }
-                        }
-                    }
-                    failures
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("language thread")).collect()
-    });
-    assert!(failures.is_empty(), "source-fact matrix:\n{}", failures.join("\n"));
+    let temp = TempDir::new().expect("cell temp");
+    let mut failures = Vec::new();
+    for (file, relative, original) in &written {
+        let args = ["--verbose", "--json-full", "symbols", file.as_str()];
+        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file.as_str()]));
+        let serve = |entry: &Value| {
+            let path = temp.path().join(relative);
+            std::fs::create_dir_all(path.parent().expect("entry parent")).expect("create shard");
+            std::fs::write(&path, serde_json::to_vec(entry).expect("serialize")).expect("write entry");
+            let output = scratch.hug_with_temp(temp.path(), &args);
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
+        };
+        let (lookup, _, served) = serve(original);
+        if lookup != "hit" || served != uncached {
+            failures.push(format!("{file}: unedited: {lookup}, equal output: {}", served == uncached));
+            continue;
+        }
+        for &(label, reason, edit) in SOURCE_FACT_EDITS.iter().filter(|row| row.0 == selected) {
+            let mut edited = original.clone();
+            let applicable = edit(&mut edited).is_some();
+            let expected = label != "fabricated edge" || !RESOLVING.contains(&file.as_str());
+            if applicable != expected {
+                failures.push(format!("{file}: {label}: site present {applicable}, expected {expected}"));
+                continue;
+            }
+            if !applicable {
+                continue;
+            }
+            let (lookup, stderr, output) = serve(&edited);
+            if lookup != "miss" {
+                failures.push(format!("{file}: {label}: expected a miss, entry was served"));
+            } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
+                failures.push(format!("{file}: {label}: refused for another reason: {stderr}"));
+            } else if output != served {
+                failures.push(format!("{file}: {label}: missed, but output differs from the original"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "language matrix: {}", failures.join("\n"));
 }
 
 /// One written path of the deleted-path matrix: the scratch file, what the
@@ -2205,9 +2095,8 @@ fn serves_path(output: &Value, name: &str, path: Option<&str>) -> bool {
 /// (itself an actual hit, equal to an uncached run, serving the path). The
 /// stored start is where the path starts in the source. Bash and Zsh keep a
 /// path command's whole spelling in the name: no path, no start, a hit.
-#[test]
-fn deleted_written_paths_are_recomputed_in_every_language() {
-    let rows = written_path_rows();
+fn check_written_path_language(name: &str) {
+    let rows: Vec<_> = written_path_rows().into_iter().filter(|row| row.file == name).collect();
     let sources: Vec<(&str, String)> = rows
         .iter()
         .map(|row| {
@@ -2221,76 +2110,64 @@ fn deleted_written_paths_are_recomputed_in_every_language() {
         .collect();
     let files: Vec<(&str, &str)> = sources.iter().map(|(file, source)| (*file, source.as_str())).collect();
     let scratch = Scratch::new(&files);
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = rows
-            .chunks(rows.len().div_ceil(4))
-            .map(|chunk| {
-                let (scratch, sources) = (&scratch, &sources);
-                scope.spawn(move || {
-                    let mut failures = Vec::new();
-                    for row in chunk {
-                        let file = row.file;
-                        let source = &sources.iter().find(|(name, _)| *name == file).expect("source").1;
-                        let temp = TempDir::new().expect("row temp");
-                        let args = ["--verbose", "--json-full", "symbols", file];
-                        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
-                        let written_run = scratch.hug_with_temp(temp.path(), &args);
-                        assert_eq!(lookup_of(&written_run.stderr), "miss", "{file}: the writing run");
-                        let entry = only_entry(temp.path());
-                        let original = read_json(&entry);
-                        let serve = |edited: &Value| {
-                            std::fs::write(&entry, serde_json::to_vec(edited).expect("serialize")).expect("write entry");
-                            let output = scratch.hug_with_temp(temp.path(), &args);
-                            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                            (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
-                        };
-                        let (lookup, _, served) = serve(&original);
-                        if lookup != "hit" || served != uncached || !serves_path(&served, row.name, row.path) {
-                            failures.push(format!(
-                                "{file}: unedited: {lookup}, equal output: {}, path served: {}",
-                                served == uncached,
-                                serves_path(&served, row.name, row.path)
-                            ));
-                            continue;
-                        }
-                        let mut probe = original.clone();
-                        let Some(occurrence) = written_occurrence(&mut probe, row.name, row.path) else {
-                            failures.push(format!("{file}: no stored `{}` written {:?}", row.name, row.path));
-                            continue;
-                        };
-                        let start = occurrence["path_start_byte"].as_u64().map(|start| start as usize);
-                        let end = occurrence["span"]["end_byte"].as_u64().expect("end byte") as usize;
-                        if start.map(|start| &source[start..end]) != row.path {
-                            failures.push(format!("{file}: stored start {start:?} does not start {:?}", row.path));
-                            continue;
-                        }
-                        if row.path.is_none() {
-                            continue;
-                        }
-                        for (label, key) in [("path", None), ("start", Some("path_start_byte"))] {
-                            let mut edited = original.clone();
-                            let occurrence = written_occurrence(&mut edited, row.name, row.path).expect("the occurrence");
-                            match key {
-                                Some(key) => occurrence[key] = Value::Null,
-                                None => occurrence["target"]["qualified_name"] = Value::Null,
-                            }
-                            let (lookup, stderr, output) = serve(&edited);
-                            if lookup != "miss" {
-                                failures.push(format!("{file}: {label} deleted: expected a miss, entry was served"));
-                            } else if !stderr.contains(&format!("inconsistent entry: {PATH_START}")) {
-                                failures.push(format!("{file}: {label} deleted: refused for another reason: {stderr}"));
-                            } else if output != served || !serves_path(&output, row.name, row.path) {
-                                failures.push(format!("{file}: {label} deleted: the recomputed output lost the path"));
-                            }
-                        }
-                    }
-                    failures
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("language thread")).collect()
-    });
-    assert!(failures.is_empty(), "deleted written path matrix:\n{}", failures.join("\n"));
+    let mut failures = Vec::new();
+    for row in &rows {
+        let file = row.file;
+        let source = &sources.iter().find(|(name, _)| *name == file).expect("source").1;
+        let temp = TempDir::new().expect("row temp");
+        let args = ["--verbose", "--json-full", "symbols", file];
+        let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
+        let written_run = scratch.hug_with_temp(temp.path(), &args);
+        assert_eq!(lookup_of(&written_run.stderr), "miss", "{file}: the writing run");
+        let entry = only_entry(temp.path());
+        let original = read_json(&entry);
+        let serve = |edited: &Value| {
+            std::fs::write(&entry, serde_json::to_vec(edited).expect("serialize")).expect("write entry");
+            let output = scratch.hug_with_temp(temp.path(), &args);
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
+        };
+        let (lookup, _, served) = serve(&original);
+        if lookup != "hit" || served != uncached || !serves_path(&served, row.name, row.path) {
+            failures.push(format!(
+                "{file}: unedited: {lookup}, equal output: {}, path served: {}",
+                served == uncached,
+                serves_path(&served, row.name, row.path)
+            ));
+            continue;
+        }
+        let mut probe = original.clone();
+        let Some(occurrence) = written_occurrence(&mut probe, row.name, row.path) else {
+            failures.push(format!("{file}: no stored `{}` written {:?}", row.name, row.path));
+            continue;
+        };
+        let start = occurrence["path_start_byte"].as_u64().map(|start| start as usize);
+        let end = occurrence["span"]["end_byte"].as_u64().expect("end byte") as usize;
+        if start.map(|start| &source[start..end]) != row.path {
+            failures.push(format!("{file}: stored start {start:?} does not start {:?}", row.path));
+            continue;
+        }
+        if row.path.is_none() {
+            continue;
+        }
+        for (label, key) in [("path", None), ("start", Some("path_start_byte"))] {
+            let mut edited = original.clone();
+            let occurrence = written_occurrence(&mut edited, row.name, row.path).expect("the occurrence");
+            match key {
+                Some(key) => occurrence[key] = Value::Null,
+                None => occurrence["target"]["qualified_name"] = Value::Null,
+            }
+            let (lookup, stderr, output) = serve(&edited);
+            if lookup != "miss" {
+                failures.push(format!("{file}: {label} deleted: expected a miss, entry was served"));
+            } else if !stderr.contains(&format!("inconsistent entry: {PATH_START}")) {
+                failures.push(format!("{file}: {label} deleted: refused for another reason: {stderr}"));
+            } else if output != served || !serves_path(&output, row.name, row.path) {
+                failures.push(format!("{file}: {label} deleted: the recomputed output lost the path"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "language matrix: {}", failures.join("\n"));
 }
 
 /// The full shape column of a qualified name that reaches no member
@@ -2426,61 +2303,49 @@ const LIST_EDITS: &[ListEdit] = &[
 /// TypeScript and JavaScript: each duplicate or reversal (and an empty or
 /// lost written path) is a miss naming its refusal whose output equals the
 /// unedited entry's, itself an actual hit equal to an uncached run.
-#[test]
-fn summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language() {
-    let scratch = Scratch::new(&SUMMARY_SOURCES);
-    let failures: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = SUMMARY_SOURCES
-            .iter()
-            .map(|&(file, _)| {
-                let scratch = &scratch;
-                scope.spawn(move || {
-                    let temp = TempDir::new().expect("cell temp");
-                    let args = ["--verbose", "--json-full", "symbols", file];
-                    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
-                    let written_run = scratch.hug_with_temp(temp.path(), &args);
-                    assert_eq!(lookup_of(&written_run.stderr), "miss", "{file}: the writing run");
-                    let entry = only_entry(temp.path());
-                    let original = read_json(&entry);
-                    let serve = |edited: &Value| {
-                        std::fs::write(&entry, serde_json::to_vec(edited).expect("serialize")).expect("write entry");
-                        let output = scratch.hug_with_temp(temp.path(), &args);
-                        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                        (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
-                    };
-                    let mut failures = Vec::new();
-                    let (lookup, _, served) = serve(&original);
-                    if lookup != "hit" || served != uncached {
-                        return vec![format!("{file}: unedited: {lookup}, equal output: {}", served == uncached)];
-                    }
-                    let summary = |name: &str, list: &str| -> Vec<Value> {
-                        record(&served, name)["relations"][list]
-                            .as_array()
-                            .map(|list| list.iter().map(|reference| reference["name"].clone()).collect())
-                            .unwrap_or_default()
-                    };
-                    assert_eq!(summary("g", "references"), ["f", "h", "a", "b"], "{file}");
-                    assert_eq!(summary("g", "dependencies"), ["a", "b"], "{file}");
-                    assert_eq!(summary("f", "referenced_by"), ["g", "j"], "{file}");
-                    for &(label, reason, edit) in LIST_EDITS {
-                        let mut edited = original.clone();
-                        edit(&mut edited);
-                        let (lookup, stderr, output) = serve(&edited);
-                        if lookup != "miss" {
-                            failures.push(format!("{file}: {label}: expected a miss, entry was served"));
-                        } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
-                            failures.push(format!("{file}: {label}: refused for another reason: {stderr}"));
-                        } else if output != served {
-                            failures.push(format!("{file}: {label}: missed, but output differs from the original"));
-                        }
-                    }
-                    failures
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().expect("language thread")).collect()
-    });
-    assert!(failures.is_empty(), "summary and list matrix:\n{}", failures.join("\n"));
+fn check_summary_language(name: &str, selected: &str) {
+    let scratch = Scratch::new(&SUMMARY_SOURCES.iter().copied().filter(|(file, _)| *file == name).collect::<Vec<_>>());
+    let file = name;
+    let temp = TempDir::new().expect("cell temp");
+    let args = ["--verbose", "--json-full", "symbols", file];
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
+    let written_run = scratch.hug_with_temp(temp.path(), &args);
+    assert_eq!(lookup_of(&written_run.stderr), "miss", "{file}: the writing run");
+    let entry = only_entry(temp.path());
+    let original = read_json(&entry);
+    let serve = |edited: &Value| {
+        std::fs::write(&entry, serde_json::to_vec(edited).expect("serialize")).expect("write entry");
+        let output = scratch.hug_with_temp(temp.path(), &args);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &args)))
+    };
+    let mut failures = Vec::new();
+    let (lookup, _, served) = serve(&original);
+    if lookup != "hit" || served != uncached {
+        panic!("{file}: unedited: {lookup}, equal output: {}", served == uncached);
+    }
+    let summary = |name: &str, list: &str| -> Vec<Value> {
+        record(&served, name)["relations"][list]
+            .as_array()
+            .map(|list| list.iter().map(|reference| reference["name"].clone()).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(summary("g", "references"), ["f", "h", "a", "b"], "{file}");
+    assert_eq!(summary("g", "dependencies"), ["a", "b"], "{file}");
+    assert_eq!(summary("f", "referenced_by"), ["g", "j"], "{file}");
+    for &(label, reason, edit) in LIST_EDITS.iter().filter(|row| row.0 == selected) {
+        let mut edited = original.clone();
+        edit(&mut edited);
+        let (lookup, stderr, output) = serve(&edited);
+        if lookup != "miss" {
+            failures.push(format!("{file}: {label}: expected a miss, entry was served"));
+        } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
+            failures.push(format!("{file}: {label}: refused for another reason: {stderr}"));
+        } else if output != served {
+            failures.push(format!("{file}: {label}: missed, but output differs from the original"));
+        }
+    }
+    assert!(failures.is_empty(), "language matrix: {}", failures.join("\n"));
 }
 
 // The persisted re-export report and the imports' `reexported` marker. Each
@@ -2622,15 +2487,6 @@ fn reexport_columns() -> Vec<Column> {
 // exceeds the L1 budget under suite load. Nextest schedules the rows across
 // the runner's cores; `every_reexport_matrix_row_has_a_generated_test`
 // fails when a table row has no generated test.
-
-/// One `#[test]` per named row of a shared table, each calling `$check` with
-/// its row's name, and `LISTED`, the names in generation order.
-macro_rules! matrix_row_tests {
-    ($check:path; $($test:ident => $row:literal),* $(,)?) => {
-        pub(super) const LISTED: &[&str] = &[$($row),*];
-        $(#[test] fn $test() { $check($row); })*
-    };
-}
 
 /// Runs the `name` column of `columns` against an entry `hug` wrote.
 fn check_reexport_column(
@@ -3045,5 +2901,378 @@ fn a_duplicated_or_trailing_reexport_member_is_refused_and_recomputed() {
         let output = scratch.hug_with_temp(temp.path(), &verbose);
         assert_eq!(lookup_of(&output.stderr), "miss", "{label}");
         assert_eq!(json_of(&stdout_of(output, &verbose)), uncached, "{label}");
+    }
+}
+
+mod persisted_symbol_fields_are_served_or_recomputed_per_shape {
+    use super::*;
+    matrix_row_tests! { check_persisted_symbol_column;
+        type_info_generic_params => "type_info.generic_params",
+        type_info_constraints => "type_info.constraints",
+        relations_extends => "relations.extends",
+        relations_unclassified_bases => "relations.unclassified_bases",
+        generic_name => "generic name",
+        generic_kind => "generic kind",
+        generic_constraints => "generic constraints",
+        generic_default => "generic default",
+        generic_variance => "generic variance",
+        generic_position => "generic position",
+        target_name => "target name",
+        target_id => "target id",
+        target_qualified_name => "target qualified_name",
+        target_source_span => "target source_span",
+        target_source_span_start_line => "target source_span.start.line",
+        target_source_span_start_column => "target source_span.start.column",
+        target_source_span_end_line => "target source_span.end.line",
+        target_source_span_end_column => "target source_span.end.column",
+        target_source_span_start_byte => "target source_span.start_byte",
+        target_source_span_end_byte => "target source_span.end_byte",
+        kind => "kind",
+        identity_container_kind => "identity.container_kind",
+        visibility_level => "visibility.level",
+        modifiers => "modifiers",
+        modifiers_async => "modifiers (async)",
+        attributes => "attributes",
+        scope => "scope",
+        identity_qualified_name => "identity.qualified_name",
+        identity_is_namespace_rooted => "identity.is_namespace_rooted",
+        visibility_is_test => "visibility.is_test",
+        visibility_is_deprecated => "visibility.is_deprecated",
+        metrics => "metrics",
+        metrics_parameters => "metrics.parameters",
+        metrics_has_docs => "metrics.has_docs",
+        metrics_lines => "metrics.lines",
+        metrics_cyclomatic => "metrics.cyclomatic",
+        source_declaration_text => "source.declaration_text",
+        identity_keyword => "identity.keyword",
+        source_signature_text => "source.signature_text",
+        relations_implements => "relations.implements",
+        kind_data_kind_data_type => "kind_data.kind_data_type",
+        type_data_fields => "type data fields",
+        field_data_visibility => "field data visibility",
+        field_data_is_static => "field data is_static",
+        record_schema_version => "record schema_version",
+        covered_kinds => "covered_kinds",
+        completed_capabilities => "completed_capabilities",
+        schema_version => "schema_version",
+        fingerprint => "fingerprint",
+        source_hash => "source_hash",
+        diagnostics_fingerprint => "diagnostics_fingerprint",
+        records => "records",
+        file => "file",
+        language => "language",
+        import_inventory => "import_inventory",
+        imports => "imports",
+        exports => "exports",
+        diagnostics => "diagnostics",
+    }
+}
+
+/// The leaves of the evidence's references, each shape of each one a miss
+/// equal to an uncached run; the unedited entry is served.
+mod reference_evidence_reference_leaves_are_served_only_when_consistent {
+    use super::*;
+    fn check(name: &str) { check_evidence_column(reference_leaf_columns(), name); }
+    matrix_row_tests! { check;
+        occurrence_target_name => "occurrence target.name",
+        occurrence_owner_id => "occurrence owner.id",
+        occurrence_owner_name => "occurrence owner.name",
+        occurrence_owner_qualified_name => "occurrence owner.qualified_name",
+        candidate_id => "candidate id",
+        candidate_name => "candidate name",
+        candidate_qualified_name => "candidate qualified_name",
+        coverage_owner_id => "coverage owner.id",
+        coverage_owner_name => "coverage owner.name",
+        coverage_owner_qualified_name => "coverage owner.qualified_name",
+    }
+}
+
+/// The leaves of the evidence's spans, each shape of each one a miss equal to
+/// an uncached run; the unedited entry is served.
+mod reference_evidence_span_leaves_are_served_only_when_consistent {
+    use super::*;
+    fn check(name: &str) { check_evidence_column(span_leaf_columns(), name); }
+    matrix_row_tests! { check;
+        occurrence_span_start_byte => "occurrence span.start_byte",
+        occurrence_span_end_byte => "occurrence span.end_byte",
+        occurrence_span_start => "occurrence span.start",
+        occurrence_span_end => "occurrence span.end",
+        occurrence_span_start_line => "occurrence span.start.line",
+        occurrence_span_start_column => "occurrence span.start.column",
+        occurrence_span_end_line => "occurrence span.end.line",
+        occurrence_span_end_column => "occurrence span.end.column",
+        owner_span_start_byte => "owner_span.start_byte",
+        owner_span_end_byte => "owner_span.end_byte",
+        owner_span_start => "owner_span.start",
+        owner_span_end => "owner_span.end",
+        owner_span_start_line => "owner_span.start.line",
+        owner_span_start_column => "owner_span.start.column",
+        owner_span_end_line => "owner_span.end.line",
+        owner_span_end_column => "owner_span.end.column",
+        coverage_span_start_byte => "coverage span.start_byte",
+        coverage_span_end_byte => "coverage span.end_byte",
+        coverage_span_start => "coverage span.start",
+        coverage_span_end => "coverage span.end",
+        coverage_span_start_line => "coverage span.start.line",
+        coverage_span_start_column => "coverage span.start.column",
+        coverage_span_end_line => "coverage span.end.line",
+        coverage_span_end_column => "coverage span.end.column",
+    }
+}
+
+mod reference_evidence_fields {
+    use super::*;
+    fn check(name: &str) { check_evidence_column(evidence_columns(), name); }
+    matrix_row_tests! { check;
+        unqualified_target_qualified_name => "unqualified target.qualified_name",
+        member_target_qualified_name => "member target.qualified_name",
+        qualified_target_qualified_name => "qualified target.qualified_name",
+        unqualified_path_start_byte => "unqualified path_start_byte",
+        member_path_start_byte => "member path_start_byte",
+        qualified_path_start_byte => "qualified path_start_byte",
+        occurrence_kind => "occurrence kind",
+        occurrences => "occurrences",
+        reference_coverage => "reference_coverage",
+        occurrence_confidence => "occurrence confidence",
+        occurrence_target_id => "occurrence target.id",
+        occurrence_candidates => "occurrence candidates",
+        occurrence_span => "occurrence span",
+        occurrence_owner => "occurrence owner",
+        occurrence_owner_span => "occurrence owner_span",
+        ownerless_occurrence_target_id => "ownerless occurrence target.id",
+        coverage_owner => "coverage owner",
+        coverage_state => "coverage state",
+        coverage_reasons => "coverage reasons",
+        coverage_span => "coverage span",
+    }
+}
+
+fn check_inconsistent_evidence(name: &str) {
+    let (scratch, uncached, relative_entry, original) = written_evidence();
+    let mut base = original;
+    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
+    let temp = TempDir::new().expect("edit temp");
+    let edited_path = temp.path().join(relative_entry);
+    std::fs::create_dir_all(edited_path.parent().expect("entry parent")).expect("create shard");
+    let mut failures = Vec::new();
+    for (label, edit) in INCONSISTENT_EVIDENCE.iter().filter(|(label, _)| *label == name) {
+        let mut edited = base.clone();
+        edit(&mut edited);
+        std::fs::write(&edited_path, serde_json::to_string(&edited).expect("serialize"))
+            .expect("write entry");
+        let output =
+            json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &EVIDENCE_ARGS), &EVIDENCE_ARGS));
+        if has_sentinel(&output) {
+            failures.push(format!("{label}: expected rejected, entry was served"));
+        } else if output != uncached {
+            failures.push(format!("{label}: rejected, but output differs from an uncached run"));
+        }
+    }
+    assert!(failures.is_empty(), "evidence edits: {}", failures.join("\n"));
+}
+
+mod reference_evidence_inconsistencies {
+    use super::*;
+    matrix_row_tests! { check_inconsistent_evidence;
+        zero_length_span => "zero-length span",
+        span_ending_before_it_starts => "span ending before it starts",
+        span_past_the_end_of_the_source => "span past the end of the source",
+        span_off_a_character_boundary => "span off a character boundary",
+        span_points_that_disagree_with_its_offsets => "span points that disagree with its offsets",
+        target_name_that_is_not_the_text_at_its_span => "target name that is not the text at its span",
+        scoped_with_candidates => "Scoped with candidates",
+        nameonly_with_a_target_id => "NameOnly with a target ID",
+        nameonly_with_a_repeated_candidate => "NameOnly with a repeated candidate",
+        unresolved_with_a_target_id => "Unresolved with a target ID",
+        unresolved_with_candidates => "Unresolved with candidates",
+        a_repeated_occurrence => "a repeated occurrence",
+        occurrences_out_of_order => "occurrences out of order",
+        an_owner_that_owns_no_coverage_region => "an owner that owns no coverage region",
+        a_region_owner_whose_name_is_not_its_record_s => "a region owner whose name is not its record's",
+        a_candidate_whose_name_is_not_its_record_s => "a candidate whose name is not its record's",
+        complete_coverage_with_a_reason => "Complete coverage with a reason",
+        repeated_coverage_reasons => "repeated coverage reasons",
+        no_file_level_region => "no file-level region",
+        coverage_out_of_order => "coverage out of order",
+        evidence_without_the_occurrences_capability => "evidence without the occurrences capability",
+        a_reference_edge_whose_occurrence_is_gone => "a reference edge whose occurrence is gone",
+        a_referenced_by_edge_no_occurrence_made => "a referenced-by edge no occurrence made",
+        direct_recursion_with_no_call_to_itself => "direct recursion with no call to itself",
+        an_ownerless_scoped_target_naming_another_declaration => "an ownerless Scoped target naming another declaration",
+        an_ownerless_scoped_target_with_a_malformed_id => "an ownerless Scoped target with a malformed ID",
+        an_ownerless_scoped_target_that_lost_its_id => "an ownerless Scoped target that lost its ID",
+        a_named_owner_s_scoped_target_naming_another_declaration => "a named owner's Scoped target naming another declaration",
+        a_named_owner_s_scoped_target_with_a_malformed_id => "a named owner's Scoped target with a malformed ID",
+        a_candidate_naming_a_declaration_of_another_name => "a candidate naming a declaration of another name",
+        a_region_owner_with_a_malformed_id => "a region owner with a malformed ID",
+        a_region_owned_by_a_declaration_that_is_not_a_callable => "a region owned by a declaration that is not a callable",
+        a_repeated_coverage_region => "a repeated coverage region",
+        a_callable_s_region_removed_although_it_owns_no_occurrence => "a callable's region removed although it owns no occurrence",
+        an_occurrence_owned_by_a_region_around_its_innermost_one => "an occurrence owned by a region around its innermost one",
+        an_unsupported_language_limit_in_a_resolving_language => "an unsupported-language limit in a resolving language",
+        a_scoped_occurrence_whose_reference_edge_is_gone => "a Scoped occurrence whose reference edge is gone",
+        a_dependency_no_import_occurrence_made => "a dependency no import occurrence made",
+        a_referenced_by_entry_whose_name_is_not_its_record_s => "a referenced-by entry whose name is not its record's",
+        no_recursion_while_the_region_is_limited => "no recursion while the region is limited",
+        no_recursion_beside_a_scoped_call_to_itself => "no recursion beside a Scoped call to itself",
+        unknown_recursion_over_a_complete_region_with_no_call => "unknown recursion over a complete region with no call",
+        semantics_without_the_semantics_capability => "semantics without the semantics capability",
+    }
+}
+
+macro_rules! identity_edit_rows {
+    ($check:path) => {
+        matrix_row_tests! { $check;
+            phantom_coverage_owner => "phantom coverage owner",
+            phantom_candidate_id => "phantom candidate ID",
+            phantom_ownerless_established_target_id => "phantom ownerless established target ID",
+            phantom_named_owner_target_id => "phantom named-owner target ID",
+            removed_empty_named_callable_region => "removed empty named callable region",
+        }
+    };
+}
+
+mod every_kind_evidence_identities_name_retained_declarations_in_every_language {
+    use super::*;
+    language_edit_tests! { check_identity_language; identity_edit_rows;
+        rust_rs => "rust.rs",
+        typescript_ts => "typescript.ts",
+        javascript_js => "javascript.js",
+        go_go => "go.go",
+        python_py => "python.py",
+        java_java => "java.java",
+        c_sharp_cs => "c_sharp.cs",
+        c_c => "c.c",
+        cpp_cpp => "cpp.cpp",
+        swift_swift => "swift.swift",
+        scala_scala => "scala.scala",
+        php_php => "php.php",
+        perl_pl => "perl.pl",
+        bash_sh => "bash.sh",
+        zsh_zsh => "zsh.zsh",
+        lua_lua => "lua.lua",
+    }
+}
+
+macro_rules! geometry_edit_rows {
+    ($check:path) => {
+        matrix_row_tests! { $check;
+            region => "region",
+            path => "path",
+            candidates => "candidates",
+            fabricated_edge => "fabricated edge",
+        }
+    };
+}
+
+mod retained_geometry_written_paths_and_candidate_order_are_checked_in_every_language {
+    use super::*;
+    language_edit_tests! { check_geometry_language; geometry_edit_rows;
+        rust_rs => "rust.rs",
+        typescript_ts => "typescript.ts",
+        javascript_js => "javascript.js",
+        go_go => "go.go",
+        python_py => "python.py",
+        java_java => "java.java",
+        c_sharp_cs => "c_sharp.cs",
+        c_c => "c.c",
+        cpp_cpp => "cpp.cpp",
+        swift_swift => "swift.swift",
+        scala_scala => "scala.scala",
+        php_php => "php.php",
+        perl_pl => "perl.pl",
+        bash_sh => "bash.sh",
+        zsh_zsh => "zsh.zsh",
+        lua_lua => "lua.lua",
+    }
+}
+
+mod deleted_written_paths_are_recomputed_in_every_language {
+    use super::*;
+    matrix_row_tests! { check_written_path_language;
+        minimal_rs => "minimal.rs",
+        rust_rs => "rust.rs",
+        typescript_ts => "typescript.ts",
+        javascript_js => "javascript.js",
+        go_go => "go.go",
+        python_py => "python.py",
+        java_java => "java.java",
+        c_sharp_cs => "c_sharp.cs",
+        c_c => "c.c",
+        cpp_cpp => "cpp.cpp",
+        swift_swift => "swift.swift",
+        scala_scala => "scala.scala",
+        php_php => "php.php",
+        lua_lua => "lua.lua",
+        perl_pl => "perl.pl",
+        receiver_pl => "receiver.pl",
+        bash_sh => "bash.sh",
+        zsh_zsh => "zsh.zsh",
+    }
+}
+macro_rules! summary_edit_rows {
+    ($check:path) => {
+        matrix_row_tests! { $check;
+            s01_duplicate => "S01 duplicate",
+            s01_reverse => "S01 reverse",
+            s02_duplicate => "S02 duplicate",
+            s02_reverse => "S02 reverse",
+            s03_duplicate => "S03 duplicate",
+            s03_reverse => "S03 reverse",
+            s04_duplicate => "S04 duplicate",
+            s04_reverse => "S04 reverse",
+            s05_duplicate => "S05 duplicate",
+            s05_reverse => "S05 reverse",
+            s06_duplicate => "S06 duplicate",
+            s06_reverse => "S06 reverse",
+            s07_duplicate => "S07 duplicate",
+            s07_reverse => "S07 reverse",
+            s09_null_path_on_a_member_call => "S09 null path on a member call",
+            s10_empty_path_on_a_member_call => "S10 empty path on a member call",
+            s10_empty_path_on_an_unqualified_call => "S10 empty path on an unqualified call",
+        }
+    };
+}
+
+mod summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language {
+    use super::*;
+    language_edit_tests! { check_summary_language; summary_edit_rows;
+        summaries_rs => "summaries.rs",
+        summaries_ts => "summaries.ts",
+        summaries_js => "summaries.js",
+    }
+}
+
+#[test]
+fn every_cache_matrix_row_has_a_generated_test() {
+    assert_eq!(member_columns().iter().map(|row| row.name).collect::<Vec<_>>(), attribute_and_modifier_members_are_served_or_recomputed_per_shape::LISTED);
+    assert_eq!(LIST_EDITS.iter().map(|row| row.0).collect::<Vec<_>>(), summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language::edits());
+    assert_eq!(SOURCE_FACT_EDITS.iter().map(|row| row.0).collect::<Vec<_>>(), retained_geometry_written_paths_and_candidate_order_are_checked_in_every_language::edits());
+    assert_eq!(IDENTITY_EDITS.iter().map(|row| row.0).collect::<Vec<_>>(), every_kind_evidence_identities_name_retained_declarations_in_every_language::edits());
+    assert_eq!(metrics_counts_serve_only_a_u32::LISTED, ["lines", "cyclomatic"]);
+    assert_eq!(columns().iter().map(|row| row.name).collect::<Vec<_>>(), persisted_symbol_fields_are_served_or_recomputed_per_shape::LISTED);
+    assert_eq!(evidence_columns().iter().map(|row| row.name).collect::<Vec<_>>(), reference_evidence_fields::LISTED);
+    assert_eq!(reference_leaf_columns().iter().map(|row| row.name).collect::<Vec<_>>(), reference_evidence_reference_leaves_are_served_only_when_consistent::LISTED);
+    assert_eq!(span_leaf_columns().iter().map(|row| row.name).collect::<Vec<_>>(), reference_evidence_span_leaves_are_served_only_when_consistent::LISTED);
+    assert_eq!(INCONSISTENT_EVIDENCE.iter().map(|row| row.0).collect::<Vec<_>>(), reference_evidence_inconsistencies::LISTED);
+    assert_eq!(LANGUAGE_FIXTURES.iter().map(|row| row.0).collect::<Vec<_>>(), every_kind_evidence_identities_name_retained_declarations_in_every_language::LISTED);
+    assert_eq!(LANGUAGE_FIXTURES.iter().map(|row| row.0).collect::<Vec<_>>(), retained_geometry_written_paths_and_candidate_order_are_checked_in_every_language::LISTED);
+    assert_eq!(written_path_rows().iter().map(|row| row.file).collect::<Vec<_>>(), deleted_written_paths_are_recomputed_in_every_language::LISTED);
+    assert_eq!(SUMMARY_SOURCES.iter().map(|row| row.0).collect::<Vec<_>>(), summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language::LISTED);
+}
+
+mod metrics_counts_serve_only_a_u32 {
+    use super::*;
+    matrix_row_tests! { check_metric_count; lines => "lines", cyclomatic => "cyclomatic" }
+}
+
+mod attribute_and_modifier_members_are_served_or_recomputed_per_shape {
+    use super::*;
+    matrix_row_tests! { check_attribute_or_modifier_column;
+        attribute_name => "attribute name",
+        attribute_value => "attribute value",
+        modifier_type_custom => "modifier type (Custom)",
+        modifier_custom_value => "modifier Custom value",
+        modifier_type_static => "modifier type (Static)",
     }
 }

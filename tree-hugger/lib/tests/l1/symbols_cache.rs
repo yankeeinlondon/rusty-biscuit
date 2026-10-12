@@ -132,15 +132,16 @@ fn fixture(language: ProgrammingLanguage) -> PathBuf {
     primary_fixture(language).expect("primary fixture")
 }
 
+crate::language_cases::language_tests!(every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run => check_every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run);
+
 /// The "Cache correctness" row of the per-language matrix: for every fixture,
 /// the cold run stores an entry and the warm run is a complete hit that
 /// parses nothing and equals an uncached run.
-#[test]
-fn every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run() {
+fn check_every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run(language: ProgrammingLanguage) {
     let dir = TempDir::new().expect("temp");
     let cache = cache_in(&dir);
     let query = SymbolQuery::complete_index();
-    let fixtures: Vec<PathBuf> = all_fixtures().into_iter().chain(multi_fixtures()).collect();
+    let fixtures = crate::symbols_fixtures::fixtures_for(language, true);
 
     for path in &fixtures {
         let label = display_name(path);
@@ -162,16 +163,17 @@ fn every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run() {
     assert!(files_with_extension(dir.path(), "tmp").is_empty(), "no temporary file left");
 }
 
+crate::language_cases::language_tests!(stored_reference_evidence_round_trips_through_rewrites => check_stored_reference_evidence_round_trips_through_rewrites);
+
 /// Reference evidence survives repeated persistence: for every fixture, a
 /// functions-only `Occurrences` entry is written, read and widened to the
 /// complete index (rewritten), then read again as a `Hit`; each result equals
 /// an uncached run, and both writes store the same whole-file evidence.
-#[test]
-fn stored_reference_evidence_round_trips_through_rewrites() {
+fn check_stored_reference_evidence_round_trips_through_rewrites(language: ProgrammingLanguage) {
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     let complete = SymbolQuery::complete_index();
     let evidence = |entry: &Value| json!([entry["occurrences"], entry["reference_coverage"]]);
-    let fixtures: Vec<PathBuf> = all_fixtures().into_iter().chain(multi_fixtures()).collect();
+    let fixtures = crate::symbols_fixtures::fixtures_for(language, true);
 
     for path in &fixtures {
         let label = display_name(path);
@@ -207,18 +209,62 @@ fn stored_reference_evidence_round_trips_through_rewrites() {
 /// of that query computes it: unselected kinds dropped, and relations,
 /// semantics, parsed docs, export targets, diagnostics and each record's
 /// `parse_pass` reduced to what the narrower query's passes produce.
-#[test]
-fn projected_results_equal_uncached_queries() {
-    assert_projections_equal_uncached_queries(all_fixtures());
+mod projected_results_equal_uncached_queries {
+    use super::*;
+    macro_rules! projection_language_tests {
+        ($($test:ident => $language:ident),* $(,)?) => {
+            const LANGUAGES: &[ProgrammingLanguage] = &[$(ProgrammingLanguage::$language),*];
+            $(#[test] fn $test() {
+                let language = ProgrammingLanguage::$language;
+                let fixtures = all_fixtures().into_iter()
+                    .filter(|path| ProgrammingLanguage::from_path(path) == Some(language)).collect();
+                assert_projections_equal_uncached_queries(fixtures, false);
+            })*
+        };
+    }
+    projection_language_tests! {
+        rust => Rust,
+        javascript => JavaScript,
+        typescript => TypeScript,
+        go => Go,
+        python => Python,
+        java => Java,
+        php => Php,
+        perl => Perl,
+        bash => Bash,
+        zsh => Zsh,
+        c => C,
+        cpp => Cpp,
+        csharp => CSharp,
+        swift => Swift,
+        scala => Scala,
+        lua => Lua,
+    }
+    #[test]
+    fn projections_exercise_every_optional_facet() {
+        let dir = TempDir::new().expect("fixture temp");
+        let path = dir.path().join("facets.rs");
+        std::fs::write(&path, "fn helper() {}\n/// Calls helper.\n#[deprecated]\npub fn caller() { helper(); }\n").expect("write fixture");
+        assert_projections_equal_uncached_queries(vec![path], true);
+    }
+
+    #[test]
+    fn every_fixture_language_is_scheduled() {
+        assert_eq!(LANGUAGES, ProgrammingLanguage::all());
+        let fixtures = all_fixtures();
+        assert!(fixtures.len() >= 16);
+        assert!(fixtures.iter().all(|path| LANGUAGES.contains(&ProgrammingLanguage::from_path(path).expect("fixture language"))));
+    }
 }
 
-/// [`projected_results_equal_uncached_queries`] over the `multi/` tree.
-#[test]
-fn projected_results_over_multi_equal_uncached_queries() {
-    assert_projections_equal_uncached_queries(multi_fixtures());
+crate::language_cases::language_tests!(projected_results_over_multi_equal_uncached_queries => check_projected_results_over_multi_equal_uncached_queries);
+
+/// Complete-entry projections over the `multi/` tree.
+fn check_projected_results_over_multi_equal_uncached_queries(language: ProgrammingLanguage) {
+    assert_projections_equal_uncached_queries(multi_fixtures().into_iter().filter(|path| ProgrammingLanguage::from_path(path) == Some(language)).collect(), false);
 }
 
-fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
+fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>, require_populated_facets: bool) {
     // Each capability alone (each projection rule on its own) and all of
     // them, over every kind; kind selection itself is a plain filter, so a
     // member kind whose owners are unselected (the case that needs owners
@@ -257,7 +303,7 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
         assert!(matches!(lookup, CacheLookup::Miss(_)), "{label}: first run");
         let tree_file = TreeFile::new(&path).expect("parse fixture");
 
-        for (kinds, capabilities) in cells {
+        for &(kinds, capabilities) in &cells {
             {
                 let mut query = SymbolQuery::new().capabilities(capabilities.iter().copied());
                 if let Some(kinds) = kinds {
@@ -294,13 +340,15 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
             }
         }
     }
-    assert!(fixture_count >= 16, "only {fixture_count} fixtures");
+    assert!(fixture_count > 0, "no fixtures for a scheduled language");
     assert_eq!(compared, fixture_count * cells.len());
-    assert!(stripped_references > 0, "no projection removed references");
-    assert!(stripped_occurrences > 0, "no projection removed occurrences");
-    assert!(stripped_parsed_docs > 0, "no projection removed parsed docs");
-    assert!(stripped_flags > 0, "no projection removed a set flag");
-    assert!(stripped_metrics > 0, "no projection removed metrics");
+    if require_populated_facets {
+        assert!(stripped_references > 0, "no projection removed references");
+        assert!(stripped_occurrences > 0, "no projection removed occurrences");
+        assert!(stripped_parsed_docs > 0, "no projection removed parsed docs");
+        assert!(stripped_flags > 0, "no projection removed a set flag");
+        assert!(stripped_metrics > 0, "no projection removed metrics");
+    }
 }
 
 fn count_records(result: &Value, predicate: impl Fn(&Value) -> bool) -> usize {
@@ -323,8 +371,9 @@ struct WideningRow {
     diagnostics_runs: u64,
 }
 
-#[test]
-fn widening_capabilities_runs_only_the_missing_passes() {
+crate::language_cases::language_tests!(widening_capabilities_runs_only_the_missing_passes => check_widening_capabilities_runs_only_the_missing_passes);
+
+fn check_widening_capabilities_runs_only_the_missing_passes(language: ProgrammingLanguage) {
     let functions = || SymbolQuery::new().kinds(FUNCTION_KINDS);
     let rows = [
         WideningRow {
@@ -413,7 +462,7 @@ fn widening_capabilities_runs_only_the_missing_passes() {
         },
     ];
 
-    for row in rows {
+    for row in rows.into_iter().filter(|row| row.language == language) {
         let path = fixture(row.language);
         let label = format!("{}: {:?} then {:?}", display_name(&path), row.first, row.second);
         let dir = TempDir::new().expect("temp");
@@ -911,6 +960,8 @@ fn record_ids(result: &Value) -> Vec<Value> {
         .collect()
 }
 
+crate::language_cases::language_tests!(deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work => check_deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work);
+
 /// For every source of the deferred kind matrix: a filtered query of the
 /// deferred kinds stores every record of those kinds and records only those
 /// kinds as its coverage, never the whole file; the unfiltered query is then
@@ -918,15 +969,15 @@ fn record_ids(result: &Value) -> Vec<Value> {
 /// widens the capabilities without diagnostics. Afterwards each deferred kind,
 /// with and without containment, is a hit that does no work and equals an
 /// uncached query.
-#[test]
-fn deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work() {
+fn check_deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work(language: ProgrammingLanguage) {
     let deferred = SymbolQuery::new().kinds(DEFERRED_KINDS);
     let filtered = deferred.clone().name(NamePattern::new("no_declaration_has_this_name"));
     let mut sorted_kinds = DEFERRED_KINDS.to_vec();
     sorted_kinds.sort();
     let sources = TempDir::new().expect("sources");
     let (mut stored_records, mut warm_records) = (0, 0);
-    for (ordinal, (language, source)) in deferred_kind_sources().into_iter().enumerate() {
+    for (ordinal, (row_language, source)) in deferred_kind_sources().into_iter().enumerate().filter(|(_, row)| row.0 == language) {
+        assert_eq!(row_language, language);
         let path = sources.path().join(format!("deferred_{ordinal}.{}", language.extensions()[0]));
         std::fs::write(&path, source).expect("write source");
         let label = format!("{language:?} {source:?}");
@@ -975,8 +1026,9 @@ fn deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work(
             }
         }
     }
-    assert!(stored_records > 50, "too few stored records ({stored_records})");
-    assert!(warm_records > 100, "too few warm records ({warm_records})");
+    let minimum = crate::language_cases::corpus_minimums(language).deferred;
+    assert!(stored_records >= minimum, "{language}: too few stored records ({stored_records})");
+    assert!(warm_records >= 2 * minimum, "{language}: too few warm records ({warm_records})");
 }
 
 /// `(language, source, name, qualified name, kind before the deferred
@@ -1120,7 +1172,7 @@ crate::symbols_relations::declaration_fact_group_tests!(
 /// narrower query exactly as an uncached query computes it: generic
 /// parameters, modifiers, attributes and relation targets kept, Rust impl
 /// containers and `metrics` dropped where the query does not ask for them.
-/// The per-language group must exercise each projection.
+/// The Rust group must exercise each projection.
 fn warm_hits_project_to_uncached_queries(group: usize) {
     let method: &[SymbolKindV2] = &[SymbolKindV2::Method];
     let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 6] = [
@@ -1171,7 +1223,7 @@ fn warm_hits_project_to_uncached_queries(group: usize) {
             });
         }
     }
-    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+    if group != crate::symbols_relations::RUST_FACT_GROUP {
         return;
     }
     assert!(dropped_containers > 0, "no projection removed a container");
@@ -1191,7 +1243,7 @@ crate::symbols_relations::declaration_fact_group_tests!(
 /// retains, so it parses once; Metrics always parses once. Each widened
 /// result equals an uncached query, the entry then records every request,
 /// and each request (and the declarations-only narrowing) is a `Hit` with
-/// no work. The per-language group must reach the parsing path through Rust.
+/// no work. The Rust group must reach the parsing path through Rust.
 fn entries_widen_by_containment_and_metrics(group: usize) {
     let sources = TempDir::new().expect("sources");
     let declarations = SymbolQuery::new();
@@ -1226,7 +1278,7 @@ fn entries_widen_by_containment_and_metrics(group: usize) {
             assert_eq!(served, uncached(&path, query), "{label}: then {query:?}");
         }
     }
-    if group == crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+    if group == crate::symbols_relations::RUST_FACT_GROUP {
         assert!(rust_rows >= 5, "the Rust rows exercise the parsing path ({rust_rows})");
     }
 }
@@ -1237,7 +1289,7 @@ fn entries_widen_by_containment_and_metrics(group: usize) {
 fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
     let sources = TempDir::new().expect("sources");
     let (label, path) =
-        crate::symbols_relations::write_declaration_fact_group(sources.path(), crate::symbols_relations::PER_LANGUAGE_FACT_GROUP)
+        crate::symbols_relations::write_declaration_fact_group(sources.path(), crate::symbols_relations::RUST_FACT_GROUP)
             .into_iter()
             .find(|(label, _)| label.starts_with("rust impls"))
             .expect("the Rust impl source");
@@ -1503,8 +1555,7 @@ fn check_oversized_owner_warm_hit(language: ProgrammingLanguage) {
     check_boundary_child(&label, row, &warm.result.index);
 }
 
-/// One test per generic reader; each analyzes a source of about half a
-/// megabyte once.
+/// One test per generic reader, retaining the overflowing parameter count.
 mod oversized_owner_warm_hits {
     use super::*;
 
@@ -3469,14 +3520,15 @@ const QUALIFIED_IMPORT_CACHE_SOURCES: &[QualifiedImportCacheRow] = &[
     ),
 ];
 
+crate::language_cases::language_tests!(qualified_reads_and_imports_hold_through_the_cache => check_qualified_reads_and_imports_hold_through_the_cache);
+
 /// R7-F3.C4: Every Java qualified-name inventory row and the sibling import
 /// readers keep their
 /// offsets and paths, and no phantom import appears, through a
 /// functions-only entry, its warm `Hit`, a record-only semantic widening, a
 /// kind widening, the complete warm `Hit` and a projected type-only result;
 /// each also equals an uncached run.
-#[test]
-fn qualified_reads_and_imports_hold_through_the_cache() {
+fn check_qualified_reads_and_imports_hold_through_the_cache(language: ProgrammingLanguage) {
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
     let complete = SymbolQuery::complete_index();
@@ -3488,7 +3540,7 @@ fn qualified_reads_and_imports_hold_through_the_cache() {
         let imports = imports.iter().map(|&(name, _, _, line, column)| (name, line, column)).collect();
         (name, source, reads, imports)
     }));
-    for (name, source, reads, imports) in sources {
+    for (name, source, reads, imports) in sources.filter(|(name, ..)| if name.starts_with("R7-F3.") { language == ProgrammingLanguage::Java } else { ProgrammingLanguage::from_path(std::path::Path::new(name)) == Some(language) }) {
         let dir = TempDir::new().expect("temp");
         let path = dir.path().join(if name.starts_with("R7-F3.") { "Matrix.java" } else { name });
         std::fs::write(&path, source).expect("write source");
@@ -3571,13 +3623,15 @@ fn qualified_reads_and_imports_hold_through_the_cache() {
 /// row's own expected imports (original and source included), every read
 /// and no imported token, and for TS/JS/Rust the owner's dependencies and
 /// recursion; each also equals an uncached run.
-#[test]
-fn commented_imports_hold_through_the_cache() {
+fn check_commented_import_cache(selected: &str) {
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
     let complete = SymbolQuery::complete_index();
     let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    let mut checked = 0;
     super::symbols_occurrences::for_each_import_row(|row| {
+        if row.label.split(": comment at").next().expect("base label") != selected { return; }
+        checked += 1;
         let dir = TempDir::new().expect("temp");
         let path = dir.path().join(format!("source.{}", row.extension));
         std::fs::write(&path, row.source).expect("write source");
@@ -3606,6 +3660,7 @@ fn commented_imports_hold_through_the_cache() {
             super::symbols_occurrences::assert_commented_import_row(row, &cell, &index, &evidence, every_kind);
         }
     });
+    assert!(checked > 0, "scheduled import row was absent: {selected}");
 }
 
 /// Runs each source through a functions-only entry, its warm `Hit`, a
@@ -3664,15 +3719,16 @@ fn assert_exclusions_hold_through_the_cache(sources: &[DeclarationCacheRow]) {
     }
 }
 
+crate::language_cases::language_tests!(every_declaration_exclusion_shape_holds_through_six_cache_stages => check_every_declaration_exclusion_shape_holds_through_six_cache_stages);
+
 /// Every declaration-exclusion shape, including earlier sibling controls,
 /// keeps its independently expected reads through persistence and projection.
-#[test]
-fn every_declaration_exclusion_shape_holds_through_six_cache_stages() {
+fn check_every_declaration_exclusion_shape_holds_through_six_cache_stages(language: ProgrammingLanguage) {
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
     let complete = SymbolQuery::complete_index();
     let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
-    for &(label, extension, source, declarations, reads) in crate::symbols_occurrences::DECLARATION_EXCLUSION_MATRIX {
+    for &(label, extension, source, declarations, reads) in crate::symbols_occurrences::DECLARATION_EXCLUSION_MATRIX.iter().filter(|row| ProgrammingLanguage::from_extension(row.1) == Some(language)) {
         let dir = TempDir::new().expect("temp");
         let path = dir.path().join(format!("source.{extension}"));
         std::fs::write(&path, source).expect("write source");
@@ -3916,12 +3972,41 @@ fn selected_import_provenance_holds_through_six_cache_stages() {
     }
 }
 
-#[test]
-fn stored_selected_import_provenance_matrix_recomputes_public_evidence() {
+macro_rules! stored_import_cases {
+    ($($name:ident => $row:literal => $label:literal),+ $(,)?) => {
+        mod stored_selected_import_provenance_matrix_recomputes_public_evidence {
+            $(#[test] fn $name() { super::check_stored_import_provenance($row); })+
+            #[test]
+            fn every_source_has_a_case() {
+                let registered = [$($label),+];
+                let actual: Vec<_> = crate::symbols_occurrences::IMPORT_PROVENANCE_MATRIX.iter().map(|row| row.0).collect();
+                assert_eq!(registered.as_slice(), actual);
+            }
+        }
+    };
+}
+stored_import_cases! {
+    row_0 => 0 => "R9-F4.01.rs",
+    row_1 => 1 => "R9-F4.01.rs.renamed",
+    row_2 => 2 => "R9-F4.02.ts",
+    row_3 => 3 => "R9-F4.02.ts.renamed",
+    row_4 => 4 => "R9-F4.03.ts",
+    row_5 => 5 => "R9-F4.03.js",
+    row_6 => 6 => "R9-F4.03.rs",
+    row_7 => 7 => "R9-F4.05.rs.self",
+    row_8 => 8 => "R9-F4.05.ts.self",
+    row_9 => 9 => "R9-F4.05.rs.raw",
+    row_10 => 10 => "R9-F4.05.ts.escaped",
+    row_11 => 11 => "R9-F4.05.js.escaped",
+    row_12 => 12 => "R9-F4.05.js.unique",
+}
+
+fn check_stored_import_provenance(row: usize) {
     use crate::symbols_occurrences::{IMPORT_PROVENANCE_MATRIX, check_import_provenance};
     let query = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     let fields = ["import_span", "import_start_byte", "import_span/start", "import_span/end", "import_span/start_byte", "import_span/end_byte", "import_span/start/line", "import_span/start/column", "import_span/end/line", "import_span/end/column"];
-    for &(label, file, source, owner, name, shadow) in IMPORT_PROVENANCE_MATRIX {
+    let &(label, file, source, owner, name, shadow) = &IMPORT_PROVENANCE_MATRIX[row];
+    {
         let dir = TempDir::new().expect("temp");
         let path = dir.path().join(file);
         std::fs::write(&path, source).expect("source");
@@ -4157,4 +4242,78 @@ fn a_revision_fifty_entry_never_replays_its_error_severity() {
     let (lookup, warm, _) = cached(&cache, source(), &query);
     assert_eq!(lookup, CacheLookup::Hit);
     assert_eq!(warm, uncached, "the rewritten entry is a hit equal to an uncached run");
+}
+
+mod commented_imports_hold_through_the_cache {
+    use super::*;
+    macro_rules! import_row_tests {
+        ($($test:ident => $label:literal),* $(,)?) => {
+            const LISTED: &[&str] = &[$($label),*];
+            $(#[test] fn $test() { check_commented_import_cache($label); })*
+        };
+    }
+    import_row_tests! {
+        r8_f2_07_ts_string_named_original => "R8-F2.07.ts string-named original",
+        r8_f2_07_js_string_named_original => "R8-F2.07.js string-named original",
+        r8_f1_01_ts_entity_alias_block_comment_before => "R8-F1.01 TS entity alias, block comment before `=`",
+        r8_f1_01_ts_entity_alias_line_comment_before => "R8-F1.01 TS entity alias, line comment before `=`",
+        r8_f1_01_export_ts_exported_entity_alias_comment_before => "R8-F1.01.export TS exported entity alias, comment before `=`",
+        r8_f1_02_ts_entity_alias_block_comment_after => "R8-F1.02 TS entity alias, block comment after `=`",
+        r8_f1_02_ts_entity_alias_line_comment_after => "R8-F1.02 TS entity alias, line comment after `=`",
+        r8_f1_s1_ts_entity_alias_comment_before_the_bound_name => "R8-F1.S1 TS entity alias, comment before the bound name",
+        r8_f1_s2_ts_entity_alias_comment_inside_the_target_path => "R8-F1.S2 TS entity alias, comment inside the target path",
+        r8_f1_09_ts_clean_ts_import_forms_beside_comments => "R8-F1.09.ts clean TS import forms beside comments",
+        r8_f1_09_ts_named_default_and_namespace_imports_beside_comments => "R8-F1.09.ts named, default and namespace imports beside comments",
+        r8_f1_09_js_named_default_and_namespace_imports_beside_comments => "R8-F1.09.js named, default and namespace imports beside comments",
+        r8_f1_03_scala_block_comment_between_path_segments => "R8-F1.03 Scala block comment between path segments",
+        r8_f1_03_scala_line_comment_between_path_segments => "R8-F1.03 Scala line comment between path segments",
+        r8_f1_03_scala_comment_in_a_braced_and_an_on_demand_path => "R8-F1.03 Scala comment in a braced and an on-demand path",
+        r8_f1_04a_scala_comment_before_a_plain_selector_group => "R8-F1.04a Scala comment before a plain selector group",
+        r8_f1_04b_scala_comment_before_a_renamed_selector_and_as => "R8-F1.04b Scala comment before a renamed selector (`=>` and `as`)",
+        r8_f1_05_star_scala_comment_before_a_wildcard_block_and_line => "R8-F1.05.star Scala comment before a `*` wildcard (block and line)",
+        r8_f1_05_underscore_scala_comment_before_a_wildcard => "R8-F1.05.underscore Scala comment before a `_` wildcard",
+        r8_f1_05_given_scala_comment_before_a_direct_given => "R8-F1.05.given Scala comment before a direct `given`",
+        r8_f1_06_mixed_scala_comment_before_given_t => "R8-F1.06.mixed Scala comment before `{_, given T}`",
+        r8_f1_06_given_scala_comment_before_given_t => "R8-F1.06.given Scala comment before `{given T}`",
+        r8_f1_07_simple_scala_comment_before_after_a_one_segment_path => "R8-F1.07.simple Scala comment before `,` after a one-segment path",
+        r8_f1_07_qualified_scala_comment_before_after_a_qualified_path => "R8-F1.07.qualified Scala comment before `,` after a qualified path",
+        r8_f1_08_scala_comments_the_binding_never_depended_on => "R8-F1.08 Scala comments the binding never depended on",
+        r8_f1_10_rs_rust_use_paths_lists_renames_globs_and_extern_aliases_with_comments => "R8-F1.10.rs Rust use paths, lists, renames, globs and extern aliases with comments",
+        r8_f1_10_java_java_qualified_imports_with_comments => "R8-F1.10.java Java qualified imports with comments",
+        r8_f1_10_cs_c_alias_static_and_global_usings_with_comments => "R8-F1.10.cs C# alias, static and global usings with comments",
+        r8_f1_10_php_php_use_paths_aliases_and_groups_with_comments => "R8-F1.10.php PHP use paths, aliases and groups with comments",
+        r8_f1_10_swift_swift_selective_and_whole_module_imports_with_comments => "R8-F1.10.swift Swift selective and whole-module imports with comments",
+        r8_f1_10_py_python_parenthesized_from_import_with_a_line_comment => "R8-F1.10.py Python parenthesized from-import with a line comment",
+        r8_f1_10_go_go_aliased_blank_dot_and_raw_string_imports_with_comments => "R8-F1.10.go Go aliased, blank, dot and raw-string imports with comments",
+        r8_f2_01_single => "R8-F2.01.single",
+        r8_f2_01_multiple => "R8-F2.01.multiple",
+        r8_f2_01_nested => "R8-F2.01.nested",
+        r8_f2_02_escaped => "R8-F2.02.escaped",
+        r8_f2_02_original => "R8-F2.02.original",
+        r8_f2_03_direct => "R8-F2.03.direct",
+        r8_f2_03_multiple => "R8-F2.03.multiple",
+        r8_f2_03_braced => "R8-F2.03.braced",
+        r8_f2_04_arrow => "R8-F2.04.arrow",
+        r8_f2_04_as => "R8-F2.04.as",
+        r8_f2_04_as_mixed => "R8-F2.04.as.mixed",
+        r8_f2_05_direct_root => "R8-F2.05.direct.root",
+        r8_f2_05_direct => "R8-F2.05.direct",
+        r8_f2_05_braced => "R8-F2.05.braced",
+        r8_f2_05_wildcard => "R8-F2.05.wildcard",
+        r8_f2_06_hidden => "R8-F2.06.hidden",
+        r8_f2_06_backticks => "R8-F2.06.backticks",
+        r8_f2_06_this => "R8-F2.06.this",
+        r8_f2_06_super => "R8-F2.06.super",
+        r8_f2_06_root => "R8-F2.06.root",
+        r8_f2_06_given => "R8-F2.06.given",
+    }
+    #[test]
+    fn every_import_row_is_scheduled() {
+        let mut labels = Vec::new();
+        super::super::symbols_occurrences::for_each_import_row(|row| {
+            let label = row.label.split(": comment at").next().expect("base label").to_string();
+            if labels.last() != Some(&label) { labels.push(label); }
+        });
+        assert_eq!(labels, LISTED);
+    }
 }

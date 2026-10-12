@@ -165,28 +165,54 @@ fn multi_stats(scratch: &Scratch, args: &[&str]) -> String {
         .to_string()
 }
 
-/// The work counters through the CLI: each declaration command over
-/// `multi/` runs no diagnostics and one definition capture per file.
-#[test]
-fn symbol_commands_run_no_diagnostics() {
-    let scratch = Scratch::new(MULTI_FIXTURES);
-    for command in ["functions", "types", "symbols", "classes"] {
+/// Each declaration command captures definitions without running diagnostics.
+mod symbol_commands_run_no_diagnostics {
+    use super::*;
+
+    fn check(command: &str) {
+        let scratch = Scratch::new(MULTI_FIXTURES);
         let uncached = multi_stats(&scratch, &["--json", command, "--no-cache"]);
         assert!(
             uncached.ends_with("parsed 16 files, 16 definition captures, 0 diagnostics runs"),
             "{command}: {uncached}"
         );
     }
+
+    #[test]
+    fn functions() {
+        check("functions");
+    }
+    #[test]
+    fn types() {
+        check("types");
+    }
+    #[test]
+    fn symbols() {
+        check("symbols");
+    }
+    #[test]
+    fn classes() {
+        check("classes");
+    }
 }
 
-/// `lint` and `--json-full`, which show diagnostics, still run them.
-#[test]
-fn lint_and_json_full_run_diagnostics() {
-    let scratch = Scratch::new(MULTI_FIXTURES);
-    let lint = multi_stats(&scratch, &["--json", "lint", "--no-cache"]);
-    assert!(!lint.ends_with(" 0 diagnostics runs"), "lint runs diagnostics: {lint}");
-    let full = multi_stats(&scratch, &["--json-full", "functions", "--no-cache"]);
-    assert!(full.ends_with("16 diagnostics runs"), "--json-full runs diagnostics: {full}");
+/// Commands that show diagnostics must still run them.
+mod lint_and_json_full_run_diagnostics {
+    use super::*;
+
+    #[test]
+    fn lint() {
+        let scratch = Scratch::new(MULTI_FIXTURES);
+        let lint = multi_stats(&scratch, &["--json", "lint", "--no-cache"]);
+        assert!(!lint.ends_with(" 0 diagnostics runs"), "lint runs diagnostics: {lint}");
+    }
+
+    #[test]
+    fn json_full() {
+        let scratch = Scratch::new(MULTI_FIXTURES);
+        let full = multi_stats(&scratch, &["--json-full", "functions", "--no-cache"]);
+        assert!(full.ends_with("16 diagnostics runs"), "--json-full runs diagnostics: {full}");
+    }
 }
 
 /// A complete warm hit parses nothing, captures nothing and runs no
