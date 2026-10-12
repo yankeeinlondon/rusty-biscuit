@@ -185,6 +185,10 @@
   `test-toolkit` and also declares it as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
+- `worktree/lib` uses `test-toolkit` only as a development dependency, for
+  `EnvGuard`, which restores `WT`, `HOME`, and `USERPROFILE` after the
+  base-directory precedence tests even when one panics. It adds no crate to the
+  workspace: every crate it brings is already in `Cargo.lock`.
 - `tree-hugger` uses `test-toolkit` only as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
@@ -228,7 +232,10 @@
   `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
-  and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
+  and uses `biscuit-file` (no default features, `file-reference` only) for
+  `canonicalize_simplified` and for `home_dir()`, the environment-first home
+  lookup behind `~/.worktree.json` and the setup candidates. Both crates pin
+  `gix = "=0.84.0"`, so the feature builds no second `gix`.
   It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a

@@ -47,28 +47,16 @@ Outside a repository, `wt` explains where to run it and exits with code 1.
 
     Allows you to create a new worktree by just providing the branch name you want to use.
 
-    - Directory Resolution
-        - Establishing the base directory we `wt` will use for all worktrees it creates:
-            - if the ENV variable `WT` is set and points to a valid directory (which is NOT a git repo) we will use that
-            - if WT is not set we will look for a `~/.worktree.json` file:
-
-                The `~/.worktree.json` file is structured like:
-
-                ```ts
-                type worktree {
-                    base_dir: string; 
-                }
-                ```
-
-                - if the file exists and the file's structure is valid, the directory it points to is a valid directory, and that directory is NOT part of a git repo, we will use that directory as the base
-                - if the file doesn't exist we will ask the user to choose a "base directory" from a set of choices:
-                    - the following directories will be "considered": `~/worktrees`, `~/wt`, `~/.claudine/worktrees`
-                    - each of the "considered" directories will be evaluated to make sure that they are NOT part of a git repo (as this would cause conflicts); any which are a part of a repo will be eliminated for consideration. 
-                    - if these directories do NOT exist that is fine, they're considered "available"
-                    - if we have at least one available option then we will use the `inquire` crate to create a select input for the user to choose between the found options, plus a "other" option
-                    - if the "other" option is chosen then we will provide a text input for them to specify the directory manually
-                - if the file _exists_ but has the wrong structure then we will provide an error which describes the problem and describes what the correct format is. Provide the user with the path to the config file (e.g., `~/.worktree.config`) as an OSC8 link (Prose struct in biscuit-terminal supports this with an easy syntax) and tell the user to edit the file or alternatively to delete the file and run `wt create` again for an interactive process.
-                - if the file _exists_ but points to a directory which is in a git repo, we will provide an error which describes the problem and then provides the filepath to the config file (as an OSC8 link) and suggests the user to update this file. In this case, we should also just suggest some common choices are ... and list the same "considered" directories which passed from above.
+    - Directory Resolution (full rules in [`docs/base-directory.md`](./docs/base-directory.md))
+        - the base directory comes from the `WT` environment variable, or, when `WT` is unset or exactly empty, from `base_dir` in `~/.worktree.json` (`{"base_dir": "/home/me/wt"}`)
+        - any other `WT` value is used or rejected; an invalid `WT` never falls back to the config file
+        - the value must be an absolute path on this host (`/home/me/wt` on Linux and WSL, `C:\Users\me\wt` on Windows) naming an existing directory that does not have `.git` directly inside it; directories deeper inside a repository are allowed
+        - nothing is expanded or made relative to the current directory: `wt`, `./wt`, and `~/wt` are rejected, and a path written for another operating system (`b:\wt` on Linux, macOS, or WSL; `/home/me/wt` on Windows) is rejected as foreign syntax. Under WSL, a drive path also gets a `/mnt/b/wt` suggestion
+        - every rejection exits 1 before anything is created, naming the value, its source (`WT` or the config file, linked), and the fix; a missing directory is never recreated, since it may be an unmounted drive
+        - a malformed `~/.worktree.json` (not UTF-8 JSON with one string `base_dir`, a repeated key, trailing text) exits 1 with the expected format
+        - when neither source is set:
+            - in an interactive terminal (stdin and stderr are terminals and `CI` is unset or empty), `wt` offers `~/worktrees`, `~/wt`, `~/.claudine/worktrees` (minus repository roots) and "Other" for a typed path. An unusable choice shows why and asks again; nothing is created or saved until the path passes the rules above. A missing directory is created, checked, then saved to `~/.worktree.json`. A creation failure exits 1; cancelling exits 0
+            - otherwise `wt create` exits 1 with instructions to set `WT` or write `~/.worktree.json`, and never prompts
         - Repo Info:
             - we will detect if the current working directory is inside a git repo and if it's not return with a descriptive error
             - if we are in a git repo, we will detect:
