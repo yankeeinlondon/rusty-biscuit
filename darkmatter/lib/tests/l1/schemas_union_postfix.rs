@@ -526,6 +526,32 @@ fn a_cross_file_rejection_names_both_sources() {
 }
 
 #[test]
+fn a_rejection_inside_a_referenced_schema_keeps_the_referenced_wrapper() {
+    let (_dir, root) = temp_root();
+    write_files(
+        &root,
+        &[("wrapper.yaml", "$schema:\n  choice: [string, number]\n  p: choice(max(10))\n")],
+    );
+    let err = resolve_yaml_schema(
+        &YamlValue::String("./wrapper.yaml".to_string()),
+        &root,
+        &context_at(&root),
+    )
+    .expect_err("rejected");
+    let SchemaError::ReferencedSchema { path, source } = err else {
+        panic!("expected ReferencedSchema, got {err:?}");
+    };
+    assert_eq!(path, root.join("wrapper.yaml"));
+    let (name, rejection, site, _) = union_error(*source);
+    assert_eq!(name, "choice");
+    assert_eq!(
+        rejection,
+        SchemaUnionRejection::Constraint { keyword: "max".to_string(), array_level: false }
+    );
+    assert_eq!(site, SchemaSourcePath::root().property("p"));
+}
+
+#[test]
 fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
     let (_dir, root) = temp_root();
     let err = resolve_inline(&root, "a: [\"b(required)\", number]\nb: a[]\n").expect_err("cycle");
@@ -543,3 +569,45 @@ fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
     assert!(chain.contains("exceeded"), "{chain}");
 }
 
+
+// ── Authored references round-trip; resolved unions are display-only ──────
+
+#[test]
+fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected() {
+    use darkmatter::markdown::schemas::simplified::{grammar::parse_type_expr, serialize_property_atom};
+
+    for authored in [
+        CONTENT_POLICY_LIST,
+        "short_form(required)",
+        "choice[]",
+        "choice[](min(1); max(3))",
+        "choice(eager)@this",
+        "choice[](min(1))@./types.yaml",
+    ] {
+        let parsed = parse_type_expr("p", authored).expect(authored);
+        assert!(matches!(parsed.ty, TypeExpr::Imported { .. }), "{authored}: {parsed:?}");
+        let written = serialize_property_atom(&parsed);
+        let reparsed = parse_type_expr("p", &written).expect(&written);
+        assert_eq!(reparsed, parsed, "{authored} -> {written}");
+        assert_eq!(serialize_property_atom(&reparsed), written, "{authored}");
+    }
+
+    // The resolved form is a display spelling the grammar refuses, so it can
+    // never be mistaken for an authored expression.
+    let (_dir, root) = temp_root();
+    let resolved = resolve_inline(&root, "choice: [string, number]\np: \"choice[](min(1))\"\n")
+        .expect("schema resolves");
+    let PropertyDef::Single(atom) = simplified_property(&resolved, "p") else {
+        panic!("expected a single atom");
+    };
+    assert!(matches!(atom.ty, TypeExpr::Union(_)), "{atom:?}");
+    let display = serialize_property_atom(atom);
+    assert!(parse_type_expr("p", &display).is_err(), "{display}");
+
+    // Only a named union takes `[]`; no anonymous spelling is accepted.
+    for anonymous in ["(string | number)[]", "[string, number][]"] {
+        assert!(parse_type_expr("p", anonymous).is_err(), "{anonymous}");
+        let schema = format!("p: \"{anonymous}\"\n");
+        resolve_inline(&root, &schema).expect_err(&schema);
+    }
+}

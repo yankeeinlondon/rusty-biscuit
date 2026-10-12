@@ -2,10 +2,10 @@
 //! library validator, the same path `md schema validate` and DMLS take.
 //!
 //! The schema is a `kind: schema` file that declares `short_form`,
-//! `long_form`, and `policy`. Today `policy[]` is rejected because `[]` cannot
-//! be applied to a union-typed named type, so each test document types every
-//! policy entry as its own `policy@./content-policy.yaml` property instead of
-//! one `content_policy` list.
+//! `long_form`, and `policy`. Each test document types every policy entry as
+//! its own `policy@./content-policy.yaml` property. The list form
+//! (`policy[](min(1))@./content-policy.yaml`) is covered by
+//! `schemas_union_postfix`.
 
 use darkmatter::markdown::{
     Markdown,
@@ -164,10 +164,10 @@ fn file_changed_rules_outside_the_grammar_are_flagged() {
 
 #[test]
 fn long_form_without_rule_is_not_flagged_by_the_schema() {
-    // `rule` cannot carry `(required)` today: a constraint on the union-typed
-    // `short_form` reference is rejected when `long_form` is referenced
-    // directly and is not enforced through `policy`. Evaluation by the
-    // content-policy library reports the missing `rule` instead.
+    // The shipped schema leaves `rule` optional: the schema language accepts
+    // `short_form(required)`, but the shipped `long_form` does not declare it
+    // yet. Evaluation by the content-policy library reports the missing
+    // `rule` instead.
     let report = validate_entries(
         include_str!("../../../../content-policy/schemas/content-policy.yaml"),
         &["{action: refresh}"],
