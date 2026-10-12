@@ -442,3 +442,37 @@ at the end of every `just install`.
   endpoint**, while `Get-CimInstance Win32_SoundDevice` is empty. cpal then
   reports no output device, and playa reports that error directly instead
   of falling back to host players.
+
+## reqwest's rustls client aborting against a loopback TLS server
+
+Found 2026-10-12 on `build-win-native` while adding `schematic-runtime`'s
+local TLS tests. Not yet root-caused; the evidence below narrows it.
+
+- **Symptom.** A test that runs a `tokio-rustls` server on `127.0.0.1` and
+  sends to it through reqwest 0.13's built-in rustls client (aws-lc-rs
+  provider, `rustls-platform-verifier`) sometimes dies with `0xc0000409`
+  (`STATUS_STACK_BUFFER_OVERRUN`, a native fast-fail). Stdout shows only
+  `running 1 test`, stderr is empty, and an `eprintln!` placed after the send
+  never prints, so the abort happens inside the handshake or send and not at
+  runtime drop or thread exit. Under a full parallel suite, 3 of 5 runs had
+  one abort; alone under `--stress-count 15` there were none; 18 builder tests
+  launched as parallel processes outside nextest gave 1 in 270. Aborts
+  cluster: several processes die in the same stress iteration.
+- **What it is not.** It is not stack size (`RUST_MIN_STACK=8388608` made no
+  difference, and Rust's stack-overflow handler would print to stderr). It is
+  not the server's crypto provider (it also aborts with a `ring` server). It
+  is not the platform verifier alone (`tls_danger_accept_invalid_certs`
+  clients also aborted), and not the runtime's code (plain reqwest with no
+  runtime code aborted too, 2 in 160). It never aborted in 160 runs where
+  reqwest was handed a preconfigured rustls `ClientConfig`
+  (`tls_backend_preconfigured`) with either provider. That count is too small
+  to prove the preconfigured path is immune.
+- **What was done.** The four loopback-TLS tests in
+  `schematic/runtime/tests/l1/builder.rs` carry
+  `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.
+  Generated clients before the runtime used the same reqwest configuration,
+  so production HTTPS on Windows has the same exposure; it has not been seen
+  outside this loopback fixture.
+- **Next step for whoever picks it up.** Capture the faulting stack with
+  `cdbX64.exe` (see "COM lifetime and cpal" above for how to drive it) while
+  running the four tests as parallel processes in a loop.
