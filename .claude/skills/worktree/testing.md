@@ -20,6 +20,12 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
 - On Windows the user cache ignores `HOME`, so tests that seed a store use the
   real per-user path there. `--ignore-api` binary tests are Unix-only (native
   Windows resolves the home directory without `HOME`).
+- `~/.worktree.json` and the setup candidates are different: `config_path()`
+  and `considered_dirs()` use biscuit-file's `home_dir()`, which reads `HOME`
+  on Unix and `USERPROFILE` on Windows. Set **both** for a `wt` child or an
+  `EnvGuard`-scoped test, and the config never touches the real user's file.
+  Library tests reach the resolver through `config::resolve_with(wt,
+  config_path, probe)`, so only precedence tests mutate the environment.
 - Inside tmux `wt` cannot query the background: pass `COLORFGBG` (`15;0` dark,
   `0;15` light), or the row highlight follows the host's appearance.
 
