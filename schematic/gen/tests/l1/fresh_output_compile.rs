@@ -20,9 +20,9 @@
 use std::path::Path;
 
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint,
-    EndpointParams, FormField, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, ParamDef,
-    ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin,
+    Endpoint, EndpointParams, FormField, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType,
+    ParamDef, ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
 };
 use schematic_gen::output::{RustOutputRequest, Selection, get_module_path, prepare_rust_output};
 use schematic_gen::pipeline::resolve_all_apis;
@@ -131,6 +131,9 @@ fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endp
         module_path: Some(module.to_string()),
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

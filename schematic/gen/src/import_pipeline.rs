@@ -32,6 +32,9 @@ pub struct ImportOptions {
     pub definitions_out: Option<String>,
     /// Path prefixes whose endpoints are excluded from the import.
     pub exclude_paths: Vec<String>,
+    /// Response header carrying the provider's request id; an OpenAPI
+    /// document does not declare one, so it is supplied here.
+    pub request_id_header: Option<String>,
     /// Print generated code without writing files.
     pub dry_run: bool,
     /// Fail on any warning-level diagnostic.
@@ -94,6 +97,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     }
 
     let mut api = import_result.api;
+    api.request_id_header.clone_from(&options.request_id_header);
     let models = import_result.models;
     let mut diagnostics = import_result.diagnostics;
 
@@ -212,6 +216,7 @@ mod tests {
             output: "./out".to_string(),
             definitions_out: None,
             exclude_paths: vec![],
+            request_id_header: None,
             dry_run: true,
             strict: false,
             verbose: false,
@@ -289,6 +294,7 @@ components:
             output: output_dir.to_string_lossy().to_string(),
             definitions_out: None,
             exclude_paths: vec![],
+            request_id_header: None,
             dry_run: true,
             strict: false,
             verbose: false,
@@ -312,6 +318,7 @@ components:
             output: "/tmp/out".to_string(),
             definitions_out: None,
             exclude_paths: vec![],
+            request_id_header: None,
             dry_run: true,
             strict: false,
             verbose: false,

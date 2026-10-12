@@ -4,7 +4,9 @@
 //! across the codebase, reducing duplication and ensuring consistency.
 
 use proc_macro2::TokenStream;
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
+};
 
 /// Creates a minimal RestApi for testing.
 ///
@@ -30,6 +32,9 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -55,6 +60,9 @@ pub fn make_api_with_endpoint(
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -112,6 +120,9 @@ pub fn make_simple_api() -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -171,6 +182,9 @@ pub fn make_complex_api() -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

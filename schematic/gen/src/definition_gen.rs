@@ -12,8 +12,8 @@ use std::path::Path;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EndpointParams, FormField, FormFieldKind,
-    ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, FormField,
+    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
 };
 
 use crate::errors::GeneratorError;
@@ -126,6 +126,9 @@ fn rest_api_tokens(api: &RestApi) -> TokenStream {
     let module_path = option_string_tokens(api.module_path.as_deref());
     let request_suffix = option_string_tokens(api.request_suffix.as_deref());
     let version = option_string_tokens(api.version.as_deref());
+    let cross_origin = cross_origin_tokens(&api.cross_origin);
+    let request_id_header = option_string_tokens(api.request_id_header.as_deref());
+    let secret_names = string_vec_tokens(&api.secret_names);
 
     let endpoints = api.endpoints.iter().map(endpoint_tokens);
 
@@ -150,6 +153,9 @@ fn rest_api_tokens(api: &RestApi) -> TokenStream {
             request_suffix: #request_suffix,
             version: #version,
             env_mapping: None,
+            cross_origin: #cross_origin,
+            request_id_header: #request_id_header,
+            secret_names: #secret_names,
         }
     }
 }
@@ -402,6 +408,19 @@ fn option_string_tokens(value: Option<&str>) -> TokenStream {
     }
 }
 
+fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
+    match policy {
+        CrossOrigin::SameOrigin => quote! { CrossOrigin::same_origin() },
+        CrossOrigin::AllowOrigins(origins) => {
+            let origins = origins.iter();
+            quote! { CrossOrigin::allow_origins([#(#origins),*]) }
+        }
+        CrossOrigin::AllowWithoutCredentials => quote! { CrossOrigin::allow_without_credentials() },
+        CrossOrigin::DangerAllowAny => quote! { CrossOrigin::danger_allow_any() },
+        CrossOrigin::Deny => quote! { CrossOrigin::deny() },
+    }
+}
+
 fn string_vec_tokens(values: &[String]) -> TokenStream {
     let values = values.iter();
     quote! { vec![#(#values.to_string()),*] }
@@ -444,6 +463,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 
@@ -469,6 +491,31 @@ mod tests {
         assert!(code.contains(r#"id: "ListItems".to_string()"#));
         assert!(code.contains("RestMethod::Get"));
         assert!(code.contains(r#"path: "/items".to_string()"#));
+    }
+
+    #[test]
+    fn emits_api_level_policy_fields() {
+        let mut api = sample_api();
+        api.cross_origin = CrossOrigin::allow_origins(["https://uploads.example.com"]);
+        api.request_id_header = Some("x-request-id".to_string());
+        api.secret_names = vec!["X-Pin".to_string()];
+
+        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()]);
+        let code = format_code(&validate_code(&tokens).unwrap());
+
+        assert!(code.contains(r#"CrossOrigin::allow_origins(["https://uploads.example.com"])"#));
+        assert!(code.contains(r#"request_id_header: Some("x-request-id".to_string())"#));
+        assert!(code.contains(r#"secret_names: vec!["X-Pin".to_string()]"#));
+    }
+
+    #[test]
+    fn emits_same_origin_for_the_default_policy() {
+        let tokens =
+            assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()]);
+        let code = format_code(&validate_code(&tokens).unwrap());
+
+        assert!(code.contains("cross_origin: CrossOrigin::same_origin()"));
+        assert!(code.contains("request_id_header: None"));
     }
 
     /// Renders a bare expression inside a function so it parses as a file.

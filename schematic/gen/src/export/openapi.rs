@@ -835,6 +835,7 @@ fn snake_case(input: &str) -> String {
 mod tests {
     use super::*;
     use biscuit_file::serde_yaml_ng;
+    use schematic_define::CrossOrigin;
     use schematic_define::openapi::ExportFormat;
     use schematic_definitions::openai::{define_openai_api, openapi_registry};
     use tempfile::TempDir;
@@ -1065,6 +1066,9 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

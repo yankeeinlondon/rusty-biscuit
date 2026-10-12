@@ -112,6 +112,10 @@ enum Commands {
         #[arg(long, value_name = "PREFIX")]
         exclude_path: Vec<String>,
 
+        /// Response header that carries the provider's request id
+        #[arg(long, value_name = "HEADER")]
+        request_id_header: Option<String>,
+
         #[arg(long)]
         dry_run: bool,
 
@@ -180,6 +184,7 @@ fn main() -> ExitCode {
             output,
             definitions_out,
             exclude_path,
+            request_id_header,
             dry_run,
             strict,
         }) => schematic_gen::commands::run_import_command(
@@ -190,6 +195,7 @@ fn main() -> ExitCode {
                 output,
                 definitions_out,
                 exclude_paths: exclude_path,
+                request_id_header,
                 dry_run,
                 strict,
                 verbose: cli.verbose > 0,

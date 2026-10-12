@@ -9,7 +9,7 @@ use schematic_define::RestApi;
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, RestMethod, AuthStrategy, Endpoint, ApiResponse};
+/// use schematic_define::{RestApi, RestMethod, AuthStrategy, Endpoint, ApiResponse, CrossOrigin};
 /// use schematic_gen::export::resolve_module_name;
 ///
 /// let api = RestApi {
@@ -27,6 +27,9 @@ use schematic_define::RestApi;
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
 /// };
 /// assert_eq!(resolve_module_name(&api), "openai");
 /// ```

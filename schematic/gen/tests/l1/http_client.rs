@@ -8,7 +8,7 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, Endpoint, EnvAuthStrategy,
     OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
 };
 use schematic_gen::output::assemble::assemble_shared_module;
@@ -70,6 +70,9 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -101,6 +104,9 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -156,6 +162,9 @@ fn make_dual_auth_api() -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -714,6 +723,9 @@ fn make_text_response_api() -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

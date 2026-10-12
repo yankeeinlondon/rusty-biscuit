@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use biscuit_test_harness::bin_exe;
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::SchemaRegistry;
 use schematic_gen::diagnostics::Output;
 use schematic_gen::errors::GeneratorError;
@@ -54,6 +54,9 @@ fn api(name: &str, module: &str, suffix: Option<&str>, endpoints: Vec<Endpoint>)
         module_path: Some(module.to_string()),
         request_suffix: suffix.map(str::to_string),
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

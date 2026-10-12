@@ -280,7 +280,7 @@ fn to_snake_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, Endpoint};
+    use schematic_define::{ApiResponse, CrossOrigin, Endpoint};
 
     fn make_test_api() -> RestApi {
         RestApi {
@@ -308,6 +308,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

@@ -1,7 +1,7 @@
 use super::helpers::generate_headers_init;
 use super::*;
 use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
-use schematic_define::AuthStrategy;
+use schematic_define::{AuthStrategy, CrossOrigin};
 
 fn make_api(name: &str, base_url: &str, description: &str) -> RestApi {
     RestApi {
@@ -19,6 +19,9 @@ fn make_api(name: &str, base_url: &str, description: &str) -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -154,6 +157,9 @@ fn generate_api_struct_with_bearer_auth() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
     let tokens = generate_api_struct(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -182,6 +188,9 @@ fn generate_api_struct_with_api_key_auth() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
     let tokens = generate_api_struct(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -208,6 +217,9 @@ fn generate_api_struct_with_basic_auth() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
     let tokens = generate_api_struct(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -354,6 +366,9 @@ fn generate_api_struct_with_headers() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
     let tokens = generate_api_struct(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -446,6 +461,9 @@ fn generate_api_struct_has_docs_url_constant() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
     let tokens = generate_api_struct(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");

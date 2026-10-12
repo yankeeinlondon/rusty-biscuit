@@ -191,7 +191,9 @@ generate-dry-run:
 #
 # Rewrites definitions/src/openai/{mod,types}.rs. Run `just generate` afterwards
 # to rebuild the client and the exported artifacts. The Assistants family is
-# excluded: OpenAI has superseded it with Responses + Conversations.
+# excluded: OpenAI has superseded it with Responses + Conversations. The
+# request-id header is not declared by OpenAPI; the vendored spec's examples
+# read `x-request-id` from responses.
 import-openai:
     @echo ""
     @echo "Importing OpenAI Definition"
@@ -203,7 +205,8 @@ import-openai:
         --module-path openai \
         --definitions-out definitions/src/openai \
         --exclude-path /assistants \
-        --exclude-path /threads
+        --exclude-path /threads \
+        --request-id-header x-request-id
 
 # generate all API clients to schematic/schema
 generate:

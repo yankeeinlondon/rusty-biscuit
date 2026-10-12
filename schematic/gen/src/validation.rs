@@ -14,7 +14,7 @@
 //! ## Examples
 //!
 //! ```
-//! use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+//! use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod, CrossOrigin};
 //! use schematic_gen::diagnostics::{Feature, Severity};
 //! use schematic_gen::validation::{validate_postman, validate_rust_client};
 //!
@@ -44,6 +44,9 @@
 //!     module_path: None,
 //!     request_suffix: None,
 //!     version: None,
+//!     cross_origin: CrossOrigin::default(),
+//!     request_id_header: None,
+//!     secret_names: vec![],
 //! };
 //!
 //! let rust = validate_rust_client(&[&api]);
@@ -954,7 +957,7 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
 mod tests {
     use super::*;
     use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
-    use schematic_define::{ApiKeyLocation, AuthStrategy, FormField, RestMethod};
+    use schematic_define::{ApiKeyLocation, AuthStrategy, CrossOrigin, FormField, RestMethod};
 
     fn make_test_api() -> RestApi {
         RestApi {
@@ -972,6 +975,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

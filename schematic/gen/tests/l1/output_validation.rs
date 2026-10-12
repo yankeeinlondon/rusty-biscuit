@@ -12,7 +12,7 @@ use std::process::Command;
 use biscuit_test_harness::bin_exe;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
@@ -52,6 +52,9 @@ fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
         module_path: Some(module.to_string()),
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

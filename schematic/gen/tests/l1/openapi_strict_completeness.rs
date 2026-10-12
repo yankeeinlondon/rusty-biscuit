@@ -17,7 +17,9 @@
 //! output runs over the whole batch before writing any document; these tests
 //! pin the registry-level contract and that diagnostic.
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
+};
 use schematic_definitions::registry::{
     SchemaRegistry, get_registries_for_module, get_registry, registry_key_for,
 };
@@ -53,6 +55,9 @@ fn synthetic_api(name: &str, response_type: &str) -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -252,6 +257,9 @@ fn request_body_types_must_be_registered() {
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let registry = SchemaRegistry::new();

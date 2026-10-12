@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
 use crate::export::auth::{ApiKeyLocation, ExportAuth};
 use crate::export::body::{ExportBody, FormField, FormFieldExportKind, map_body};
@@ -33,6 +33,9 @@ fn minimal_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

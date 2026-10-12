@@ -2,7 +2,7 @@ use super::generate_request_auth_helpers;
 use super::helpers::{generate_auth_setup, to_snake_case};
 use super::*;
 use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod};
 
 fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
     RestApi {
@@ -30,6 +30,9 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -49,6 +52,9 @@ fn make_api_with_endpoints(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 
@@ -79,6 +85,9 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     }
 }
 

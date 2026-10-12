@@ -234,7 +234,9 @@ fn generated_files_exist_and_have_expected_structure() {
 /// Tests generating code for multiple different API configurations.
 #[test]
 fn generate_code_for_various_api_configurations() {
-    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{
+        ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
+    };
 
     let test_cases = [
         // Simple API with no auth
@@ -263,6 +265,9 @@ fn generate_code_for_various_api_configurations() {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         },
         // API with all HTTP methods
         RestApi {
@@ -336,6 +341,9 @@ fn generate_code_for_various_api_configurations() {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         },
         // API with multiple path parameters
         RestApi {
@@ -363,6 +371,9 @@ fn generate_code_for_various_api_configurations() {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         },
     ];
 
@@ -422,7 +433,7 @@ fn generate_code_for_various_api_configurations() {
 /// of their declared response type.
 #[test]
 fn binary_response_generates_request_bytes_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     // Note: "BinaryTest" avoids the "Api" suffix which triggers module path inference
     let api = RestApi {
@@ -450,6 +461,9 @@ fn binary_response_generates_request_bytes_method() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -490,7 +504,7 @@ fn binary_response_generates_request_bytes_method() {
 /// Tests that Text response endpoints generate `request_text()` method.
 #[test]
 fn text_response_generates_request_text_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
         name: "TextTest".to_string(),
@@ -517,6 +531,9 @@ fn text_response_generates_request_text_method() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -544,7 +561,7 @@ fn text_response_generates_request_text_method() {
 /// Tests that Empty response endpoints generate `request_empty()` method.
 #[test]
 fn empty_response_generates_request_empty_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
         name: "EmptyTest".to_string(),
@@ -571,6 +588,9 @@ fn empty_response_generates_request_empty_method() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -594,7 +614,7 @@ fn empty_response_generates_request_empty_method() {
 /// Tests that mixed response types generate all appropriate methods.
 #[test]
 fn mixed_response_types_generate_all_methods() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
         name: "MixedTest".to_string(),
@@ -656,6 +676,9 @@ fn mixed_response_types_generate_all_methods() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -836,7 +859,7 @@ fn multiple_apis_compile() {
 #[test]
 fn paginated_endpoints_generate_paginated_trait() {
     use schematic_define::params::{EndpointParams, PaginationStyle};
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     let api = RestApi {
         name: "PaginatedTest".to_string(),
@@ -878,6 +901,9 @@ fn paginated_endpoints_generate_paginated_trait() {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -1033,7 +1059,7 @@ fn generated_openapi_filenames_use_module_names() {
 /// mirrors the strict-failure path inside `run_generate_all`.
 #[test]
 fn grouped_export_fails_when_module_registry_missing() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
     use schematic_definitions::registry::SchemaRegistry;
     use schematic_gen::errors::GeneratorError;
 
@@ -1063,6 +1089,9 @@ fn grouped_export_fails_when_module_registry_missing() {
             module_path: Some("synthetic_unknown_module".to_string()),
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

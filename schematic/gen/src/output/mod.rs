@@ -683,7 +683,9 @@ pub fn generate_and_write_standalone(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod};
+    use schematic_define::{
+        ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod,
+    };
     use std::fs;
     use tempfile::TempDir;
 
@@ -713,6 +715,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 
@@ -766,6 +771,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 
@@ -1034,6 +1042,9 @@ mod tests {
                 module_path: None,
                 request_suffix: None,
                 version: None,
+                cross_origin: CrossOrigin::default(),
+                request_id_header: None,
+                secret_names: vec![],
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1085,6 +1096,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1119,6 +1133,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1163,6 +1180,9 @@ mod tests {
             module_path: Some("foo".to_string()),
             request_suffix: Some("NativeRequest".to_string()),
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         let api_b = RestApi {
@@ -1190,6 +1210,9 @@ mod tests {
             module_path: Some("foo".to_string()),
             request_suffix: Some("CompatRequest".to_string()),
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         };
 
         (api_a, api_b)
@@ -1453,6 +1476,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 

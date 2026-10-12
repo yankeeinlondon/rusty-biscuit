@@ -43,7 +43,7 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 /// use schematic_gen::export::postman::write_postman;
 ///
 /// let api = RestApi {
@@ -61,6 +61,9 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
 /// };
 ///
 /// let path = write_postman(&api, Path::new("/tmp"), false).unwrap();
@@ -102,7 +105,7 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, AuthStrategy};
+/// use schematic_define::{RestApi, AuthStrategy, CrossOrigin};
 /// use schematic_gen::export::postman::write_postman_grouped;
 ///
 /// let api1 = RestApi {
@@ -120,6 +123,9 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
 /// };
 ///
 /// let path = write_postman_grouped(&[&api1], "ollama", Path::new("/tmp"), false).unwrap();

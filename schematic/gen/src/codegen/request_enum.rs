@@ -219,7 +219,9 @@ fn generate_from_impls(api: &RestApi, enum_name: &proc_macro2::Ident, suffix: &s
 mod tests {
     use super::*;
     use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
-    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod};
+    use schematic_define::{
+        ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod,
+    };
 
     fn make_api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
         RestApi {
@@ -237,6 +239,9 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
         }
     }
 
