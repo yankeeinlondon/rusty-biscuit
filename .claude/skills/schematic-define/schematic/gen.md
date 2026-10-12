@@ -96,7 +96,7 @@ API Definition (RestApi)
 schema/src/
 ├── lib.rs           # Module declarations
 ├── prelude.rs       # Convenient re-exports
-├── shared.rs        # RequestParts, SchematicError, reqwest re-export
+├── shared.rs        # RequestParts, SchematicError, auth resolution, cookie/query helpers, reqwest re-export
 ├── anthropic.rs     # Anthropic API client
 ├── openai.rs        # OpenAI API client
 ├── elevenlabs.rs    # ElevenLabs API client
@@ -119,9 +119,18 @@ generations are automatically cleaned up.
 // Re-export reqwest for custom requests
 pub use reqwest;
 
-// Request components tuple
-pub type RequestParts = (&'static str, String, Option<String>, Vec<(String, String)>);
-// (HTTP method, path, optional JSON body, headers)
+// Request components tuple:
+// (HTTP method, path, body, headers, unencoded declared query pairs)
+pub type RequestParts = (
+    &'static str,
+    String,
+    RequestBody,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+);
+
+// Encodes each query pair once and appends it; `?` or `&` follows `path`
+pub fn append_query_pairs(url: &mut String, path: &str, pairs: &[(String, String)]);
 
 // Error enum
 pub enum SchematicError {
@@ -150,10 +159,11 @@ impl GetUserRequest {
         Self { user_id: user_id.into() }
     }
 
-    /// Converts to (method, path, body, headers) tuple.
+    /// Converts to (method, path, body, headers, query) tuple.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/users/{}", self.user_id);
-        Ok(("GET", path, None, vec![]))
+        let path = format!("/users/{}", urlencoding::encode(&self.user_id.to_string()));
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 ```

@@ -203,7 +203,7 @@ Endpoint {
 | `BearerToken { header: None }` | `env_auth: vec!["KEY"]` | `Authorization: Bearer <token>` |
 | `ApiKey { header: "X-Key" }` | `env_auth: vec!["KEY"]` | `X-Key: <key>` |
 | `Basic` | `env_username`, `env_auth[0]` | `Authorization: Basic <base64>` |
-| `ApiKeyParam { location, name }` | Query or cookie | `?api_key=<key>` |
+| `ApiKeyParam { location, name }` | `env_auth` or `.with_api_key_param(key)` (temporary) | `?api_key=<key>` or `Cookie: api_key=<key>` |
 | `None` | (none) | (none) |
 
 ## Testing & Verification

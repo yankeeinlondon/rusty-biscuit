@@ -258,7 +258,7 @@ The generator produces per-API module files:
 schema/src/
 ├── lib.rs           # Module declarations
 ├── prelude.rs       # Convenient re-exports
-├── shared.rs        # RequestParts, SchematicError, VariantBuilder, Paginated trait, reqwest re-export
+├── shared.rs        # RequestParts, append_query_pairs, SchematicError, VariantBuilder, Paginated trait, reqwest re-export
 ├── anthropic.rs     # Anthropic API client
 ├── openai.rs        # OpenAI API client
 ├── elevenlabs.rs    # ElevenLabs API client
@@ -433,9 +433,10 @@ pub enum SchematicError {
 pub struct ListModelsRequest {}
 
 impl ListModelsRequest {
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/models".to_string();
-        ("GET", path, None)
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 
@@ -453,8 +454,9 @@ impl RetrieveModelRequest {
     }
 
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/models/{}", self.model);
-        Ok(("GET", path, None, vec![]))
+        let path = format!("/models/{}", urlencoding::encode(&self.model.to_string()));
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 
@@ -477,7 +479,7 @@ pub enum OpenAIRequest {
 }
 
 impl OpenAIRequest {
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::ListModels(req) => req.into_parts(),
             Self::RetrieveModel(req) => req.into_parts(),
@@ -585,11 +587,15 @@ The generator supports both the legacy single-strategy auth model and the new mu
 Runtime precedence is always:
 
 1. Explicit auth already set on `Headers`
-2. Explicit auth configured through generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, or `.oauth_token(...)`
-3. Environment fallback resolved through `EnvMapping`
+2. Explicit auth configured through generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, `.oauth_token(...)`, or `.with_api_key_param(...)`
+3. Environment fallback from the effective policy: a header resolved through `EnvMapping`, or for `ApiKeyParam` the first non-empty variable named by `env_auth`
 4. `SchematicError::AuthenticationRequired`
 
-`RestApi::env_auth` and `env_username` remain authoring conveniences, but generated REST clients normalize them into `EnvMapping` and no longer resolve auth directly from those raw fields at runtime.
+Any explicit credential disables every environment fallback. The policy is always `RestApi::effective_auth_policy()`, so an explicit `auth_policy` overrides the legacy `auth` field.
+
+`RestApi::env_auth` and `env_username` remain authoring conveniences. Generated REST clients normalize them into `EnvMapping` for header credentials; an `ApiKeyParam` key has no `EnvMapping` field, so the client reads `env_auth` for it directly (temporary; see below).
+
+The resolution logic is emitted once, into the generated `shared.rs` (`shared::resolve_request_auth`); each client passes it its policy, headers, `env_auth`, and explicit parameter key. A client's `Debug` output prints only its base URL and auth policy, never a credential.
 
 ### Bearer Token
 
@@ -601,18 +607,20 @@ RestApi {
 }
 ```
 
-Generated code:
+Generated code (`shared::resolve_request_auth`):
 
 ```rust
-if !headers.has_explicit_auth() {
-    headers = self.apply_env_fallback(headers);
+let mut key = explicit_api_key_param(policy, api_key_param);
+let explicit = headers.has_explicit_auth() || key.is_some();
+
+if !explicit {
+    headers = apply_env_fallback(policy, headers);
+    key = env_api_key_param(policy, env_auth);
 }
 
-if self.auth_is_required()
-    && !headers.has_explicit_auth()
-    && !self.headers_satisfy_fallback(&headers)
-{
-    return Err(self.authentication_required_error());
+let required = !policy.explicit.is_empty() || policy.env_fallback.is_some();
+if required && !explicit && key.is_none() && !headers_satisfy_fallback(policy, &headers) {
+    return Err(authentication_required_error(policy, &headers, env_auth));
 }
 ```
 
@@ -631,6 +639,26 @@ Generated code:
 ```rust
 headers = headers.header("X-API-Key", key);
 ```
+
+### API Key in a Query Parameter or Cookie
+
+```rust
+RestApi {
+    auth: AuthStrategy::ApiKeyParam {
+        name: "api_key".to_string(),
+        location: ApiKeyLocation::Query, // or ApiKeyLocation::Cookie
+    },
+    env_auth: vec!["EXAMPLE_KEY".to_string()],
+    // ...
+}
+```
+
+The client gets `.with_api_key_param(key)`. The key, explicit or from the
+first non-empty `env_auth` variable, is sent as the `api_key` query pair
+(replacing a declared pair of that name) or merged into the one `Cookie`
+header (replacing a cookie of that name). **Temporary:** the setter and the
+environment scan are interim and will be replaced when credentials move to a
+shared runtime. See `schematic/docs/generation/request-side.md`.
 
 ### Basic Auth
 
@@ -750,15 +778,28 @@ impl GetMessageRequest {
         }
     }
 
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
-        let path = format!("/threads/{}/messages/{}", self.thread_id, self.message_id);
-        ("GET", path, None)
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!(
+            "/threads/{}/messages/{}",
+            urlencoding::encode(&self.thread_id.to_string()),
+            urlencoding::encode(&self.message_id.to_string()),
+        );
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
 
 // Usage
 let request = GetMessageRequest::new("thread-123", "msg-456");
 ```
+
+## Query Parameters
+
+Declared query parameters become optional fields with `with_*` builders.
+`into_parts()` returns them as unencoded `(name, value)` pairs in the fifth
+element of `RequestParts`, apart from the path, and the client encodes them
+once when it builds the URL (`shared::append_query_pairs`). See
+[`docs/generation/request-side.md`](../docs/generation/request-side.md).
 
 ## Request Bodies
 
@@ -784,9 +825,12 @@ impl CreateCompletionRequest {
         Self { body }
     }
 
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/completions".to_string();
-        ("POST", path, serde_json::to_string(&self.body).ok())
+        let body = serde_json::to_string(&self.body)
+            .map_err(|e| SchematicError::SerializationError(e.to_string()))?;
+        let query: Vec<(String, String)> = Vec::new();
+        Ok(("POST", path, crate::shared::RequestBody::Json(body), vec![], query))
     }
 }
 
@@ -823,6 +867,24 @@ let request = CreateMessageRequest::new("thread-123", CreateMessageBody {
     ..Default::default()
 });
 ```
+
+A text body (`ApiRequest::Text { content_type }`) is a `body: String` field and
+a binary body (`ApiRequest::Binary { content_type }`) a `body: Vec<u8>` field.
+Both become `RequestBody::Raw`: the bytes are sent unchanged with the declared
+`Content-Type`.
+
+## Header and Cookie Parameters
+
+`EndpointParams.header` and `EndpointParams.cookie` entries become optional
+fields with `with_*` builders, sent under their exact declared names in the
+headers element of `RequestParts`. A set header parameter replaces a static
+endpoint header of the same name (case-insensitive); arrays are joined with
+`,`. Cookie values are percent-encoded where RFC 6265 requires and merged,
+with the API's and the endpoint's static cookies and any cookie API key, into
+one `Cookie` header (`shared::combine_cookie_headers`). Every header is
+parsed through the HTTP types before sending, so an invalid value fails
+without a request and without echoing the value. See
+[`docs/generation/request-side.md`](../docs/generation/request-side.md).
 
 ## Module Reference
 

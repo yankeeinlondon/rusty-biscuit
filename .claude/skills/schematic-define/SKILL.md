@@ -45,8 +45,13 @@ gets a synthesized `{EndpointId}Form` struct — file parts typed
 through the usual `pub body:` field.
 
 `into_parts` returns `shared::RequestBody` (`Empty` / `Json` / `Multipart` /
-`UrlEncoded` / `Raw`), **not** `Option<String>`. `Text` and `Binary` bodies are
-still not carried on the request struct.
+`UrlEncoded` / `Raw`), **not** `Option<String>`, as the third of five tuple
+elements; declared query parameters are the fifth, as unencoded pairs kept out
+of the path. `Text` bodies are a `body: String` field and `Binary` bodies a
+`body: Vec<u8>` field, both sent as `RequestBody::Raw` under the declared
+content type. Header and cookie parameters (`EndpointParams.header`/`cookie`)
+become `with_*` fields sent in the headers element; cookies always end up in
+one `Cookie` header.
 
 ### 2) Auth Strategies Include Query/Cookie API Keys
 
@@ -62,6 +67,13 @@ still not carried on the request struct.
 
 - `Query`
 - `Cookie`
+
+Generated clients send an `ApiKeyParam` key: `.with_api_key_param(key)`
+(explicit, wins) or the first non-empty `env_auth` variable when the
+effective policy's env fallback is `ApiKeyParam`. Both are **temporary**
+until a shared runtime owns credentials. Auth resolution lives once in the
+generated `shared.rs` (`resolve_request_auth`), not per client, and a
+client's `Debug` prints no credential.
 
 ### 3) Public Enums Are `#[non_exhaustive]`
 

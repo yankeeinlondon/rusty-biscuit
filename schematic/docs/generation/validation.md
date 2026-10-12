@@ -130,9 +130,16 @@ The same fields are available to code as
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
 | `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
 | `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
-| `text-request-body`, `binary-request-body`: the client cannot send this body yet | ✓ | | | error |
-| `api-key-param`: an API key sent as a query parameter or cookie | ✓ | | | error |
-| `header-parameter`, `cookie-parameter`: a declared parameter the output does not send | ✓ | | ✓ | error if `required`, warning otherwise |
+| `text-request-body`, `binary-request-body`: the declared content type is empty or not a valid header value | ✓ | | | error |
+| `api-key-param`: a query API-key parameter name is empty, or a cookie API-key name is not a cookie name | ✓ | | | error |
+| `header-parameter`, `cookie-parameter`: the name is not an HTTP token, or the type is an array of arrays | ✓ | | | error |
+| `header-parameter`, `cookie-parameter`: a declared parameter Postman collections do not carry | | | ✓ | error if `required`, warning otherwise |
+
+The Rust client sends text and binary bodies, header and cookie parameters,
+and API keys in a query parameter or cookie, so its rules for those features
+check only that the declared names and content types can go on the wire.
+How each one is sent is described in
+[request-side inputs](./request-side.md#text-and-binary-bodies).
 
 Rust-only rules are never applied to the exports. An export carries type
 names and endpoint ids as data, so a name that is not valid Rust syntax still
@@ -217,6 +224,9 @@ mixes a query into the path, where it cannot be separated, typed, or masked.
 Nine shipped endpoints still do this (one Gitea, one GitLab, seven OpenAI
 `Beta*` endpoints), so `query-in-path` is a warning reported once per output
 for each of them. Its severity is the constant `QUERY_IN_PATH_SEVERITY`.
+The generated client keeps such a query in the path exactly as written and
+appends declared query parameters after it; see
+[request-side inputs](./request-side.md#path-templates-that-already-contain-a-query).
 
 ## Calling validation from code
 
