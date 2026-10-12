@@ -19,28 +19,49 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 3
 clarified: false
-implemented: false
-human_review: false
+implemented: true
+human_review: true
+human_review_items:
+  - |-
+    **Delete the leftover folder `schematic/gen/schematic/` (requirement R30) — the one requirement still open.**
+
+    This folder holds five old files, left behind years ago when the code generator was run from the wrong directory. Nothing builds or reads them; they only look like real generated output and can mislead people. The spec makes deleting them part of this work, but only after you confirm "pre-authorization item 2". That confirmation was never recorded, and the automated session's own safety layer also refused to run the delete. So the folder is still there and R30 is the only unmet requirement. It has to be settled before this work can be accepted as complete.
+
+    - **Option A: confirm the deletion (recommended).** You, or an agent you authorize, run `git rm -r schematic/gen/schematic` and commit it with the rest. *Pros:* closes R30; removes a misleading duplicate; no build, test, or CI step uses it (checked). *Cons:* none in practice, since the files stay in git history.
+    - **Option B: keep the folder and drop R30.** *Pros:* nothing to do. *Cons:* the misleading copy stays; the spec says only this spec may delete it, so no later spec would clean it up.
+    - **Option C: delete later in a separate change.** *Pros:* keeps this review smaller. *Cons:* needs a new authorization, because the spec grants the deletion only to this spec.
+
+    Related: `checks/cargo-machete.txt` (a saved report outside this area) still mentions the folder. No script regenerates it, so it was left untouched. Re-capturing it after the deletion is your call.
+
+    **Recommendation: Option A.** It is the change the spec intended, it is fully reversible through git, and every check that it is safe has been done.
+  - |-
+    **Old "ignored" end-to-end tests and the `just test-e2e` recipe (pre-authorization item 7) were never cleaned up.**
+
+    Three slow tests in `schematic/gen/tests/l1/e2e_generation.rs` are switched off by default (`#[ignore]`). They compile and lint the generated code, which the new always-on "fresh-output guard" now does more thoroughly, across all 18 APIs instead of only OpenAI. The `just test-e2e` recipe that runs them uses `cargo test`, which this repository's testing rules do not allow (it uses nextest). The plan defaulted to removing them, but that needed your confirmation (item 7), which never came. So they were left as they were.
+
+    - **Option A: remove the three ignored tests and the `test-e2e` recipe (recommended).** *Pros:* no duplicate coverage; no recipe that breaks the test-runner rule. *Cons:* loses the clippy-on-generated-code check, although `just lint-schema` already runs clippy on the committed generated code.
+    - **Option B: keep the tests but switch `test-e2e` to nextest.** *Pros:* keeps every test. *Cons:* keeps tests that duplicate the guard, and they stay off by default.
+    - **Option C: leave everything as is.** *Pros:* no work. *Cons:* the rule violation and the duplication remain.
+
+    **Recommendation: Option A.** The guard replaced what these tests were for, and a small follow-up change can do the removal.
 message_to_agent: |-
-  Phase 6 is done (see implementation-log.md "## Phase 6"). Carry forward:
-  - Pre-authorization items 1-8 still have NO recorded author confirmation. Phases 3, 5, 6 read item 1 (just generate) narrowly as authorized by the phase request; Phase 7's Task 7.1 needs item 2 (delete schematic/gen/schematic/) and item 3 (checks/cargo-machete.txt, conditional). Apply the same narrow reading and log it, or leave the action pending and record the boundary.
-  - Auth resolution no longer lives in each client: it is emitted once into the generated shared.rs by gen/src/codegen/client/shared_auth.rs (shared::resolve_request_auth, apply_api_key_param, header_pair, debug_client); clients call it with (auth_policy, headers, env_auth, api_key_param). Cookie helpers (encode_cookie_value, combine_cookie_headers) are in codegen/error.rs beside append_query_pairs. Every client shrank by 168 lines; unfolded_circle_core_rest.rs is 1800/2000 lines (SPLIT_THRESHOLD_LINES) - watch it if generated output grows.
-  - Rust-side gap diagnostics are gone; validation now checks header/cookie names (HTTP token), nested header/cookie arrays, raw-body content types, and ApiKeyParam names. Postman still reports header/cookie params it cannot carry.
-  - The only live users of the new features are the 7 OpenAI Beta* endpoints' `openai-beta` header parameter. OpenAPI/Postman artifacts did not change in Phase 6; schema/Cargo.lock unchanged since Phase 5.
-  - Fixture guard renamed to fresh_output_compile::slow_fixture_apis_compile_and_send_offline; it now runs 16 wiremock tests in the generated fixture crate (REQUEST_SIDE_TESTS list guarded by request_side_test_list_names_every_child_test). CI selects slow_ by regex; no CI file changed.
-  - Dependents (sniff, biscuit-speaks, model-citizen, homelab, eversolo-integration, unfolded-integration-helper, arcam-amp-integration, sony-receiver-integration) pass `cargo check --all-targets` against the regenerated crate; their `just test {pkg}` runs are Phase 7's.
-  - Known gaps to keep recorded, not fix: a query API key appears in the request URL, ResponseContext.url, and reqwest error text until the redaction follow-up; nested query arrays generate non-compiling code (no live user).
+  All seven phases are implemented (see implementation-log.md "## Phase 7" for the final ledger, defaults table, and consolidated review agenda). For a review/fix agent:
+  - R30 is the only incomplete requirement: `schematic/gen/schematic/` (5 tracked files) still exists. All preconditions are verified (not a workspace member, not a test or CI input), but the delete was refused by the session permission layer and pre-authorization item 2 is unconfirmed. Do not delete it without the author's confirmation (see human_review_items). Plan Task 7.1 stays unchecked for that reason.
+  - Phase 7 changed one generator doc comment (codegen/request_enum.rs: into_parts now documents the 5-tuple and the Header error), regenerated (doc-only diff in 15 schema/src files), fixed doc and skill drift, and added an offline-cache fetch hint to the fresh-output test helper with the L1 test `fresh_output_compile::offline_cache_misses_name_the_fetch_that_fills_the_cache`.
+  - Platform evidence: the guard passes natively on macOS, native Windows, and WSL2. On build-linux it fails because that host's Cargo cache lacks `cc v1.2.52` (fix: `cargo fetch --manifest-path schematic/schema/Cargo.toml` on that host). No hosted CI run contains this work yet.
+  - All 8 dependents pass `just test`. On this macOS host sniff needs `LIBGIT2_NO_PKG_CONFIG=1` (a stale Homebrew libgit2 path; documented in the os skill macos.md).
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on: []
 refresh_required: false
 related: []
 next_spec: 2026-10-12-schematic-runtime-envelope
+completed: true
 ---
 
 # Schematic generation integrity

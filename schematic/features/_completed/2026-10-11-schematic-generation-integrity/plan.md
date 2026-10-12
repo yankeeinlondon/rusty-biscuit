@@ -198,11 +198,152 @@ skills_files_updated_during_phase_6:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_7:
+  - schematic/README.md
+  - schematic/gen/README.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - schematic-gen
   - test-toolkit
   - schematic-schema
   - schematic-define
+source_code:
+  - schematic/gen/src/cargo_gen.rs
+  - schematic/gen/tests/common/mod.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/justfile
+  - .config/nextest.toml
+  - .github/workflows/ci.yml
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/assemble/mod.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/openapi/ollama.json
+  - schematic/gen/src/output/inventory.rs
+  - schematic/gen/src/output/publish.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/level2/terminal_capture.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/output/assemble/shared.rs
+  - schematic/define/src/types.rs
+  - schematic/schema/src/artificial_analysis/mod.rs
+  - schematic/schema/src/bitbucket/mod.rs
+  - schematic/schema/src/elevenlabs/mod.rs
+  - schematic/schema/src/emqx/mod.rs
+  - schematic/schema/src/eversolo/mod.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/gitlab/mod.rs
+  - schematic/schema/src/huggingface/mod.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/openai/mod.rs
+  - schematic/gen/src/codegen/request_enum.rs
+documentation:
+  - schematic/README.md
+  - .github/ci/README.md
+  - schematic/skill/SKILL.md
+  - .claude/skills/rust-devops/ci-cd.md
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/generation/partial-generation.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - schematic/docs/generation/request-side.md
+  - .claude/skills/schematic-define/SKILL.md
+  - schematic/docs/dependencies.md
+  - .claude/skills/os/build-hosts.md
+completed_phase: 7
+implemented: true
 ---
 
 # Schematic generation integrity implementation plan
@@ -421,22 +562,23 @@ Run generated fixture wire tests, two offline guard tests, and the negative cont
 - [ ] **Remove stale output** — Task 7.1; depends on Phase 6 and confirmed deletion authority; owns only the stale tree and authorized reference maintenance.
   - Confirm the five tracked residue files under `schematic/gen/schematic/` are neither workspace members nor test/CI inputs, then remove that tree. Verify absence on disk and deletion entries in the diff; unstaged `git ls-files` is not an absence test (R30).
   - Search maintained references, excluding snapshot specs/plans. Confirm whether `checks/cargo-machete.txt` has a regeneration recipe; regenerate only under the conditional grant, otherwise preserve the line and record a finding.
-- [ ] **Audit behavior docs** — Task 7.2; depends on Phase 6; owns current README/docs/skills audit, with log integration reserved to the integrator.
+  - **Pending (Phase 7 run):** preconditions verified and the reference search done (`checks/cargo-machete.txt` has no recipe; preserved, finding logged), but the deletion was refused by the session's permission layer and pre-authorization item 2 has no recorded confirmation. Left unchecked until the author confirms item 2 and the tree is deleted.
+- [x] **Audit behavior docs** — Task 7.2; depends on Phase 6; owns current README/docs/skills audit, with log integration reserved to the integrator.
   - Finish the drift pass across `schematic/README.md`, `schematic/gen/README.md`, `schematic/docs/generation/`, dependency docs, `schematic/skill/`, and applicable `.claude/skills/schematic-define/` entries. Keep examples aligned with implemented behavior, and docs independent of feature lifecycle paths.
   - Check every behavior-changed symbol's comments; remove/fix drift assuming code is correct. Record choices, departures, unmigrated query warnings, compatibility limitations, and temporary auth/query tuple surfaces for follow-up refresh.
 
 ### Wave 14 — Final regeneration (sequential)
 
-- [ ] **Regenerate final artifacts** — Task 7.3; depends on Tasks 7.1–7.2; sole owner of generated outputs.
+- [x] **Regenerate final artifacts** — Task 7.3; depends on Tasks 7.1–7.2; sole owner of generated outputs.
   - Run `just generate` for full schema/OpenAPI/Postman output. Inspect file lists and content diffs; explain each change by R14, R28, or a live supported feature. Confirm no generated file was hand-edited and no dependent/endpoint literals changed (R15, R20, R31).
   - Run `just test`, `just lint`, `just test-schema`, `just lint-schema`, the nextest `artifact_drift::` tests, and existing `just test-l2` with no focus gain. Use the actual working drift invocation rather than a stale ignored-test recipe.
 
 ### Wave 15 — Evidence and review handoff (parallelizable)
 
-- [ ] **Verify dependent packages** — Task 7.4; depends on Task 7.3; owns local dependent build/test evidence.
+- [x] **Verify dependent packages** — Task 7.4; depends on Task 7.3; owns local dependent build/test evidence.
   - Using actual discovered package names, run root `just test {pkg}` for sniff, biscuit-speaks, model-citizen, and the five homelab crates, including their library/CLI packages as applicable. Record build and test results individually; no dependent-source edits.
   - Stop the affected dependent verification branch and log any break contradicting the no-consumer premise. Continue independent verification, but leave R31 incomplete until resolved within authorization.
-- [ ] **Verify platform evidence** — Task 7.5; depends on Task 7.3; owns OS/CI report evidence.
+- [x] **Verify platform evidence** — Task 7.5; depends on Task 7.3; owns OS/CI report evidence.
   - Load OS/build-host instructions and discover configured hosts through sniff. Reuse qualifying evidence per package/environment/tier; run missing required tests on available macOS/Linux/native-Windows/WSL2 hosts using approved non-interactive procedures. Record compile and behavioral evidence separately.
   - For archive-only WSL2/native-Windows reproduction, explicitly verify the guard exclusion/expected listings and run the offline fixture/full compile guard on a toolchain-bearing host for that environment when available. Linux builder execution proves placement for WSL archives; it must not be reported as a native WSL compile run.
   - Confirm build reports precede archiving, guard tests never execute on hosted archive consumers, and completion records account for the remaining archive tests. Use CI reports if available, otherwise the R35 plan/workflow-diff fallback and clearly state what is unproven. Do not create a hosted run or add labels merely to discover behavior.
@@ -446,7 +588,7 @@ Avoid competing child builds during Tasks 7.4–7.5: run independent package/hos
 
 ### Wave 16 — Acceptance reconciliation (sequential)
 
-- [ ] **Reconcile review evidence** — Task 7.6; depends on Tasks 7.4–7.5.
+- [x] **Reconcile review evidence** — Task 7.6; depends on Tasks 7.4–7.5.
   - Finish `implementation-log.md` with all 22 defaults actually used, all non-prescribed choices/deviations, feature counts/reconciliation, guard/CI timing, dependencies/outside-area files, platform results, dependent results, generated diffs, comment drift, and every specification human-review agenda item.
   - Map R1–R35 to test names/results or recorded measurements using the ledger below. Identify missing grants, failing requirements, unavailable evidence, and any archive/report mismatch explicitly; a green local tree alone is insufficient.
   - Report implementation complete, ready for review only when all implementation tasks are done, distinguishing unresolved verification from passed evidence. Leave lifecycle location unchanged and do not commit.

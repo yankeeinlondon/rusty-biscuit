@@ -197,11 +197,152 @@ skills_files_updated_during_phase_6:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
   - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_7:
+  - schematic/README.md
+  - schematic/gen/README.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/validation.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - schematic-gen
   - test-toolkit
   - schematic-schema
   - schematic-define
+source_code:
+  - schematic/gen/src/cargo_gen.rs
+  - schematic/gen/tests/common/mod.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/justfile
+  - .config/nextest.toml
+  - .github/workflows/ci.yml
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/assemble/mod.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/openapi/ollama.json
+  - schematic/gen/src/output/inventory.rs
+  - schematic/gen/src/output/publish.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/level2/terminal_capture.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/variant.rs
+  - schematic/gen/src/codegen/client/methods.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/request_structs/into_parts.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis/client.rs
+  - schematic/schema/src/artificial_analysis/requests.rs
+  - schematic/schema/src/bitbucket/client.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/client.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/client.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/client.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/client.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/client.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/client.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/client.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama/client.rs
+  - schematic/schema/src/ollama/requests.rs
+  - schematic/schema/src/openai/client.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/shared.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/mod.rs
+  - schematic/gen/src/codegen/client/helpers.rs
+  - schematic/gen/src/codegen/client/shared_auth.rs
+  - schematic/gen/src/codegen/api_struct/constructors.rs
+  - schematic/gen/src/codegen/api_struct/fields.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/codegen/api_struct/variant.rs
+  - schematic/gen/src/output/assemble/shared.rs
+  - schematic/define/src/types.rs
+  - schematic/schema/src/artificial_analysis/mod.rs
+  - schematic/schema/src/bitbucket/mod.rs
+  - schematic/schema/src/elevenlabs/mod.rs
+  - schematic/schema/src/emqx/mod.rs
+  - schematic/schema/src/eversolo/mod.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/github/mod.rs
+  - schematic/schema/src/gitlab/mod.rs
+  - schematic/schema/src/huggingface/mod.rs
+  - schematic/schema/src/ollama/mod.rs
+  - schematic/schema/src/openai/mod.rs
+  - schematic/gen/src/codegen/request_enum.rs
+documentation:
+  - schematic/README.md
+  - .github/ci/README.md
+  - schematic/skill/SKILL.md
+  - .claude/skills/rust-devops/ci-cd.md
+  - schematic/gen/README.md
+  - schematic/docs/generation/validation.md
+  - .claude/skills/schematic-define/schematic/gen.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/generation/partial-generation.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - schematic/docs/generation/request-side.md
+  - .claude/skills/schematic-define/SKILL.md
+  - schematic/docs/dependencies.md
+  - .claude/skills/os/build-hosts.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-11-schematic-generation-integrity (7 phases)
@@ -649,7 +790,7 @@ No dependency was added. `schematic/docs/dependencies.md` is unchanged.
 | Feature id | Rust | OpenAPI | Postman | Severity |
 | --- | :-: | :-: | :-: | --- |
 | `duplicate-endpoint-id` (raw id twice in one API) | ✓ | ✓ | ✓ | error |
-| `duplicate-method-path` (same API, same `endpoint_uniqueness_key`) | ✓ | ✓ | ✓ | `DUPLICATE_METHOD_PATH_SEVERITY` = warning (deviation, below) |
+| `duplicate-method-path` (same API, same `endpoint_uniqueness_key`) | ✓ | ✓ | ✓ | `DUPLICATE_METHOD_PATH_SEVERITY` = warning (deviation, below). **Superseded:** error since review-1 fix cycle 1 (ruling 2026-10-12; constant removed) |
 | `query-in-path` | ✓ | ✓ | ✓ | `QUERY_IN_PATH_SEVERITY` = warning |
 | `invalid-output-filename` (export stem not one safe component; Rust module equal to `lib`/`shared`/`prelude`/`ws_shared`/a WebSocket module) | ✓ | ✓ | ✓ | error |
 | `invalid-identifier` (API name, endpoint id, path/query/form names) | ✓ | | | error |
@@ -711,6 +852,9 @@ No dependency was added. `schematic/docs/dependencies.md` is unchanged.
 
 ### Deviation from R13 — duplicate method+path is a warning (review item)
 
+> **Withdrawn** by the author's 2026-10-12 ruling on review-1 item 1; R13 is
+> now enforced as errors. See "Review 1, ruling 1" at the end of this log.
+
 The live definitions contain two same-API duplicate routes:
 
 | API | Endpoints | Route | How they differ |
@@ -764,7 +908,7 @@ removed `missing_schemas_error` format by hand; it now renders the real
 | R10 independence both ways, all outputs attempted, named, nonzero exit; warnings succeed | `::malformed_rust_type_blocks_only_the_rust_client` (malformed Rust type → Rust fails; OpenAPI carries `Vec<Thing` as data; Postman written), `::incomplete_registry_blocks_only_openapi`, `::cli_reports_each_output_and_exits_nonzero_when_one_fails` (real binary, exit 1, Postman after the OpenAPI failure), `::cli_warnings_alone_exit_successfully` (real binary, `gitea`, exit 0, one warning per output) | pass |
 | R11 type syntax, module path, filenames, identifier collisions, `/api/api` | `validation::tests::accepted_definitions_produce_no_diagnostics_for_any_output` (generic/qualified types, `/api/api`, sanitizing names), `::rust_only_rejections_name_feature_and_endpoint` (29 reject rows; each asserts the feature never reaches the exports), `::export_file_names_must_be_one_safe_component`, `::body_collision_message_suggests_a_rename` | pass |
 | R12 duplicate ids and emitted names | `::duplicate_endpoint_id_in_one_api_fails_every_output`, `::group_members_may_share_raw_ids_when_suffixes_differ`, `::group_members_whose_emitted_names_collide_name_both_apis`, `::live_shared_groups_are_accepted` | pass |
-| R13 `(method, normalized_path)` key | `::path_parameter_names_do_not_distinguish_routes` (`/items/{id}` = `/items/{name}`, GET ≠ DELETE, `{+repo}`; detection in every output) | pass; severity is warning (deviation above) |
+| R13 `(method, normalized_path)` key | `::path_parameter_names_do_not_distinguish_routes` (`/items/{id}` = `/items/{name}`, GET ≠ DELETE, `{+repo}`; detection in every output) | pass; severity is warning (deviation above). **Superseded:** error since review-1 fix cycle 1; `same_api_duplicate_route_blocks_every_output` |
 | R33 nine warnings, one constant | `output_validation::live_definitions_warn_once_per_output_for_each_embedded_query` (9 named endpoints per output, 27 lines, 9 unique, zero live errors), `validation::tests::query_in_path_is_one_warning_per_output`, `::interim_route_checks_are_warnings` | pass |
 | Gap reporting (R10 backstop) | `::api_key_param_is_found_through_the_effective_policy` (explicit method found; policy override hides legacy auth), `::unsent_header_and_cookie_parameters_are_reported_by_requiredness` | pass |
 
@@ -1858,3 +2002,460 @@ schematic-define` with `-D rustdoc::broken_intra_doc_links` fails on
 9. The fixture guard test was renamed (`slow_fixture_apis_compile_offline` →
    `slow_fixture_apis_compile_and_send_offline`); CI selection is by `slow_`
    regex, so no CI file changed.
+
+## Phase 7
+
+### Authorization state
+
+- Pre-authorization items 1–8 still have no recorded author confirmation.
+- **Item 2 (delete `schematic/gen/schematic/`) — not exercised; R30 left
+  incomplete.** The precondition checks passed (below), but the deletion
+  command was **refused by the session's permission layer** ("irreversible
+  local destruction"). With no recorded author confirmation of item 2 either,
+  the plan's rule applies: the action stays pending and the boundary is
+  recorded. No workaround (moving the tree, `git rm`) was attempted. The five
+  files are unchanged on disk and in the index.
+- Item 3 (`checks/cargo-machete.txt`) — condition not met: the file is a
+  captured `cargo machete` console transcript (last touched by an unrelated
+  sentrux-baseline commit, `0fdbf0dbb`) and no recipe, script, or workflow
+  regenerates it (searched root `justfile`, `just/`, `scripts/`, `.github/`).
+  Default 18 therefore keeps the file; the stale line is a finding (below).
+- Item 1 (`just generate`) read narrowly, as in Phases 3, 5, and 6, as
+  authorized by the request to implement this phase, for the generator-made
+  refresh only. The recipe's exact `cargo run` command was used (without its
+  desktop notification). Nothing generated was hand-edited.
+- Item 7 (ignored e2e tests, `test-e2e`) remains unexercised since Phase 1:
+  `e2e_generation.rs` still has three `#[ignore]`d compile/clippy tests and
+  `just test-e2e` still uses `cargo test`. Not a Phase 7 task; carried to the
+  review agenda.
+- Items 4, 6, 8: not needed in Phase 7.
+
+### Task 7.1 — stale tree (R30): checks done, deletion pending
+
+> **Superseded (2026-10-12):** the author authorized deletion (review 1, item 2) and removed the five files with `git rm -r` during the decision session; R30 is complete.
+
+- `git ls-files schematic/gen/schematic` → exactly five files:
+  `schema/{Cargo.toml, src/lib.rs, src/openai.rs, src/prelude.rs, src/shared.rs}`.
+- Not a workspace member: `cargo metadata --no-deps` lists no manifest under
+  `gen/schematic/`; its `path = "../define"` dependencies do not even resolve
+  from that location, so it cannot build.
+- Not a test or CI input: no reference in `Cargo.toml`, `.github/`,
+  `.config/`, `scripts/`, `just/`, any justfile, or `schematic/gen/` sources or
+  tests.
+- Maintained references (snapshot specs/plans/reviews excluded): only
+  `checks/cargo-machete.txt:10`
+  (`schematic-schema -- ./schematic/gen/schematic/schema/Cargo.toml: tokio`).
+  Remaining mentions are in snapshots (`schematic/reviews/2026-07-31-macro-review`,
+  `features/2026-09-20-upgrade-reqwest`, `fixes/2026-10-06-planner-metadata-no-deps`)
+  and are left as written.
+- **Finding (review):** `checks/cargo-machete.txt` lists the stale tree's
+  manifest as an unused-`tokio` report. The file has no regeneration recipe;
+  it is preserved unchanged. Once the tree is deleted, that entry describes a
+  file that no longer exists; re-capturing the transcript is an author action.
+- To finish R30 once item 2 is confirmed: `git rm -r schematic/gen/schematic`
+  (or an ordinary delete), then verify absence on disk and five deletion
+  entries in the diff. Nothing else depends on it.
+
+### Task 7.2 — behavior-docs audit (drift found and fixed; code assumed correct)
+
+An independent read-only audit compared every current doc with the code;
+each claim below was re-verified before editing. The three
+`docs/generation/` pages were accurate except one item. No `docs/` page names
+or links a feature/fix, and none mentions `gen/schematic/`.
+
+- `gen/README.md`: client struct sample (old `headers: Vec<(String, String)>`,
+  no `auth_policy`/`api_key_param`, no `Debug` note); "Ignored slow tests
+  compile generated output" (the `slow_*` guard is not ignored and runs in
+  `just test`); "no mocked server" and Future Work items "runtime behavior"
+  and "multi-API compile" (both exist now); `cargo check -p schematic-schema`
+  in two places (the crate is excluded from the workspace, so the command
+  fails) → `just test-fresh-output` / `cargo check --manifest-path …`;
+  manual-verification paths `elevenlabs.rs` → `elevenlabs/client.rs` and the
+  missing `generate` subcommand; dependency block (reqwest 0.12
+  `rustls-tls`) → the `cargo_gen.rs` template; output tree (split modules
+  are directories, WebSocket modules missing).
+- `.claude/skills/schematic-define/schematic/gen.md`: same client struct
+  sample; `variant(&self, base_url, env_auth, strategy)` is really
+  `variant_with`, and `variant(&self)` returns a `VariantBuilder`;
+  `SchematicError` list missing five variants; generator-modules table
+  (directories, plus `client/shared_auth.rs` and `request_structs/named_params.rs`);
+  output tree.
+- `.claude/skills/schematic-define/SKILL.md`: "`Endpoint.params` is still
+  dropped by the OpenAPI exporter" — false (`export/paths.rs:99` calls
+  `map_parameters`, which emits query, header, and cookie parameters);
+  bullet removed.
+- `schematic/skill/SKILL.md`: `just gen` → `just generate` (no `gen` recipe).
+- `schematic/docs/dependencies.md` (stale before this spec): generated
+  crate listed reqwest 0.12 and omitted `schematic-define`,
+  `schematic-definitions`, `bytes`, `urlencoding`, `futures-util`,
+  `tokio-stream`, `tokio-tungstenite`, and the `wiremock`/`serial_test`
+  dev-dependencies; `schematic-gen` omitted `biscuit-file`, `colored`,
+  `schematic-definitions`, `serde`, `serde_json`, `openapiv3`, `indexmap`,
+  and the `jsonschema` dev-dependency, and listed a `toml` dev-dependency the
+  manifest does not have. Rewritten from the manifests; no crate was added
+  by this spec.
+- `schematic/docs/generation/validation.md`: "WebSocket validation is
+  expected to report through…" described unbuilt behavior without a marker;
+  now **Planned:** (the validator has no WebSocket path).
+- **Code comment drift (generator):** `codegen/request_enum.rs` emitted
+  `/// Converts the request into (method, path, body, headers) parts.` on
+  every request enum's `into_parts`, a 4-tuple, although `RequestParts` has
+  had five elements since Phase 5; its `## Errors` also omitted the
+  `SchematicError::Header` the inner cookie-merging `into_parts` can return.
+  Fixed in the generator, then regenerated (below).
+- Left as is (minor, recorded): `gen/README.md`'s sample shows
+  `SchematicError` inside a per-API file (it lives in `shared.rs`), and its
+  "DO NOT verify combined shared-module APIs at runtime" line in
+  `schematic/README.md` still holds (the group is compile-checked only).
+
+### Task 7.3 — final regeneration (R20, R31)
+
+- First `just generate` run (before the comment fix): **zero diff**; every
+  Rust, OpenAPI, and Postman file byte-identical to the committed Phase 6
+  output.
+- After the `request_enum.rs` comment fix: 15 Rust files changed
+  (`schema/src/{anthropic,lmstudio,samsung_smart_tv,unfolded_circle_core_rest}.rs`
+  and `requests.rs` of the 11 split modules), 90+/54−, exactly 18 copies of one
+  doc-comment hunk (one per request enum; grouped modules hold two). No code
+  line changed; OpenAPI and Postman unchanged; `schema/Cargo.toml` and
+  `schema/Cargo.lock` unchanged. Explained by comment drift, which is neither
+  R14 nor R28 but changes no behavior (recorded for review).
+  `unfolded_circle_core_rest.rs` is 1802 lines (split threshold 2000).
+- `query-in-path`: 9 endpoints for each of `rust`, `openapi`, `postman`
+  (`--dry-run`, unique `api endpoint` pairs per output).
+- Gates after regeneration (macOS): `just test` exit 0 (L1 1774 passed, 9
+  skipped; guard 4 passed), `just lint` 0, `just lint-schema` 0,
+  `just test-schema` 20 passed, `just check-drift` 7 passed (6
+  `artifact_drift::` + `slow_real_apis_compile_offline`), `just test-l2` 3
+  passed (tmux, no focus change), `cargo clippy -p schematic-gen
+  --all-targets --features terminal-tests -- -D warnings` clean,
+  `just check-tier-coverage schematic` 0 stranded.
+
+### Task 7.4 — dependent packages (R31)
+
+Discovered through `cargo metadata`: exactly eight workspace packages
+depend directly on `schematic-schema`, matching the spec's list (the five
+homelab crates are `homelab`, `eversolo-integration`,
+`unfolded-integration-helper`, `arcam-amp-integration`,
+`sony-receiver-integration`). Root `just test {pkg}`, one at a time, after
+the final regeneration. No dependent file changed.
+
+| Package (`just test` selection) | Result |
+| --- | --- |
+| sniff (+ sniff-cli, `sniff/remote`) | **pass**, 3355 passed, 33 skipped — after a host link failure, see below |
+| biscuit-speaks | pass, 492 passed, 19 skipped |
+| model-citizen | pass, 170 passed |
+| homelab | pass, 224 passed, 8 skipped |
+| eversolo-integration | pass, 28 passed, 3 skipped |
+| unfolded-integration-helper | pass, 28 passed |
+| arcam-amp-integration | pass, 21 passed, 2 skipped |
+| sony-receiver-integration | pass, 27 passed, 3 skipped |
+
+sniff's first run failed to **link** (`ld: library 'git2' not found`, search
+path `/opt/homebrew/Cellar/libgit2/1.9.7/lib`; installed is `1.9.7_2`): the
+Homebrew-upgrade trap the `os` skill already records (`macos.md`). Rerun with
+the documented `LIBGIT2_NO_PKG_CONFIG=1` (vendored libgit2) → pass. Host
+environment, unrelated to this spec; nothing in sniff changed.
+
+### Task 7.5 — platform evidence (R16–R18, R35)
+
+Hosts declared: `BUILD_LINUX=build-linux`, `BUILD_WIN=build-win-native`,
+`BUILD_WSL=build-win`; `BUILD_MACOS` unset. Both runs used
+`scripts/cross-check.sh` on the working tree (`+656 changed files` over
+`origin/feat/modern-config` 3ec131376); no receipt was published (the tested
+tree is uncommitted), so none of this is CI-reusable evidence.
+
+| Environment | L1 (archive/CI mode, `slow_` excluded) | Fresh-output guard, native child Cargo |
+| --- | --- | --- |
+| macOS (this host) | `just test`: 1774 passed | 4/4 pass (warm, ~16–23 s) |
+| Linux `build-linux` | 624 passed, 12 skipped (archive from an ubuntu-latest-style build) | **4/4 fail — host Cargo cache gap**: `failed to download cc v1.2.52 … --offline was specified`. The guard failed loudly, as R16/default 8 require; **not proven natively on Linux** |
+| native Windows `build-win-native` | 622 passed, 12 skipped (2 unix-only tests absent) | **4/4 pass**, 169 s (cold child target) |
+| WSL2 `build-win` | 624 passed, 12 skipped (archive mode, builder target hidden — CI's WSL2 shape) | **4/4 pass** natively in the guest, 139 s (cold) |
+
+- Guard command: `./scripts/cross-check.sh schematic-gen --os all --features
+  terminal-tests 'fresh_output_compile::slow_'` (a build flag switches
+  `cross-check` to plain nextest so `slow_` tests can be selected).
+- Linux: filling the cache needs `cargo fetch --manifest-path
+  schematic/schema/Cargo.toml` on that host (what CI's build job does before
+  the guard). That needs a remote shell, which this session is not
+  authorized to open outside `cross-check`; left unproven. This is the first
+  host where offline compile was unavailable (spec risk "Offline compile
+  unavailable").
+- **Test-helper change prompted by this evidence (small, beyond the plan's
+  task list):** the failure printed the command and Cargo's stderr but not
+  what to do. `tests/common/fresh_output.rs` now has `OFFLINE_CACHE_HINT` /
+  `offline_cache_hint(stderr)`; `CargoRun::assert_success` and the negative
+  control's assertion prepend `hint: … run cargo fetch --manifest-path
+  schematic/schema/Cargo.toml …` when Cargo reports `but --offline was
+  specified`. New L1 test
+  `fresh_output_compile::offline_cache_misses_name_the_fetch_that_fills_the_cache`
+  uses build-linux's exact stderr (positive), a compiler error, and empty
+  stderr (negative). No production code changed. `schematic/README.md`'s
+  existing fetch note mentions the hint; the `os` skill's `build-hosts.md`
+  records the cross-check guard command and the build-linux cache gap.
+- R35 (CI): no hosted run contains this spec's work (latest `ci.yml` run on
+  the branch is 2026-10-09, before Phase 1; nothing pushed, no run or label
+  created to find out). Fallback evidence, re-read this phase: the build
+  job's "Run the schematic fresh-output guard" step (`ci.yml` ~684) runs
+  `cargo fetch --manifest-path schematic/schema/Cargo.toml` then
+  `just -f schematic/justfile test-fresh-output` **before** "Produce the
+  archives" (~709) whenever the owner builds schematic-gen, fails the job on
+  failure, and uploads its JUnit report; archive consumers exclude the tests
+  through the shared L1 filter's `slow_` exclusion in both executed and
+  expected listings (`.config/nextest.toml`, `scripts/ci/consolidation.py`
+  `MARKER_TIERS`), and the WSL archive run above (624 tests, no `slow_`)
+  shows the same. `ci_workflow_contracts::the_build_owner_runs_the_schematic_fresh_output_guard_before_archiving`
+  (Phase 1) guards the order. **Unproven until the first hosted run:** the
+  guard's CI duration and the completion records of a real run.
+
+### Requirement → test mapping (Phase 7)
+
+| Requirement | Test / evidence | Boundary / rung | Result |
+| --- | --- | --- | --- |
+| R30 stale tree deleted | precondition checks above | filesystem | ~~**incomplete** — deletion refused; item 2 unconfirmed~~ **complete** (2026-10-12, author ruling on review 1 item 2) |
+| R31 generator-only regeneration | `just generate` diff (doc-only, 18 hunks), `slow_real_apis_compile_offline` (fresh = committed), `artifact_drift::*` | process + filesystem (F3) | pass |
+| R31 dependents | root `just test` of all 8 dependents (table above) | crate boundary (F3) | pass |
+| R16 fails loudly offline | build-linux run (4 loud failures, no skip); `offline_cache_misses_name_the_fetch_that_fills_the_cache` | process (F3) / F1 | pass |
+| R16–R18 on Windows/WSL2 | native guard runs on build-win-native and build-win | process, per OS (F3) | pass |
+| R35 placement | workflow re-read + Phase 1 contract test; WSL archive listing | CI config (F1) | pass (fallback); hosted run unproven |
+| comment drift fix | `slow_real_apis_compile_offline` (fresh generation = committed, which now carries the corrected doc) | F3 | pass |
+
+Input Robustness Matrix: not applicable (no reader of a file format or
+configuration was added).
+
+### Timing (this phase)
+
+- `just test` (macOS, warm): L1 ~2.5 s of test time; fresh-output guard 16–23
+  s for its four tests (fixture test ~5 s, real-API ~2–7 s, wire ~7–9 s,
+  negative control ~1.6 s).
+- Cold child target, other hosts: native Windows 169 s, WSL2 139 s for the
+  four tests (fixture test 110–140 s of that).
+- CI build-job duration of the guard: not measured (no hosted run).
+
+### Defaults 1–22 as finally used
+
+| Default | Final value |
+| --- | --- |
+| 1 diagnostics format | As stated; `api` is a list so group diagnostics name every API (`api=A,B`); `endpoint=<none>` for API/group scope. |
+| 2 machine readability | As stated: `Serialize`, no new flag, stderr, nonzero only for errors/write failures. |
+| 3 inventory | As stated, refined: a directory module is evidenced by an owned `mod.rs`; whole-tree ownership is needed only to delete it. |
+| 4 shared-runtime rule | As stated; runtime-bearing files are `shared.rs` and `ws_shared.rs`. |
+| 5 write order | Writes in the stated order, `lib.rs` last write; **deviation:** deletions of obsolete paths follow `lib.rs`. |
+| 6 duplicate id scope | As stated (raw ids per API; emitted names across a group). |
+| 7 operationId rename | As stated; observed renames: Ollama `Embeddings`, `ListModels`. |
+| 8 compile mechanism | As stated except `cargo update --workspace --offline` instead of `cargo generate-lockfile --offline` (keeps the copied pins). Offline failure now also prints a fetch hint (Phase 7). |
+| 9 ignored e2e tests | **Not applied:** the three `#[ignore]`d tests and `cargo test`-based `just test-e2e` remain (item 7 unconfirmed). |
+| 10 runtime-test location | As stated: fixture crate built by the helper, wiremock/raw TCP, nextest. |
+| 11 text/binary types | As stated (`String`, `Vec<u8>` → `RequestBody::Raw`). |
+| 12 `RequestParts` | As stated: 5-tuple, query pairs fifth. |
+| 13 cookie serialization | As stated; `%` kept literally; array elements encoded then joined by `,`. |
+| 14 header/cookie typing | As stated; `required`/style/explode/enum not honored. |
+| 15 `ApiKeyParam` env | As stated (temporary): first non-empty `env_auth` var, only under an `ApiKeyParam` env fallback; `EnvMapping` unchanged. |
+| 16 explicit key | `with_api_key_param(mut self, key) -> Self`, `SensitiveString` storage, generated only when the effective policy accepts it (temporary). |
+| 17 guard scope | Two principal tests + negative control + the distinct wire-baseline test (four `slow_`); fixture test renamed `slow_fixture_apis_compile_and_send_offline` in Phase 6. |
+| 18 `cargo-machete.txt` | No regeneration recipe → preserved; stale line recorded. |
+| 19 docs | Three pages: `docs/generation/{validation,partial-generation,request-side}.md` (split instead of one combined page). |
+| 20 feature ids | The ten listed plus six added (`invalid-identifier`, `invalid-request-suffix`, `generated-name-collision`, `invalid-module-path`, `invalid-output-filename`, `incomplete-schema-registry`). `duplicate-method-path` is a **warning** (R13 deviation). |
+| 21 test files | `fresh_output_compile.rs`, `partial_generation.rs` as named; request-side tests went into `fresh_output_compile.rs` (child crate) and existing modules rather than a separate `request_side_features.rs`. |
+| 22 partial exports | As stated; both module resolvers give the same 15 names for the live APIs. |
+
+### Acceptance ledger R1–R35 (final)
+
+| Req | Evidence (phase) | Status |
+| --- | --- | --- |
+| R1–R2 | `partial_generation::partial_run_regenerates_the_whole_group_and_keeps_every_other_module` and the real-tree partial compile (4) | pass |
+| R3–R7 | `partial_generation::{owned_stale_files_…, refuses_*, failure_during_publication_lists_completed_and_pending_mutations, exports_rewrite_only_the_selected_groups, each_root_establishes_its_own_safety}` (4) | pass |
+| R8–R10 | `output_validation::{malformed_rust_type_blocks_only_the_rust_client, incomplete_registry_blocks_only_openapi, …}`, `diagnostics::tests::*` (2) | pass |
+| R11–R12 | `validation::tests::*` accept/reject tables, group name collisions (2) | pass |
+| R13 | `path_parameter_names_do_not_distinguish_routes`; OpenAPI merge/collision tests (2, 3) | pass with **deviation**: same-API duplicate route is a warning. **Superseded (review-1 fix cycle 1):** met as written; error in every output, see "Review 1, ruling 1" |
+| R14–R15 | `export::openapi::tests::*` allocation/link/scan tests; `artifact_drift::committed_openapi_documents_have_unique_operation_ids` (3) | pass |
+| R16–R18 | `slow_fixture_apis_compile_and_send_offline`, `slow_real_apis_compile_offline`, `slow_negative_control_reports_compiler_error`, `CheckoutWitness` (1, 6); native macOS/Windows/WSL2 runs (7) | pass on macOS, Windows, WSL2; **Linux native unproven** (host cache gap) |
+| R19 | `fixture_coverage_names_every_fixture_api`, `request_side_test_list_names_every_child_test`, fixture guard (6) | pass |
+| R20 | `slow_real_apis_compile_offline` (fresh = committed), `artifact_drift::*` (1, 7) | pass |
+| R21–R27 | 16 child wiremock tests in the fixture crate + unit/validation tests (6) | pass |
+| R28–R29 | `slow_query_wire_matches_pre_split_baseline` (pre-change golden), `query_params_codegen::*` (1, 5) | pass |
+| R30 | stale tree deletion | ~~**incomplete** (pending item 2)~~ **complete** (2026-10-12) |
+| R31 | regeneration diffs explained (3, 5, 6, 7); 8 dependents tested (7) | pass |
+| R32 | measured counts (1) | recorded; "six"/"about 29" do not reconcile |
+| R33–R34 | `live_definitions_warn_once_per_output_for_each_embedded_query` (9 per output), compatibility refusal/recovery tests (2, 4) | pass |
+| R35 | workflow step + contract test (1), placement re-read (7) | pass by fallback; hosted run not yet available |
+
+### Files touched outside `schematic/` (Phase 7)
+
+- `.claude/skills/os/build-hosts.md` (cross-check command for `slow_`
+  guard tests; build-linux cache gap).
+- `.claude/skills/schematic-define/SKILL.md`,
+  `.claude/skills/schematic-define/schematic/gen.md` (drift).
+- No dependency added; no CI file changed; no dependent crate changed.
+
+### Human review agenda — consolidated for review 1
+
+Phase-specific items are in each phase's section; this is the full agenda.
+
+1. **Authorization:** items 1–8 were never confirmed. Item 1 was read as
+   granted by each phase request (Phases 3, 5, 6, 7); item 2 (delete
+   `schematic/gen/schematic/`) was **refused by the permission layer** and is
+   pending, so R30 is incomplete (superseded 2026-10-12: the author deleted
+   it; R30 is complete); item 3's condition was not met; item 7 was
+   never exercised (ignored e2e tests and `cargo test`-based `test-e2e`
+   remain); items 4 and 8 were unnecessary; item 5 was used (temp crates,
+   child target dir); item 6 was used in Phase 5.
+2. `checks/cargo-machete.txt` names the stale tree's manifest; no recipe
+   regenerates it.
+3. R13 deviation: same-API duplicate method+path is a warning (GitHub
+   `GetGitTree`/`GetGitTreeRecursive`, Bitbucket `ListDirectoryContents`/`GetFileContentRaw`).
+4. Default 5 deviation (deletions after `lib.rs`); default 3 refinement;
+   default 8 `cargo update` departure; default 19 split into three pages;
+   six added feature ids (default 20); default 21 file placement.
+5. Inventory reader and byte-for-byte shared-runtime rule: adequate for now;
+   both are the interim the runtime/envelope follow-up replaces with a
+   persisted compatibility marker.
+6. Temporary surfaces for the runtime/envelope follow-up:
+   `with_api_key_param`, the `env_auth` scan, `shared::resolve_request_auth`,
+   and the 5-tuple `RequestParts` (query pairs are a separate element, so
+   redaction can find the `ApiKeyParam` pair).
+7. Auth resolution moved into generated `shared.rs` (every client −168
+   lines); new client `Debug` impls; `merge_headers` now keeps API and
+   endpoint `Cookie` headers and merges them cookie by cookie.
+8. Cookie encoding keeps `%`; array cookies join with `,`; non-ASCII header
+   values pass as `obs-text`.
+9. A query API key is visible in URLs and `reqwest` error text until the
+   redaction follow-up; nested query arrays generate non-compiling code (no
+   live user).
+10. Offline compile per host: macOS, native Windows, WSL2 pass; **build-linux
+    failed for a cache gap** (needs `cargo fetch` there); CI's guard duration
+    and completion records await the first hosted run.
+11. R32: 549 endpoints (not ~519); multipart 16 endpoints (not "six" or
+    "about 29"); 7 live header parameters (OpenAI `openai-beta`).
+12. `query-in-path` stays a warning with nine endpoints per output; the
+    definition-API follow-up owns raising it and migrating them.
+13. Generated diffs: Phase 3 (Ollama ids), Phase 5 (query split, lockfile
+    re-resolution), Phase 6 (auth move, `openai-beta`), Phase 7 (one
+    doc-comment fix in 18 request enums). Nothing unexplained.
+14. Postman does not carry header/cookie parameters (reported as warnings);
+    the split threshold sits close to small two-API groups.
+15. Phase 7 test-helper addition (offline fetch hint) went slightly beyond
+    the task list; small and test-only.
+
+### Status
+
+Implementation complete, ready for review — **with R30 incomplete** (stale
+tree deletion pending author confirmation of item 2) and two evidence gaps
+recorded (native Linux guard run, first hosted CI run). Lifecycle location
+unchanged; nothing committed or staged.
+
+> **Superseded (2026-10-12):** R30 is complete (author deletion, review 1 item 2), and R13 is enforced as errors per the review 1 item 1 ruling (see "Review 1, ruling 1").
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-10-12T08:27:04-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-modern-config/schematic/features/2026-10-11-schematic-generation-integrity/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review found in '/Volumes/coding/wt/rusty-biscuit/feat-modern-config/schematic/features/2026-10-11-schematic-generation-integrity/review-1.md' indicated that the specification is **production ready**!
+- the specification file used to define the functional/non-functional target of all this work can be found at '/Volumes/coding/wt/rusty-biscuit/feat-modern-config/schematic/features/2026-10-11-schematic-generation-integrity/spec.md'
+- caveat on the readiness signal: the review's frontmatter sets `ready: true` with `findings: []`, but its body states that it stopped at the human-decision check and that **production readiness has not been assessed** (no implementation comparison, no tests run)
+- while the review found this feature to be production ready, it did have findings worth looking at for follow on work:
+        - the review recorded no code findings or observations; the follow-on work comes from the two human rulings dated 2026-10-12:
+        - Item 1 — R13 enforced as written (duplicate `method + path` routes become `Severity::Error`): **not yet implemented**
+                - `DUPLICATE_METHOD_PATH_SEVERITY` (still `Severity::Warning` in `schematic/gen/src/validation.rs`) and its warning behavior are to be removed
+                - GitHub `GetGitTree` and `GetGitTreeRecursive` merge into one `GetGitTree` with an optional `recursive` query parameter
+                - Bitbucket `ListDirectoryContents` and `GetFileContentRaw` merge into one source endpoint returning `Binary`
+                - regenerate with `just generate`, update the docs and skills that describe the warning (e.g. `schematic/docs/generation/validation.md`), and log the departure from the spec's D36 forward hook
+        - Item 2 — deletion of the stale `schematic/gen/schematic/` tree (R30): **done** during the decision session (`git rm -r`, five files, uncommitted); R30 is now complete
+        - deferred items listed under "Deferred work and verification limits": three ignored end-to-end tests and the `cargo test`-based `test-e2e` recipe, Postman header/cookie parameters, the native Linux guard run (offline cache gap), and the first hosted CI run
+- refer to the review file -- /Volumes/coding/wt/rusty-biscuit/feat-modern-config/schematic/features/2026-10-11-schematic-generation-integrity/review-1.md -- for more details
+
+### Review 1, ruling 1 — R13 enforced as errors (2026-10-12)
+
+The author's 2026-10-12 ruling on review-1 item 1 withdraws the D36 forward
+hook and the `DUPLICATE_METHOD_PATH_SEVERITY` warning recorded in Phase 2
+("Deviation from R13"). An endpoint is `method + path` permanently; no
+selector ever joins `endpoint_uniqueness_key`. The spec is left as written
+(snapshot); this section records the departure from its selector hook.
+
+- **Validation (`gen/src/validation.rs`):** `DUPLICATE_METHOD_PATH_SEVERITY`
+  is removed; `check_routes` reports a same-API duplicate route as
+  `Severity::Error` in all three outputs, with no exception list. The OpenAPI
+  "document keeps only one operation" consequence clause is gone (nothing is
+  written now); the message tells the author to merge the two endpoints.
+  `QUERY_IN_PATH_SEVERITY` remains the only route-check severity constant
+  (R33 specifies a warning). The test `interim_route_checks_are_warnings` is
+  now `query_in_path_severity_is_a_warning`.
+- **GitHub:** `GetGitTree` and `GetGitTreeRecursive` merged into one
+  `GetGitTree` with an optional `recursive` boolean query parameter,
+  response `GitTreeResponse`. 17 → 16 endpoints.
+- **Bitbucket:** `ListDirectoryContents` (JSON `PaginatedResponse<SourceEntry>`)
+  and `GetFileContentRaw` (`Text`, `Accept: text/plain`) merged into
+  `GetSource`, returning `Binary`, keeping Bitbucket pagination (`page`,
+  `pagelen`) and no `Accept` override (it would turn a directory listing
+  into an error or text). Id choice: Bitbucket names this resource `src`
+  ("Get file or directory contents"); `GetSource` names the resource rather
+  than one of the two shapes, so it stays correct when the response-model
+  follow-up turns `Binary` into a `Directory | File` enum. `SourceEntry` and
+  its registry entry are kept for that follow-up and for callers decoding a
+  listing. 16 → 15 endpoints.
+- **Gitea `GetGitTreeRecursive`** (`?recursive=true` in its path) is
+  untouched: its raw path differs from `GetGitTree`'s, so generation reports
+  no duplicate route for it (only its existing `query-in-path` warning).
+- **Regeneration (`just generate`):** exit 0, `[OK]` for all three outputs,
+  zero `duplicate-method-path` lines; warnings are unchanged (27
+  `query-in-path`, 7 Postman `header-parameter`). Generated diff, beyond the
+  files already modified by earlier phases: `schema/src/github/{requests,mod}.rs`
+  (`GetGitTreeRecursiveRequest` removed, `GetGitTreeRequest` gains
+  `recursive: Option<bool>`), `schema/src/bitbucket/{requests,client,mod}.rs`
+  (`ListDirectoryContentsRequest` and `GetFileContentRawRequest` replaced by
+  `GetSourceRequest`; the `get_file_content_raw` text helper replaced by a
+  `get_source` bytes helper; `Bitbucket::request_text` is no longer generated
+  because no Bitbucket endpoint returns `Text`),
+  `openapi/github.json` (the route's one operation is now `GetGitTree`, its
+  `recursive` parameter optional), `openapi/bitbucket.json` (`GetSource`,
+  `application/octet-stream`, pagination parameters), and the two matching
+  Postman collections (one request each instead of two). The two operations
+  previously missing from the OpenAPI documents (`GetGitTree`,
+  `ListDirectoryContents`) are now described by the merged operation.
+- **Premise contradiction (dependent crate):** the ruling states nothing
+  outside `schematic/` uses the four endpoints. A repository search found
+  that `sniff` does, behind its `remote` feature (enabled by `sniff-cli`,
+  `worktree`, `darkmatter`, and `dmls`):
+  `sniff/lib/src/remote/github.rs` (`GetGitTreeRecursiveRequest`, lines 114
+  and 148) and `sniff/lib/src/remote/bitbucket.rs`
+  (`ListDirectoryContentsRequest` line 272, `GetFileContentRawRequest` and
+  `get_file_content_raw` lines 438–441); `cargo check -p sniff --features
+  remote` fails with 5 errors. Per R31 ("if a dependent breaks, stop and
+  record it ... rather than editing the dependent") and because the ruling
+  authorizes only the two definition edits, `sniff` was **not** edited. This
+  needs an author decision. `sniff/docs/repos/repo-tech-design.md` names the
+  old endpoints too.
+- **Tests:** `validation::tests::path_parameter_names_do_not_distinguish_routes`
+  asserts the error in every output; new
+  `validation::tests::same_route_in_different_apis_is_not_a_duplicate`;
+  new `output_validation::same_api_duplicate_route_blocks_every_output`
+  (`/things/{id}` and `/things/{name}` through `generate_batch`: all three
+  outputs fail and no output root is created); new
+  `output_validation::live_definitions_declare_no_duplicate_routes` (every
+  API `resolve_all_apis` returns, all three validators). Definition tests:
+  GitHub `git_tree_endpoint_has_optional_recursive_query_param`, Bitbucket
+  `source_endpoint_serves_directories_and_files_as_binary`, pagination and
+  count tests updated.
+- **Class sweep** ("a validation rule the spec requires as an error is
+  emitted below that severity, or carries a per-rule severity constant or
+  exception list"): checked `check_routes` (duplicate id: error;
+  `query-in-path`: warning, as R33 specifies), every other `Severity` site in
+  `validation.rs` (all errors except `check_unsent_params`),
+  `export/openapi.rs` (group route collision, duplicate `operationId`,
+  unresolved link: all errors), the Postman validator, and the WebSocket
+  planner (`WsSeverity`, predates this spec and is owned by the WebSocket
+  follow-up). No sibling fixed. One candidate is flagged rather than
+  changed: Postman's optional header/cookie parameters are warnings
+  (`check_unsent_params`); R10 does not set a severity for an optional input
+  an output cannot carry, the choice was disclosed in Phase 2 and on the
+  review-1 agenda (item 14), and raising it would block the OpenAI Postman
+  collection (7 `openai-beta` parameters).
+- **Docs and skills:** `docs/generation/validation.md` (severity table and
+  the route section rewritten with a merge example), `README.md` and
+  `definitions/README.md` (endpoint counts, Bitbucket table),
+  `gen/README.md`, `skill/SKILL.md`, `.claude/skills/schematic-define/SKILL.md`
+  (GitHub count, which already read 14), `.claude/skills/schematic-define/schematic/gen.md`.
+- **Gates:** `just test` (schematic) exit 0 — L1 1776 passed, 9 skipped;
+  fresh-output guard 4 passed (1 slow, 152 s). `just lint` (schematic) exit 0.
