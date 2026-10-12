@@ -20,6 +20,13 @@
 //!
 //! Remote (`http://` / `https://`) `$schema` values are rejected up front
 //! with [`SchemaError::RemoteUnsupported`].
+//!
+//! Schema documents compiled into the library (the runtime baseline and the
+//! Content Policy schema it imports) are prepared by `prepare_embedded_schema`
+//! through the same parsing and import expansion. Only the namespace source
+//! differs: an embedded document's imports resolve lexically against the
+//! embedded table by repository-relative virtual path, never against the disk,
+//! the network, or the request's context, and record no dependency edges.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -34,7 +41,8 @@ use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaAdvisory, SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
+    SchemaAdvisory, SchemaArm,
+    embedded::{self, EmbeddedDocument}, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
         AlphanumericOptions, SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
@@ -865,6 +873,77 @@ fn resolve_standalone_schema(
     }
 }
 
+/// Prepares the embedded schema document registered at `path`: parses it,
+/// expands its imports against `documents` alone, and lowers it.
+///
+/// Embedded documents are immutable build inputs, so the result records no
+/// dependency edges and nothing is read from the disk or the network.
+///
+/// ## Errors
+///
+/// The resolver's typed errors. Failures specific to an embedded source are
+/// [`SchemaError::SchemaDocument`], naming the importing virtual document: an
+/// unregistered `path` or import target, an import that is not a relative
+/// virtual path inside the repository root, a whole-file reference or
+/// root-union document, or an `example(...)` constraint (which would name a
+/// file on disk).
+pub(crate) fn prepare_embedded_schema(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+) -> Result<ResolvedSchema, SchemaError> {
+    let unsupported = |message: &str| SchemaError::SchemaDocument {
+        path: PathBuf::from(path),
+        message: message.to_string(),
+    };
+    let document = embedded::find(documents, path)
+        .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
+    let Some(standalone) = parse_standalone_schema_document(document.text, Path::new(path))? else {
+        return Err(SchemaError::AmbiguousReferenced {
+            path: PathBuf::from(path),
+        });
+    };
+    let schema = match standalone.declaration {
+        SchemaDeclaration::Schema(schema @ SimplifiedSchema::Single(_)) => schema,
+        SchemaDeclaration::Schema(SimplifiedSchema::Union(_)) => {
+            return Err(unsupported("an embedded schema cannot be a root union"));
+        }
+        SchemaDeclaration::Reference(_) => {
+            return Err(unsupported("an embedded schema cannot be a whole-file reference"));
+        }
+    };
+    let (schema, _) = expand_imports(
+        schema,
+        Path::new(""),
+        NamespaceKey::Embedded(path.to_string()),
+        &SchemaSourcePath::root(),
+        NamespaceSource::Embedded(documents),
+    )?;
+    let json_schema = to_json_schema(&schema)?;
+    if contains_example_annotation(&json_schema) {
+        return Err(unsupported("an embedded schema cannot reference `example(...)` artifacts"));
+    }
+    Ok(ResolvedSchema {
+        simplified: Some(schema),
+        json_schema,
+        origin: SchemaOrigin::document(),
+        imports: Vec::new(),
+        examples: Vec::new(),
+        referenced_files: Vec::new(),
+        advisories: Vec::new(),
+    })
+}
+
+/// Whether a lowered schema carries an unresolved `example(...)` reference.
+fn contains_example_annotation(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.contains_key("x-darkmatter-example") || map.values().any(contains_example_annotation)
+        }
+        Value::Array(items) => items.iter().any(contains_example_annotation),
+        _ => false,
+    }
+}
+
 fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
     base_dir: &Path,
@@ -996,8 +1075,9 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 const MAX_IMPORT_DEPTH: usize = 32;
 
 /// Cycle-detection identity for a named-type namespace. The inline document
-/// root has no path, so it uses a dedicated sentinel; every other namespace is
-/// keyed by the canonicalized path of the file it was loaded from.
+/// root has no path, so it uses a dedicated sentinel; a file namespace is
+/// keyed by the canonicalized path of the file it was loaded from, and an
+/// embedded one by its virtual path, which never equals a host path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NamespaceKey {
     /// The inline document `$schema` (or a root-union arm) — the top-level
@@ -1005,6 +1085,9 @@ enum NamespaceKey {
     Root,
     /// A named-type file, keyed by its canonicalized path.
     File(PathBuf),
+    /// An embedded schema document, keyed by its virtual path. Its imports
+    /// resolve only against the embedded table.
+    Embedded(String),
 }
 
 impl NamespaceKey {
@@ -1013,6 +1096,7 @@ impl NamespaceKey {
         match self {
             Self::Root => SchemaSourceId::InlineDocument,
             Self::File(path) => SchemaSourceId::File(path.clone()),
+            Self::Embedded(path) => SchemaSourceId::Embedded(path.clone()),
         }
     }
 }
@@ -1034,19 +1118,34 @@ struct Namespace {
 
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
 /// a parsed [`SimplifiedSchema`].
-struct ImportEngine {
+struct ImportEngine<'a> {
     /// Stack of `(namespace, type-name)` frames currently being expanded, used
     /// to detect direct and transitive cycles.
     stack: Vec<(NamespaceKey, String)>,
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
     dependencies: BTreeSet<PathBuf>,
-    /// Schema-root resolution context for bare-name import targets (Phase 3).
-    schema_roots: Vec<PathBuf>,
-    /// Immutable host request snapshot used by nested import references.
-    file_resolution_context: biscuit_file::FileResolutionContext,
+    /// Where the namespaces that imports name are read from.
+    source: NamespaceSource<'a>,
     /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
+    /// Parsed embedded namespaces keyed by virtual path.
+    embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+}
+
+/// Where an expansion reads the namespaces its imports name. This is all that
+/// differs between a disk and an embedded expansion: parsing, expansion,
+/// constraint merging, and cycle detection are shared.
+enum NamespaceSource<'a> {
+    /// Schema files, resolved through the request's captured context; bare
+    /// file names try the schema roots first (Phase 3).
+    Files {
+        schema_roots: Vec<PathBuf>,
+        context: Box<biscuit_file::FileResolutionContext>,
+    },
+    /// The embedded table, by virtual path. Nothing is read from the disk or
+    /// the network, and every namespace is [`NamespaceKey::Embedded`].
+    Embedded(&'a [EmbeddedDocument<'a>]),
 }
 
 struct CachedNamespace {
@@ -1239,6 +1338,21 @@ fn expand_document_imports(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
+    let source = NamespaceSource::Files {
+        schema_roots: schema_roots.to_vec(),
+        context: Box::new(request_context.clone()),
+    };
+    expand_imports(schema, base_dir, key, root, source)
+}
+
+/// [`expand_document_imports`] over an explicit namespace source.
+fn expand_imports(
+    schema: SimplifiedSchema,
+    base_dir: &Path,
+    key: NamespaceKey,
+    root: &SchemaSourcePath,
+    source: NamespaceSource<'_>,
+) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
     }
@@ -1256,15 +1370,15 @@ fn expand_document_imports(
     let mut engine = ImportEngine {
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
-        schema_roots: schema_roots.to_vec(),
-        file_resolution_context: request_context.clone(),
+        source,
         namespace_cache: HashMap::new(),
+        embedded_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current, root)?;
     Ok((expanded, engine.dependencies.into_iter().collect()))
 }
 
-impl ImportEngine {
+impl ImportEngine<'_> {
     fn expand_schema(
         &mut self,
         schema: SimplifiedSchema,
@@ -1519,7 +1633,9 @@ impl ImportEngine {
 
         let base = match &target.key {
             NamespaceKey::File(file) => self.rehome_examples(base, file)?,
-            NamespaceKey::Root => base,
+            // An embedded definition's examples are rejected once the
+            // embedded schema is lowered (`prepare_embedded_schema`).
+            NamespaceKey::Root | NamespaceKey::Embedded(_) => base,
         };
         let definition = SchemaReferenceSite {
             source: target.key.source_id(),
@@ -1539,15 +1655,12 @@ impl ImportEngine {
     /// from any directory. A missing example fails here with the error the
     /// later pass would have raised.
     fn rehome_examples(&self, base: ExpandedDef, file: &Path) -> Result<ExpandedDef, SchemaError> {
+        let NamespaceSource::Files { schema_roots, context } = &self.source else {
+            unreachable!("a file namespace is only loaded from the file source")
+        };
         let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
         let rehome = |atom: &mut PropertyAtom| {
-            rehome_atom_examples(
-                atom,
-                base_dir,
-                file,
-                &self.schema_roots,
-                &self.file_resolution_context,
-            )
+            rehome_atom_examples(atom, base_dir, file, schema_roots, context)
         };
         Ok(match base {
             ExpandedDef::Single(mut atom, provenance) => {
@@ -1581,12 +1694,18 @@ impl ImportEngine {
                 named_types: Arc::clone(&current.named_types),
             });
         }
-        let path = named_type_file_path(
-            reference,
-            &current.base_dir,
-            &self.schema_roots,
-            &self.file_resolution_context,
-        )?;
+        let path = match &self.source {
+            NamespaceSource::Files { schema_roots, context } => {
+                named_type_file_path(reference, &current.base_dir, schema_roots, context)?
+            }
+            NamespaceSource::Embedded(documents) => {
+                let documents = *documents;
+                let NamespaceKey::Embedded(importer) = &current.key else {
+                    unreachable!("an embedded expansion holds only embedded namespaces")
+                };
+                return self.resolve_embedded_namespace(documents, importer, reference);
+            }
+        };
 
         let canonical = canonical_path(&path);
         self.dependencies.insert(canonical.clone());
@@ -1615,6 +1734,39 @@ impl ImportEngine {
         Ok(Namespace {
             key: NamespaceKey::File(canonical),
             base_dir,
+            named_types,
+        })
+    }
+
+    /// Resolves `reference`, written in the embedded document `importer`,
+    /// against the embedded table only. The target contributes no dependency
+    /// edge: embedded documents are immutable build inputs.
+    fn resolve_embedded_namespace(
+        &mut self,
+        documents: &[EmbeddedDocument<'_>],
+        importer: &str,
+        reference: &str,
+    ) -> Result<Namespace, SchemaError> {
+        let invalid = |reason: String| SchemaError::SchemaDocument {
+            path: PathBuf::from(importer),
+            message: format!("embedded import `{}`: {reason}", reference.trim()),
+        };
+        let target = embedded::resolve_path(importer, reference).map_err(invalid)?;
+        let named_types = match self.embedded_cache.get(&target) {
+            Some(cached) => Arc::clone(cached),
+            None => {
+                let document = embedded::find(documents, &target).ok_or_else(|| {
+                    invalid(format!("`{target}` is not an embedded schema document"))
+                })?;
+                let named_types =
+                    Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+                self.embedded_cache.insert(target.clone(), Arc::clone(&named_types));
+                named_types
+            }
+        };
+        Ok(Namespace {
+            key: NamespaceKey::Embedded(target),
+            base_dir: PathBuf::new(),
             named_types,
         })
     }
@@ -1778,6 +1930,12 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
+    named_types_from_text(text, path)
+}
+
+/// The named types a schema document's text declares; `path` identifies the
+/// document in errors.
+fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -4889,13 +5047,16 @@ mod shared_type_tables {
         path
     }
 
-    fn engine(dir: &Path) -> ImportEngine {
+    fn engine(dir: &Path) -> ImportEngine<'static> {
         ImportEngine {
             stack: Vec::new(),
             dependencies: BTreeSet::new(),
-            schema_roots: Vec::new(),
-            file_resolution_context: FileResolutionContext::new(dir),
+            source: NamespaceSource::Files {
+                schema_roots: Vec::new(),
+                context: Box::new(FileResolutionContext::new(dir)),
+            },
             namespace_cache: HashMap::new(),
+            embedded_cache: HashMap::new(),
         }
     }
 

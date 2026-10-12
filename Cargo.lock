@@ -3061,6 +3061,7 @@ dependencies = [
  "biscuit-test-harness",
  "chromiumoxide",
  "chrono",
+ "content-policy",
  "criterion",
  "cssparser 0.37.0",
  "dashmap",

@@ -9,6 +9,7 @@ $schema:
     tags: "string[] -> Freeform document tags."
     draft: "boolish -> Author-controlled draft marker. Darkmatter does not use this for compose control but commonly ignores it during hash workflows."
     last_updated: "date -> Managed content-change date in YYYY-MM-DD form. Hash save and downstream tools may update it when content changes."
+    content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"
     metadata: "object -> Arbitrary author metadata. Darkmatter preserves it and leaves interpretation to downstream tools."
 
     hash:

@@ -869,17 +869,13 @@ mod tests {
     /// Draft 2020-12 JSON Schema without errors (spec testing requirement 2;
     /// Phase 3 validation checkpoint). The converter exercises every baseline
     /// property atom and keeps broad object surfaces open where runtime parsers
-    /// remain authoritative.
+    /// remain authoritative. The baseline imports named types, so it converts
+    /// only after preparation expands them.
     #[test]
     fn darkmatter_baseline_schema_converts_to_json_schema() {
         let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
-        let frontmatter: YamlValue =
-            serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-        let schema_value = frontmatter
-            .get("$schema")
-            .expect("baseline file must have a `$schema` key");
-        let schema = parse_yaml_schema(schema_value).expect("baseline schema must parse");
-        let json = to_json_schema(&schema).expect("baseline must convert to JSON Schema");
+        assert!(raw.contains("content_policy: "), "the baseline declares an import");
+        let json = crate::markdown::schemas::darkmatter_base_json_schema();
         let obj = json.as_object().expect("root must be a JSON object");
         assert_eq!(
             obj.get("type").and_then(|v| v.as_str()),
@@ -930,13 +926,7 @@ mod tests {
     fn darkmatter_baseline_schema_ctx_reflects_runtime_semantics() {
         use serde_json::{Value, json};
 
-        let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
-        let frontmatter: YamlValue = serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-        let schema_value = frontmatter
-            .get("$schema")
-            .expect("baseline file must have a `$schema` key");
-        let schema = parse_yaml_schema(schema_value).expect("baseline schema must parse");
-        let json = to_json_schema(&schema).expect("baseline must convert to JSON Schema");
+        let json = crate::markdown::schemas::darkmatter_base_json_schema();
 
         let validator = jsonschema::options()
             .with_draft(jsonschema::Draft::Draft202012)

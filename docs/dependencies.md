@@ -7,6 +7,13 @@
 
 ## Recent Dependency Notes
 
+- `darkmatter` adds `content-policy` as a normal dependency with
+  `default-features = false` (2026-10-12). It is a workspace member, so the
+  lockfile gains one edge and no package. The runtime baseline imports its
+  `EDITOR_SCHEMA` to type `content_policy`, and Darkmatter's tests compare
+  Content Policy's declaration parser with that typing. The edge runs from
+  Darkmatter to Content Policy only; Content Policy's `just deps-check` still
+  forbids the reverse, and `file-adapter` stays off.
 - `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
   `default-features = false` (2026-10-03). It was already in the graph through
   `darkmatter`, so the lockfile gains one edge and no package. Its tests parse

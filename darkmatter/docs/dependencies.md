@@ -37,6 +37,19 @@ features their tier requires.
   selects the same sources and a malformed manifest fails the guard. Every
   other package that includes the engine already depends on `toml`.
 
+## Content Policy Schema Dependency
+
+- `content-policy` (`darkmatter`, `default-features = false`) — supplies
+  `EDITOR_SCHEMA`, the Content Policy editor schema that the runtime baseline
+  imports to type `content_policy`. The library compiles it in beside the
+  baseline, so an installed binary prepares the baseline without schema files
+  on disk. Tests also run the shared Content Policy declaration cases through
+  `Policy::from_declaration` and the baseline validator, so each case states
+  where the parser and the editor schema agree and where they differ. The
+  dependency runs one way: Content Policy never depends on Darkmatter, and
+  `just deps-check` in `content-policy/` fails if it ever does. The
+  `file-adapter` feature stays off.
+
 ## Execution Identity and Network Context
 
 - `biscuit-hash` with the `blake3` feature computes `ctx.sid`, the full BLAKE3

@@ -73,6 +73,7 @@ pub mod simplified;
 pub mod triggers;
 pub mod validate;
 mod positions;
+mod embedded;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -146,34 +147,44 @@ pub use triggers::{
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
-static BASE_SCHEMA: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
-static BASE_JSON_SCHEMA: std::sync::OnceLock<Arc<Value>> = std::sync::OnceLock::new();
+/// The runtime baseline, prepared from the embedded table: its typed form with
+/// every import expanded, and that form lowered to JSON Schema.
+struct ShippedBaseline {
+    schema: SimplifiedSchema,
+    json_schema: Arc<Value>,
+}
 
-fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
-    BASE_SCHEMA.get_or_init(|| {
-        let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
-        let frontmatter: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-        let schema_value = frontmatter
-            .get("$schema")
-            .expect("baseline file must have a `$schema` key");
-        parse_yaml_schema(schema_value).expect("baseline schema must parse")
+/// Prepared and lowered once per process, on first use.
+static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
+
+fn shipped_baseline() -> &'static ShippedBaseline {
+    BASELINE.get_or_init(|| {
+        let resolved = resolve::prepare_embedded_schema(embedded::BASELINE_PATH, embedded::SHIPPED)
+            .unwrap_or_else(|error| panic!("the embedded baseline schema must prepare: {error}"));
+        ShippedBaseline {
+            schema: resolved
+                .simplified
+                .expect("an embedded schema is a SimplifiedSchema"),
+            json_schema: Arc::new(resolved.json_schema),
+        }
     })
 }
 
+fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
+    &shipped_baseline().schema
+}
+
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
-    BASE_JSON_SCHEMA.get_or_init(|| {
-        Arc::new(
-            to_json_schema(darkmatter_base_schema_ref()).expect("baseline schema must convert"),
-        )
-    })
+    &shipped_baseline().json_schema
 }
 
 /// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
 ///
-/// Loads the authored schema from `darkmatter/docs/schemas/darkmatter.yaml` via
-/// `include_str!` and parses it at first call. The result is cached so repeated
-/// calls are cheap.
+/// The baseline is authored at `darkmatter/docs/schemas/darkmatter.yaml` and
+/// compiled into the library. Its imports, such as `content_policy`'s
+/// Content Policy types, resolve against the other compiled-in schema
+/// documents, never the disk, so the result carries every referenced
+/// definition inline. It is prepared at first call and cached.
 ///
 /// ## Examples
 ///
@@ -185,8 +196,8 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be parsed. This is a
-/// library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared. This is a library bug, not an author error.
 pub fn darkmatter_base_schema() -> SimplifiedSchema {
     darkmatter_base_schema_ref().clone()
 }
@@ -194,10 +205,9 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is derived from [`darkmatter_base_schema`] and cached so repeated
-/// calls do not re-pay the conversion cost. Each call returns an independent
-/// owned value; callers that only need to read the schema can use
-/// [`darkmatter_base_json_schema_ref`] instead.
+/// The result is [`darkmatter_base_schema`] lowered once and cached. Each
+/// call returns an independent owned value; callers that only need to read the
+/// schema can use [`darkmatter_base_json_schema_ref`] instead.
 ///
 /// ## Examples
 ///
@@ -210,8 +220,8 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
-/// Schema. This is a library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared and lowered. This is a library bug, not an author error.
 pub fn darkmatter_base_json_schema() -> Value {
     darkmatter_base_json_schema_ref().clone()
 }
@@ -224,8 +234,8 @@ pub fn darkmatter_base_json_schema() -> Value {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
-/// Schema. This is a library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared and lowered. This is a library bug, not an author error.
 pub fn darkmatter_base_json_schema_ref() -> &'static Value {
     darkmatter_base_json_schema_arc().as_ref()
 }
