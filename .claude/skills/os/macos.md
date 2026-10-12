@@ -370,6 +370,13 @@ different artifact.
 
 ## CI shell and runtime inspection (2026-09-15)
 
+Kache passthrough fixtures must explicitly unset `DYLD_FALLBACK_LIBRARY_PATH`
+when modeling a stripping wrapper. A Bash script that merely executes its
+arguments can preserve it on hosted macOS, so relying on shell startup to
+strip it makes the negative probe pass and skips the expected re-sign step.
+The shared fake's `strip` mode and the standalone negative probe both remove
+the variable explicitly; `forward` mode supplies the probe's sentinel.
+
 `/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
 empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
 cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
