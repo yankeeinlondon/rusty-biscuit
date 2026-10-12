@@ -97,7 +97,7 @@ fn go_alias<'a>(exported: &'a str, original: &'a str, local: &'a str, source: &'
 
 #[test]
 fn go_alias_forwards_a_package_type() {
-    let s = snippet("pos-alias.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias.go"));
+    let s = snippet("pos-alias.go", include_str!("../fixtures/reexports/go/pos-alias.go"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
@@ -125,7 +125,7 @@ fn go_alias_marks_the_forwarded_import_only() {
 
 #[test]
 fn go_alias_renames_the_exported_name() {
-    let s = snippet("pos-alias-renamed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-renamed.go"));
+    let s = snippet("pos-alias-renamed.go", include_str!("../fixtures/reexports/go/pos-alias-renamed.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(
@@ -137,7 +137,7 @@ fn go_alias_renames_the_exported_name() {
 
 #[test]
 fn go_alias_through_an_aliased_import_has_no_inferred_caveat() {
-    let s = snippet("pos-alias-aliased-import.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-aliased-import.go"));
+    let s = snippet("pos-alias-aliased-import.go", include_str!("../fixtures/reexports/go/pos-alias-aliased-import.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     let expect = Expect { caveats: &[], ..go_alias("X", "X", "q", "example.com/pkg", "X = q.X", "type X = q.X", "q") };
@@ -148,7 +148,7 @@ fn go_alias_through_an_aliased_import_has_no_inferred_caveat() {
 
 #[test]
 fn go_alias_matches_the_last_path_segment() {
-    let s = snippet("pos-alias-nested-pkgpath.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-nested-pkgpath.go"));
+    let s = snippet("pos-alias-nested-pkgpath.go", include_str!("../fixtures/reexports/go/pos-alias-nested-pkgpath.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(
@@ -160,7 +160,7 @@ fn go_alias_matches_the_last_path_segment() {
 
 #[test]
 fn go_alias_grouped_gives_one_entry_per_alias() {
-    let s = snippet("pos-alias-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-grouped.go"));
+    let s = snippet("pos-alias-grouped.go", include_str!("../fixtures/reexports/go/pos-alias-grouped.go"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 2);
@@ -172,7 +172,7 @@ fn go_alias_grouped_gives_one_entry_per_alias() {
 
 #[test]
 fn go_generic_alias_forwards_the_generic_type() {
-    let s = snippet("pos-alias-generic.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-generic.go"));
+    let s = snippet("pos-alias-generic.go", include_str!("../fixtures/reexports/go/pos-alias-generic.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(
@@ -184,13 +184,13 @@ fn go_generic_alias_forwards_the_generic_type() {
 
 #[test]
 fn go_pointer_alias_is_not_a_forward() {
-    let s = snippet("pos-alias-pointer.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-pointer.go"));
+    let s = snippet("pos-alias-pointer.go", include_str!("../fixtures/reexports/go/pos-alias-pointer.go"));
     assert_negative(&s);
 }
 
 #[test]
 fn go_build_constraint_marks_every_entry_conditional() {
-    let s = snippet("pos-alias-build-tag.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-build-tag.go"));
+    let s = snippet("pos-alias-build-tag.go", include_str!("../fixtures/reexports/go/pos-alias-build-tag.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     let expect = Expect {
@@ -239,7 +239,7 @@ const VAR_CAVEATS: &[ReexportCaveat] = &[ReexportCaveat::MutableBinding, Reexpor
 
 #[test]
 fn go_var_copy_is_a_mutable_value_copy() {
-    let s = snippet("pos-var.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var.go"));
+    let s = snippet("pos-var.go", include_str!("../fixtures/reexports/go/pos-var.go"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
@@ -249,12 +249,12 @@ fn go_var_copy_is_a_mutable_value_copy() {
 
 #[test]
 fn go_typed_var_and_func_var_copies_are_reported() {
-    let typed = snippet("pos-var-typed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var-typed.go"));
+    let typed = snippet("pos-var-typed.go", include_str!("../fixtures/reexports/go/pos-var-typed.go"));
     let report = typed.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(&typed, &report.entries[0], &go_value("X", "Y", "X T = pkg.Y", "var X T = pkg.Y", VAR_CAVEATS));
 
-    let func = snippet("pos-func-var.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-func-var.go"));
+    let func = snippet("pos-func-var.go", include_str!("../fixtures/reexports/go/pos-func-var.go"));
     let report = func.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(&func, &report.entries[0], &go_value("F", "Func", "F = pkg.Func", "var F = pkg.Func", VAR_CAVEATS));
@@ -262,7 +262,7 @@ fn go_typed_var_and_func_var_copies_are_reported() {
 
 #[test]
 fn go_const_copy_has_no_mutable_caveat() {
-    let s = snippet("pos-const.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-const.go"));
+    let s = snippet("pos-const.go", include_str!("../fixtures/reexports/go/pos-const.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     assert_entry(&s, &report.entries[0], &go_value("C", "K", "C = pkg.K", "const C = pkg.K", INFERRED));
@@ -270,7 +270,7 @@ fn go_const_copy_has_no_mutable_caveat() {
 
 #[test]
 fn go_var_copy_ignores_a_local_shadow_inside_a_function() {
-    let s = snippet("pos-var-after-localshadow.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var-after-localshadow.go"));
+    let s = snippet("pos-var-after-localshadow.go", include_str!("../fixtures/reexports/go/pos-var-after-localshadow.go"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     assert_eq!(report.entries[0].exported_name.as_deref(), Some("X"));
@@ -304,13 +304,13 @@ fn go_grouped_value_specs_and_positional_pairing() {
 
 #[test]
 fn go_reassigned_var_keeps_the_mutable_caveat_entry() {
-    let s = snippet("neg-var-mutated.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-mutated.go"));
+    let s = snippet("neg-var-mutated.go", include_str!("../fixtures/reexports/go/neg-var-mutated.go"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
     assert_eq!(report.entries[0].caveats, VAR_CAVEATS);
 
-    let paired = snippet("neg-var-mutable-nonconst.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-mutable-nonconst.go"));
+    let paired = snippet("neg-var-mutable-nonconst.go", include_str!("../fixtures/reexports/go/neg-var-mutable-nonconst.go"));
     let report = paired.report();
     assert_eq!(report.entries.len(), 1, "only the imported value pairs with an exported name");
     assert_eq!(paired.text(&report.entries[0].span), "X");
@@ -319,25 +319,25 @@ fn go_reassigned_var_keeps_the_mutable_caveat_entry() {
 #[test]
 fn go_negative_samples_report_nothing() {
     let samples = [
-        ("neg-alias-builtin.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-builtin.go")),
-        ("neg-alias-in-func.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-in-func.go")),
-        ("neg-alias-local.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-local.go")),
-        ("neg-alias-shadowed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-shadowed.go")),
-        ("neg-alias-unexported.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-unexported.go")),
-        ("neg-defined-type-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-defined-type-grouped.go")),
-        ("neg-defined-type.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-defined-type.go")),
-        ("neg-embedded-struct.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-embedded-struct.go")),
-        ("neg-func-wrapper.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-func-wrapper.go")),
-        ("neg-iface-embed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-iface-embed.go")),
-        ("neg-import-aliased.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-aliased.go")),
-        ("neg-import-blank.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-blank.go")),
-        ("neg-import-dot.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-dot.go")),
-        ("neg-import-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-grouped.go")),
-        ("neg-method-expr.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-method-expr.go")),
-        ("neg-var-call.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-call.go")),
-        ("pos-import-plain.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-import-plain.go")),
+        ("neg-alias-builtin.go", include_str!("../fixtures/reexports/go/neg-alias-builtin.go")),
+        ("neg-alias-in-func.go", include_str!("../fixtures/reexports/go/neg-alias-in-func.go")),
+        ("neg-alias-local.go", include_str!("../fixtures/reexports/go/neg-alias-local.go")),
+        ("neg-alias-shadowed.go", include_str!("../fixtures/reexports/go/neg-alias-shadowed.go")),
+        ("neg-alias-unexported.go", include_str!("../fixtures/reexports/go/neg-alias-unexported.go")),
+        ("neg-defined-type-grouped.go", include_str!("../fixtures/reexports/go/neg-defined-type-grouped.go")),
+        ("neg-defined-type.go", include_str!("../fixtures/reexports/go/neg-defined-type.go")),
+        ("neg-embedded-struct.go", include_str!("../fixtures/reexports/go/neg-embedded-struct.go")),
+        ("neg-func-wrapper.go", include_str!("../fixtures/reexports/go/neg-func-wrapper.go")),
+        ("neg-iface-embed.go", include_str!("../fixtures/reexports/go/neg-iface-embed.go")),
+        ("neg-import-aliased.go", include_str!("../fixtures/reexports/go/neg-import-aliased.go")),
+        ("neg-import-blank.go", include_str!("../fixtures/reexports/go/neg-import-blank.go")),
+        ("neg-import-dot.go", include_str!("../fixtures/reexports/go/neg-import-dot.go")),
+        ("neg-import-grouped.go", include_str!("../fixtures/reexports/go/neg-import-grouped.go")),
+        ("neg-method-expr.go", include_str!("../fixtures/reexports/go/neg-method-expr.go")),
+        ("neg-var-call.go", include_str!("../fixtures/reexports/go/neg-var-call.go")),
+        ("pos-import-plain.go", include_str!("../fixtures/reexports/go/pos-import-plain.go")),
         // A dot import leaves `type X = Y` unqualified: nothing anchors it.
-        ("amb-dot-import-alias.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/amb-dot-import-alias.go")),
+        ("amb-dot-import-alias.go", include_str!("../fixtures/reexports/go/amb-dot-import-alias.go")),
     ];
     for (name, source) in samples {
         let s = snippet(name, source);
@@ -467,7 +467,7 @@ fn lua_named<'a>(exported: &'a str, original: &'a str, local: Option<&'a str>, s
 
 #[test]
 fn lua_return_require_forwards_the_whole_module() {
-    let s = snippet("pos-return-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require.lua"));
+    let s = snippet("pos-return-require.lua", include_str!("../fixtures/reexports/lua/pos-return-require.lua"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
@@ -477,10 +477,10 @@ fn lua_return_require_forwards_the_whole_module() {
 
 #[test]
 fn lua_return_require_call_styles_all_forward() {
-    let nop = snippet("pos-return-require-nop.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-nop.lua"));
-    let longstr = snippet("pos-return-require-longstr.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-longstr.lua"));
-    let dotted = snippet("pos-return-require-dotted.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-dotted.lua"));
-    let parenthesized = snippet("pos-return-parenthesized.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-parenthesized.lua"));
+    let nop = snippet("pos-return-require-nop.lua", include_str!("../fixtures/reexports/lua/pos-return-require-nop.lua"));
+    let longstr = snippet("pos-return-require-longstr.lua", include_str!("../fixtures/reexports/lua/pos-return-require-longstr.lua"));
+    let dotted = snippet("pos-return-require-dotted.lua", include_str!("../fixtures/reexports/lua/pos-return-require-dotted.lua"));
+    let parenthesized = snippet("pos-return-parenthesized.lua", include_str!("../fixtures/reexports/lua/pos-return-parenthesized.lua"));
 
     let report = nop.report();
     assert_entry(&nop, &report.entries[0], &lua_module("m", None, "require 'm'", "return require 'm'"));
@@ -495,13 +495,13 @@ fn lua_return_require_call_styles_all_forward() {
 
 #[test]
 fn lua_return_of_a_required_local_forwards_the_module() {
-    let s = snippet("pos-local-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-return.lua"));
+    let s = snippet("pos-local-return.lua", include_str!("../fixtures/reexports/lua/pos-local-return.lua"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
     assert_entry(&s, &report.entries[0], &lua_module("m", Some("m"), "m", "return m"));
 
-    let hybrid = snippet("pos-return-module-after-assign.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-module-after-assign.lua"));
+    let hybrid = snippet("pos-return-module-after-assign.lua", include_str!("../fixtures/reexports/lua/pos-return-module-after-assign.lua"));
     let report = hybrid.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
@@ -510,7 +510,7 @@ fn lua_return_of_a_required_local_forwards_the_module() {
 
 #[test]
 fn lua_returned_constructor_names_imported_members() {
-    let s = snippet("pos-table-ctor.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua"));
+    let s = snippet("pos-table-ctor.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor.lua"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
@@ -532,7 +532,7 @@ fn lua_constructor_field_can_rename_and_require_inline() {
 
 #[test]
 fn lua_local_table_constructor_collects_fields() {
-    let s = snippet("pos-table-ctor-localvar.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-localvar.lua"));
+    let s = snippet("pos-table-ctor-localvar.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-localvar.lua"));
     let report = s.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 2);
@@ -543,7 +543,7 @@ fn lua_local_table_constructor_collects_fields() {
 
 #[test]
 fn lua_constructor_field_holding_a_module_is_a_namespace() {
-    let s = snippet("pos-table-ctor-module.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-module.lua"));
+    let s = snippet("pos-table-ctor-module.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-module.lua"));
     let report = s.report();
     assert_eq!(report.entries.len(), 1);
     let expect = Expect {
@@ -554,7 +554,7 @@ fn lua_constructor_field_holding_a_module_is_a_namespace() {
     };
     assert_entry(&s, &report.entries[0], &expect);
 
-    let multi = snippet("pos-multi-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-multi-return.lua"));
+    let multi = snippet("pos-multi-return.lua", include_str!("../fixtures/reexports/lua/pos-multi-return.lua"));
     let report = multi.report();
     assert_eq!(report.entries.len(), 2);
     assert_eq!(report.entries[0].exported_name.as_deref(), Some("a"));
@@ -565,31 +565,31 @@ fn lua_constructor_field_holding_a_module_is_a_namespace() {
 
 #[test]
 fn lua_positional_constructor_field_has_no_name_and_is_not_reported() {
-    let s = snippet("pos-table-ctor-positional.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-positional.lua"));
+    let s = snippet("pos-table-ctor-positional.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-positional.lua"));
     assert_negative(&s);
 }
 
 #[test]
 fn lua_assigned_fields_before_return_m_forward_members() {
-    let direct = snippet("pos-table-field-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-require.lua"));
+    let direct = snippet("pos-table-field-require.lua", include_str!("../fixtures/reexports/lua/pos-table-field-require.lua"));
     let report = direct.report();
     assert_complete(&report);
     assert_eq!(report.entries.len(), 1);
     let line = "M.foo = require(\"m\").foo";
     assert_entry(&direct, &report.entries[0], &lua_named("foo", "foo", None, "m", line, line));
 
-    let chain = snippet("pos-require-string-call-chain.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-require-string-call-chain.lua"));
+    let chain = snippet("pos-require-string-call-chain.lua", include_str!("../fixtures/reexports/lua/pos-require-string-call-chain.lua"));
     let report = chain.report();
     assert_eq!(report.entries.len(), 1);
     let line = "M.foo = require \"m\".foo";
     assert_entry(&chain, &report.entries[0], &lua_named("foo", "foo", None, "m", line, line));
 
-    let local = snippet("pos-table-field-local.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua"));
+    let local = snippet("pos-table-field-local.lua", include_str!("../fixtures/reexports/lua/pos-table-field-local.lua"));
     let report = local.report();
     let line = "M.foo = m.foo";
     assert_entry(&local, &report.entries[0], &lua_named("foo", "foo", Some("m"), "m", line, line));
 
-    let index = snippet("pos-table-field-alias-index.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-alias-index.lua"));
+    let index = snippet("pos-table-field-alias-index.lua", include_str!("../fixtures/reexports/lua/pos-table-field-alias-index.lua"));
     let report = index.report();
     let line = "M[\"foo\"] = m.foo";
     assert_entry(&index, &report.entries[0], &lua_named("foo", "foo", Some("m"), "m", line, line));
@@ -623,31 +623,31 @@ fn lua_the_last_write_to_a_field_decides() {
 
 #[test]
 fn lua_return_of_a_member_is_not_reported() {
-    let field = snippet("pos-return-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-field.lua"));
+    let field = snippet("pos-return-field.lua", include_str!("../fixtures/reexports/lua/pos-return-field.lua"));
     assert_negative(&field);
-    let local = snippet("pos-return-local-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-local-field.lua"));
+    let local = snippet("pos-return-local-field.lua", include_str!("../fixtures/reexports/lua/pos-return-local-field.lua"));
     assert_negative(&local);
 }
 
 #[test]
 fn lua_local_function_member_has_no_require_provenance() {
-    let s = snippet("pos-local-func-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-func-field.lua"));
+    let s = snippet("pos-local-func-field.lua", include_str!("../fixtures/reexports/lua/pos-local-func-field.lua"));
     assert_negative(&s);
 }
 
 #[test]
 fn lua_negative_samples_report_nothing_and_stay_complete() {
     let samples = [
-        ("neg-call-result.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-call-result.lua")),
-        ("neg-global-assign.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-global-assign.lua")),
-        ("neg-method-wrap.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-method-wrap.lua")),
-        ("neg-no-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-no-return.lua")),
-        ("neg-require-concat.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-concat.lua")),
-        ("neg-require-dynamic.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-dynamic.lua")),
-        ("neg-require-unreturned.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-unreturned.lua")),
-        ("neg-return-conditional.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-conditional.lua")),
-        ("neg-return-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-in-function.lua")),
-        ("neg-return-ternary.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-ternary.lua")),
+        ("neg-call-result.lua", include_str!("../fixtures/reexports/lua/neg-call-result.lua")),
+        ("neg-global-assign.lua", include_str!("../fixtures/reexports/lua/neg-global-assign.lua")),
+        ("neg-method-wrap.lua", include_str!("../fixtures/reexports/lua/neg-method-wrap.lua")),
+        ("neg-no-return.lua", include_str!("../fixtures/reexports/lua/neg-no-return.lua")),
+        ("neg-require-concat.lua", include_str!("../fixtures/reexports/lua/neg-require-concat.lua")),
+        ("neg-require-dynamic.lua", include_str!("../fixtures/reexports/lua/neg-require-dynamic.lua")),
+        ("neg-require-unreturned.lua", include_str!("../fixtures/reexports/lua/neg-require-unreturned.lua")),
+        ("neg-return-conditional.lua", include_str!("../fixtures/reexports/lua/neg-return-conditional.lua")),
+        ("neg-return-in-function.lua", include_str!("../fixtures/reexports/lua/neg-return-in-function.lua")),
+        ("neg-return-ternary.lua", include_str!("../fixtures/reexports/lua/neg-return-ternary.lua")),
     ];
     for (name, source) in samples {
         let s = snippet(name, source);
@@ -659,13 +659,13 @@ fn lua_negative_samples_report_nothing_and_stay_complete() {
 
 #[test]
 fn lua_rebound_bindings_limit_coverage() {
-    let table = snippet("neg-rebound-M.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-rebound-M.lua"));
+    let table = snippet("neg-rebound-M.lua", include_str!("../fixtures/reexports/lua/neg-rebound-M.lua"));
     let report = table.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::ReboundBinding]);
     assert_eq!(table.text(&report.coverage.limits[0].span), "M = {}");
 
-    let module = snippet("neg-rebound-m.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-rebound-m.lua"));
+    let module = snippet("neg-rebound-m.lua", include_str!("../fixtures/reexports/lua/neg-rebound-m.lua"));
     let report = module.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::ReboundBinding]);
@@ -700,7 +700,7 @@ fn assert_complete_on_both_paths(s: &Snippet) -> ReexportReport {
 
 #[test]
 fn lua_write_to_a_function_local_keeps_the_returned_module() {
-    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-return.lua"));
+    let source = with_unrelated_local_write(include_str!("../fixtures/reexports/lua/pos-local-return.lua"));
     let s = snippet("pos-local-return.lua", &source);
     let report = assert_complete_on_both_paths(&s);
     assert_eq!(report.entries.len(), 1);
@@ -709,7 +709,7 @@ fn lua_write_to_a_function_local_keeps_the_returned_module() {
 
 #[test]
 fn lua_write_to_a_function_local_keeps_the_returned_constructor() {
-    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua"));
+    let source = with_unrelated_local_write(include_str!("../fixtures/reexports/lua/pos-table-ctor.lua"));
     let s = snippet("pos-table-ctor.lua", &source);
     let report = assert_complete_on_both_paths(&s);
     assert_eq!(report.entries.len(), 1);
@@ -718,7 +718,7 @@ fn lua_write_to_a_function_local_keeps_the_returned_constructor() {
 
 #[test]
 fn lua_write_to_a_function_local_keeps_the_assembled_table() {
-    let source = with_unrelated_local_write(include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua"));
+    let source = with_unrelated_local_write(include_str!("../fixtures/reexports/lua/pos-table-field-local.lua"));
     let s = snippet("pos-table-field-local.lua", &source);
     let report = assert_complete_on_both_paths(&s);
     assert_eq!(report.entries.len(), 1);
@@ -812,7 +812,7 @@ fn lua_require_shadowed_only_inside_a_function_stays_the_loader() {
 
 #[test]
 fn lua_shadowed_require_limits_and_derives_nothing() {
-    let s = snippet("neg-shadowed-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-shadowed-require.lua"));
+    let s = snippet("neg-shadowed-require.lua", include_str!("../fixtures/reexports/lua/neg-shadowed-require.lua"));
     let report = s.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::ShadowedGlobal]);
@@ -830,8 +830,8 @@ fn lua_shadowed_require_limits_and_derives_nothing() {
 #[test]
 fn lua_legacy_module_limits_with_dynamic_forwarding() {
     for (name, source) in [
-        ("legacy-module.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/legacy-module.lua")),
-        ("legacy-module-name.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/legacy-module-name.lua")),
+        ("legacy-module.lua", include_str!("../fixtures/reexports/lua/legacy-module.lua")),
+        ("legacy-module-name.lua", include_str!("../fixtures/reexports/lua/legacy-module-name.lua")),
     ] {
         let s = snippet(name, source);
         let report = s.report();
@@ -843,7 +843,7 @@ fn lua_legacy_module_limits_with_dynamic_forwarding() {
 
 #[test]
 fn lua_dynamic_forwarding_samples_are_limited() {
-    let copy = snippet("amb-copy-loop.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-copy-loop.lua"));
+    let copy = snippet("amb-copy-loop.lua", include_str!("../fixtures/reexports/lua/amb-copy-loop.lua"));
     let report = copy.report();
     assert!(report.entries.is_empty());
     // The loop forwards dynamically, and its `M[k]` write may replace any field.
@@ -851,19 +851,19 @@ fn lua_dynamic_forwarding_samples_are_limited() {
     assert!(copy.text(&report.coverage.limits[0].span).starts_with("for k, v in pairs(m)"));
     assert_eq!(copy.text(&report.coverage.limits[1].span), "M[k] = v");
 
-    let meta = snippet("amb-setmetatable-index.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-setmetatable-index.lua"));
+    let meta = snippet("amb-setmetatable-index.lua", include_str!("../fixtures/reexports/lua/amb-setmetatable-index.lua"));
     let report = meta.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::DynamicForwarding]);
     assert!(meta.text(&report.coverage.limits[0].span).starts_with("setmetatable("));
 
-    let pcall = snippet("amb-pcall-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-pcall-require.lua"));
+    let pcall = snippet("amb-pcall-require.lua", include_str!("../fixtures/reexports/lua/amb-pcall-require.lua"));
     let report = pcall.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::DynamicForwarding]);
     assert_eq!(pcall.text(&report.coverage.limits[0].span), "pcall(require, \"m\")");
 
-    let extra = snippet("amb-extra-return-values.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-extra-return-values.lua"));
+    let extra = snippet("amb-extra-return-values.lua", include_str!("../fixtures/reexports/lua/amb-extra-return-values.lua"));
     let report = extra.report();
     assert!(report.entries.is_empty());
     assert_limited(&report, &[ReexportLimitReason::DynamicForwarding]);
@@ -907,39 +907,39 @@ fn lua_damaged_return_limits_coverage() {
 #[test]
 fn go_corpus_runs_every_sample_without_breaking_report_invariants() {
     let samples = [
-        ("amb-dot-import-alias.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/amb-dot-import-alias.go")),
-        ("neg-alias-builtin.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-builtin.go")),
-        ("neg-alias-in-func.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-in-func.go")),
-        ("neg-alias-local.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-local.go")),
-        ("neg-alias-shadowed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-shadowed.go")),
-        ("neg-alias-unexported.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-alias-unexported.go")),
-        ("neg-defined-type-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-defined-type-grouped.go")),
-        ("neg-defined-type.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-defined-type.go")),
-        ("neg-embedded-struct.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-embedded-struct.go")),
-        ("neg-func-wrapper.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-func-wrapper.go")),
-        ("neg-iface-embed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-iface-embed.go")),
-        ("neg-import-aliased.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-aliased.go")),
-        ("neg-import-blank.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-blank.go")),
-        ("neg-import-dot.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-dot.go")),
-        ("neg-import-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-import-grouped.go")),
-        ("neg-method-expr.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-method-expr.go")),
-        ("neg-var-call.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-call.go")),
-        ("neg-var-mutable-nonconst.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-mutable-nonconst.go")),
-        ("neg-var-mutated.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/neg-var-mutated.go")),
-        ("pos-alias-aliased-import.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-aliased-import.go")),
-        ("pos-alias-build-tag.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-build-tag.go")),
-        ("pos-alias-generic.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-generic.go")),
-        ("pos-alias-grouped.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-grouped.go")),
-        ("pos-alias-nested-pkgpath.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-nested-pkgpath.go")),
-        ("pos-alias-pointer.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-pointer.go")),
-        ("pos-alias-renamed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias-renamed.go")),
-        ("pos-alias.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-alias.go")),
-        ("pos-const.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-const.go")),
-        ("pos-func-var.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-func-var.go")),
-        ("pos-import-plain.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-import-plain.go")),
-        ("pos-var-after-localshadow.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var-after-localshadow.go")),
-        ("pos-var-typed.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var-typed.go")),
-        ("pos-var.go", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/go/pos-var.go")),
+        ("amb-dot-import-alias.go", include_str!("../fixtures/reexports/go/amb-dot-import-alias.go")),
+        ("neg-alias-builtin.go", include_str!("../fixtures/reexports/go/neg-alias-builtin.go")),
+        ("neg-alias-in-func.go", include_str!("../fixtures/reexports/go/neg-alias-in-func.go")),
+        ("neg-alias-local.go", include_str!("../fixtures/reexports/go/neg-alias-local.go")),
+        ("neg-alias-shadowed.go", include_str!("../fixtures/reexports/go/neg-alias-shadowed.go")),
+        ("neg-alias-unexported.go", include_str!("../fixtures/reexports/go/neg-alias-unexported.go")),
+        ("neg-defined-type-grouped.go", include_str!("../fixtures/reexports/go/neg-defined-type-grouped.go")),
+        ("neg-defined-type.go", include_str!("../fixtures/reexports/go/neg-defined-type.go")),
+        ("neg-embedded-struct.go", include_str!("../fixtures/reexports/go/neg-embedded-struct.go")),
+        ("neg-func-wrapper.go", include_str!("../fixtures/reexports/go/neg-func-wrapper.go")),
+        ("neg-iface-embed.go", include_str!("../fixtures/reexports/go/neg-iface-embed.go")),
+        ("neg-import-aliased.go", include_str!("../fixtures/reexports/go/neg-import-aliased.go")),
+        ("neg-import-blank.go", include_str!("../fixtures/reexports/go/neg-import-blank.go")),
+        ("neg-import-dot.go", include_str!("../fixtures/reexports/go/neg-import-dot.go")),
+        ("neg-import-grouped.go", include_str!("../fixtures/reexports/go/neg-import-grouped.go")),
+        ("neg-method-expr.go", include_str!("../fixtures/reexports/go/neg-method-expr.go")),
+        ("neg-var-call.go", include_str!("../fixtures/reexports/go/neg-var-call.go")),
+        ("neg-var-mutable-nonconst.go", include_str!("../fixtures/reexports/go/neg-var-mutable-nonconst.go")),
+        ("neg-var-mutated.go", include_str!("../fixtures/reexports/go/neg-var-mutated.go")),
+        ("pos-alias-aliased-import.go", include_str!("../fixtures/reexports/go/pos-alias-aliased-import.go")),
+        ("pos-alias-build-tag.go", include_str!("../fixtures/reexports/go/pos-alias-build-tag.go")),
+        ("pos-alias-generic.go", include_str!("../fixtures/reexports/go/pos-alias-generic.go")),
+        ("pos-alias-grouped.go", include_str!("../fixtures/reexports/go/pos-alias-grouped.go")),
+        ("pos-alias-nested-pkgpath.go", include_str!("../fixtures/reexports/go/pos-alias-nested-pkgpath.go")),
+        ("pos-alias-pointer.go", include_str!("../fixtures/reexports/go/pos-alias-pointer.go")),
+        ("pos-alias-renamed.go", include_str!("../fixtures/reexports/go/pos-alias-renamed.go")),
+        ("pos-alias.go", include_str!("../fixtures/reexports/go/pos-alias.go")),
+        ("pos-const.go", include_str!("../fixtures/reexports/go/pos-const.go")),
+        ("pos-func-var.go", include_str!("../fixtures/reexports/go/pos-func-var.go")),
+        ("pos-import-plain.go", include_str!("../fixtures/reexports/go/pos-import-plain.go")),
+        ("pos-var-after-localshadow.go", include_str!("../fixtures/reexports/go/pos-var-after-localshadow.go")),
+        ("pos-var-typed.go", include_str!("../fixtures/reexports/go/pos-var-typed.go")),
+        ("pos-var.go", include_str!("../fixtures/reexports/go/pos-var.go")),
     ];
     for (name, source) in samples {
         let s = snippet(name, source);
@@ -958,46 +958,46 @@ fn go_corpus_runs_every_sample_without_breaking_report_invariants() {
 #[test]
 fn lua_corpus_runs_every_sample_without_breaking_report_invariants() {
     let samples = [
-        ("amb-copy-loop.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-copy-loop.lua")),
-        ("amb-extra-return-values.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-extra-return-values.lua")),
-        ("amb-pcall-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-pcall-require.lua")),
-        ("amb-setmetatable-index.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/amb-setmetatable-index.lua")),
-        ("legacy-module-name.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/legacy-module-name.lua")),
-        ("legacy-module.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/legacy-module.lua")),
-        ("neg-call-result.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-call-result.lua")),
-        ("neg-computed-key.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-computed-key.lua")),
-        ("neg-field-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-field-in-function.lua")),
-        ("neg-global-assign.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-global-assign.lua")),
-        ("neg-method-wrap.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-method-wrap.lua")),
-        ("neg-no-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-no-return.lua")),
-        ("neg-rebound-M.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-rebound-M.lua")),
-        ("neg-rebound-m.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-rebound-m.lua")),
-        ("neg-require-concat.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-concat.lua")),
-        ("neg-require-dynamic.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-dynamic.lua")),
-        ("neg-require-unreturned.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-require-unreturned.lua")),
-        ("neg-return-conditional.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-conditional.lua")),
-        ("neg-return-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-in-function.lua")),
-        ("neg-return-ternary.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-return-ternary.lua")),
-        ("neg-shadowed-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-shadowed-require.lua")),
-        ("pos-local-func-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-func-field.lua")),
-        ("pos-local-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-local-return.lua")),
-        ("pos-multi-return.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-multi-return.lua")),
-        ("pos-require-string-call-chain.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-require-string-call-chain.lua")),
-        ("pos-return-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-field.lua")),
-        ("pos-return-local-field.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-local-field.lua")),
-        ("pos-return-module-after-assign.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-module-after-assign.lua")),
-        ("pos-return-parenthesized.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-parenthesized.lua")),
-        ("pos-return-require-dotted.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-dotted.lua")),
-        ("pos-return-require-longstr.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-longstr.lua")),
-        ("pos-return-require-nop.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require-nop.lua")),
-        ("pos-return-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-return-require.lua")),
-        ("pos-table-ctor-localvar.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-localvar.lua")),
-        ("pos-table-ctor-module.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-module.lua")),
-        ("pos-table-ctor-positional.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor-positional.lua")),
-        ("pos-table-ctor.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua")),
-        ("pos-table-field-alias-index.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-alias-index.lua")),
-        ("pos-table-field-local.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua")),
-        ("pos-table-field-require.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-require.lua")),
+        ("amb-copy-loop.lua", include_str!("../fixtures/reexports/lua/amb-copy-loop.lua")),
+        ("amb-extra-return-values.lua", include_str!("../fixtures/reexports/lua/amb-extra-return-values.lua")),
+        ("amb-pcall-require.lua", include_str!("../fixtures/reexports/lua/amb-pcall-require.lua")),
+        ("amb-setmetatable-index.lua", include_str!("../fixtures/reexports/lua/amb-setmetatable-index.lua")),
+        ("legacy-module-name.lua", include_str!("../fixtures/reexports/lua/legacy-module-name.lua")),
+        ("legacy-module.lua", include_str!("../fixtures/reexports/lua/legacy-module.lua")),
+        ("neg-call-result.lua", include_str!("../fixtures/reexports/lua/neg-call-result.lua")),
+        ("neg-computed-key.lua", include_str!("../fixtures/reexports/lua/neg-computed-key.lua")),
+        ("neg-field-in-function.lua", include_str!("../fixtures/reexports/lua/neg-field-in-function.lua")),
+        ("neg-global-assign.lua", include_str!("../fixtures/reexports/lua/neg-global-assign.lua")),
+        ("neg-method-wrap.lua", include_str!("../fixtures/reexports/lua/neg-method-wrap.lua")),
+        ("neg-no-return.lua", include_str!("../fixtures/reexports/lua/neg-no-return.lua")),
+        ("neg-rebound-M.lua", include_str!("../fixtures/reexports/lua/neg-rebound-M.lua")),
+        ("neg-rebound-m.lua", include_str!("../fixtures/reexports/lua/neg-rebound-m.lua")),
+        ("neg-require-concat.lua", include_str!("../fixtures/reexports/lua/neg-require-concat.lua")),
+        ("neg-require-dynamic.lua", include_str!("../fixtures/reexports/lua/neg-require-dynamic.lua")),
+        ("neg-require-unreturned.lua", include_str!("../fixtures/reexports/lua/neg-require-unreturned.lua")),
+        ("neg-return-conditional.lua", include_str!("../fixtures/reexports/lua/neg-return-conditional.lua")),
+        ("neg-return-in-function.lua", include_str!("../fixtures/reexports/lua/neg-return-in-function.lua")),
+        ("neg-return-ternary.lua", include_str!("../fixtures/reexports/lua/neg-return-ternary.lua")),
+        ("neg-shadowed-require.lua", include_str!("../fixtures/reexports/lua/neg-shadowed-require.lua")),
+        ("pos-local-func-field.lua", include_str!("../fixtures/reexports/lua/pos-local-func-field.lua")),
+        ("pos-local-return.lua", include_str!("../fixtures/reexports/lua/pos-local-return.lua")),
+        ("pos-multi-return.lua", include_str!("../fixtures/reexports/lua/pos-multi-return.lua")),
+        ("pos-require-string-call-chain.lua", include_str!("../fixtures/reexports/lua/pos-require-string-call-chain.lua")),
+        ("pos-return-field.lua", include_str!("../fixtures/reexports/lua/pos-return-field.lua")),
+        ("pos-return-local-field.lua", include_str!("../fixtures/reexports/lua/pos-return-local-field.lua")),
+        ("pos-return-module-after-assign.lua", include_str!("../fixtures/reexports/lua/pos-return-module-after-assign.lua")),
+        ("pos-return-parenthesized.lua", include_str!("../fixtures/reexports/lua/pos-return-parenthesized.lua")),
+        ("pos-return-require-dotted.lua", include_str!("../fixtures/reexports/lua/pos-return-require-dotted.lua")),
+        ("pos-return-require-longstr.lua", include_str!("../fixtures/reexports/lua/pos-return-require-longstr.lua")),
+        ("pos-return-require-nop.lua", include_str!("../fixtures/reexports/lua/pos-return-require-nop.lua")),
+        ("pos-return-require.lua", include_str!("../fixtures/reexports/lua/pos-return-require.lua")),
+        ("pos-table-ctor-localvar.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-localvar.lua")),
+        ("pos-table-ctor-module.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-module.lua")),
+        ("pos-table-ctor-positional.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor-positional.lua")),
+        ("pos-table-ctor.lua", include_str!("../fixtures/reexports/lua/pos-table-ctor.lua")),
+        ("pos-table-field-alias-index.lua", include_str!("../fixtures/reexports/lua/pos-table-field-alias-index.lua")),
+        ("pos-table-field-local.lua", include_str!("../fixtures/reexports/lua/pos-table-field-local.lua")),
+        ("pos-table-field-require.lua", include_str!("../fixtures/reexports/lua/pos-table-field-require.lua")),
     ];
     for (name, source) in samples {
         let s = snippet(name, source);
@@ -1015,7 +1015,7 @@ fn lua_corpus_runs_every_sample_without_breaking_report_invariants() {
 /// `pos-table-field-local.lua` with `inserted` placed before its final
 /// `return M`.
 fn field_local_with(inserted: &str) -> Snippet {
-    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-field-local.lua");
+    let sample = include_str!("../fixtures/reexports/lua/pos-table-field-local.lua");
     let (body, last) = sample.trim_end().rsplit_once('\n').expect("multi-line sample");
     assert_eq!(last, "return M");
     snippet("pos-table-field-local.lua", &format!("{body}\n{inserted}\n{last}\n"))
@@ -1111,9 +1111,9 @@ fn lua_unknown_key_write_withholds_every_field() {
         let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, site);
         assert!(report.entries.is_empty(), "{inserted}: {:?}", report.entries);
     }
-    let sample = snippet("neg-computed-key.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-computed-key.lua"));
+    let sample = snippet("neg-computed-key.lua", include_str!("../fixtures/reexports/lua/neg-computed-key.lua"));
     assert_limited_on_both_paths(&sample, ReexportLimitReason::ReboundBinding, "M[key] = m.x");
-    let in_function = snippet("neg-field-in-function.lua", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/neg-field-in-function.lua"));
+    let in_function = snippet("neg-field-in-function.lua", include_str!("../fixtures/reexports/lua/neg-field-in-function.lua"));
     let report = assert_limited_on_both_paths(&in_function, ReexportLimitReason::ReboundBinding, "M.foo = require(\"m\").foo");
     assert!(report.entries.is_empty());
 }
@@ -1192,7 +1192,7 @@ fn edited(sample: &str, from: &str, to: &str) -> String {
 
 #[test]
 fn lua_string_literal_constructor_key_names_the_field() {
-    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    let sample = include_str!("../fixtures/reexports/lua/pos-table-ctor.lua");
     for key in ["[\"x\"]", "['x']", "[ [[x]] ]", "[ [==[x]==] ]"] {
         let field = format!("{key} = m.x");
         let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", &field));
@@ -1212,7 +1212,7 @@ fn lua_string_literal_key_in_a_local_table_constructor_names_the_field() {
 
 #[test]
 fn lua_computed_constructor_key_withholds_every_field() {
-    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    let sample = include_str!("../fixtures/reexports/lua/pos-table-ctor.lua");
     let s = snippet("pos-table-ctor.lua", &edited(sample, "x = m.x", "[key] = m.x"));
     let report = assert_limited_on_both_paths(&s, ReexportLimitReason::ReboundBinding, "[key] = m.x");
     assert!(report.entries.is_empty(), "{:?}", report.entries);
@@ -1241,7 +1241,7 @@ fn lua_computed_key_in_an_unreturned_table_does_not_limit() {
 fn lua_equal_constructor_keys_share_one_field() {
     // Lua leaves constructor assignment order undefined for a repeated key, so
     // a repeat involving an import-derived value states no field at all.
-    let sample = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/lua/pos-table-ctor.lua");
+    let sample = include_str!("../fixtures/reexports/lua/pos-table-ctor.lua");
     for (fields, site) in [
         ("x = m.x, [\"x\"] = 1", "[\"x\"] = 1"),
         ("[\"x\"] = m.x, x = 1", "x = 1"),

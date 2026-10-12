@@ -13,7 +13,7 @@ use crate::reexports_support::{Snippet, snippet};
 macro_rules! sample {
     ($lang:literal, $file:literal) => {
         include_str!(concat!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/",
+            "../fixtures/reexports/",
             $lang,
             "/",
             $file
@@ -102,7 +102,7 @@ fn assert_indexed_marks(snip: &Snippet, marked_names: &[&str]) {
 #[test]
 fn swift_exported_import_is_a_wildcard_with_the_unstable_caveat() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-exported-import.swift"
+        "../fixtures/reexports/swift/pos-exported-import.swift"
     );
     let snip = snippet("a.swift", source);
     let report = snip.report();
@@ -127,7 +127,7 @@ fn swift_exported_import_is_a_wildcard_with_the_unstable_caveat() {
 #[test]
 fn swift_exported_submodule_import_keeps_the_dotted_source() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-exported-submodule.swift"
+        "../fixtures/reexports/swift/pos-exported-submodule.swift"
     );
     let snip = snippet("a.swift", source);
     let report = snip.report();
@@ -152,7 +152,7 @@ fn swift_exported_submodule_import_keeps_the_dotted_source() {
 #[test]
 fn swift_exported_selective_import_is_named() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-exported-selective.swift"
+        "../fixtures/reexports/swift/pos-exported-selective.swift"
     );
     let snip = snippet("a.swift", source);
     let report = snip.report();
@@ -195,7 +195,7 @@ fn swift_every_selective_kind_is_named_and_a_submodule_is_not() {
 #[test]
 fn swift_exported_with_extra_modifiers_and_odd_spacing_is_still_read() {
     let with_access = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-access-with-attr.swift"
+        "../fixtures/reexports/swift/pos-access-with-attr.swift"
     );
     let snip = snippet("a.swift", with_access);
     let report = snip.report();
@@ -204,7 +204,7 @@ fn swift_exported_with_extra_modifiers_and_odd_spacing_is_still_read() {
     assert_eq!(snip.text(&report.entries[0].statement_span), "@_exported public import Foo");
 
     let spacing = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-exported-attr-spacing.swift"
+        "../fixtures/reexports/swift/pos-exported-attr-spacing.swift"
     );
     let snip = snippet("a.swift", spacing);
     let report = snip.report();
@@ -220,37 +220,37 @@ fn swift_access_level_and_plain_imports_are_complete_negatives() {
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-public-import.swift"
+            "../fixtures/reexports/swift/pos-public-import.swift"
         ),
     );
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-access-imports.swift"
+            "../fixtures/reexports/swift/pos-access-imports.swift"
         ),
     );
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-selective-import.swift"
+            "../fixtures/reexports/swift/pos-selective-import.swift"
         ),
     );
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/neg-plain-import.swift"
+            "../fixtures/reexports/swift/neg-plain-import.swift"
         ),
     );
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/neg-typealias-public.swift"
+            "../fixtures/reexports/swift/neg-typealias-public.swift"
         ),
     );
     assert_complete_and_empty(
         "a.swift",
         include_str!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/neg-other-attr.swift"
+            "../fixtures/reexports/swift/neg-other-attr.swift"
         ),
     );
 }
@@ -264,7 +264,7 @@ fn swift_plain_and_access_imports_are_not_marked_forwarded() {
 #[test]
 fn swift_import_inside_if_is_conditional_and_after_endif_is_not() {
     let guarded = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/swift/pos-exported-ifconfig.swift"
+        "../fixtures/reexports/swift/pos-exported-ifconfig.swift"
     );
     let snip = snippet("a.swift", guarded);
     let report = snip.report();
@@ -351,7 +351,7 @@ fn swift_samples_corpus_holds_the_report_invariants() {
 #[test]
 fn scala_export_of_a_path_is_named_with_the_path_as_source() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-path.scala"
+        "../fixtures/reexports/scala/pos-export-path.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -376,7 +376,7 @@ fn scala_export_of_a_path_is_named_with_the_path_as_source() {
 #[test]
 fn scala_selectors_rename_and_split_the_given_and_star_wildcards() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-selectors.scala"
+        "../fixtures/reexports/scala/pos-export-selectors.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -445,7 +445,7 @@ fn scala_selectors_rename_and_split_the_given_and_star_wildcards() {
 #[test]
 fn scala_exclusion_lists_the_name_on_the_star_wildcard_and_makes_no_entry_for_it() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-exclusion.scala"
+        "../fixtures/reexports/scala/pos-export-exclusion.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -480,7 +480,7 @@ fn scala_exclusion_lists_the_name_on_the_star_wildcard_and_makes_no_entry_for_it
 #[test]
 fn scala_given_selectors_are_wildcards_with_the_givens_only_caveat() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-givens.scala"
+        "../fixtures/reexports/scala/pos-export-givens.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -507,7 +507,7 @@ fn scala_given_selectors_are_wildcards_with_the_givens_only_caveat() {
 #[test]
 fn scala_given_by_type_differs_from_a_plain_type_name_selector() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-given-vs-plain.scala"
+        "../fixtures/reexports/scala/pos-given-vs-plain.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -551,7 +551,7 @@ fn scala_backticked_name_loses_its_quotes_but_the_source_keeps_the_path_as_writt
 #[test]
 fn scala_object_member_export_needs_no_import_and_is_scoped_to_the_object() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-member-no-import.scala"
+        "../fixtures/reexports/scala/pos-export-member-no-import.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -591,7 +591,7 @@ fn scala_object_member_export_needs_no_import_and_is_scoped_to_the_object() {
 #[test]
 fn scala_scope_is_the_enclosing_package_and_object_chain() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-top-level.scala"
+        "../fixtures/reexports/scala/pos-export-top-level.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -609,7 +609,7 @@ fn scala_scope_is_the_enclosing_package_and_object_chain() {
 #[test]
 fn scala_enum_export_is_a_plain_wildcard_and_named() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-case.scala"
+        "../fixtures/reexports/scala/pos-export-case.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -639,7 +639,7 @@ fn scala_enum_export_is_a_plain_wildcard_and_named() {
 #[test]
 fn scala_export_through_an_imported_name_links_the_import() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-import-then-export.scala"
+        "../fixtures/reexports/scala/pos-import-then-export.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -688,7 +688,7 @@ fn scala_export_through_an_imported_name_links_the_import() {
 #[test]
 fn scala_export_through_a_name_a_member_definition_hides_does_not_link_the_import() {
     let control = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-import-then-export.scala"
+        "../fixtures/reexports/scala/pos-import-then-export.scala"
     );
     assert_indexed_marks(&snippet("a.scala", control), &["O", "Thing"]);
 
@@ -794,9 +794,9 @@ fn scala_export_links_only_an_import_in_the_same_or_an_enclosing_scope() {
 #[test]
 fn scala_imports_and_local_definitions_are_complete_negatives() {
     for source in [
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/neg-import-only.scala"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/neg-local-def.scala"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/scala2-import-contrast.scala"),
+        include_str!("../fixtures/reexports/scala/neg-import-only.scala"),
+        include_str!("../fixtures/reexports/scala/neg-local-def.scala"),
+        include_str!("../fixtures/reexports/scala/scala2-import-contrast.scala"),
     ] {
         assert_complete_and_empty("a.scala", source);
     }
@@ -805,7 +805,7 @@ fn scala_imports_and_local_definitions_are_complete_negatives() {
 #[test]
 fn scala_modified_or_annotated_export_is_a_parse_error_limit_and_never_a_public_entry() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-class-member.scala"
+        "../fixtures/reexports/scala/pos-export-class-member.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -820,7 +820,7 @@ fn scala_modified_or_annotated_export_is_a_parse_error_limit_and_never_a_public_
     assert!(report.entries.iter().all(|e| e.scope.as_deref() == Some("Facade")));
 
     let modifiers = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-modifiers.scala"
+        "../fixtures/reexports/scala/pos-export-modifiers.scala"
     );
     let snip = snippet("a.scala", modifiers);
     let report = snip.report();
@@ -832,7 +832,7 @@ fn scala_modified_or_annotated_export_is_a_parse_error_limit_and_never_a_public_
 #[test]
 fn scala_inline_export_is_limited_while_neighboring_exports_are_kept() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-given-vs-plain.scala"
+        "../fixtures/reexports/scala/pos-given-vs-plain.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -845,7 +845,7 @@ fn scala_inline_export_is_limited_while_neighboring_exports_are_kept() {
 #[test]
 fn scala_multi_clause_export_is_a_grammar_gap_with_no_entry() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/pos-export-multiple.scala"
+        "../fixtures/reexports/scala/pos-export-multiple.scala"
     );
     let snip = snippet("a.scala", source);
     let report = snip.report();
@@ -869,7 +869,7 @@ fn scala2_export_identifier_is_damage_on_a_trigger_and_limits() {
     // `export` as an identifier is Scala 2 code; the Scala 3 grammar reads it
     // as a damaged `export`, so coverage cannot claim a negative.
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/scala/scala2-export-ident.scala"
+        "../fixtures/reexports/scala/scala2-export-ident.scala"
     );
     let report = snippet("a.scala", source).report();
     assert!(report.entries.is_empty());
@@ -928,7 +928,7 @@ fn scala_samples_corpus_holds_the_report_invariants() {
 #[test]
 fn csharp_type_forwarded_to_is_named_with_the_type_as_written() {
     let source = include_str!(
-        "../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-typeforward.cs"
+        "../fixtures/reexports/cs/pos-typeforward.cs"
     );
     let snip = snippet("a.cs", source);
     let report = snip.report();
@@ -996,13 +996,13 @@ fn csharp_attribute_list_with_two_attributes_yields_two_entries() {
 #[test]
 fn csharp_every_using_form_is_a_complete_negative() {
     for source in [
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-using.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-using-alias-any.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-using-in-namespace.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-using-after-file-scoped.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/pos-file-scoped.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/neg-plain.cs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cs/neg-using-stmt.cs"),
+        include_str!("../fixtures/reexports/cs/pos-using.cs"),
+        include_str!("../fixtures/reexports/cs/pos-using-alias-any.cs"),
+        include_str!("../fixtures/reexports/cs/pos-using-in-namespace.cs"),
+        include_str!("../fixtures/reexports/cs/pos-using-after-file-scoped.cs"),
+        include_str!("../fixtures/reexports/cs/pos-file-scoped.cs"),
+        include_str!("../fixtures/reexports/cs/neg-plain.cs"),
+        include_str!("../fixtures/reexports/cs/neg-using-stmt.cs"),
     ] {
         assert_complete_and_empty("a.cs", source);
     }

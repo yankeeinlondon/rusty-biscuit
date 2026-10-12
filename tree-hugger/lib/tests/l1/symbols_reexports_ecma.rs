@@ -99,7 +99,7 @@ fn marked_imports(snip: &Snippet) -> Vec<(String, bool)> {
 
 #[test]
 fn js_named_reexport_is_one_syntax_entry() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-named.js");
+    let source = include_str!("../fixtures/reexports/js/pos-named.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -110,7 +110,7 @@ fn js_named_reexport_is_one_syntax_entry() {
 
 #[test]
 fn js_renamed_specifiers_each_get_an_entry_in_order() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-renamed.js");
+    let source = include_str!("../fixtures/reexports/js/pos-renamed.js");
     let snip = snippet("a.js", source);
     let statement = r#"export { a as b, c, d as e } from "m";"#;
     assert_eq!(
@@ -125,9 +125,9 @@ fn js_renamed_specifiers_each_get_an_entry_in_order() {
 
 #[test]
 fn js_default_is_read_from_the_anonymous_token_in_either_position() {
-    let as_default = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-as-default.js");
-    let bare = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-bare.js");
-    let as_name = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-as-name.js");
+    let as_default = include_str!("../fixtures/reexports/js/pos-default-as-default.js");
+    let bare = include_str!("../fixtures/reexports/js/pos-default-bare.js");
+    let as_name = include_str!("../fixtures/reexports/js/pos-default-as-name.js");
     assert_eq!(
         digests(&snippet("a.js", as_default)),
         [direct("Named/Syntax", "default", "x", "m", "x as default", r#"export { x as default } from "m";"#)]
@@ -144,7 +144,7 @@ fn js_default_is_read_from_the_anonymous_token_in_either_position() {
 
 #[test]
 fn js_string_literal_names_are_kept_without_their_quotes() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-string-name.js");
+    let source = include_str!("../fixtures/reexports/js/pos-string-name.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -154,9 +154,9 @@ fn js_string_literal_names_are_kept_without_their_quotes() {
 
 #[test]
 fn js_wildcard_and_namespace_stay_distinct() {
-    let wildcard = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-wildcard.js");
-    let namespace = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-namespace.js");
-    let default = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-namespace-default.js");
+    let wildcard = include_str!("../fixtures/reexports/js/pos-wildcard.js");
+    let namespace = include_str!("../fixtures/reexports/js/pos-namespace.js");
+    let default = include_str!("../fixtures/reexports/js/pos-namespace-default.js");
     assert_eq!(
         digests(&snippet("a.js", wildcard)),
         [direct("Wildcard/Syntax", "-", "-", "m", "*", r#"export * from "m";"#)]
@@ -173,7 +173,7 @@ fn js_wildcard_and_namespace_stay_distinct() {
 
 #[test]
 fn js_import_then_export_keeps_the_local_binding_and_marks_the_import() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-export.js");
+    let source = include_str!("../fixtures/reexports/js/pos-import-export.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -185,7 +185,7 @@ fn js_import_then_export_keeps_the_local_binding_and_marks_the_import() {
 
 #[test]
 fn js_default_and_namespace_imports_forward_through_export_clause_and_default() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-default-export.js");
+    let source = include_str!("../fixtures/reexports/js/pos-import-default-export.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -200,7 +200,7 @@ fn js_default_and_namespace_imports_forward_through_export_clause_and_default() 
 
 #[test]
 fn js_export_default_of_a_named_import_names_the_original() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-then-export-default-id.js");
+    let source = include_str!("../fixtures/reexports/js/pos-import-then-export-default-id.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -211,7 +211,7 @@ fn js_export_default_of_a_named_import_names_the_original() {
 
 #[test]
 fn js_local_exports_are_not_forwards() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/neg-local-export.js");
+    let source = include_str!("../fixtures/reexports/js/neg-local-export.js");
     let snip = snippet("a.js", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -228,7 +228,7 @@ fn js_import_that_is_not_exported_is_not_marked() {
 
 #[test]
 fn js_block_scoped_declaration_shadows_the_import_with_a_limit() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-import-shadow-block.js");
+    let source = include_str!("../fixtures/reexports/js/amb-import-shadow-block.js");
     let snip = snippet("a.js", source);
     assert!(digests(&snip).is_empty());
     assert_limited(&snip, &[(ReexportLimitReason::ShadowedGlobal, "a")]);
@@ -244,7 +244,7 @@ fn js_same_scope_declaration_shadows_the_import() {
 
 #[test]
 fn js_function_parameter_does_not_shadow_the_module_binding() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-import-rebound.js");
+    let source = include_str!("../fixtures/reexports/js/amb-import-rebound.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -254,7 +254,7 @@ fn js_function_parameter_does_not_shadow_the_module_binding() {
 
 #[test]
 fn js_mutable_copy_of_an_import_that_is_reassigned_is_limited_not_forwarded() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-import-rebound.js");
+    let source = include_str!("../fixtures/reexports/js/amb-import-rebound.js");
     let snip = snippet("a.js", source);
     assert_limited(&snip, &[(ReexportLimitReason::ReboundBinding, "b")]);
     let const_copy = snippet("a.js", "import { a } from \"m\";\nconst b = a;\nexport { b };\n");
@@ -277,7 +277,7 @@ fn js_reassigned_import_binding_is_limited_and_a_shadowed_assignment_is_not() {
 
 #[test]
 fn js_import_attributes_limit_with_parse_error_and_forward_nothing_from_the_statement() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-attributes.js");
+    let source = include_str!("../fixtures/reexports/js/pos-attributes.js");
     let snip = snippet("a.js", source);
     assert!(digests(&snip).is_empty());
     assert_limited(&snip, &[(ReexportLimitReason::ParseError, r#"export { a } from "m" with {"#)]);
@@ -333,7 +333,7 @@ fn jsx_syntax_does_not_disturb_the_extraction() {
 
 #[test]
 fn cjs_module_exports_of_require_is_a_declared_module_forward() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-module-exports.js");
+    let source = include_str!("../fixtures/reexports/js/pos-cjs-module-exports.js");
     let snip = snippet("a.cjs", source);
     assert_eq!(
         digests(&snip),
@@ -345,7 +345,7 @@ fn cjs_module_exports_of_require_is_a_declared_module_forward() {
 
 #[test]
 fn cjs_property_assignments_are_named_or_namespace_forwards() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-exports-prop.js");
+    let source = include_str!("../fixtures/reexports/js/pos-cjs-exports-prop.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -362,7 +362,7 @@ fn cjs_property_assignments_are_named_or_namespace_forwards() {
 fn cjs_destructured_and_object_literal_forms_resolve_through_require_bindings() {
     // The sample's second `module.exports = ..` replaces the first object and
     // detaches `exports`, so only its own members are the interface.
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-destructure.js");
+    let source = include_str!("../fixtures/reexports/js/pos-cjs-destructure.js");
     let snip = snippet("a.js", source);
     assert_eq!(
         digests(&snip),
@@ -405,7 +405,7 @@ fn cjs_forwards_of_an_es_import_link_the_import_record() {
 
 #[test]
 fn cjs_local_objects_and_the_bare_require_function_are_not_forwards() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/neg-cjs-local.js");
+    let source = include_str!("../fixtures/reexports/js/neg-cjs-local.js");
     let snip = snippet("a.js", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -415,7 +415,7 @@ fn cjs_local_objects_and_the_bare_require_function_are_not_forwards() {
 fn cjs_conditional_dynamic_and_merge_forms_are_limited_and_the_guarded_one_is_conditional() {
     // The sample's later unguarded `module.exports = ..` lines replace the
     // guarded forward on its first line, so that one is checked alone.
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-cjs-conditional.js");
+    let source = include_str!("../fixtures/reexports/js/amb-cjs-conditional.js");
     let guarded = snippet("a.js", source.lines().next().expect("first line"));
     assert_eq!(
         digests(&guarded),
@@ -446,7 +446,7 @@ fn cjs_conditional_dynamic_and_merge_forms_are_limited_and_the_guarded_one_is_co
 
 #[test]
 fn cjs_shadowed_require_module_and_exports_are_limited_not_forwarded() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-cjs-shadowed.js");
+    let source = include_str!("../fixtures/reexports/js/amb-cjs-shadowed.js");
     let snip = snippet("a.js", source);
     assert!(digests(&snip).is_empty());
     assert_limited(
@@ -575,7 +575,7 @@ fn cjs_property_forward_of_a_binding_hidden_by_a_nearer_declaration_is_not_forwa
 
 #[test]
 fn cjs_object_literal_member_hidden_by_a_block_local_is_withheld_and_other_sites_stay() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-destructure.js")
+    let source = include_str!("../fixtures/reexports/js/pos-cjs-destructure.js")
         .replacen("module.exports = { a };", "{ const a = 1; module.exports = { a }; }", 1)
         .replacen("module.exports = { b, c: b.c };", "{ const b = {}; module.exports = { b, c: b.c }; }", 1)
         // `exports` is detached once `module.exports` is replaced.
@@ -611,7 +611,7 @@ fn cjs_consumer_of_an_es_import_hidden_by_a_block_local_leaves_the_import_unmark
 
 #[test]
 fn cjs_reassigned_loader_and_interface_globals_are_not_proven() {
-    let fixture = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-module-exports.js");
+    let fixture = include_str!("../fixtures/reexports/js/pos-cjs-module-exports.js");
     let site = r#"module.exports = require("m")"#;
     for source in [format!("require = replacement;\n{fixture}"), format!("{fixture}require = replacement;\n")] {
         assert_withheld(&source, &[(ReexportLimitReason::ShadowedGlobal, site)]);
@@ -642,7 +642,7 @@ fn cjs_reassigned_loader_and_interface_globals_are_not_proven() {
 
 #[test]
 fn ts_export_equals_after_require_is_reassigned_is_not_proven() {
-    let fixture = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-require.ts");
+    let fixture = include_str!("../fixtures/reexports/ts/pos-export-equals-require.ts");
     let snip = snippet("a.ts", &format!("require = replacement;\n{fixture}"));
     assert!(digests(&snip).is_empty());
     assert_limited(&snip, &[(ReexportLimitReason::ShadowedGlobal, r#"require("m")"#)]);
@@ -845,10 +845,10 @@ fn ts_outer_namespace_local_hides_the_import_from_an_inner_namespace_export() {
 
 #[test]
 fn ts_shares_the_javascript_forms() {
-    let named = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-named.ts");
-    let renamed = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-renamed.ts");
-    let wildcard = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-wildcard.ts");
-    let namespace = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-namespace.ts");
+    let named = include_str!("../fixtures/reexports/ts/pos-named.ts");
+    let renamed = include_str!("../fixtures/reexports/ts/pos-renamed.ts");
+    let wildcard = include_str!("../fixtures/reexports/ts/pos-wildcard.ts");
+    let namespace = include_str!("../fixtures/reexports/ts/pos-namespace.ts");
     assert_eq!(digests(&snippet("a.ts", named)), [direct("Named/Syntax", "a", "a", "m", "a", r#"export { a } from "m";"#)]);
     assert_eq!(
         digests(&snippet("a.ts", renamed)),
@@ -863,7 +863,7 @@ fn ts_shares_the_javascript_forms() {
 
 #[test]
 fn ts_default_is_an_identifier_named_default() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-default-forms.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-default-forms.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -877,7 +877,7 @@ fn ts_default_is_an_identifier_named_default() {
 
 #[test]
 fn ts_import_then_export_links_the_import() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-import-export.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-import-export.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -888,7 +888,7 @@ fn ts_import_then_export_links_the_import() {
 
 #[test]
 fn ts_statement_type_qualifier_makes_every_specifier_type_only() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-statement.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-type-statement.ts");
     let snip = snippet("a.ts", source);
     let statement = r#"export type { T, U as V } from "m";"#;
     assert_eq!(
@@ -902,7 +902,7 @@ fn ts_statement_type_qualifier_makes_every_specifier_type_only() {
 
 #[test]
 fn ts_specifier_type_qualifier_is_per_specifier() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-specifier.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-type-specifier.ts");
     let snip = snippet("a.ts", source);
     let statement = r#"export { type T, U, type W as X } from "m";"#;
     assert_eq!(
@@ -917,7 +917,7 @@ fn ts_specifier_type_qualifier_is_per_specifier() {
 
 #[test]
 fn ts_type_only_imports_make_their_forwards_type_only() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-local-clause.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-type-local-clause.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -931,7 +931,7 @@ fn ts_type_only_imports_make_their_forwards_type_only() {
 
 #[test]
 fn ts_type_export_of_a_local_type_is_not_a_forward() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-local-export.ts");
+    let source = include_str!("../fixtures/reexports/ts/neg-local-export.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -939,8 +939,8 @@ fn ts_type_export_of_a_local_type_is_not_a_forward() {
 
 #[test]
 fn ts_export_type_star_forms_are_grammar_gaps() {
-    let wildcard = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-wildcard.ts");
-    let namespace = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-namespace.ts");
+    let wildcard = include_str!("../fixtures/reexports/ts/pos-type-wildcard.ts");
+    let namespace = include_str!("../fixtures/reexports/ts/pos-type-namespace.ts");
     for source in [wildcard, namespace] {
         let snip = snippet("a.ts", source);
         assert!(digests(&snip).is_empty());
@@ -950,8 +950,8 @@ fn ts_export_type_star_forms_are_grammar_gaps() {
 
 #[test]
 fn ts_export_equals_of_an_import_is_a_declared_module_forward() {
-    let require_import = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-import.ts");
-    let default_import = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-import2.ts");
+    let require_import = include_str!("../fixtures/reexports/ts/pos-export-equals-import.ts");
+    let default_import = include_str!("../fixtures/reexports/ts/pos-export-equals-import2.ts");
     let snip = snippet("a.ts", require_import);
     assert_eq!(
         digests(&snip),
@@ -968,7 +968,7 @@ fn ts_export_equals_of_an_import_is_a_declared_module_forward() {
 
 #[test]
 fn ts_export_equals_require_has_no_local_binding() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-require.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-export-equals-require.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -981,7 +981,7 @@ fn ts_export_equals_require_has_no_local_binding() {
 
 #[test]
 fn ts_export_equals_of_a_local_is_not_a_forward() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-export-equals-local.ts");
+    let source = include_str!("../fixtures/reexports/ts/neg-export-equals-local.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -989,7 +989,7 @@ fn ts_export_equals_of_a_local_is_not_a_forward() {
 
 #[test]
 fn ts_export_equals_of_a_member_or_object_is_limited() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/amb-export-equals-call.ts");
+    let source = include_str!("../fixtures/reexports/ts/amb-export-equals-call.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_limited(
@@ -1000,7 +1000,7 @@ fn ts_export_equals_of_a_member_or_object_is_limited() {
 
 #[test]
 fn ts_export_as_namespace_is_not_a_forward_but_the_following_export_equals_is() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-as-namespace.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-export-as-namespace.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -1036,7 +1036,7 @@ fn ts_export_import_alias_reports_only_when_the_head_is_an_import() {
 
 #[test]
 fn ts_export_import_of_a_local_namespace_is_not_a_forward() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-ns-alias-local.ts");
+    let source = include_str!("../fixtures/reexports/ts/neg-ns-alias-local.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -1044,7 +1044,7 @@ fn ts_export_import_of_a_local_namespace_is_not_a_forward() {
 
 #[test]
 fn ts_export_import_require_is_a_grammar_gap_and_other_lines_survive() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-import-alias.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-export-import-alias.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_limited(&snip, &[(ReexportLimitReason::GrammarGap, "")]);
@@ -1055,7 +1055,7 @@ fn ts_export_import_require_is_a_grammar_gap_and_other_lines_survive() {
 
 #[test]
 fn ts_namespace_and_ambient_module_bodies_carry_their_scope() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-ns-export-import.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-ns-export-import.ts");
     let snip = snippet("a.ts", source);
     assert_eq!(
         digests(&snip),
@@ -1070,7 +1070,7 @@ fn ts_namespace_and_ambient_module_bodies_carry_their_scope() {
 
 #[test]
 fn ts_declaration_files_report_their_forwards_and_not_local_exports() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-dts-reexport.d.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-dts-reexport.d.ts");
     let snip = snippet("a.d.ts", source);
     assert_eq!(
         digests(&snip),
@@ -1083,7 +1083,7 @@ fn ts_declaration_files_report_their_forwards_and_not_local_exports() {
 
 #[test]
 fn ts_decorated_exports_are_not_forwards() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-decorator-export.ts");
+    let source = include_str!("../fixtures/reexports/ts/pos-decorator-export.ts");
     let snip = snippet("a.ts", source);
     assert!(digests(&snip).is_empty());
     assert_complete(&snip.report());
@@ -1146,28 +1146,28 @@ fn assert_report_invariants(snip: &Snippet, name: &str) {
 #[test]
 fn js_corpus_satisfies_the_report_invariants() {
     let files: [(&str, &str); 22] = [
-        ("amb-cjs-conditional.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-cjs-conditional.js")),
-        ("amb-cjs-shadowed.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-cjs-shadowed.js")),
-        ("amb-import-rebound.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-import-rebound.js")),
-        ("amb-import-shadow-block.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/amb-import-shadow-block.js")),
-        ("neg-cjs-local.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/neg-cjs-local.js")),
-        ("neg-local-export.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/neg-local-export.js")),
-        ("pos-attributes.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-attributes.js")),
-        ("pos-cjs-destructure.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-destructure.js")),
-        ("pos-cjs-exports-prop.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-exports-prop.js")),
-        ("pos-cjs-module-exports.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-cjs-module-exports.js")),
-        ("pos-default-as-default.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-as-default.js")),
-        ("pos-default-as-name.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-as-name.js")),
-        ("pos-default-bare.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-default-bare.js")),
-        ("pos-import-default-export.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-default-export.js")),
-        ("pos-import-export.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-export.js")),
-        ("pos-import-then-export-default-id.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-import-then-export-default-id.js")),
-        ("pos-named.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-named.js")),
-        ("pos-namespace-default.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-namespace-default.js")),
-        ("pos-namespace.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-namespace.js")),
-        ("pos-renamed.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-renamed.js")),
-        ("pos-string-name.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-string-name.js")),
-        ("pos-wildcard.js", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/js/pos-wildcard.js")),
+        ("amb-cjs-conditional.js", include_str!("../fixtures/reexports/js/amb-cjs-conditional.js")),
+        ("amb-cjs-shadowed.js", include_str!("../fixtures/reexports/js/amb-cjs-shadowed.js")),
+        ("amb-import-rebound.js", include_str!("../fixtures/reexports/js/amb-import-rebound.js")),
+        ("amb-import-shadow-block.js", include_str!("../fixtures/reexports/js/amb-import-shadow-block.js")),
+        ("neg-cjs-local.js", include_str!("../fixtures/reexports/js/neg-cjs-local.js")),
+        ("neg-local-export.js", include_str!("../fixtures/reexports/js/neg-local-export.js")),
+        ("pos-attributes.js", include_str!("../fixtures/reexports/js/pos-attributes.js")),
+        ("pos-cjs-destructure.js", include_str!("../fixtures/reexports/js/pos-cjs-destructure.js")),
+        ("pos-cjs-exports-prop.js", include_str!("../fixtures/reexports/js/pos-cjs-exports-prop.js")),
+        ("pos-cjs-module-exports.js", include_str!("../fixtures/reexports/js/pos-cjs-module-exports.js")),
+        ("pos-default-as-default.js", include_str!("../fixtures/reexports/js/pos-default-as-default.js")),
+        ("pos-default-as-name.js", include_str!("../fixtures/reexports/js/pos-default-as-name.js")),
+        ("pos-default-bare.js", include_str!("../fixtures/reexports/js/pos-default-bare.js")),
+        ("pos-import-default-export.js", include_str!("../fixtures/reexports/js/pos-import-default-export.js")),
+        ("pos-import-export.js", include_str!("../fixtures/reexports/js/pos-import-export.js")),
+        ("pos-import-then-export-default-id.js", include_str!("../fixtures/reexports/js/pos-import-then-export-default-id.js")),
+        ("pos-named.js", include_str!("../fixtures/reexports/js/pos-named.js")),
+        ("pos-namespace-default.js", include_str!("../fixtures/reexports/js/pos-namespace-default.js")),
+        ("pos-namespace.js", include_str!("../fixtures/reexports/js/pos-namespace.js")),
+        ("pos-renamed.js", include_str!("../fixtures/reexports/js/pos-renamed.js")),
+        ("pos-string-name.js", include_str!("../fixtures/reexports/js/pos-string-name.js")),
+        ("pos-wildcard.js", include_str!("../fixtures/reexports/js/pos-wildcard.js")),
     ];
     for (name, source) in files {
         assert_report_invariants(&snippet(name, source), name);
@@ -1177,29 +1177,29 @@ fn js_corpus_satisfies_the_report_invariants() {
 #[test]
 fn ts_corpus_satisfies_the_report_invariants() {
     let files: [(&str, &str); 23] = [
-        ("amb-export-equals-call.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/amb-export-equals-call.ts")),
-        ("neg-export-equals-local.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-export-equals-local.ts")),
-        ("neg-local-export.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-local-export.ts")),
-        ("neg-ns-alias-local.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/neg-ns-alias-local.ts")),
-        ("pos-decorator-export.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-decorator-export.ts")),
-        ("pos-default-forms.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-default-forms.ts")),
-        ("pos-dts-reexport.d.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-dts-reexport.d.ts")),
-        ("pos-export-as-namespace.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-as-namespace.ts")),
-        ("pos-export-equals-import.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-import.ts")),
-        ("pos-export-equals-import2.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-import2.ts")),
-        ("pos-export-equals-require.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-equals-require.ts")),
-        ("pos-export-import-alias.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-export-import-alias.ts")),
-        ("pos-import-export.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-import-export.ts")),
-        ("pos-named.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-named.ts")),
-        ("pos-namespace.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-namespace.ts")),
-        ("pos-ns-export-import.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-ns-export-import.ts")),
-        ("pos-renamed.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-renamed.ts")),
-        ("pos-type-local-clause.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-local-clause.ts")),
-        ("pos-type-namespace.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-namespace.ts")),
-        ("pos-type-specifier.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-specifier.ts")),
-        ("pos-type-statement.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-statement.ts")),
-        ("pos-type-wildcard.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-type-wildcard.ts")),
-        ("pos-wildcard.ts", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/ts/pos-wildcard.ts")),
+        ("amb-export-equals-call.ts", include_str!("../fixtures/reexports/ts/amb-export-equals-call.ts")),
+        ("neg-export-equals-local.ts", include_str!("../fixtures/reexports/ts/neg-export-equals-local.ts")),
+        ("neg-local-export.ts", include_str!("../fixtures/reexports/ts/neg-local-export.ts")),
+        ("neg-ns-alias-local.ts", include_str!("../fixtures/reexports/ts/neg-ns-alias-local.ts")),
+        ("pos-decorator-export.ts", include_str!("../fixtures/reexports/ts/pos-decorator-export.ts")),
+        ("pos-default-forms.ts", include_str!("../fixtures/reexports/ts/pos-default-forms.ts")),
+        ("pos-dts-reexport.d.ts", include_str!("../fixtures/reexports/ts/pos-dts-reexport.d.ts")),
+        ("pos-export-as-namespace.ts", include_str!("../fixtures/reexports/ts/pos-export-as-namespace.ts")),
+        ("pos-export-equals-import.ts", include_str!("../fixtures/reexports/ts/pos-export-equals-import.ts")),
+        ("pos-export-equals-import2.ts", include_str!("../fixtures/reexports/ts/pos-export-equals-import2.ts")),
+        ("pos-export-equals-require.ts", include_str!("../fixtures/reexports/ts/pos-export-equals-require.ts")),
+        ("pos-export-import-alias.ts", include_str!("../fixtures/reexports/ts/pos-export-import-alias.ts")),
+        ("pos-import-export.ts", include_str!("../fixtures/reexports/ts/pos-import-export.ts")),
+        ("pos-named.ts", include_str!("../fixtures/reexports/ts/pos-named.ts")),
+        ("pos-namespace.ts", include_str!("../fixtures/reexports/ts/pos-namespace.ts")),
+        ("pos-ns-export-import.ts", include_str!("../fixtures/reexports/ts/pos-ns-export-import.ts")),
+        ("pos-renamed.ts", include_str!("../fixtures/reexports/ts/pos-renamed.ts")),
+        ("pos-type-local-clause.ts", include_str!("../fixtures/reexports/ts/pos-type-local-clause.ts")),
+        ("pos-type-namespace.ts", include_str!("../fixtures/reexports/ts/pos-type-namespace.ts")),
+        ("pos-type-specifier.ts", include_str!("../fixtures/reexports/ts/pos-type-specifier.ts")),
+        ("pos-type-statement.ts", include_str!("../fixtures/reexports/ts/pos-type-statement.ts")),
+        ("pos-type-wildcard.ts", include_str!("../fixtures/reexports/ts/pos-type-wildcard.ts")),
+        ("pos-wildcard.ts", include_str!("../fixtures/reexports/ts/pos-wildcard.ts")),
     ];
     for (name, source) in files {
         assert_report_invariants(&snippet(name, source), name);

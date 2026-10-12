@@ -91,7 +91,7 @@ fn forwarded_imports(snip: &Snippet) -> Vec<String> {
 
 #[test]
 fn a_plain_pub_use_is_one_named_entry() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-simple.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-simple.rs");
     let snip = snippet("a.rs", source);
     let report = snip.report();
     assert_complete(&report);
@@ -101,7 +101,7 @@ fn a_plain_pub_use_is_one_named_entry() {
 
 #[test]
 fn an_alias_renames_the_exported_name() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-alias.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-alias.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     assert_eq!(digests(&snip), vec![named("C", "B", "a", "C", "a::B as C", "pub use a::B as C;")]);
@@ -128,7 +128,7 @@ fn a_single_identifier_path_has_no_source() {
 
 #[test]
 fn a_group_yields_one_entry_per_leaf_sharing_the_statement() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-grouped.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-grouped.rs");
     let snip = snippet("a.rs", source);
     let statement = "pub use a::{B, C as D, self, e::F};";
     assert_complete(&snip.report());
@@ -174,7 +174,7 @@ fn a_pathless_group_has_no_source() {
 
 #[test]
 fn self_alone_and_renamed_self_forward_the_group_path() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-self-only.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-self-only.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     assert_eq!(
@@ -190,7 +190,7 @@ fn self_alone_and_renamed_self_forward_the_group_path() {
 
 #[test]
 fn globs_are_wildcards_with_the_written_source() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-glob.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-glob.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     assert_eq!(
@@ -221,7 +221,7 @@ fn a_glob_inside_a_group_and_a_rooted_glob() {
 
 #[test]
 fn leading_path_roots_stay_in_the_source() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-use-leading.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-use-leading.rs");
     let snip = snippet("a.rs", source);
     assert_eq!(
         digests(&snip),
@@ -247,7 +247,7 @@ fn a_rooted_external_path_keeps_its_leading_colons() {
 
 #[test]
 fn restricted_visibility_keeps_its_written_text() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-restricted.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-restricted.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     let at = |restriction: &str, name: &str, statement: &str| {
@@ -281,14 +281,14 @@ fn restricted_whitespace_is_normalized() {
 
 #[test]
 fn private_uses_and_pub_items_are_negatives() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-private-use.rs");
+    let source = include_str!("../fixtures/reexports/rust/neg-private-use.rs");
     let snip = snippet("a.rs", source);
     let report = snip.report();
     assert_complete(&report);
     assert!(report.entries.is_empty());
     assert!(forwarded_imports(&snip).is_empty());
 
-    let items = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-pub-local.rs");
+    let items = include_str!("../fixtures/reexports/rust/neg-pub-local.rs");
     let snip = snippet("a.rs", items);
     let report = snip.report();
     assert_complete(&report);
@@ -297,7 +297,7 @@ fn private_uses_and_pub_items_are_negatives() {
 
 #[test]
 fn pub_extern_crate_is_a_namespace_entry() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-extern-crate.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-extern-crate.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     let entries = digests(&snip);
@@ -324,7 +324,7 @@ fn restricted_extern_crate_keeps_its_restriction_and_private_is_ignored() {
 
 #[test]
 fn cfg_and_cfg_attr_attributes_make_an_entry_conditional() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-cfg.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-cfg.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     let conditional = |name: &str, statement: &str| {
@@ -368,7 +368,7 @@ fn a_cfg_on_a_module_or_the_file_conditions_what_it_holds() {
 
 #[test]
 fn nested_modules_qualify_the_scope() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-nested-mod.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-nested-mod.rs");
     let snip = snippet("a.rs", source);
     assert_complete(&snip.report());
     assert_eq!(
@@ -398,8 +398,8 @@ fn a_restricted_forward_in_a_module_matches_the_documented_example() {
 #[test]
 fn uses_inside_function_bodies_and_blocks_are_not_reported() {
     for sample in [
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-in-fn.rs"),
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-in-fn-pub.rs"),
+        include_str!("../fixtures/reexports/rust/neg-in-fn.rs"),
+        include_str!("../fixtures/reexports/rust/pos-in-fn-pub.rs"),
     ] {
         let snip = snippet("a.rs", sample);
         let report = snip.report();
@@ -417,7 +417,7 @@ fn uses_inside_function_bodies_and_blocks_are_not_reported() {
 
 #[test]
 fn a_macro_rules_body_with_pub_then_use_limits_coverage() {
-    let source = include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-macro.rs");
+    let source = include_str!("../fixtures/reexports/rust/pos-macro.rs");
     let snip = snippet("a.rs", source);
     let report = snip.report();
     assert_eq!(report.coverage.state, ReexportCoverageState::Limited);
@@ -531,21 +531,21 @@ fn query_and_direct_reports_agree() {
 #[test]
 fn every_audit_sample_extracts_in_order_without_panicking() {
     let samples: [(&str, &str); 15] = [
-        ("neg-in-fn", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-in-fn.rs")),
-        ("neg-private-use", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-private-use.rs")),
-        ("neg-pub-local", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/neg-pub-local.rs")),
-        ("pos-alias", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-alias.rs")),
-        ("pos-cfg", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-cfg.rs")),
-        ("pos-extern-crate", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-extern-crate.rs")),
-        ("pos-glob", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-glob.rs")),
-        ("pos-grouped", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-grouped.rs")),
-        ("pos-in-fn-pub", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-in-fn-pub.rs")),
-        ("pos-macro", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-macro.rs")),
-        ("pos-nested-mod", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-nested-mod.rs")),
-        ("pos-restricted", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-restricted.rs")),
-        ("pos-self-only", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-self-only.rs")),
-        ("pos-simple", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-simple.rs")),
-        ("pos-use-leading", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/rust/pos-use-leading.rs")),
+        ("neg-in-fn", include_str!("../fixtures/reexports/rust/neg-in-fn.rs")),
+        ("neg-private-use", include_str!("../fixtures/reexports/rust/neg-private-use.rs")),
+        ("neg-pub-local", include_str!("../fixtures/reexports/rust/neg-pub-local.rs")),
+        ("pos-alias", include_str!("../fixtures/reexports/rust/pos-alias.rs")),
+        ("pos-cfg", include_str!("../fixtures/reexports/rust/pos-cfg.rs")),
+        ("pos-extern-crate", include_str!("../fixtures/reexports/rust/pos-extern-crate.rs")),
+        ("pos-glob", include_str!("../fixtures/reexports/rust/pos-glob.rs")),
+        ("pos-grouped", include_str!("../fixtures/reexports/rust/pos-grouped.rs")),
+        ("pos-in-fn-pub", include_str!("../fixtures/reexports/rust/pos-in-fn-pub.rs")),
+        ("pos-macro", include_str!("../fixtures/reexports/rust/pos-macro.rs")),
+        ("pos-nested-mod", include_str!("../fixtures/reexports/rust/pos-nested-mod.rs")),
+        ("pos-restricted", include_str!("../fixtures/reexports/rust/pos-restricted.rs")),
+        ("pos-self-only", include_str!("../fixtures/reexports/rust/pos-self-only.rs")),
+        ("pos-simple", include_str!("../fixtures/reexports/rust/pos-simple.rs")),
+        ("pos-use-leading", include_str!("../fixtures/reexports/rust/pos-use-leading.rs")),
     ];
     for (name, source) in samples {
         let snip = snippet("a.rs", source);

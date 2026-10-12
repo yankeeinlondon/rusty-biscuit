@@ -4,8 +4,7 @@
 //! star imports) and `exposed` entries (every public import of a module with
 //! no `__all__`). Perl reports names in literal Exporter lists that the same
 //! package binds through `use Module qw(..)`. The audit samples under
-//! `features/2026-10-11-reexports-all-languages/audit/samples/` are the
-//! fixtures.
+//! `tests/fixtures/reexports/` are the fixtures.
 
 use tree_hugger::{
     ReexportCoverageState as State, ReexportEntry, ReexportEvidence as Ev, ReexportForm as Form,
@@ -19,7 +18,7 @@ use crate::reexports_support::{Snippet, snippet};
 macro_rules! sample {
     ($lang:literal, $file:literal) => {
         include_str!(concat!(
-            "../../../features/2026-10-11-reexports-all-languages/audit/samples/",
+            "../fixtures/reexports/",
             $lang,
             "/",
             $file

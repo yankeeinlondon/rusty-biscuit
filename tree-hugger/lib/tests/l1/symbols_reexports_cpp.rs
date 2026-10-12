@@ -169,7 +169,7 @@ fn extern_c_blocks_stay_namespace_scope() {
 
 #[test]
 fn the_extern_c_include_sample_forwards_nothing() {
-    let s = snippet("pos-extern-c-block.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-extern-c-block.hpp"));
+    let s = snippet("pos-extern-c-block.hpp", include_str!("../fixtures/reexports/cpp/pos-extern-c-block.hpp"));
     let report = s.report();
     assert_complete(&report);
     assert!(report.entries.is_empty());
@@ -179,7 +179,7 @@ fn the_extern_c_include_sample_forwards_nothing() {
 fn the_using_declaration_sample_reports_the_clean_forms_and_limits_the_damaged_ones() {
     let s = snippet(
         "pos-using-decl.hpp",
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-using-decl.hpp"),
+        include_str!("../fixtures/reexports/cpp/pos-using-decl.hpp"),
     );
     let report = s.report();
     assert_eq!(report.coverage.state, ReexportCoverageState::Limited);
@@ -199,7 +199,7 @@ fn the_using_declaration_sample_reports_the_clean_forms_and_limits_the_damaged_o
 fn the_using_directive_sample_reports_directives_only() {
     let s = snippet(
         "pos-using-directive.hpp",
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-using-directive.hpp"),
+        include_str!("../fixtures/reexports/cpp/pos-using-directive.hpp"),
     );
     let report = s.report();
     assert_complete(&report);
@@ -216,7 +216,7 @@ fn the_using_directive_sample_reports_directives_only() {
 
 #[test]
 fn type_aliases_are_not_forwards() {
-    let s = snippet("pos-alias.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-alias.hpp"));
+    let s = snippet("pos-alias.hpp", include_str!("../fixtures/reexports/cpp/pos-alias.hpp"));
     let report = s.report();
     assert_complete(&report);
     assert!(report.entries.is_empty());
@@ -237,7 +237,7 @@ fn class_member_using_and_function_body_using_are_not_forwards() {
 fn the_class_member_sample_gives_no_entries() {
     let s = snippet(
         "pos-class-using.hpp",
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-class-using.hpp"),
+        include_str!("../fixtures/reexports/cpp/pos-class-using.hpp"),
     );
     let report = s.report();
     assert!(report.entries.is_empty());
@@ -248,8 +248,8 @@ fn the_class_member_sample_gives_no_entries() {
 #[test]
 fn includes_and_plain_code_are_complete_negatives() {
     for (name, text) in [
-        ("pos-include.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-include.hpp")),
-        ("neg-plain.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/neg-plain.cpp")),
+        ("pos-include.hpp", include_str!("../fixtures/reexports/cpp/pos-include.hpp")),
+        ("neg-plain.cpp", include_str!("../fixtures/reexports/cpp/neg-plain.cpp")),
     ] {
         let s = snippet(name, text);
         let report = s.report();
@@ -262,7 +262,7 @@ fn includes_and_plain_code_are_complete_negatives() {
 fn the_grouped_using_sample_is_a_parse_error_not_a_complete_negative() {
     let s = snippet(
         "neg-using-grouped-invalid.hpp",
-        include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/neg-using-grouped-invalid.hpp"),
+        include_str!("../fixtures/reexports/cpp/neg-using-grouped-invalid.hpp"),
     );
     let report = s.report();
     assert!(report.entries.is_empty());
@@ -321,10 +321,10 @@ fn damage_directly_after_using_is_limited() {
 fn module_samples_are_limited_over_the_whole_file() {
     for name in ["pos-export-block.cppm", "pos-export-import.cppm", "pos-module-decls.cppm", "pos-impl-unit.cpp"] {
         let text = match name {
-            "pos-export-block.cppm" => include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-export-block.cppm"),
-            "pos-export-import.cppm" => include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-export-import.cppm"),
-            "pos-module-decls.cppm" => include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-module-decls.cppm"),
-            _ => include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-impl-unit.cpp"),
+            "pos-export-block.cppm" => include_str!("../fixtures/reexports/cpp/pos-export-block.cppm"),
+            "pos-export-import.cppm" => include_str!("../fixtures/reexports/cpp/pos-export-import.cppm"),
+            "pos-module-decls.cppm" => include_str!("../fixtures/reexports/cpp/pos-module-decls.cppm"),
+            _ => include_str!("../fixtures/reexports/cpp/pos-impl-unit.cpp"),
         };
         let s = snippet(&name.replace(".cppm", ".cpp"), text);
         let report = s.report();
@@ -403,18 +403,18 @@ fn the_query_and_direct_paths_agree() {
 #[test]
 fn every_cpp_audit_sample_extracts_with_ordered_unique_output() {
     let samples = [
-        ("neg-plain.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/neg-plain.cpp")),
-        ("neg-using-grouped-invalid.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/neg-using-grouped-invalid.hpp")),
-        ("pos-alias.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-alias.hpp")),
-        ("pos-class-using.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-class-using.hpp")),
-        ("pos-export-block.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-export-block.cppm")),
-        ("pos-export-import.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-export-import.cppm")),
-        ("pos-extern-c-block.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-extern-c-block.hpp")),
-        ("pos-impl-unit.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-impl-unit.cpp")),
-        ("pos-include.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-include.hpp")),
-        ("pos-module-decls.cpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-module-decls.cppm")),
-        ("pos-using-decl.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-using-decl.hpp")),
-        ("pos-using-directive.hpp", include_str!("../../../features/2026-10-11-reexports-all-languages/audit/samples/cpp/pos-using-directive.hpp")),
+        ("neg-plain.cpp", include_str!("../fixtures/reexports/cpp/neg-plain.cpp")),
+        ("neg-using-grouped-invalid.hpp", include_str!("../fixtures/reexports/cpp/neg-using-grouped-invalid.hpp")),
+        ("pos-alias.hpp", include_str!("../fixtures/reexports/cpp/pos-alias.hpp")),
+        ("pos-class-using.hpp", include_str!("../fixtures/reexports/cpp/pos-class-using.hpp")),
+        ("pos-export-block.cpp", include_str!("../fixtures/reexports/cpp/pos-export-block.cppm")),
+        ("pos-export-import.cpp", include_str!("../fixtures/reexports/cpp/pos-export-import.cppm")),
+        ("pos-extern-c-block.hpp", include_str!("../fixtures/reexports/cpp/pos-extern-c-block.hpp")),
+        ("pos-impl-unit.cpp", include_str!("../fixtures/reexports/cpp/pos-impl-unit.cpp")),
+        ("pos-include.hpp", include_str!("../fixtures/reexports/cpp/pos-include.hpp")),
+        ("pos-module-decls.cpp", include_str!("../fixtures/reexports/cpp/pos-module-decls.cppm")),
+        ("pos-using-decl.hpp", include_str!("../fixtures/reexports/cpp/pos-using-decl.hpp")),
+        ("pos-using-directive.hpp", include_str!("../fixtures/reexports/cpp/pos-using-directive.hpp")),
     ];
     for (name, text) in samples {
         let report = snippet(name, text).report();
