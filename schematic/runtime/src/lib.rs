@@ -15,11 +15,16 @@
 //! - the managed [`Client`], built through [`ClientBuilder`] from an
 //!   [`ApiDefinition`], optionally sharing a [`SharedTransport`];
 //! - programmatic [`Credential`]s and the API's [`AuthConfig`], per-call
-//!   [`CallOptions`], and the shared [`Deadline`].
+//!   [`CallOptions`], and the shared [`Deadline`];
+//! - the [`OriginPolicy`] that governs redirects and followed links;
+//! - [`Client::send_raw`] and its [`RawResponse`], for a reply without
+//!   decoding;
+//! - the two response [`hooks`], gated by [`SupportsHooks`].
 //!
 //! ## The governing rule
 //!
-//! A send returns `Ok(Response)` if and only if an HTTP response head (status
+//! A send returns `Ok` (a [`Response`], or a [`RawResponse`] from
+//! [`Client::send_raw`]) if and only if an HTTP response head (status
 //! line and headers) was received; any HTTP status, including an undecodable
 //! or cut-off body, is reported inside the envelope with its raw bytes. A send
 //! returns `Err(TransportError)` only when no head arrived.
@@ -43,20 +48,26 @@ pub mod deadline;
 mod encode;
 pub mod endpoint;
 pub mod error;
+pub mod hooks;
 pub mod meta;
 pub mod options;
+pub mod origin;
+pub mod raw;
 pub mod redact;
 pub mod response;
 pub mod transport;
 
-pub use client::{ApiDefinition, Client, ClientBuilder, DEFAULT_TIMEOUT};
+pub use client::{ApiDefinition, Client, ClientBuilder, DEFAULT_TIMEOUT, MAX_REDIRECTS};
 pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
 pub use deadline::Deadline;
 pub use endpoint::{Api, EndpointSpec, ErrorBody, FormPart, RequestBody, RequestParts};
 pub use error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
+pub use hooks::{HookError, HookStage, SupportsHooks};
 pub use meta::{AuthMethod, RequestMeta, ResponseMeta};
 pub use options::CallOptions;
+pub use origin::OriginPolicy;
+pub use raw::{RawCompletion, RawJsonError, RawResponse};
 pub use redact::{RedactedUrl, SecretNames};
 pub use transport::{SharedTransport, SharedTransportBuilder};
 pub use response::{

@@ -1,7 +1,8 @@
 //! Client and shared-transport construction against local mocks: base URL
 //! validation, timeouts, user agent and default headers, transport ownership
-//! of connection options, connection reuse, proxies, TLS roots, and the HTTP
-//! library never following redirects (R17–R19).
+//! of connection options, connection reuse, proxies, and TLS roots
+//! (R17, R18). That no constructor lets the HTTP library follow a redirect
+//! (R19) is proved in `redirects.rs`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -475,35 +476,4 @@ async fn accepting_invalid_certificates_reaches_a_self_signed_server_that_the_de
     let transport = SharedTransport::builder().danger_accept_invalid_certificates().build().expect("transport");
     let attached = builder(definition(), &url).transport(&transport).build().expect("client");
     assert_eq!(send_item(&attached).await, Ok(200));
-}
-
-async fn redirect_pair() -> (MockServer, MockServer) {
-    let landing = MockServer::start().await;
-    Mock::given(path("/landing"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"id":2}"#, "application/json"))
-        .mount(&landing)
-        .await;
-    let origin = MockServer::start().await;
-    Mock::given(path("/item"))
-        .respond_with(ResponseTemplate::new(302).append_header("Location", format!("{}/landing", landing.uri())))
-        .mount(&origin)
-        .await;
-    (origin, landing)
-}
-
-#[tokio::test]
-async fn a_redirect_is_returned_to_the_caller_and_never_followed() {
-    let (origin, landing) = redirect_pair().await;
-    let transport = SharedTransport::builder().build().expect("transport");
-    let standalone = plain_client(&origin.uri());
-    let attached = builder(definition(), &origin.uri()).transport(&transport).build().expect("client");
-
-    for client in [&standalone, &attached] {
-        let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head arrived");
-        assert_eq!(response.meta.status, 302);
-        assert_eq!(response.meta.headers["location"], format!("{}/landing", landing.uri()));
-    }
-
-    assert_eq!(origin.received_requests().await.expect("recording").len(), 2);
-    assert!(landing.received_requests().await.expect("recording").is_empty(), "the redirect target was never contacted");
 }

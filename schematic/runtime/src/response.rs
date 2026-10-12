@@ -199,8 +199,6 @@ pub enum RedirectRefusal {
     /// The target uses a scheme other than HTTP(S) or carries user
     /// information.
     UnsafeLocation,
-    /// The request body cannot be replayed for a 307 or 308 redirect.
-    BodyNotReplayable,
 }
 
 impl fmt::Display for RedirectRefusal {
@@ -211,7 +209,6 @@ impl fmt::Display for RedirectRefusal {
             Self::MissingLocation => "no Location header",
             Self::InvalidLocation => "Location is not a valid URL",
             Self::UnsafeLocation => "Location is not a plain HTTP(S) URL",
-            Self::BodyNotReplayable => "request body cannot be replayed",
         })
     }
 }

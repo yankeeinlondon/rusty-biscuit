@@ -1,10 +1,20 @@
-//! The managed client and the typed send.
+//! The managed client, the typed send, and the raw send.
 //!
 //! A [`Client`] is built for one API marker `A` and sends only requests whose
 //! [`EndpointSpec::Api`] is `A`. Generated code supplies the API's
 //! [`ApiDefinition`]; callers adjust it through [`ClientBuilder`] but cannot
 //! inject an HTTP client, so every send goes through the runtime's credential
-//! resolution, expiration, and redaction.
+//! resolution, origin policy, expiration, and redaction.
+//!
+//! ## Redirects
+//!
+//! The HTTP client never follows a redirect; every send ([`Client::send`] and
+//! [`Client::send_raw`], through one shared execution core) follows them
+//! itself, one hop at a time, so that the [`OriginPolicy`] is checked at every
+//! hop. Each hop is rebuilt from the request as the application assembled it,
+//! before any credential, and the resolved credential is attached only when
+//! the policy allows it for that hop's target. Every hop shares the send's
+//! single expiration.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -12,25 +22,35 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http::header::{CONTENT_TYPE, COOKIE, USER_AGENT};
-use http::{HeaderMap, HeaderName, HeaderValue, Method};
+use http::header::{
+    CONTENT_ENCODING, CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_TYPE, COOKIE, HOST, LOCATION,
+    TRANSFER_ENCODING, USER_AGENT,
+};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use tokio::time::Instant;
 use url::Url;
 
 use crate::codec::{BodyReadError, Decode, DecodeFailureKind, LiveBody, StreamBounds};
-use crate::credentials::{AuthConfig, Credential, CredentialPlacement};
+use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
 use crate::encode::{self, EncodedBody};
 use crate::endpoint::{Api, EndpointSpec, ErrorBody, RequestParts};
+use crate::hooks::{HookError, HookStage, Hooks, SupportsHooks};
 use crate::error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 use crate::meta::{AuthMethod, RequestMeta, ResponseMeta};
 use crate::options::{CallAuth, CallOptions};
-use crate::redact::SecretNames;
-use crate::response::{ApiError, ErrorKind, FailureCategory, Outcome, Response};
+use crate::origin::{Decision, OriginPolicy, OriginRules};
+use crate::raw::{RawCompletion, RawResponse};
+use crate::redact::{RedactedUrl, SecretNames};
+use crate::response::{ApiError, ErrorKind, FailureCategory, Outcome, RedirectRefusal, Response};
 use crate::transport::{self, ConnectionSettings, SharedTransport};
 
 /// The per-request timeout used when the builder sets none.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The most redirects one send follows; the next redirect response is
+/// refused with [`RedirectRefusal::HopLimit`].
+pub const MAX_REDIRECTS: usize = 10;
 
 /// What a generated API tells the runtime about itself.
 ///
@@ -42,6 +62,7 @@ pub struct ApiDefinition {
     auth: AuthConfig,
     secret_names: Vec<String>,
     request_id_header: Option<String>,
+    cross_origin: OriginPolicy,
 }
 
 impl ApiDefinition {
@@ -52,7 +73,17 @@ impl ApiDefinition {
             auth: AuthConfig::none(),
             secret_names: Vec::new(),
             request_id_header: None,
+            cross_origin: OriginPolicy::SameOrigin,
         }
+    }
+
+    /// Sets the API's cross-origin policy (default
+    /// [`OriginPolicy::SameOrigin`]). Callers can only tighten it, through
+    /// [`ClientBuilder::cross_origin`].
+    #[must_use]
+    pub fn cross_origin(mut self, policy: OriginPolicy) -> Self {
+        self.cross_origin = policy;
+        self
     }
 
     /// Sets how the API accepts credentials.
@@ -118,6 +149,8 @@ struct Inner {
     credential: Option<Credential>,
     secrets: SecretNames,
     request_id_header: Option<String>,
+    origins: OriginRules,
+    hooks: Hooks,
 }
 
 /// Builds a [`Client`].
@@ -135,6 +168,8 @@ pub struct ClientBuilder<A: Api> {
     default_headers: Vec<(String, String)>,
     credential: Option<Credential>,
     env_order: Option<Vec<String>>,
+    cross_origin: Option<OriginPolicy>,
+    hooks: Hooks,
     api: PhantomData<fn() -> A>,
 }
 
@@ -160,6 +195,8 @@ impl<A: Api> Client<A> {
             default_headers: Vec::new(),
             credential: None,
             env_order: None,
+            cross_origin: None,
+            hooks: Hooks::default(),
             api: PhantomData,
         }
     }
@@ -257,17 +294,62 @@ impl<A: Api> ClientBuilder<A> {
         self
     }
 
+    /// Tightens the API's cross-origin policy for this client.
+    ///
+    /// [`OriginPolicy::Deny`] and [`OriginPolicy::SameOrigin`] are accepted,
+    /// and so is an [`OriginPolicy::AllowOrigins`] list that is a subset of
+    /// the API's own list. Over a `Deny` API only `Deny` is accepted. Any
+    /// other choice fails [`build`](Self::build).
+    #[must_use]
+    pub fn cross_origin(mut self, policy: OriginPolicy) -> Self {
+        self.cross_origin = Some(policy);
+        self
+    }
+
+    /// Runs `hook` on every successful JSON body before it is decoded, so it
+    /// can reshape the document to fit the endpoint's success type.
+    ///
+    /// It runs only for a 2xx reply to an endpoint whose codec supports
+    /// hooks, and only once the body has parsed as JSON; registering again
+    /// replaces it. See [`crate::hooks`] for the full order.
+    #[must_use]
+    pub fn pre_response_json<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&ResponseMeta, serde_json::Value) -> Result<serde_json::Value, HookError> + Send + Sync + 'static,
+    {
+        self.hooks.set_pre_response_json(hook);
+        self
+    }
+
+    /// Runs `hook` on the decoded success value of endpoint `R`, after the
+    /// global JSON hook; registering again for `R` replaces it.
+    ///
+    /// `R` must be an endpoint of this client's API whose codec supports
+    /// hooks; a text, binary, or empty endpoint does not compile.
+    #[must_use]
+    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+    where
+        R: EndpointSpec<Api = A>,
+        R::Decoder: SupportsHooks,
+        F: Fn(&ResponseMeta, &mut R::Success) -> Result<(), HookError> + Send + Sync + 'static,
+    {
+        self.hooks.set_mutator::<R, F>(hook);
+        self
+    }
+
     /// Builds the client.
     ///
     /// ## Errors
     ///
     /// Returns [`BuildError`] when the base URL is not a plain HTTP(S) URL,
     /// a default header is invalid or carries a credential, the client
-    /// credential is of a kind the API does not accept, a connection option
-    /// is set on a client attached to a shared transport, or the HTTP client
-    /// cannot be initialized.
+    /// credential is of a kind the API does not accept, an allowed origin is
+    /// not a bare HTTP(S) origin, the requested cross-origin policy loosens
+    /// the API's, a connection option is set on a client attached to a shared
+    /// transport, or the HTTP client cannot be initialized.
     pub fn build(self) -> Result<Client<A>, BuildError> {
         let base_url = parse_base_url(&self.definition.base_url)?;
+        let origins = OriginRules::new(&base_url, &self.definition.cross_origin, self.cross_origin.as_ref())?;
         let mut auth = self.definition.auth;
         if let Some(vars) = self.env_order {
             auth.replace_env_order(vars);
@@ -318,6 +400,8 @@ impl<A: Api> ClientBuilder<A> {
                 credential: self.credential,
                 secrets,
                 request_id_header: self.definition.request_id_header,
+                origins,
+                hooks: self.hooks,
             }),
             api: PhantomData,
         })
@@ -348,8 +432,8 @@ fn header_pair(name: &str, value: &str) -> Option<(HeaderName, HeaderValue)> {
     Some((HeaderName::from_bytes(name.as_bytes()).ok()?, HeaderValue::from_str(value).ok()?))
 }
 
-/// A request ready for its first hop: the URL and headers as the application
-/// assembled them, before any credential.
+/// One hop's request as the application assembled it, before any credential.
+#[derive(Clone)]
 struct Assembled {
     method: Method,
     url: Url,
@@ -357,21 +441,114 @@ struct Assembled {
     body: Option<EncodedBody>,
 }
 
+/// How [`Client::execute`] ended once a response head arrived.
+enum Exchange {
+    /// A reply that is not a followable redirect, with its body unread.
+    Final { meta: ResponseMeta, body: LiveBody },
+    /// A redirect that stopped the send, with its body read.
+    Stopped { meta: ResponseMeta, body: Bytes, stop: Stop },
+}
+
+/// Why a redirect stopped the send.
+enum Stop {
+    /// The redirect's own body was cut off.
+    Interrupted,
+    /// The redirect was not followed.
+    Refused(RedirectRefusal),
+    /// The next hop received no head.
+    Failed { target: RedactedUrl, category: FailureCategory },
+}
+
 impl<A: Api> Client<A> {
-    /// Sends `request` and decodes its reply with the endpoint's codec.
+    /// Sends `request` and decodes its reply with the endpoint's codec,
+    /// following redirects the cross-origin policy allows.
+    ///
+    /// A 2xx reply to an endpoint whose codec supports hooks runs the
+    /// client's response hooks (see [`crate::hooks`]).
     ///
     /// ## Returns
     ///
     /// `Ok` with an envelope whenever a response head arrived, whatever its
-    /// status and whether its body could be read or decoded.
+    /// status and whether its body could be read or decoded. After a redirect
+    /// the envelope describes the last response received: the final reply, a
+    /// redirect that was not followed ([`ErrorKind::RedirectRefused`]), or the
+    /// last redirect when the next hop received no head
+    /// ([`ErrorKind::RedirectFailed`]).
     ///
     /// ## Errors
     ///
     /// Returns [`TransportError`] only when no response head arrived: an
-    /// argument or URL was refused before sending, the shared deadline had
-    /// already expired, or the connection, TLS handshake, or wait for the
-    /// head failed.
+    /// argument, URL, or cross-origin target was refused before sending, the
+    /// shared deadline had already expired, or the connection, TLS
+    /// handshake, or wait for the first head failed.
     pub async fn send<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        let (meta, outcome) = match self.execute(request, options).await? {
+            Exchange::Final { meta, body } => {
+                let outcome = classify_reply::<R>(body, self.inner.hooks.stage::<R>(&meta)).await;
+                (meta, outcome)
+            }
+            Exchange::Stopped { meta, body, stop } => {
+                let kind = match stop {
+                    Stop::Interrupted => ErrorKind::BodyInterrupted,
+                    Stop::Refused(reason) => ErrorKind::RedirectRefused { reason },
+                    Stop::Failed { target, category } => ErrorKind::RedirectFailed { target, category },
+                };
+                (meta, Outcome::Failure(ApiError { kind, body }))
+            }
+        };
+        Ok(completed(options.deadline.as_ref(), meta, outcome))
+    }
+
+    /// Sends `request` and returns its reply's metadata and body bytes
+    /// undecoded, through the same credentials, cross-origin policy,
+    /// redirects, expiration, and redaction as [`send`](Self::send).
+    ///
+    /// No status is a failure here and no response hook runs.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok` whenever a response head arrived. [`RawResponse::completion`]
+    /// says whether the body is complete, was interrupted, or belongs to a
+    /// redirect that was refused or whose next hop failed.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`TransportError`] in exactly the cases [`send`](Self::send)
+    /// does: when no response head arrived.
+    pub async fn send_raw<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        let (meta, body, completion) = match self.execute(request, options).await? {
+            Exchange::Final { meta, body } => match body.collect().await {
+                Ok(bytes) => (meta, bytes, RawCompletion::Complete),
+                Err(failure) => (meta, failure.retained, RawCompletion::BodyInterrupted),
+            },
+            Exchange::Stopped { meta, body, stop } => {
+                let completion = match stop {
+                    Stop::Interrupted => RawCompletion::BodyInterrupted,
+                    Stop::Refused(reason) => RawCompletion::RedirectRefused { reason },
+                    Stop::Failed { target, category } => RawCompletion::RedirectFailed { target, category },
+                };
+                (meta, body, completion)
+            }
+        };
+        if let Some(deadline) = &options.deadline {
+            deadline.record_completed();
+        }
+        Ok(RawResponse { meta, body, completion })
+    }
+
+    /// The execution core shared by every send: assembles `request`, checks
+    /// its origin, resolves the credential once, and follows redirects under
+    /// one expiration until a reply that ends the send.
+    ///
+    /// It does not count the send against its deadline; the caller does,
+    /// once the outcome is classified.
+    async fn execute<R>(&self, request: R, options: &CallOptions) -> Result<Exchange, TransportError>
     where
         R: EndpointSpec<Api = A>,
     {
@@ -387,6 +564,12 @@ impl<A: Api> Client<A> {
             .assemble(parts)
             .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
 
+        let Decision::Follow { credentials } = inner.origins.link(&assembled.url) else {
+            let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
+            let target = inner.secrets.redact_url(&assembled.url);
+            return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
+        };
+
         let resolved = inner.auth.resolve(&options.auth, inner.credential.as_ref());
         let resolved = match resolved {
             Ok(resolved) => resolved,
@@ -398,63 +581,223 @@ impl<A: Api> Client<A> {
         if matches!(options.auth, CallAuth::Anonymous) {
             strip_credentials(&inner.auth, &mut assembled);
         }
-        let auth = resolved.auth.clone();
-        if let Some((placement, value)) = &resolved.sent
-            && let Err(argument) = place_credential(&mut assembled, placement, value)
-        {
-            let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, auth);
-            return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
-        }
+        let (sent, auth) = match self.authenticate(&assembled, credentials, &resolved, false) {
+            Ok(sent) => sent,
+            Err(argument) => {
+                let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, resolved.auth.clone());
+                return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
+            }
+        };
 
-        let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, auth);
         let deadline = options.deadline.as_ref();
         if let Some(deadline) = deadline
             && deadline.is_expired()
         {
+            let meta = self.meta_for::<R>(&sent.method, &sent.url, &sent.headers, auth);
             return Err(pre_send(deadline_exceeded(deadline), meta));
         }
         let expiration = Expiration::start(start, inner.timeout, deadline);
-
-        let mut http_request = inner.http.request(assembled.method.clone(), assembled.url.clone());
-        http_request = http_request.headers(assembled.headers.clone());
-        if let Some(body) = &assembled.body {
-            http_request = http_request.body(body.bytes.clone());
-        }
-        let reply = match tokio::time::timeout_at(expiration.at, http_request.send()).await {
-            Ok(Ok(reply)) => reply,
-            Ok(Err(error)) => return Err(pre_send(category_kind(transport::classify(&error), deadline), meta)),
-            Err(_) => {
-                let kind = match (expiration.limit, deadline) {
-                    (Limit::SharedDeadline, Some(deadline)) => deadline_exceeded(deadline),
-                    _ => TransportErrorKind::Timeout,
-                };
-                return Err(pre_send(kind, meta));
-            }
+        let expiry_category = match expiration.limit {
+            Limit::SharedDeadline => FailureCategory::DeadlineExceeded,
+            Limit::RequestTimeout => FailureCategory::Timeout,
         };
 
-        let status = reply.status();
-        let headers = reply.headers().clone();
-        let response_meta = ResponseMeta::capture(
-            &inner.secrets,
-            meta,
-            status,
-            &headers,
-            inner.request_id_header.as_deref(),
-            start.elapsed(),
-        );
-        let body = live_body(reply, &expiration);
-        let outcome = classify_reply::<R>(body).await;
-        if let Some(deadline) = deadline {
-            deadline.record_completed();
+        let mut current = assembled;
+        let mut hop = (sent, auth);
+        let mut followed = 0;
+        // The last redirect received, with its body, once a hop has been
+        // followed.
+        let mut last_redirect: Option<(ResponseMeta, Bytes)> = None;
+        loop {
+            let (sent, auth) = hop;
+            let meta = self.meta_for::<R>(&sent.method, &sent.url, &sent.headers, auth);
+            let failed_hop = |category: FailureCategory, last_redirect: Option<(ResponseMeta, Bytes)>| match last_redirect {
+                Some((mut redirect_meta, body)) => {
+                    redirect_meta.elapsed = start.elapsed();
+                    let target = inner.secrets.redact_url(&current.url);
+                    Ok(Exchange::Stopped {
+                        meta: redirect_meta,
+                        body,
+                        stop: Stop::Failed { target, category },
+                    })
+                }
+                None => Err(pre_send(category_kind(category, deadline), meta.clone())),
+            };
+            // A hop never starts after the send's expiration.
+            if last_redirect.is_some() && Instant::now() >= expiration.at {
+                return failed_hop(expiry_category, last_redirect);
+            }
+            let reply = match tokio::time::timeout_at(expiration.at, self.dispatch(&sent)).await {
+                Ok(Ok(reply)) => reply,
+                Ok(Err(error)) => return failed_hop(transport::classify(&error), last_redirect),
+                Err(_) => return failed_hop(expiry_category, last_redirect),
+            };
+
+            let status = reply.status();
+            let headers = reply.headers().clone();
+            let response_meta = ResponseMeta::capture(
+                &inner.secrets,
+                meta,
+                status,
+                &headers,
+                inner.request_id_header.as_deref(),
+                start.elapsed(),
+            );
+            let body = live_body(reply, &expiration);
+            if !is_followable_redirect(status) {
+                return Ok(Exchange::Final { meta: response_meta, body });
+            }
+
+            // A redirect's body is read before the next hop, both as evidence
+            // and so that its connection can be reused.
+            let body = match body.collect().await {
+                Ok(bytes) => bytes,
+                Err(failure) => {
+                    return Ok(Exchange::Stopped {
+                        meta: response_meta,
+                        body: failure.retained,
+                        stop: Stop::Interrupted,
+                    });
+                }
+            };
+            let (next, credentials) = match self.next_hop(&current, status, &headers, followed) {
+                Ok(next) => next,
+                Err(reason) => {
+                    return Ok(Exchange::Stopped {
+                        meta: response_meta,
+                        body,
+                        stop: Stop::Refused(reason),
+                    });
+                }
+            };
+            hop = match self.authenticate(&next, credentials, &resolved, true) {
+                Ok(sent) => sent,
+                Err(_) => {
+                    let target = inner.secrets.redact_url(&next.url);
+                    return Ok(Exchange::Stopped {
+                        meta: response_meta,
+                        body,
+                        stop: Stop::Failed {
+                            target,
+                            category: FailureCategory::Other,
+                        },
+                    });
+                }
+            };
+            current = next;
+            followed += 1;
+            last_redirect = Some((response_meta, body));
         }
-        Ok(Response {
-            meta: response_meta,
-            outcome,
-        })
     }
 
-    /// Joins the endpoint's path and query onto the base URL and assembles
-    /// its headers and body.
+    /// Checks a URL the caller is about to request, such as a next-page
+    /// link, against the cross-origin policy for the endpoint `R`, without any
+    /// network work.
+    ///
+    /// A same-origin URL passes under every policy, including
+    /// [`OriginPolicy::Deny`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`TransportError`] of kind
+    /// [`TransportErrorKind::CrossOriginRejected`] when the policy refuses
+    /// `url`'s origin, or when `url` is not a plain HTTP(S) URL.
+    pub fn check_link<R>(&self, url: &Url) -> Result<(), TransportError>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        match self.inner.origins.link(url) {
+            Decision::Follow { .. } => Ok(()),
+            Decision::Refuse => {
+                let meta = self.meta_for::<R>(&R::METHOD, url, &HeaderMap::new(), AuthMethod::Anonymous);
+                let target = self.inner.secrets.redact_url(url);
+                Err(TransportError::new(meta, TransportErrorKind::CrossOriginRejected { target }, Duration::ZERO))
+            }
+        }
+    }
+
+    /// Starts one hop's request.
+    async fn dispatch(&self, sent: &Assembled) -> reqwest::Result<reqwest::Response> {
+        let mut request = self.inner.http.request(sent.method.clone(), sent.url.clone()).headers(sent.headers.clone());
+        if let Some(body) = &sent.body {
+            request = request.body(body.bytes.clone());
+        }
+        request.send().await
+    }
+
+    /// The request actually sent for `hop`, and the credential source it
+    /// reports.
+    ///
+    /// With `credentials`, the resolved credential is attached; on a later
+    /// hop (`replace`) a value the redirect target already carries in the
+    /// credential's slot is replaced rather than refused. Without, every
+    /// secret header and secret query value is removed.
+    fn authenticate(
+        &self,
+        hop: &Assembled,
+        credentials: bool,
+        resolved: &Resolved,
+        replace: bool,
+    ) -> Result<(Assembled, AuthMethod), InvalidArgument> {
+        let mut sent = hop.clone();
+        if !credentials {
+            strip_secrets(&self.inner.secrets, &mut sent);
+            return Ok((sent, AuthMethod::Anonymous));
+        }
+        if let Some((placement, value)) = &resolved.sent {
+            if replace {
+                remove_placement(&mut sent, placement);
+            }
+            place_credential(&mut sent, placement, value)?;
+        }
+        Ok((sent, resolved.auth.clone()))
+    }
+
+    /// The next hop for a redirect received in reply to `current`, and
+    /// whether the credential goes with it.
+    fn next_hop(
+        &self,
+        current: &Assembled,
+        status: StatusCode,
+        headers: &HeaderMap,
+        followed: usize,
+    ) -> Result<(Assembled, bool), RedirectRefusal> {
+        let location = headers.get(LOCATION).ok_or(RedirectRefusal::MissingLocation)?;
+        let location = std::str::from_utf8(location.as_bytes()).map_err(|_| RedirectRefusal::InvalidLocation)?;
+        // Resolved against the hop's URL before any credential, so a
+        // relative `Location` never inherits a query-string credential.
+        let mut target = current.url.join(location).map_err(|_| RedirectRefusal::InvalidLocation)?;
+        if !matches!(target.scheme(), "http" | "https") || !target.username().is_empty() || target.password().is_some() {
+            return Err(RedirectRefusal::UnsafeLocation);
+        }
+        if followed >= MAX_REDIRECTS {
+            return Err(RedirectRefusal::HopLimit);
+        }
+        target.set_fragment(None);
+        let Decision::Follow { credentials } = self.inner.origins.redirect(&target) else {
+            return Err(RedirectRefusal::CrossOrigin);
+        };
+
+        let becomes_get = match status {
+            StatusCode::MOVED_PERMANENTLY | StatusCode::FOUND => current.method == Method::POST,
+            StatusCode::SEE_OTHER => current.method != Method::HEAD,
+            _ => false,
+        };
+        let mut next = current.clone();
+        next.url = target;
+        next.headers.remove(HOST);
+        if becomes_get {
+            next.method = Method::GET;
+            next.body = None;
+            for name in [CONTENT_TYPE, CONTENT_LENGTH, CONTENT_ENCODING, CONTENT_LANGUAGE, CONTENT_LOCATION, TRANSFER_ENCODING] {
+                next.headers.remove(name);
+            }
+        }
+        Ok((next, credentials))
+    }
+
+    /// Joins the endpoint's path (or takes it whole when it is an absolute
+    /// URL) and query onto the base URL, and assembles its headers and body.
     fn assemble(&self, parts: RequestParts) -> Result<Assembled, TransportErrorKind> {
         let inner = &*self.inner;
         let RequestParts {
@@ -464,9 +807,15 @@ impl<A: Api> Client<A> {
             headers: part_headers,
             body,
         } = parts;
-        let separator = if path.starts_with('/') || path.is_empty() { "" } else { "/" };
-        let joined = format!("{}{separator}{path}", inner.base_url.as_str().trim_end_matches('/'));
-        let mut url = Url::parse(&joined).map_err(|_| TransportErrorKind::InvalidUrl)?;
+        let mut url = if is_absolute_url(&path) {
+            // An absolute URL, such as a followed next-page link, is checked
+            // against the cross-origin policy before it is sent.
+            Url::parse(&path)
+        } else {
+            let separator = if path.starts_with('/') || path.is_empty() { "" } else { "/" };
+            Url::parse(&format!("{}{separator}{path}", inner.base_url.as_str().trim_end_matches('/')))
+        }
+        .map_err(|_| TransportErrorKind::InvalidUrl)?;
         url.set_fragment(None);
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(&query);
@@ -534,22 +883,37 @@ fn category_kind(category: FailureCategory, deadline: Option<&Deadline>) -> Tran
 /// that asked for no credential.
 fn strip_credentials(auth: &AuthConfig, assembled: &mut Assembled) {
     for placement in auth.placements() {
-        match placement {
-            CredentialPlacement::ApiKeyQuery { name } => remove_query(&mut assembled.url, name),
-            CredentialPlacement::ApiKeyCookie { name } => remove_cookie(&mut assembled.headers, name),
-            other => {
-                if let Some(header) = other.header_name() {
-                    assembled.headers.remove(header);
-                }
+        remove_placement(assembled, placement);
+    }
+}
+
+/// Removes whatever `placement` would carry.
+fn remove_placement(assembled: &mut Assembled, placement: &CredentialPlacement) {
+    match placement {
+        CredentialPlacement::ApiKeyQuery { name } => remove_query(&mut assembled.url, |pair_name| pair_name == name),
+        CredentialPlacement::ApiKeyCookie { name } => remove_cookie(&mut assembled.headers, name),
+        other => {
+            if let Some(header) = other.header_name() {
+                assembled.headers.remove(header);
             }
         }
     }
 }
 
-fn remove_query(url: &mut Url, name: &str) {
+/// Removes every secret header, including `Cookie`, and every secret query
+/// value, for a hop the credential must not reach.
+fn strip_secrets(secrets: &SecretNames, assembled: &mut Assembled) {
+    let names: Vec<HeaderName> = assembled.headers.keys().filter(|name| secrets.is_secret_header(name.as_str())).cloned().collect();
+    for name in names {
+        assembled.headers.remove(name);
+    }
+    remove_query(&mut assembled.url, |name| secrets.is_secret_query(name));
+}
+
+fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
     let kept: Vec<(String, String)> = url
         .query_pairs()
-        .filter(|(pair_name, _)| pair_name != name)
+        .filter(|(pair_name, _)| !remove(pair_name))
         .map(|(pair_name, value)| (pair_name.into_owned(), value.into_owned()))
         .collect();
     if kept.len() == url.query_pairs().count() {
@@ -638,6 +1002,33 @@ fn encode_cookie_value(value: &str) -> String {
     encoded
 }
 
+/// Whether `path` is an absolute HTTP(S) URL rather than a path.
+fn is_absolute_url(path: &str) -> bool {
+    let lower = path.get(..8).unwrap_or(path).to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+/// The statuses whose `Location` the runtime follows; any other 3xx is a
+/// final reply.
+fn is_followable_redirect(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::MOVED_PERMANENTLY
+            | StatusCode::FOUND
+            | StatusCode::SEE_OTHER
+            | StatusCode::TEMPORARY_REDIRECT
+            | StatusCode::PERMANENT_REDIRECT
+    )
+}
+
+/// Counts a classified send against its deadline and wraps its envelope.
+fn completed<T, E>(deadline: Option<&Deadline>, meta: ResponseMeta, outcome: Outcome<T, E>) -> Response<T, E> {
+    if let Some(deadline) = deadline {
+        deadline.record_completed();
+    }
+    Response { meta, outcome }
+}
+
 /// Wraps a received reply's body for a codec, bounded by the send's
 /// expiration.
 fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
@@ -659,12 +1050,12 @@ fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
     })
 }
 
-/// Classifies a received reply: a 2xx through the endpoint's codec, any other
-/// status by its declared error body.
-async fn classify_reply<R: EndpointSpec>(body: LiveBody) -> Outcome<R::Success, R::Failure> {
+/// Classifies a received reply: a 2xx through the endpoint's codec and the
+/// client's `hooks`, any other status by its declared error body.
+async fn classify_reply<R: EndpointSpec>(body: LiveBody, hooks: HookStage<'_>) -> Outcome<R::Success, R::Failure> {
     let status = body.status();
     if status.is_success() {
-        return match R::Decoder::decode(body).await {
+        return match R::Decoder::decode_hooked(body, hooks).await {
             Ok(value) => Outcome::Success(value),
             Err(failure) => {
                 let kind = match failure.kind {

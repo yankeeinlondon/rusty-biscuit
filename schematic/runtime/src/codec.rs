@@ -17,6 +17,8 @@ use futures_core::Stream;
 use http::{HeaderMap, StatusCode};
 use tokio::time::Instant;
 
+use crate::hooks::{HookStage, SupportsHooks};
+
 /// Decodes a live response body into an endpoint's success type.
 ///
 /// A codec must keep evidence: on a read failure it returns the bytes that
@@ -34,6 +36,21 @@ pub trait Decode: 'static {
 
     /// Reads `body` into the output.
     fn decode(body: LiveBody) -> impl Future<Output = Result<Self::Output, DecodeFailure>> + Send;
+
+    /// Reads a 2xx `body` into the output, applying the client's response
+    /// `hooks`; the runtime calls this rather than [`decode`](Self::decode).
+    ///
+    /// The default ignores `hooks`. Only a codec that implements
+    /// [`SupportsHooks`] overrides it, and it must then
+    /// report a hook's refusal as [`DecodeFailureKind::Hook`] with the
+    /// original bytes.
+    fn decode_hooked(
+        body: LiveBody,
+        hooks: HookStage<'_>,
+    ) -> impl Future<Output = Result<Self::Output, DecodeFailure>> + Send {
+        let _ = hooks;
+        Self::decode(body)
+    }
 }
 
 /// A response body as it arrives, with the head it belongs to.
@@ -219,7 +236,12 @@ pub enum DecodeFailureKind {
 /// A successful parse is the only validity check: a body that parses is
 /// accepted whatever its `Content-Type`, and one that does not is
 /// [`DecodeFailureKind::Malformed`] with the original bytes.
+///
+/// It is the only built-in codec that runs the response hooks
+/// ([`SupportsHooks`]).
 pub struct Json<T>(PhantomData<fn() -> T>);
+
+impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
 
 impl<T> Decode for Json<T>
 where
@@ -230,6 +252,25 @@ where
     async fn decode(body: LiveBody) -> Result<T, DecodeFailure> {
         let bytes = body.collect().await?;
         serde_json::from_slice(&bytes).map_err(|_| DecodeFailure::new(DecodeFailureKind::Malformed, bytes))
+    }
+
+    async fn decode_hooked(body: LiveBody, hooks: HookStage<'_>) -> Result<T, DecodeFailure> {
+        if hooks.is_empty() {
+            return Self::decode(body).await;
+        }
+        let bytes = body.collect().await?;
+        let malformed = || DecodeFailure::new(DecodeFailureKind::Malformed, bytes.clone());
+        let hook_failed = || DecodeFailure::new(DecodeFailureKind::Hook, bytes.clone());
+        let mut value: T = if hooks.has_pre_response_json() {
+            // The global hook sees only a body that parses as JSON.
+            let json: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| malformed())?;
+            let json = hooks.pre_response_json(json).map_err(|_| hook_failed())?;
+            serde_json::from_value(json).map_err(|_| malformed())?
+        } else {
+            serde_json::from_slice(&bytes).map_err(|_| malformed())?
+        };
+        hooks.mutate(&mut value).map_err(|_| hook_failed())?;
+        Ok(value)
     }
 }
 
