@@ -95,6 +95,9 @@ pub struct SuggestionLintProblem {
 /// against its target schema — the non-null scalar fragment or array-item
 /// fragment, with `x-darkmatter-suggest` excluded — using the existing JSON
 /// Schema validator so numeric and string constraints are single-sourced.
+/// Candidates on a named-type reference (`Name(suggest(…))`) are skipped
+/// until the schema is resolved; lint the resolved schema to judge them
+/// against the referenced type.
 ///
 /// ## Errors versus lint
 ///
@@ -178,8 +181,13 @@ fn lint_atom(
     property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
-    if let TypeExpr::InlineObject(shape) = &atom.ty {
-        lint_shape(shape, root_arm, property_path, problems)?;
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => lint_shape(shape, root_arm, property_path, problems)?,
+        // A named reference's target is known only after resolution, which a
+        // passive lint never performs; linting the resolved schema judges its
+        // candidates against the resolved target.
+        TypeExpr::Imported { .. } => return Ok(()),
+        TypeExpr::Primitive(_) => {}
     }
     let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {
         Constraint::Suggest(candidates) => Some(candidates),

@@ -187,7 +187,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "string | number | array",
         argument_arity: "1",
         description: "Sets the minimum allowed size or value.",
-        json_schema_effect: "string: minLength; number: minimum; array: minItems",
+        json_schema_effect: "string: minLength; number: minimum; array: minItems (repeated: the larger wins)",
     },
     SchemaConstraintDescriptor {
         name: "max",
@@ -196,7 +196,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "string | number | array",
         argument_arity: "1",
         description: "Sets the maximum allowed size or value.",
-        json_schema_effect: "string: maxLength; number: maximum; array: maxItems",
+        json_schema_effect: "string: maxLength; number: maximum; array: maxItems (repeated: the smaller wins)",
     },
     // ── numeric ────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -216,7 +216,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "string",
         argument_arity: "0",
         description: "Disallow empty / whitespace-only strings.",
-        json_schema_effect: "pattern set to \"\\\\S\"",
+        json_schema_effect: "pattern set to \"\\\\S\"; beside another pattern, each becomes an `allOf` entry",
     },
     SchemaConstraintDescriptor {
         name: "pattern",
@@ -225,7 +225,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "string",
         argument_arity: "1",
         description: "ECMA-262 regex the value must match.",
-        json_schema_effect: "pattern set to the supplied regex",
+        json_schema_effect: "pattern set to the supplied regex; repeated patterns (or `not-empty`) each become an `allOf` entry and all must match",
     },
     // ── enum ───────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -255,7 +255,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "file",
         argument_arity: "1+",
         description: "Glob patterns that shape file path suggestions (completion). Patterns starting with `!` exclude. In a root union, an existing file outside a simplified arm's declared glob rules that arm out; in a single schema the glob only suggests.",
-        json_schema_effect: "none on a single schema; `x-darkmatter-match` on each declaring simplified arm of a root union",
+        json_schema_effect: "none on a single schema; `x-darkmatter-match` on each declaring simplified arm of a root union (repeated `match(...)` groups become an array of pattern arrays, and a file must satisfy every group)",
     },
     // ── url ────────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -265,7 +265,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         target_types: "url",
         argument_arity: "1+",
         description: "Allowed URL schemes (lowercased).",
-        json_schema_effect: "x-darkmatter-url-scheme set to the scheme list",
+        json_schema_effect: "x-darkmatter-url-scheme set to the scheme list; repeated `scheme(...)` lists intersect",
     },
     // ── advisory suggestions ───────────────────────────────────────────
     SchemaConstraintDescriptor {
