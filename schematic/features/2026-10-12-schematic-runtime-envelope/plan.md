@@ -4,6 +4,11 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Schematic Runtime Envelope Implementation Plan
@@ -14,14 +19,14 @@ Replace generated REST execution code with a hand-written `schematic-runtime`, t
 
 Successful completion means every active requirement R1–R37 has observable passing evidence; R36 is recorded as withdrawn. Fresh generated REST and WebSocket modules compile, all affected packages and consumers pass their scoped gates, repeated generation produces no changes, and macOS, Linux, native Windows, and WSL2 have separately identified evidence. Documentation describes the shipped behavior, and `implementation-log.md` records adopted defaults, decisions, measurements, deviations, and review items. A proposed gap remains unmet until the author accepts it; missing evidence must never be called a pass. The implementation ends **implementation complete, ready for review**, without committing, pushing, or moving the feature directory.
 
-Planning inspection on 2026-10-11 found the prerequisite `2026-10-11-schematic-generation-integrity` marked `implemented: false`, with no adjacent plan or implementation log. Current request-part generation still combines path and query, and the runtime workspace member does not exist. This plan is dependency-gated rather than assuming those outcomes have landed. The existing unrelated edit to `darkmatter/fixes/2026-10-11-clean-fidelity/spec.md` is outside scope.
+Prerequisite refresh on 2026-10-12, from generation-integrity review 3: the prerequisite is implemented and ready. RequestParts is a five-element tuple with ordered, unencoded query pairs last; compiled fixture clients exercise request-side features. The existing four fresh-output checks run through gen/tests/common/fresh_output.rs and just test-fresh-output. Partial compatibility reads generated Rust inventory and compares shared.rs/ws_shared.rs bytes in output/inventory.rs::shared_runtime_compatibility; no serialized inventory or persisted ABI marker exists. The runtime workspace member still does not exist. Preserve sniff's migrated recursive=true GitHub requests and binary GetSource decoding for Bitbucket as the consumer baseline. The author withdrew REST selectors; later response-model work uses one endpoint with multiple wire-distinguishable responses.
 
 ### Necessary Rules
 
 - **Authority and execution scope.** D56/D57 are settled author rulings. Adopt the specification's remaining Proposed items and defaults provisionally and log them, rather than reopening settled choices. This planning request authorizes creating this document only. At implementation entry, verify that the specification's pre-authorizations have been granted by the implementation instruction or existing session context. In a non-interactive run, missing required authorization is recorded as a blocker; do not wait for a prompt or treat `yolo: true` as authorization.
 - **Dependency refresh.** Read the prerequisite's implementation/review outcomes before runtime work. Verify ordered query separation, request-side text/binary/header/cookie/API-key support, fresh-output compile checks, partial-generation compatibility interface, and stale-tree cleanup. Record differences and refresh this plan against actual interfaces. If the prerequisite is still unavailable, stop before implementation changes. A small blocking omission after it lands may be repaired here only under the spec's minimum-repair allowance, with the requirement, scope, and reason logged; do not absorb the entire prerequisite.
 - **Numbering and phase boundaries.** Start at Phase 1; references to “phase 0” in the spec mean this phase's inventory. Waves below have globally unique numbers and run in order. Tasks within a wave may run concurrently only when their write sets are disjoint; a singleton wave is sequential. A wave is a scheduling step, not permission to bypass prerequisites. Earlier phases preserve checked-in schema; Phase 7 completes regeneration and every migration before its checkpoint.
-- **Ownership and exclusions.** Runtime is a workspace member at `schematic/runtime/`, initially version `0.1.0`; schema remains workspace-excluded and generator-owned. Runtime does not depend on `schematic-define`. Edit API-level `RestApi` construction sites, never the approximately 519 endpoint literals. Do not add endpoint wrappers, general middleware, pagination, SSE/NDJSON/GraphQL codecs, new serde derives on definition models, or endpoint-level origin overrides. Do not delete the stale generated tree owned by the prerequisite or retire sniff's `FocusedProviderClient`.
+- **Ownership and exclusions.** Runtime is a workspace member at `schematic/runtime/`, initially version `0.1.0`; schema remains workspace-excluded and generator-owned. Runtime does not depend on `schematic-define`. Edit API-level `RestApi` construction sites, never the 547 endpoint literals. Do not add endpoint wrappers, general middleware, pagination, SSE/NDJSON/GraphQL codecs, new serde derives on definition models, or endpoint-level origin overrides. Do not delete the stale generated tree owned by the prerequisite or retire sniff's `FocusedProviderClient`.
 - **Credential contract.** Preserve `effective_auth_policy()`, accepted methods, legacy fallback, environment mapping, custom header names/prefixes, and Basic username/password behavior. Per-call → client → first non-empty configured environment value → anonymous; explicit anonymous mode bypasses and removes every credential source. No missing-credential error and no runtime authentication retry. Reject incompatible credential methods and auth-bearing default headers; reject injected query/cookie-key collisions. `AuthMethod` reports source only and is distinct from the definition's method-selection enum.
 - **Origin contract.** Adopt PD1–PD6, PD29, and PD30. Base origin means parsed scheme, host, and effective port. Under `deny`, same-origin links pass, but redirects and cross-origin links fail. Overrides are only deny, same-origin, or subsets of a definition allowlist; a deny definition permits only deny. `allow_any` is definition-authored through the dangerous opt-in, never a permitted caller override. Use 10 followed hops, resolving each Location against its responding URL. Each target is compared to the configured base origin for credential forwarding, including A → B → B and B → A.
 - **Head and evidence contract.** Any received head in a logical send requires an envelope. Failed later hops retain the last redirect's head as `RedirectFailed`; policy refusals use `RedirectRefused`. Metadata describes the last received hop, not an unreachable target. Raw body bytes and decoded provider values remain unchanged. Redact stored headers, URL/query data, Location URLs, secret-marked request IDs, redirect targets, and diagnostic context. Safe displays omit provider bodies; provider-body and raw-body Debug can expose provider echoes and must be documented. Never retain unchecked library source chains or arbitrary hook messages.
@@ -39,22 +44,22 @@ One bounded functional spike is justified: the production HTTP-library integrati
 
 ### Wave 1 — Entry Inventory (parallel)
 
-- [ ] **Verify Prerequisite**
+- [x] **Verify Prerequisite**
   - Read prerequisite implementation/review artifacts and inspect actual request parts, partial-generation inventory format, and fresh-output compile harness. Record readiness and exact integration points in `implementation-log.md`.
-  - Inventory every changed configuration reader and supported format for the robustness matrix below; identify inherited load-bearing inventory fields instead of inventing a new format.
+  - Confirm that retained inventory still reads generated Rust source. Record its module/export/ownership checks and the shared-file comparison; the runtime feature introduces the persisted ABI marker, not an inherited configuration field.
   - Record implementation authorization status and any blockers. This task is required before Wave 2.
-- [ ] **Inventory Consumers**
+- [x] **Inventory Consumers**
   - Inventory generated-client `request`, non-JSON convenience sends, constructors, variants/Headers authentication, hooks, error matches, logging, and `EndpointSpec` uses across all eight crates. Include indirect users and shared WebSocket types, filtering out ordinary reqwest calls.
   - Record file/symbol, API, response kind, old behavior, proposed replacement, and test owner for each call site. Confirm whether model-citizen is manifest-only; record exact package names from manifests rather than assuming directory names equal package names.
   - Ownership: write inventory notes in a separate temporary artifact; the phase coordinator merges them into the implementation log so agents do not concurrently edit it.
 
 ### Wave 2 — Contract Preparation (parallel after Wave 1)
 
-- [ ] **Capture Baseline**
+- [x] **Capture Baseline**
   - Run affected Schematic and eight consumer L1 baselines through their canonical recipes; distinguish pre-existing failures. Record lint baseline where useful and build coverage for dependents.
   - Capture one `schematic-schema` compile-time sample on this host using its excluded-crate manifest. Record exact command, profile, feature set, toolchain, and cache state so Phase 7 repeats the same conditions without deleting shared caches.
   - Load `sniff` for package/host discovery and `os` for available build-host evidence routes. Record available environments and required OS-sensitive cases without launching a cross-platform performance study.
-- [ ] **Prove Decoder Boundary**
+- [x] **Prove Decoder Boundary**
   - In an isolated throwaway fixture using the actual dependency versions, receive headers, incrementally retain body bytes, observe a truncated body, and return an owned test stream whose first item precedes body completion. Demonstrate drop cancellation without a detached worker.
   - Verify managed `SharedTransport` feasibility and connect-timeout ownership; record whether the proposed conflict rule can be enforced without raw-client injection or multiplying unrelated shared settings.
   - Produce a compact contract sketch for `EndpointSpec` API marker, live decoder input/error evidence, hook capability marker, expiration state, replayable request parts, and raw completion disposition. Delete throwaway artifacts or retain only intentional test fixtures.
@@ -62,26 +67,13 @@ One bounded functional spike is justified: the production HTTP-library integrati
 
 **Validation checkpoint:** prerequisite outcomes and authorizations are established; baseline and exact migration inventory exist; all PD defaults have a recorded planned disposition; decoder evidence and stable contracts unblock Phase 2. No production or generated API has changed.
 
-### Input Robustness Matrix
+### Compatibility input verification
 
-This feature does not introduce a serialized REST configuration loader: the three `RestApi` fields are Rust definition data, and JSON success/error payloads are response data. The matrix applies to the prerequisite's persisted generation-inventory reader when adding runtime ABI compatibility checks. Generated Cargo manifest writing, URL parsing, and rendering are excluded. If Phase 1 finds another configuration reader whose decisions change, add its supported-format table before modifying it.
+The prerequisite reads owned generated Rust module files and parses lib.rs and prelude.rs with syn; it has no JSON/YAML/TOML inventory fields and no persisted ABI marker. The earlier plan's serialized-inventory matrix assumed a format that was not built. The configuration robustness matrix does not apply to this Rust grammar. Generated Cargo manifests are writers, and the lockfile helper delegates parsing to Cargo.
 
-The persisted ABI field's exact key and inventory format are established by the prerequisite; `runtime_abi` below is a logical name, not a mandated schema change. Apply this table **separately for every supported inventory format**, using a fixture produced by the real generator. Before Phase 6, expand each table to one column per inherited load-bearing field read in the changed compatibility path, preserving that field's format-defined semantics. Unknown inherited fields are a dependency-refresh item, not permission to skip their columns.
+Implement the spec's proposed ABI assertion in generated lib.rs and read the persisted marker through the existing Rust inventory path. Starting from actual generated output, test a supported marker, a differing marker, a missing legacy marker, and malformed or conflicting marker declarations through public partial generation. Refusals leave output unchanged and identify the need for full generation. Preserve the existing module membership, export, ownership, and shared WebSocket checks; a matching ABI must not bypass them.
 
-| Edited input shape | Runtime ABI marker: public partial-generation outcome |
-| --- | --- |
-| Control: unedited current inventory | Compatible partial generation succeeds and retains untouched outputs. |
-| Present, supported differing ABI | Partial generation refuses with readable full-generation-required diagnostic; no outputs changed. |
-| Absent | Legacy/unknown compatibility: require full generation; do not infer current ABI. |
-| Explicit null | Invalid inventory diagnostic, distinct from the absent/legacy outcome; no outputs changed. |
-| Wrong whole-field type | Invalid inventory diagnostic; never compatible or treated as absent. |
-| Wrong one element | Scalar marker: reject any array/object representation, including mixed-element arrays. |
-| Wrong every element | Scalar marker: reject all-invalid arrays; never turn them into empty/absent compatibility data. |
-| Empty | Empty string/array/object is invalid, not an absent marker; an empty document is invalid inventory. |
-| Duplicate key | Reject duplicate compatibility keys; never select the final value. |
-| Trailing/invalid content | Reject the whole inventory, even after a valid prefix; no outputs changed. |
-
-For inherited collection fields, explicitly distinguish absent, null, wrong field type, mixed elements, all-invalid elements, and empty according to their documented meaning; never silently filter bad elements. An invalid inventory must remain invalid even when ABI is absent. One table-driven test per format starts from the real-tool fixture, applies one edit per field/shape cell, and asserts the generator's public result plus unchanged output artifacts on refusal. Include the positive control and valid incompatible ABI case. Before declaring completion, inspect load-bearing uses of serde defaults, `Option<T>`, `filter_map(..as_str())`, `unwrap_or_default()`, and `.ok()`. A review finding records every other cell in the affected row and column.
+If implementation introduces a serialized configuration reader instead, record why and apply the full per-format, per-field configuration matrix before modifying that reader. This plan does not require introducing a separate inventory format.
 
 ## Phase 2: Build Runtime Foundations
 
@@ -197,7 +189,7 @@ Entry: Phase 5 runtime ABI is stable; generator changes target fixtures and isol
 - [ ] **Integrate Runtime Compatibility**
   - Own generated manifest/lib ABI emission, prerequisite inventory compatibility reader, and fresh-output harness; coordinate file boundaries with codegen task before edits.
   - Generate the path runtime dependency so both actual excluded schema and isolated output resolve correctly. Embed the ABI expected by this generator build; mismatched runtime fails compilation with readable assertion.
-  - Make ABI mismatch refuse partial generation and require full generation before writing outputs. Implement the completed per-format inventory robustness tables from Phase 1 through public generator-result tests (R32).
+  - Make ABI mismatch refuse partial generation and require full generation before writing outputs. Exercise the generated Rust marker cases from Phase 1 through public generator-result tests, preserving inventory and no-mutation checks (R32).
   - Extend the prerequisite isolated compile harness instead of creating another: include runtime, shipped response kinds, request features, and generated WebSocket modules. Use its cache/offline resolution strategy (R31, R35).
 
 ### Wave 12 — Fresh Output Proof (sequential)
@@ -205,7 +197,7 @@ Entry: Phase 5 runtime ABI is stable; generator changes target fixtures and isol
 - [ ] **Validate Generated Surface**
   - Compile fresh complete output including WebSockets. Assert generated shared modules contain runtime references, not REST-runtime definitions; removed constructors/guard/free request and endpoint wrappers are absent.
   - Compile-fail wrong success type, missing associated type, arbitrary foreign type, actual request from API A sent through API B for typed/raw sends, forbidden hook registration, removed request API, and removed injected-client construction.
-  - Test doctored ABI failure and incompatible-marker partial-generation refusal. Run real-fixture robustness tests, verifying no partial output changes on invalid input.
+  - Test doctored ABI failure and incompatible-marker partial-generation refusal. Run generated-Rust marker refusal tests, verifying no partial output changes on invalid input.
   - Preserve WebSocket's current compile surface without performing spec 6's migration. Keep any shared legacy compatibility symbols narrowly scoped to WebSocket if necessary, documenting why; do not keep old REST send paths.
 
 **Validation checkpoint:** generator L1/goldens, current schema tests, touched definition/runtime tests, and lint pass; fresh-output compile/negative cases pass. Checked-in schema is still unchanged. All consumers still build. ABI/configuration outcomes and WebSocket compatibility are proven before the breaking migration.
@@ -288,9 +280,18 @@ This is one coordinated phase: the temporary breaking state between regeneration
 | R20–R25 | Phase 4 definition/origin/redirect tests; Phase 6 configuration translation; Phase 7 generated link test. |
 | R26 | Phase 3 deadline/ownership/cancellation; Phase 4 redirect budget/evidence; Phase 8 OS evidence. |
 | R27–R30 | Phase 5 raw/hooks/shared-core audit; Phase 3 test decoders; Phase 6/7 generated surface and regression tests. |
-| R31–R32 | Phase 6 thin output, isolated compile, ABI mismatch, partial-generation refusal, configuration robustness. |
+| R31–R32 | Phase 6 thin output, isolated compile, ABI mismatch, partial-generation refusal, Rust marker input verification. |
 | R33–R34 | Phase 7 all eight consumers, behavior preservation, inventory closure, safe-log review. |
 | R35 | Phase 6 fresh WebSocket compile; Phase 7/8 generated schema compilation/lint. |
 | R36 | Withdrawn; anonymous sends verified under R14/R16. |
 
 Each implementation task includes its meaningful tests and relevant doc/comment updates. Phase checkpoints use touched-package tests/lint and dependent build checks, not whole-workspace runs. Parallel agents receive narrow write sets and the explicit instruction that the entire session tree is non-interactive; the coordinator owns shared manifests, cross-module integration, and implementation-log merges.
+
+## Refresh log
+
+### 2026-10-12 — generation-integrity review 3
+
+- Replaced the pre-implementation dependency warning with verified tuple, authentication, compatibility, and fresh-output harness interfaces.
+- Replaced the assumed serialized-inventory matrix with generated-Rust ABI-marker checks because no configuration inventory was created; retain the full matrix if a later implementation actually introduces such a reader.
+- Updated the endpoint count to 547 and recorded sniff's GitHub/Bitbucket migration as the behavior-preservation baseline.
+- Carried forward the author's REST-selector withdrawal; runtime scope, settled decisions, and pipeline ordering are unchanged.

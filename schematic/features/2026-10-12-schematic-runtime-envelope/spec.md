@@ -27,11 +27,12 @@ review_iterations: 0
 clarified: false
 implemented: false
 human_review: false
-message_to_agent: ''
+message_to_agent: |-
+  Phase 1 (inventory, baseline, spike) is complete; see implementation-log.md "Phase 1". Nothing in the repository changed. Baseline: every schematic and dependent L1/lint gate was green, and the uncached schematic-schema compile took 14.63 s (procedure logged; repeat it in Phase 7). Spike findings to build on in Phase 2: (1) reqwest reports a truncated body as is_decode(), not is_body(), so classify BodyInterrupted by where the read failed; (2) reqwest send() error Display includes the full URL with its query, so never store or show library error text; (3) bound head wait and every body read with tokio::time::timeout_at against one Instant per logical send, and do not set reqwest's per-request timeout; (4) connect timeout, proxy, and TLS settings exist only on reqwest::Client, so SharedTransport owns them; an attached ClientBuilder that sets any of those four is a typed BuildError (proposed, logged for author review), while UA, default headers, timeout, and credentials apply per request and keep connection reuse; (5) hyper spawns one connection-driver task per connection, so assert num_alive_tasks() returns to baseline rather than "no task". The runtime must compile against reqwest 0.13.2 (root Cargo.lock) and 0.13.4 (schema/Cargo.lock); every API used was checked in both. The contract sketch is in the log; RedirectFailed means a followed hop failed before its head, and a bad Location is RedirectRefused. Consumer inventory: only sniff, biscuit-speaks, and homelab call REST; model-citizen is manifest-only; three homelab integration crates are WebSocket-only; with_api_key_param is not emitted into the current schema.
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-11-schematic-generation-integrity
-refresh_required: true
+refresh_required: false
 related: []
 next_spec: 2026-10-13-schematic-pagination
 ---
@@ -72,7 +73,7 @@ parent review (`2026-07-31-macro-review`, called "the parent" below) unless mark
 - **A caller can ask for the wrong response type.** The generic
   `request<T>` compiles with any `T`
   (`client.request::<WrongType>(ListModelsRequest::default())`). The shared
-  trait `EndpointSpec` already has an associated `Response` type with 550
+  trait `EndpointSpec` already has an associated `Response` type with 547
   generated impls, but no send method uses it (parent section 12, "Related
   fact for D3"). Verified in this tree: `EndpointSpec` is declared in
   `schematic/schema/src/shared.rs`.
@@ -161,8 +162,8 @@ for the eight-spec split; the author confirms them at review 1.
   `oauth_scopes` / `auth_policy` choice (specs 4a and 4b; D56 keeps `auth_policy`
   with a builder form and removes `oauth_scopes`, both spec 4a's; this spec preserves the existing `auth_policy` behavior
   while deferring its builder redesign). **No endpoint literal
-  (about 519; openai 265) is edited in this spec** (parent D42, D30).
-- Response model v2 (success and error sets, selectors, stream end
+  (547; openai 265) is edited in this spec** (parent D42, D30).
+- Response model v2 (success and error sets, stream end
   conditions, error mapping), GraphQL primitive and codec, SSE/NDJSON codecs
   (spec 5). The `Decode` trait shape defined here must *allow* them (R30), but
   this spec ships only the JSON, text, binary, and empty codecs.
@@ -1071,7 +1072,7 @@ failure connecting after a redirect, not only complete 200 responses.
   names treated as secret). The first is **Decided** (D30); the second is
   **Decided** as to the facility (D48) with the field form **Proposed**; the
   third is **Proposed** (PD25: per-parameter `.secret()` markers wait for spec
-  4a so that no endpoint-literal edit (about 519) happens here). This spec
+  4a so that no endpoint-literal edit (547) happens here). This spec
   owns the semantics of `request_id_header` and `secret_names` and the
   API-level fields; spec 4a owns only builder sugar and the per-parameter
   `.secret()` marker.
@@ -1235,7 +1236,7 @@ default exists.
 - Edit the 18 API definitions in `schematic-definitions` to set
   `cross_origin`, `request_id_header`, and `secret_names`; edit `RestApi` and
   its struct-literal construction sites (definitions, tests, doctests) for the
-  three new fields. **Do not edit the endpoint literals (about 519; openai
+  three new fields. **Do not edit the endpoint literals (547; openai
   265).**
 - Add dev-dependencies `trybuild` (compile-fail tests), `rcgen` and
   `tokio-rustls` (local TLS mocks, PD33), and any runtime dependency the
@@ -1253,18 +1254,41 @@ destructive action outside the files above.
 
 ## Dependencies and ordering
 
-- **Requires** `2026-10-11-schematic-generation-integrity` landed. This spec
-  assumes from it (unverified until phase 0): the generator separates query
-  parameters from the path in `RequestParts` (needed by R5 and R7); a
-  temporary `with_api_key_param` and generator-local environment scan exist
-  (this spec removes them, R33); the
-  isolated compile check of freshly generated output exists and runs on a
-  normal test run; partial generation (D9) detects an incompatible
-  shared-runtime change through an interface spec 1 defines (this spec
-  supplies the ABI constant, R32); request-side features (text/binary bodies,
-  `ApiKeyParam`, header and cookie parameters) are generated. If any is
-  missing, log it, implement the minimum needed here only if it blocks a
-  requirement, and flag it for review 1.
+- **Requires** `2026-10-11-schematic-generation-integrity` implemented and
+  reviewed. Verified by its review 3 on 2026-10-12: `RequestParts` is
+  `(method, path, body, headers, query)`, with ordered, unencoded
+  `Vec<(String, String)>` query pairs last. Text/binary bodies, header/cookie
+  parameters, and query/cookie API keys are generated and exercised through
+  compiled clients against local servers. Temporary `with_api_key_param`
+  and `shared::resolve_request_auth` exist; this spec removes that setter
+  and replaces the shared resolver and its environment scan (R33).
+- Extend `gen/tests/common/fresh_output.rs`, used by the four `slow_` tests
+  in `gen/tests/l1/fresh_output_compile.rs`. It builds temporary crates with
+  generated manifests, copied `schema/Cargo.lock`, offline workspace updates,
+  and offline locked Cargo/nextest commands. `just test` runs the separate
+  `test-fresh-output` recipe; CI runs it on build owners before archiving,
+  with archive consumers excluding it. Add the runtime path dependency to
+  this helper and the manifest builder instead of duplicating the harness.
+- `gen/src/output/inventory.rs::shared_runtime_compatibility` currently
+  compares `shared.rs` and `ws_shared.rs` byte-for-byte when REST modules are
+  retained. Inventory comes from owned Rust module files and parsed
+  `lib.rs`/`prelude.rs`; there is no serialized inventory or persisted ABI
+  marker. This spec defines and persists the marker and replaces that
+  comparison (R32), preserving ownership, inventory, and export checks.
+- The stale `schematic/gen/schematic/` tree is deleted. Current output has
+  18 REST APIs and 547 endpoint implementations, after the author-required
+  GitHub and Bitbucket merges. Measured request features: text 0, binary 0,
+  multipart 16, `ApiKeyParam` 0, header parameters 7, cookie parameters 0;
+  the earlier “six” and “about 29” figures remain unreconciled.
+- Preserve the prerequisite's consumer migration: sniff sends
+  `GetGitTreeRequest` with `.with_recursive(true)` at both GitHub tree sites and
+  uses binary `GetSource` for Bitbucket, decoding directory JSON or file
+  text in the consumer. These are the new behavior-preservation baseline.
+- The author's review-1 ruling withdraws REST selectors: endpoint identity
+  remains method plus normalized path. Later response-model work uses one
+  endpoint with multiple wire-distinguishable responses, without routing on
+  request values. WebSocket message selectors remain a separate mechanism.
+  This does not bring response-model implementation into this spec.
 - **Blocks** the pagination spec (spec 3, which needs the envelope, deadline,
   `check_link`, `InvalidArgument`), and transitively specs 4a to 7.
 - sniff's retirement of `FocusedProviderClient` is outside this spec and
@@ -1528,7 +1552,7 @@ the ruled behavior is written into the requirements:
   Design, Dependents); the phase 0 inventory establishes the real set and
   sniff's exhaustive matches. model-citizen holds a manifest dependency only
   (confirm in phase 0).
-- **Compile-time regression.** Evidence (550 endpoint impls, synthetic; about 519 endpoint literals) is for the
+- **Compile-time regression.** Evidence (550 endpoint impls, synthetic; 547 endpoint literals) is for the
   trait only; real-schema and incremental builds were not measured. Mitigation:
   no wrapper per endpoint (R31); log compile time of `schematic-schema` before
   and after on this host (one sample each; no benchmark campaign).
@@ -1632,8 +1656,10 @@ Record in `implementation-log.md`, for review 1, as they occur:
 
 ## Refresh notes
 
-`refresh_required: true`. Before planning, refresh this spec from the outcomes
-(review 1) of `2026-10-11-schematic-generation-integrity`. Specifically check:
+`refresh_required: false`. Review 3 of `2026-10-11-schematic-generation-integrity`
+verified the prerequisite outcomes on 2026-10-12; “Dependencies and ordering”
+records the actual interfaces. At implementation entry, recheck them if the
+source has changed. The evaluated refresh questions were:
 
 - Whether spec 1 delivered the query-parameter split in `RequestParts` in the
   shape R5 and R7 assume (path and query separate, query as ordered key/value).
@@ -1673,7 +1699,7 @@ keep flagged:
   this spec can only test the link check on a function (R23).
 - D40 asks for a `.secret()` marker "on any header or parameter", which touches
   `ParamDef` and header tuple types, while D42 forbids touching the endpoint
-  literals (about 519) in landing 1; PD25 resolves this with an API-level list
+  literals (547) in landing 1; PD25 resolves this with an API-level list
   and defers per-parameter markers to spec 4a (the parent leaves the owner of
   this P9 item unassigned).
 - D49 item 5 puts the `ResponseKind` guard disposition in landing 1 "with the
@@ -1685,3 +1711,13 @@ keep flagged:
   (`schematic-schema` is excluded from the workspace); PD11 makes it a member.
 - The "about 27 call sites" figure and sniff's count of exhaustive matches are
   not itemized in the parent (unverified).
+
+## Refresh log
+
+### 2026-10-12 — generation-integrity review 3
+
+- Replaced prerequisite assumptions with verified request-part, authentication, inventory, and compile-harness interfaces so implementation extends the shipped mechanisms.
+- Recorded that no persisted ABI marker or serialized inventory exists; this runtime feature creates the marker and replaces the conservative shared-file comparison.
+- Updated current endpoint counts to 547 and recorded measured request-feature counts, stale-tree deletion, and the GitHub/Bitbucket consumer migration baseline. Historical synthetic 550-endpoint spike measurements remain unchanged.
+- Carried forward the author's withdrawal of REST selectors without changing runtime scope or pipeline order.
+- Cleared refresh_required and added the implementation handoff note; no unresolved author decision was introduced by this refresh.

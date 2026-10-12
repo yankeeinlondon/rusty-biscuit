@@ -10,7 +10,7 @@ yolo: true
 
 ## Work and successful completion
 
-Replace the single response declaration with success shapes and effective HTTP error tables; add incremental SSE, NDJSON, and byte streams; support selector-separated endpoints at one address; and generate typed GraphQL operations through the existing generic send. Update generation, OpenAPI import/export, Postman, isolated definition bundles, and the four provider definitions together. Preserve untouched definition call sites and single-shape Rust success types.
+Replace the single response declaration with success shapes and effective HTTP error tables; add incremental SSE, NDJSON, and byte streams; let one endpoint (one `(method, path)`) declare several wire-distinguishable reply shapes as a tagged enum; and generate typed GraphQL operations through the existing generic send. Update generation, OpenAPI import/export, Postman, isolated definition bundles, the four provider definitions, and the Bitbucket source and OpenAI `GetResponse` endpoints (R32a, R32b) together. Preserve untouched definition call sites and single-shape Rust success types.
 
 Success means R1–R44, including R3a and R11a–R11c, have observable passing checks; generated artifacts compile and regenerate deterministically; affected dependents pass; and current docs, skills, and the implementation log describe the resulting behavior. Report evidence separately for macOS, Linux, native Windows, and WSL2. Missing required evidence remains pending, even if implementation is otherwise ready for review. The terminal lifecycle state is **implementation complete, ready for review**; the author closes the feature.
 
@@ -29,14 +29,14 @@ Execution conventions:
 ### Necessary Rules
 
 1. **Prerequisite gate.** Refresh implementation inputs from review 1 of `2026-10-12-schematic-runtime-envelope`, `2026-10-13-schematic-pagination`, `2026-10-14-schematic-definition-api`, and `2026-10-15-schematic-definition-vocabulary`, plus generation-integrity outcomes. Record actual symbols, locations, hooks, deadlines, builder seams, diagnostics, bundle layout, and baseline comparison rules. If the runtime or required builder/registration surface is absent, record a blocked prerequisite and stop implementation with a nonzero outcome; this plan does not silently build those features. Planning itself can finish now.
-2. **Authorization gate.** The spec's pre-authorizations explicitly require author confirmation and are not marked confirmed in the supplied document. `yolo: true` does not supply it. Before implementation, verify existing written authorization covers regeneration/deletion of owned output, runtime/test dependencies and lockfile changes, the four provider migrations, and forced dependent edits. If absent, record the blocker and exit without those mutations; the non-interactive run cannot request confirmation. Stale `gen/schematic` removal is optional and requires both authorization and proof that it is unreferenced and generator-owned.
-3. **Default adoption.** Adopt D-1–D-30 as written unless prerequisite review outcomes supersede them; record each separately with choice, alternatives, reason, phase, and evidence. D-17 and the end-marker behavior in D-18 are already decided, not new author questions. Names remain proposed except `EndpointSpec`. Conform to landed `Success`, `ErrorSet`, registration, pagination, and runtime contracts rather than inventing replacements.
-4. **Selection and precedence.** Apply R3/R3a: normalized concrete media types, 204-empty priority, status-specific candidate sets before status-less fallback, and `UnexpectedContentType` for an unselectable multi-shape 2xx. Single-shape endpoints remain unchecked by content type and optional statuses. Apply exact-then-narrower-range precedence across the merged error table; endpoint entries replace only identical matches. Equal-width overlapping ranges and duplicate matches at one level fail validation.
-5. **Selector and naming scope.** Top-level serialized JSON fields only; canonical numeric equality makes `1` and `1.0` equal. Grouped endpoints share body type and operation settings. Use `<Name>`/`<Name>Stream` ids, operation-local selector overlays, first-declared OpenAPI operation id, and the specified success/failure enum naming defaults. Known schema constraints must be checked; unknown structural checking gets a diagnostic and runtime object enforcement.
+2. **Authorization gate.** The spec's pre-authorizations explicitly require author confirmation and are not marked confirmed in the supplied document. `yolo: true` does not supply it. Before implementation, verify existing written authorization covers regeneration/deletion of owned output, runtime/test dependencies and lockfile changes, the four provider migrations plus the R32a/R32b endpoint edits, and forced dependent edits. If absent, record the blocker and exit without those mutations; the non-interactive run cannot request confirmation. Stale `gen/schematic` removal is optional and requires both authorization and proof that it is unreferenced and generator-owned.
+3. **Default adoption.** Adopt D-4–D-31 as written (D-1–D-3 are withdrawn by the author ruling of 2026-10-12, `2026-10-11-schematic-generation-integrity` review 1, item 1) unless prerequisite review outcomes supersede them; record each separately with choice, alternatives, reason, phase, and evidence. D-17 and the end-marker behavior in D-18 are already decided, not new author questions. Names remain proposed except `EndpointSpec`. Conform to landed `Success`, `ErrorSet`, registration, pagination, and runtime contracts rather than inventing replacements.
+4. **Selection and precedence.** Apply R3/R3a: normalized concrete media types, 204-empty priority, status-specific candidate sets before status-less fallback, and `UnexpectedContentType` for an unselectable multi-shape 2xx. Then R3b: JSON shapes sharing a media type are separated by a declared top-level discriminator value or by array versus object; the R3c fallback takes any unmatched media type. Single-shape endpoints remain unchecked by content type and optional statuses. Apply exact-then-narrower-range precedence across the merged error table; endpoint entries replace only identical matches. Equal-width overlapping ranges and duplicate matches at one level fail validation.
+5. **One endpoint per address and naming.** Endpoint identity stays spec 1's `(method, normalized path)`; no selector exists, nothing is injected into requests, and fields such as `stream` are ordinary optional fields sent as the caller set them (R13a; R13–R15 withdrawn). Shapes no tag separates fail validation. Shape notes are documentation only (variant rustdoc, OpenAPI response description). Use the specified success/failure enum naming defaults, with author-named variants for R3b groups and Bitbucket (`Directory`, `File`).
 6. **Stream contract.** End markers are consumed unless `keep` is declared; Ollama keeps its final statistics. Item-level malformed frames continue; malformed retained terminators end. Early close, interruption, idle timeout, deadline expiry, and frame-limit breach each terminate with one distinct error. The 16 MiB limit counts assembled SSE/NDJSON frames, not HTTP chunks; byte streams bypass it. Retention and diagnostics remain bounded, and no background reader or full-body copy is added.
 7. **Idle clock.** Interpret R11a's clock as starting at headers, then the previously yielded item, rather than restarting on every poll. Application delay cannot extend a shared deadline. Resolve implementation details against the landed runtime; record whether pending buffered items affect idle timing and test the chosen behavior. This detail is not permission to change the decided timeout semantics.
 8. **GraphQL scope.** Opaque query/mutation documents, POST, JSON-only Accept, unit variables omitted, all non-2xx replies on the HTTP error path. Valid nonempty errors take precedence over typed-data decoding. GraphQL declared errors survive HTTP-error opt-out. Global hooks see the 2xx wrapper; typed mutators see only successful data. Pagination reads decoded data and injects typed variables through existing body-path machinery. No subscriptions, document parser, batching, provider migration in sniff, or shipped GitHub GraphQL definition.
-9. **Export boundaries.** OpenAPI and Postman skip GraphQL with nonfatal contextual diagnostics here. Selector re-import yields one multi-shape operation and diagnoses identity/reinjection loss. Export resolved error ranges faithfully, expanding affected classes where necessary. Reading `x-schematic` back is deferred; do not add fidelity work from the next spec.
+9. **Export boundaries.** OpenAPI and Postman skip GraphQL with nonfatal contextual diagnostics here. A multi-shape endpoint exports as one operation: JSON shapes sharing a status and media type become a `oneOf` with a `discriminator` when R3b declares a field, and the fallback exports under `*/*`; re-import yields the same multi-shape endpoint. Export resolved error ranges faithfully, expanding affected classes where necessary. Reading `x-schematic` back is deferred; do not add fidelity work from the next spec.
 10. **Provider evidence.** Verify current provider documentation during implementation, recording URL/date and endpoint-specific framing, termination, error events, and audio defaults. Research labels alone do not establish framing; ElevenLabs audio remains raw bytes. Missing evidence gets a documented conservative choice allowed by the spec, or an explicit unmet requirement where no allowed choice exists. Do not silently invent `done=true` or `[DONE]` for unrelated endpoints.
 11. **Cost and validation rulings.** Existing typed-send and pager spikes already answer trait/wrapper compile cost and pager size; no repeat performance spike or multi-host benchmark. Mock tests prove incremental delivery and ownership, not live-provider behavior or HTTP/2 connection closure. Do not expand CI environments, execution bans, or scope; use the existing policy. Load the `os` skill before assessing remote availability or editing platform/path code.
 12. **Input rules.** Apply the matrices below only to changed file readers: OpenAPI JSON/YAML and definition-bundle formats actually supported by the prerequisite loader. GraphQL HTTP replies and stream framing need protocol tests, not a configuration matrix. Unsupported bundle formats are not added to satisfy this plan. The matrices distinguish absent, null, invalid, and empty; JSON duplicate object members and YAML duplicate mapping keys are rejected for these structural fields. Preserve arbitrary JSON inside schemas/examples rather than treating it as malformed configuration.
@@ -50,8 +50,9 @@ Execution conventions:
   - Search all `ApiResponse` readers, endpoint counts by variant, streaming body fields, hooks, public generated types, extension/export/import code, and dependent call sites. Recheck the reported stranded Ollama types and the roughly 519 untouched literals rather than trusting counts.
   - Inventory sniff's eight fixtures and check-status document/variables. Search `sniff/lib`, `biscuit-speaks/lib`, `model-citizen/lib`, and all five named homelab crates, plus any additional actual consumers; record zero-reference results.
 - [ ] **Provider inventory**
-  - Review definitions and research for Ollama, LM Studio, Anthropic, and ElevenLabs. Build an endpoint migration table: old/new success and failure types, selector, framing, terminator/keep, documented provider-error variants, content type/default codec, hook removal, and evidence source.
-  - Identify streaming definitions outside the four APIs and log them without editing them.
+  - Review definitions and research for Ollama, LM Studio, Anthropic, and ElevenLabs. Build an endpoint migration table: old/new success and failure types, shape set and wire tags, framing, terminator/keep, documented provider-error variants, content type/default codec, hook removal, and evidence source.
+  - Add the Bitbucket source endpoint and OpenAI `GetResponse` (R32a, R32b) to the table; for Bitbucket, record what the provider sends for a `.json` file versus a directory listing (open research item).
+  - Identify streaming or multi-shape definitions outside these and log them without editing them.
 
 ### Wave 2 — Baseline and targeted spike (sequential coordinator)
 
@@ -76,40 +77,40 @@ For optional bundle metadata newly introduced here, absence is explicitly permit
 
 **OpenAPI input — run separately for JSON and YAML through the public importer.** Status/media names are object keys; malformed keys are load-bearing input mutations too.
 
-| Shape | operation `responses` | response `content` | media entry `schema` | response `$ref` | selector property `enum` | selector property in `required` |
+| Shape | operation `responses` | response `content` | media entry `schema` | response `$ref` | media `oneOf` members | `discriminator.propertyName` |
 | --- | --- | --- | --- | --- | --- | --- |
-| Control | Import successes and HTTP errors | Preserve every declared media type | Register shape/item schema | Resolve local response | Preserve scalar restrictions | Preserve requirement |
-| Absent | Reject: no representable success | No-content success becomes empty; preserve status | JSON/stream fallback to Value with diagnostic | Use inline response | No enum restriction | Property optional |
+| Control | Import successes and HTTP errors | Preserve every declared media type | Register shape/item schema | Resolve local response | Separable members become JSON shapes | Members become discriminator-tagged shapes |
+| Absent | Reject: no representable success | No-content success becomes empty; preserve status | JSON/stream fallback to Value with diagnostic | Use inline response | Single schema | Separate by array/object, else single-schema import with diagnostic |
 | Explicit null | Reject | Reject | Reject | Reject | Reject | Reject |
 | Wrong whole type | Reject | Reject | Reject | Reject | Reject | Reject |
 | One invalid member | Reject invalid status/value | Reject invalid media/value | Reject malformed structural keyword | Reject malformed reference | Reject invalid schema enum member | Reject non-string member |
 | All invalid members | Reject | Reject | Reject | Reject | Reject | Reject |
-| Empty | Reject: no success | No-content success becomes empty | Valid unconstrained schema; register Value | Reject empty reference | Reject unsatisfiable enum | Explicitly no required fields |
-| Duplicate key | Reject | Reject | Reject structural duplicate | Reject | Reject duplicated mapping key, not repeated scalar values | Reject duplicated mapping key, not repeated names |
+| Empty | Reject: no success | No-content success becomes empty | Valid unconstrained schema; register Value | Reject empty reference | Reject empty `oneOf` | Reject empty property name |
+| Duplicate key | Reject | Reject | Reject structural duplicate | Reject | Reject duplicated mapping key | Reject duplicated mapping key |
 | Trailing/invalid document | Reject | Reject | Reject | Reject | Reject | Reject |
 
-For schema enum members, "invalid" means invalid against the declared selector property's scalar schema, not arbitrary non-string JSON: boolean and numeric enum values are legitimate. Preserve existing unrelated schema handling. A no-content error entry retains its empty error shape; an operation with only errors still fails for lack of representable success. Status keys `default`, 1xx/3xx, unsupported error-media alternatives, and invalid/wildcard media keys also get explicit R28 diagnostic tests, separate from syntactic rejection.
+For `oneOf` members, "invalid" means a member that is not a schema or reference; inseparable valid members are not a parse error but import as one schema with a diagnostic (R28). Preserve existing unrelated schema handling. A no-content error entry retains its empty error shape; an operation with only errors still fails for lack of representable success. Status keys `default`, 1xx/3xx, unsupported error-media alternatives, and invalid media keys (wildcards other than `*/*`, which maps to the R3c fallback) also get explicit R28 diagnostic tests, separate from syntactic rejection.
 
 **Definition bundle — supported format(s), public isolated load followed by validation/export.** These columns identify semantic fields; freeze exact serialized paths in Wave 2.
 
-| Shape | endpoint success set | API error entries | endpoint error entries | endpoint opt-out flag | shape content type | shape statuses | endpoint selector |
+| Shape | endpoint success set | API error entries | endpoint error entries | endpoint opt-out flag | shape content type | shape statuses | shape fallback flag | shape note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Control | Load every shape | Resolve inherited errors | Resolve added/overridden errors | Disable HTTP declarations | Preserve normalized media | Select/export exact 2xx | Validate pair and export overlay |
-| Absent | Reject | Published absence means no API defaults | Inherit API entries | Inherit/overlay policy | Use shape default | No restriction | Ordinary endpoint; reject ambiguous pair |
-| Explicit null | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Wrong whole type | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| One invalid member | Reject whole set | Reject whole table | Reject whole table | Reject non-bool | Reject non-string/invalid media | Reject invalid/non-2xx status | Reject malformed field/value |
-| All invalid members | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Empty | Reject | Explicit no defaults | Explicit no additions; still inherit | N/A: reject empty container | Reject empty media string | Explicit no restriction | Reject empty object/field |
-| Duplicate key | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Trailing/invalid document | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
+| Control | Load every shape | Resolve inherited errors | Resolve added/overridden errors | Disable HTTP declarations | Preserve normalized media | Select/export exact 2xx | Select unmatched media | Reach rustdoc/export |
+| Absent | Reject | Published absence means no API defaults | Inherit API entries | Inherit/overlay policy | Use shape default | No restriction | Not a fallback | No note |
+| Explicit null | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
+| Wrong whole type | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
+| One invalid member | Reject whole set | Reject whole table | Reject whole table | Reject non-bool | Reject non-string/invalid media | Reject invalid/non-2xx status | Reject non-bool; reject second fallback | Reject non-string |
+| All invalid members | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
+| Empty | Reject | Explicit no defaults | Explicit no additions; still inherit | N/A: reject empty container | Reject empty media string | Explicit no restriction | N/A: reject empty container | Reject empty string |
+| Duplicate key | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
+| Trailing/invalid document | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
 
 **Definition bundle — nested required variant payloads.** Each required payload is checked when its containing variant is present, not when an optional parent is omitted.
 
-| Shape | response shape tag | JSON/item descriptor | stream framing tag | stream end tag | field-end path | field-end value | end keep flag | error status match | error shape descriptor | selector field | selector scalar value |
+| Shape | response shape tag | JSON/item descriptor | stream framing tag | stream end tag | field-end path | field-end value | end keep flag | error status match | error shape descriptor | JSON tag field name | JSON tag scalar value |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Control | Select correct shape | Resolve canonical binding/schema | Select SSE/NDJSON/Bytes | Apply terminator/close | Match supported path | Match declared scalar | Deliver final item | Apply specificity | Decode declared shape | Use serialized name | Enforce chosen scalar |
-| Absent | Reject | Reject for JSON/SSE/NDJSON; absent for Bytes | Reject | ConnectionClose only if published default | Reject for field end | Reject for field end | Consumed default | Reject | Reject | Reject | Reject |
+| Control | Select correct shape | Resolve canonical binding/schema | Select SSE/NDJSON/Bytes | Apply terminator/close | Match supported path | Match declared scalar | Deliver final item | Apply specificity | Decode declared shape | Select by top-level field | Select by distinct value |
+| Absent | Reject | Reject for JSON/SSE/NDJSON; absent for Bytes | Reject | ConnectionClose only if published default | Reject for field end | Reject for field end | Consumed default | Reject | Reject | Absent unless the tag is `Field` | Reject for `Field` |
 | Explicit null | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
 | Wrong whole type | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
 | One invalid member | Reject | Reject | Reject | Reject | Reject fan-out/invalid path | Reject non-scalar | Reject | Reject bad bound/status | Reject | Reject nested/invalid name | Reject non-scalar |
@@ -136,25 +137,25 @@ Expand error status match into exact status and range lower/upper columns, and e
 
 Address-rule tag and required `suffix`, replacement, and append-path payloads, pagination input/output path and knob fields, schema-catalog entries, and Rust binding references each need their own frozen columns where their reader changes. Reuse the prerequisite matrix for unchanged fields; verify rather than widen the existing bundle format/version contract.
 
-**Matrix test construction:** start from actual Schematic-exported OpenAPI JSON/YAML and actual registered/bundled definitions containing the load-bearing features. One data-driven public test per supported format walks all its tables, independently applying one edit per cell to the unedited fixture. Control results must prove the relevant success/error/selector/GraphQL result before mutations. Assert resulting public definition/export or contextual rejection, never just deserializer `Ok`/`Err`. Grep changed readers for load-bearing serde defaults, absent/null-collapsing `Option`, `filter_map(..as_str())`, `unwrap_or_default()`, and `.ok()`; explain legitimate uses. A review finding audits the entire row and column, not only the reported cell.
+**Matrix test construction:** start from actual Schematic-exported OpenAPI JSON/YAML and actual registered/bundled definitions containing the load-bearing features. One data-driven public test per supported format walks all its tables, independently applying one edit per cell to the unedited fixture. Control results must prove the relevant success/error/wire-tag/GraphQL result before mutations. Assert resulting public definition/export or contextual rejection, never just deserializer `Ok`/`Err`. Grep changed readers for load-bearing serde defaults, absent/null-collapsing `Option`, `filter_map(..as_str())`, `unwrap_or_default()`, and `.ok()`; explain legitimate uses. A review finding audits the entire row and column, not only the reported cell.
 
 ## Phase 2: Add definition vocabulary and validation
 
 ### Wave 3 — Stored types (sequential)
 
 - [ ] **Vocabulary types**
-  - Add/widen `Success`, stored success shapes, non-exhaustive stream framing, end/keep forms, `StatusMatch`, `ErrorSet`, and selectors in `schematic-define`; preserve old response storage until Phase 5. Keep existing `.returns(...)`, `.errors(ErrorSet::none())`, and API defaults call sites working.
+  - Add/widen `Success`, stored success shapes, non-exhaustive stream framing, end/keep forms, `StatusMatch`, `ErrorSet`, R3b JSON tags, the R3c fallback marker, and shape notes in `schematic-define`; preserve old response storage until Phase 5. Keep existing `.returns(...)`, `.errors(ErrorSet::none())`, and API defaults call sites working.
   - Add registered GraphQL operation/address primitives and context entry points, including typed variables/data, explicit unit variables, operation name, HTTP error policy, and existing pagination declarations. Do not parse documents.
   - Derive serialization/equality and surrounding Debug/Clone traits; register descriptor closure for success, error, stream items, variables, and data in bundles without registering builtin bytes/unit.
 
 ### Wave 4 — Independent rules (parallel after Wave 3)
 
 - [ ] **Shape validation**
-  - Implement normalized media/status distinguishability and empty/stream constraints; known-schema selector type/enum checks; duplicate-group operation-setting equality and canonical scalar comparison. Reuse rules from generator/importer rather than copying them. Cover R1, R3a, R13, R16–R18, R23.
+  - Implement normalized media/status distinguishability and empty/stream constraints; R3b separability (shared discriminator field with distinct canonical scalar values, or one array and one object shape) and R3c fallback limits; spec 1's `(method, path)` duplicate rule stays unchanged. Reuse rules from generator/importer rather than copying them. Cover R1, R3a–R3c, R13a, R16–R18, R23.
 - [ ] **GraphQL validation**
   - Validate registration, shared generated naming collisions after module/suffix resolution, address rules, and Relay/body-path compatibility. Test wrong variables at compile time and unregistered data at definition validation. Extend bundle reference validation and apply frozen matrix cases for these types.
 
-**Validation checkpoint:** definition tests pass with the old stored response path; serialization is deterministic and isolated references resolve; specificity/overlap and selector rejection cases produce contextual diagnostics. Record finalized public names and construction seams for runtime and generator work.
+**Validation checkpoint:** definition tests pass with the old stored response path; serialization is deterministic and isolated references resolve; specificity/overlap and inseparable-shape rejection cases produce contextual diagnostics. Record finalized public names and construction seams for runtime and generator work.
 
 ## Phase 3: Implement runtime decoding and streams
 
@@ -184,19 +185,19 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 ### Wave 7 — Code generation (parallel after Phase 3)
 
 - [ ] **REST generation**
-  - Extend codegen request structs/traits/enums/module docs to emit plain or enum success/failure types, effective error lookup, stream codec metadata, and serialized-field selector injection. No convenience send wrapper methods.
-  - Add fixtures for single/multiple successes, exact-status-distinct JSON, inherited/overlaid/opted-out errors, typed selector override and non-object rejection, and hook marker eligibility. Keep the old production response path active.
+  - Extend codegen request structs/traits/enums/module docs to emit plain or enum success/failure types, effective error lookup, stream codec metadata, and shape notes as variant rustdoc. Nothing is injected into request bodies. No convenience send wrapper methods.
+  - Add fixtures for single/multiple successes, exact-status-distinct JSON, discriminator- and array/object-distinct JSON, a fallback shape, inherited/overlaid/opted-out errors, and hook marker eligibility. Keep the old production response path active.
 - [ ] **GraphQL generation**
   - Emit typed operation requests using `EndpointSpec`, POST body constants/typed variables, explicit operationName, composite failures, managed address override, and the existing generic send. Handle URL segments/proxy prefixes/trailing slashes, builder-invalid URLs, and cross-origin checks.
   - Prepare pagination integration using landed Relay/body-path contracts and freeze generated naming collision tests. Write generated fixture tests without adding shipped GitHub operations.
 - [ ] **Consumer adapters**
   - Prepare reusable v2 mapping functions for OpenAPI export/import, Postman first-shape content type, and `x-schematic` writes behind the legacy production adapters. Own disjoint exporter/importer/extension files; coordinator resolves shared imports.
-  - Include status/media aggregation, selector overlays, resolved-range expansion, normalized import classification and contextual loss diagnostics. Implement the matrix's parser-boundary checks where supported upstream parsers would otherwise hide null, invalid members, duplicates, or trailing content. No extension reader.
+  - Include status/media aggregation, `oneOf`/`discriminator` and `*/*` fallback export, resolved-range expansion, normalized import classification and contextual loss diagnostics. Implement the matrix's parser-boundary checks where supported upstream parsers would otherwise hide null, invalid members, duplicates, or trailing content. No extension reader.
 
 ### Wave 8 — Compile fixtures (sequential)
 
 - [ ] **Fixture integration**
-  - Wire additive modules/manifests and generate isolated fixture crates. Compile through the actual runtime and run a representative generated stream/selector/multi-shape/error/GraphQL request against local mocks.
+  - Wire additive modules/manifests and generate isolated fixture crates. Compile through the actual runtime and run a representative generated stream/multi-shape/error/GraphQL request against local mocks.
   - Run compile-fail cases for wrong GraphQL variables and invalid hook registration on streams, text, binary, and mixed JSON alternatives; prove all-JSON alternatives remain eligible. Validate module/suffix/body/enum naming collisions.
 
 **Validation checkpoint:** generator and define L1 pass; real fixture code compiles; adapter functions are ready to consume the new stored form; untouched production output remains at the explained baseline. Coordinate manifests and output directories rather than letting parallel agents mutate them.
@@ -207,16 +208,17 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 
 - [ ] **Response switch**
   - Change `Endpoint::response` and API error/GraphQL fields to the finalized model; widen builder lowering in place and preserve explicit none versus omitted/inherit behavior. Activate Phase 4 generator, validator, importer, exporter, and extension adapters; remove the temporary legacy path after all consumers switch.
-  - Update self-contained bundle loading, feature exports, and serde comparisons. Preserve original snapshots and narrowly enumerate response/error/selector/GraphQL field differences. Reject dangling registrations and audit the matrix before accepting a baseline update.
+  - Update self-contained bundle loading, feature exports, and serde comparisons. Preserve original snapshots and narrowly enumerate response/error/GraphQL field differences. Reject dangling registrations and audit the matrix before accepting a baseline update.
 
 ### Wave 10 — Provider definitions (parallel by disjoint provider directory)
 
 - [ ] **Ollama migration**
-  - Apply the Phase 1 endpoint inventory: native NDJSON and appropriate retained terminators, generate/chat selector pairs, and OpenAI-compatible SSE `[DONE]`. Register reachable stream types and account for every reported stranded type. Keep documented provider-error events typed and observable.
+  - Apply the Phase 1 endpoint inventory: native NDJSON and appropriate retained terminators, generate/chat as single endpoints with NDJSON and JSON shapes chosen by `Content-Type` (`stream` stays an optional field), and OpenAI-compatible SSE `[DONE]`. Register reachable stream types and account for every reported stranded type. Keep documented provider-error events typed and observable.
 - [ ] **LM Studio migration**
   - Replace both streaming binary declarations with registered SSE events and evidence-supported end conditions; use connection close where appropriate. Include or explicitly record unsupported documented error events.
 - [ ] **Anthropic migration**
-  - Define CreateMessage/CreateMessageStream selector pair and registered Messages event variants, consuming message_stop by default. Cover provider error events and both body selectors.
+  - Give the single CreateMessage endpoint a JSON shape and an SSE shape with registered Messages event variants, consuming message_stop by default; `stream` stays an optional field. Cover provider error events and both reply variants.
+  - Bitbucket source endpoint (R32a): `Directory` JSON listing plus `File` fallback; record the `.json`-file finding. OpenAI `GetResponse` (R32b): add the SSE `ResponseStreamEvent` shape beside `Response`, with the documented end condition and its source.
 - [ ] **ElevenLabs migration**
   - Make StreamSpeech an incremental byte stream; select timestamp-stream framing from evidence. Correct documented binary/audio/archive media types without removing output-format query controls. Record research/provider discrepancies, defaults, and any removed hooks.
 
@@ -234,21 +236,21 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 ### Wave 12 — Export/import checks (parallel by test ownership)
 
 - [ ] **OpenAPI coverage**
-  - Assert merged response media/status maps, all success/error shape kinds, preserved class ranges and expanded winning statuses, stream metadata, selector required-enum overlay without shared-component mutation, and deterministic operation ids. Parse exported documents with `openapiv3`.
+  - Assert merged response media/status maps, all success/error shape kinds, preserved class ranges and expanded winning statuses, stream metadata, `oneOf` with `discriminator` for tagged JSON groups, `*/*` for the fallback, and shape notes in response descriptions. Parse exported documents with `openapiv3`.
   - Assert real ElevenLabs content types and query-controlled defaults. Test `x-schematic` contains every new field plus rate-limit, deprecated, auth override, cross_origin, and request-id inherited from prerequisites.
 - [ ] **Import coverage**
   - Exercise normalized JSON/+json, SSE, NDJSON/jsonl, text, and binary mapping; deduplicate identical successes and preserve distinct same-media schemas with exact statuses. Test Value/connection-close fallback diagnostics, 204 empty, endpoint-level errors, default/1xx/3xx/multiple-error-media diagnostics, and no-success rejection.
-  - Run JSON and YAML matrix walkers from real exported fixtures through public import/export. Verify selector identity/reinjection loss is reported, content types survive, and common HTTP errors are not hoisted.
+  - Run JSON and YAML matrix walkers from real exported fixtures through public import/export. Verify multi-shape endpoints (including tagged `oneOf` groups and the fallback) round-trip, content types survive, and common HTTP errors are not hoisted.
 - [ ] **Postman coverage**
   - Update scoped golden expectations for first success media type and v2 storage. Assert contextual nonfatal GraphQL skip diagnostics in both exporters; do not implement future runnable GraphQL Postman requests.
 
 ### Wave 13 — Shipped runtime checks (sequential)
 
 - [ ] **Provider verification**
-  - Through regenerated clients, prove one Ollama NDJSON and one SSE stream deliver incrementally, Anthropic sends both enforced selectors, and ElevenLabs yields its first audio chunk before completion. Assert final Ollama statistics and typed provider-error events.
+  - Through regenerated clients, prove one Ollama NDJSON and one SSE stream deliver incrementally, Anthropic returns each variant by `Content-Type` with the caller's `stream` sent unchanged, Bitbucket selects `Directory` and `File`, OpenAI `GetResponse` returns each variant, and ElevenLabs yields its first audio chunk before completion. Assert final Ollama statistics and typed provider-error events.
   - Run definition tests for every migrated endpoint from the inventory, confirming LM Studio framing/end evidence and ElevenLabs timestamp/media decisions. Complete provider evidence and hook-removal entries as findings occur.
 
-**Validation checkpoint:** R5/R15/R21/R26–R34/R42 behavior passes, both input-format matrices pass, and exported selector/range semantics agree with runtime lookup. Goldens and baseline updates explain individual differences rather than hiding them.
+**Validation checkpoint:** R5/R13a/R21/R26–R34 (including R32a/R32b)/R42 behavior passes, both input-format matrices pass, and exported multi-shape/range semantics agree with runtime lookup. Goldens and baseline updates explain individual differences rather than hiding them.
 
 ## Phase 7: Complete GraphQL integration and parity
 
@@ -276,7 +278,7 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
 ### Wave 16 — Docs and contract audit (parallel, disjoint ownership)
 
 - [ ] **Documentation audit**
-  - Update READMEs and current topic docs for authoring success/error sets, selectors, incremental streams, timeouts/limits, provider-error item variants, GraphQL addresses/failures/hooks, and Relay pagination. Use compact examples and Mermaid stream/error-resolution flows for readers new to the repository.
+  - Update READMEs and current topic docs for authoring success/error sets, several shapes at one address (wire tags, fallback, notes), incremental streams, timeouts/limits, provider-error item variants, GraphQL addresses/failures/hooks, and Relay pagination. Use compact examples and Mermaid stream/error-resolution flows for readers new to the repository.
   - Update `schematic/docs/io/import-openapi.md`, `export-openapi.md`, `export-postman.md`, and `openapi-extensions.md` with actual fidelity limits. Docs never name this feature or another spec by date/path. Update root/area dependency docs for any crate changes.
 - [ ] **Skill audit**
   - Update `.claude/skills/schematic-define/` and its Schematic generator/runtime guidance, plus other skills affected by actual architecture changes. Review comments/docs on every changed behavior-bearing symbol; fix drift and record it without unrelated cleanup.
@@ -290,7 +292,7 @@ Address-rule tag and required `suffix`, replacement, and append-path payloads, p
   - Regenerate all owned outputs twice; the second run must produce no additional diff. Check definition source preservation, field-specific baselines, scoped artifact drift, and generated public-type differences. Explain any generated docs/type drift outside the migration set.
   - Load the `os` skill, reuse qualifying evidence per package/environment/tier, and obtain missing required evidence on macOS, Linux, native Windows, and WSL2 using authorized non-interactive hosts. Record platform-specific failures and any newly learned platform facts in the OS skill. Never turn inaccessible coverage into a pass or an execution ban.
 - [ ] **Review handoff**
-  - Finalize `implementation-log.md` with all D-1–D-30 dispositions, names/locations, deviations and alternative choices, open proposed details, inventories, public type changes, removed hooks, provider sources/uncertainties, dependent edits, and environment evidence.
+  - Finalize `implementation-log.md` with all D-4–D-31 dispositions (D-1–D-3 withdrawn), names/locations, deviations and alternative choices, open proposed details, inventories, public type changes, removed hooks, provider sources/uncertainties, dependent edits, and environment evidence.
   - Report actual verified behavior and remaining blockers. When required checks pass, mark implementation complete and ready for review 1. Leave feature lifecycle placement and spec closure to the author; do not refresh downstream specs before review 1 supplies its outcomes.
 
 **Validation checkpoint:** every ledger item points to passing evidence or an explicitly unresolved acceptance blocker; generated output is idempotent; docs and skills match behavior; all required platform and dependent checks are accounted for. No commit or lifecycle move is performed.

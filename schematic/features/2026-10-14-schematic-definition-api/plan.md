@@ -12,9 +12,11 @@ yolo: "true"
 
 Replace REST definition literals and hand-typed schema references with required-fact builders and a typed, module-scoped definition context. Capture the existing definitions and generated artifacts before changing them; introduce the context and builders additively; update the import emitter; convert OpenAI once and then the remaining APIs in verified batches; remove obsolete interfaces only after their consumers have migrated. Preserve WebSocket definitions and generated request defaults. Finish by regenerating artifacts, verifying dependents, and updating the authoring documentation.
 
-Success means all R1–R30 have observable evidence: all shipped REST endpoints use builders, registries come from the same context assembly as definitions, generated Rust paths compile, invalid references and contradictory declarations fail with context, containers preserve their wire shape without becoming components, pagination resolutions and caller controls survive, and all nine query-bearing paths are migrated. Historical differences are individually explained; final committed Rust, OpenAPI, and Postman artifacts have no drift exemptions. The implementation log records decisions and evidence as they occur. The terminal state is **implementation complete, ready for review**, with platform evidence and any remaining limitations stated accurately.
+Success means all R1–R31 have observable evidence: all shipped REST endpoints use builders, registries come from the same context assembly as definitions, generated Rust paths compile, invalid references and contradictory declarations fail with context, containers preserve their wire shape without becoming components, pagination resolutions and caller controls survive, all nine query-bearing paths are migrated (eight by merging into their same-route twins), and a request body on `GET` is rejected. Historical differences are individually explained; final committed Rust, OpenAPI, and Postman artifacts have no drift exemptions. The implementation log records decisions and evidence as they occur. The terminal state is **implementation complete, ready for review**, with platform evidence and any remaining limitations stated accurately.
 
 This is a conditional implementation plan. On 2026-10-11, the generation-integrity, runtime-envelope, and pagination specifications are marked `draft-spec` and `implemented: false`; the definition-API specification has `refresh_required: true`. The current code does not supply the reviewed runtime and pagination interfaces assumed below. Phase 1 must reconcile those outcomes before its baseline is captured. This plan does not implement the predecessor features, revise the specification snapshot, or treat their proposed interfaces as existing code.
+
+The author ruling of 2026-10-12 (`2026-10-11-schematic-generation-integrity` review 1, item 1) is incorporated: endpoint identity stays `(method, path)`, REST selectors are withdrawn, the `?`-suffixed Gitea and OpenAI endpoints merge into their twins with optional `recursive`/`beta` query parameters (no fixed-value query inputs are built), and every parameter declares its location with a `GET` body rejected (R29, R31).
 
 Waves are numbered globally. Each wave is an execution step: finish its tasks and checkpoint before starting the next. “Parallel” means the listed tasks may be assigned to separate subagents with disjoint file ownership; the coordinator integrates shared changes and runs the checkpoint. All agents operate non-interactively, without commits, `cargo fmt`, or focus-stealing terminal/browser windows. Single-task waves and per-API migration batches are sequential.
 
@@ -42,7 +44,7 @@ These rulings adopt the specification's defaults where available. They are plann
 | Fallible assembly | Adopt `define_x_api(&mut DefinitionContext) -> Result<RestApi, DefinitionError>`. One module-group assembly returns definitions and their registry together; lookups propagate errors distinctly from unknown names, rather than returning empty data or unwrapping. Registry adapters stay in schematic-definitions; schematic-define remains provider-neutral. |
 | Naming and identity | Never derive a generated Rust path by parsing `std::any::type_name`. Ordinary names require a proven public identifier; exceptions use compile-checked `rust_path!` and optional schema_name. Prefer a typed macro token proving the authored path names T; support generic type paths only where the spike proves their stable implementation. register_as targets non-container leaves. |
 | Wrapper storage | Reserve `structure: Option<TypeRef>` with no public setter; all authored registrations leave it None. Store the wrapper/reference information needed by validation and lowering separately, so R3/R7 work without reading the reserved carrier. Do not use the carrier as a second schema source. |
-| Ownership limits | No deriving proc-macro, callback descriptors, global registry, shared vendor presets, convenience methods, GraphQL, response-v2 behavior, or vocabulary additions. Fixed query inputs and narrow wire/Rust-name separation are authorized here; general query fidelity and self-contained schema bundles remain later work. No CI cells or scope changes are added. |
+| Ownership limits | No deriving proc-macro, callback descriptors, global registry, shared vendor presets, convenience methods, GraphQL, response-v2 behavior, REST selectors, fixed-value query inputs, or vocabulary additions. Endpoint merges for the `?`-suffixed pairs and narrow wire/Rust-name separation are authorized here; general query fidelity and self-contained schema bundles remain later work. No CI cells or scope changes are added. |
 
 ### Wave 1 — Refresh and Inventory (Parallel)
 
@@ -53,7 +55,7 @@ These rulings adopt the specification's defaults where available. They are plann
 - [ ] **Inventory Consumers**
   - Use sniff for repository/dependency discovery and text searches for concrete call sites. Record all REST API names, endpoint counts and ordered ids, registry entries/order, container components, defaulted fields, Basic/OAuth2 users, and five WebSocket definitions.
   - Recount the expected approximately 519 endpoints, 265 OpenAI endpoints, 36 container registrations, 35 legacy pagination declarations, and nine query-bearing paths; treat observed inventory as authoritative.
-  - Inventory GitLab repository-file request users before its field location changes, all Default implementations, oauth_scopes/auth_policy/module_path readers, external literals, registry lookups, and generated-schema dependents. Own an inventory artifact, not the shared log file.
+  - Inventory GitLab repository-file request users before its field location changes, users of every request type and client method R29 removes (Gitea GetGitTreeRecursive, the seven OpenAI Beta* endpoints, including schematic-gen L1 tests naming them), GET endpoints declaring a request body, all Default implementations, oauth_scopes/auth_policy/module_path readers, external literals, registry lookups, and generated-schema dependents. Own an inventory artifact, not the shared log file.
 
 Checkpoint: predecessor contracts and inventory agree; actual counts and consumers replace estimates throughout the execution checklist. Missing prerequisites stop baseline capture and dependent implementation, while preserving the inventory for later use.
 
@@ -131,13 +133,12 @@ Phase gate: R8–R13 pass on new fixtures, all old providers remain baseline-equ
 ### Wave 8 — Definition Forms and Runtime Wiring (Parallel)
 
 - [ ] **Add Definition Forms**
-  - Own schematic-define changes for endpoint CrossOrigin replacement, request-id/secret sugar, auth_policy, fixed-value query inputs, pager-managed markers, and narrow wire-name/Rust-name mapping (R14–R16, R29–R30).
-  - Store fixed values and adoption markers as serializable definition data. Reject fixed/managed conflicts, unmatched adoption, conflicts with caller/API defaults, and managed required inputs lacking the pagination-authored default. Reuse the resolved-strategy validator and PagerManagedRequiredWithoutDefault diagnostic.
+  - Own schematic-define changes for endpoint CrossOrigin replacement, request-id/secret sugar, auth_policy, pager-managed markers, parameter locations with the GET-body rejection, and narrow wire-name/Rust-name mapping (R14–R16, R29–R31).
+  - Store adoption markers as serializable definition data. Reject unmatched adoption and managed required inputs lacking the pagination-authored default. Reject a request body on an endpoint built with `Endpoint::get` with API, endpoint, and method context; location never enters endpoint identity. Reuse the resolved-strategy validator and PagerManagedRequiredWithoutDefault diagnostic.
   - Retain a path-query warning for existing providers; prepare the hard-error path but enable it only with completion of all nine migrations in Phase 6.
 - [ ] **Wire Runtime Emission**
   - Own generator/runtime changes consuming those agreed fields. Apply endpoint policy to redirects and followed links, and emit request-id/secret markers in the predecessor's runtime form without new redaction logic.
-  - Insert fixed query values exactly once through the normal encoder, expose no setters for them, and preserve GitLab's git_ref Rust name for wire name ref. A caller or pagination strategy cannot overwrite fixed values.
-  - Represent fixed inputs in OpenAPI/Postman or produce the established output-specific diagnostic with API, endpoint, feature, and target. One target's unsupported feature does not block other outputs.
+  - Preserve GitLab's git_ref Rust name for wire name ref. Optional `recursive`/`beta` parameters added by the merges are ordinary query inputs with setters, emitted through the normal encoder and exported like any other query parameter.
 
 Checkpoint: integrate the two branches only after agreeing on field signatures. Replace R27's no-endpoint-cross-origin assertion with R14 coverage; retain its no-GraphQL assertion.
 
@@ -146,9 +147,9 @@ Checkpoint: integrate the two branches only after agreeing on field signatures. 
 - [ ] **Verify Behavior**
   - Use two local origins in the predecessor's L1 harness: an endpoint allow_origins override reaches the second origin; a sibling under same_origin refuses it and the second origin records zero requests for that sibling. Cover invalid exact origins and caller tightening.
   - Assert request-id normalization/header validity and secret-marker emission, without duplicating predecessor redaction tests. Cover Some(AuthPolicy) through generated execution/emission.
-  - Assert fixed/default/caller query composition, encoding once, repeated-key conflicts, serialized fixed values/markers, matched pager control, and required-managed rejection through public results. Old providers still match baselines.
+  - Assert default/caller query composition, encoding once, repeated-key conflicts, serialized markers, matched pager control, required-managed rejection, and GET-body rejection through public results. Old providers still match baselines.
 
-Phase gate: R14–R15 and new R29–R30 fixtures pass, output-specific validation remains honest, and full area checks pass without enabling the hard path-query error prematurely.
+Phase gate: R14–R15 and new R29–R31 fixtures pass, output-specific validation remains honest, and full area checks pass without enabling the hard path-query error prematurely.
 
 ## Phase 5 — Convert the Import Emitter and OpenAI
 
@@ -156,10 +157,11 @@ Phase gate: R14–R15 and new R29–R30 fixtures pass, output-specific validatio
 
 - [ ] **Convert Emitter**
   - Change definition_gen.rs to emit fallible builders, nominal registration support selected by the spike, explicit typed registrations in preserved order, and the generic overlay call. The importer may use crate-internal construction without public Default.
-  - Normalize imported query-bearing paths in the shared import route before builder construction. Constants become stored fixed inputs; supported placeholders become caller query inputs. Reject malformed/ambiguous expressions with endpoint context. Keep the vendored OpenAI source unchanged.
+  - Normalize imported query-bearing paths in the shared import route before builder construction. Constants and supported placeholders become caller query inputs; a constant-suffixed path whose base route has a twin merges into that twin (R29). Report a request body on an imported GET operation (R31). Reject malformed/ambiguous expressions with endpoint context. Keep the vendored OpenAI source unchanged.
   - Implement a tested recorded transform only where reproduction established its necessity. Keep handwritten overlay files outside the emitter's output ownership; no OpenAI-specific emitter branch.
 - [ ] **Convert OpenAI**
-  - Regenerate OpenAI's definitions once using the new emitter, preserving the seven beta=true query inputs. Convert its hand-written pagination overlay to endpoint-level assignments; unknown overlay endpoint ids remain errors.
+  - Before regenerating, run the R29 schema gate on each of the seven beta pairs: compare flattened request and response JSON schemas; use the beta type where it is a superset (log equal cases); for any pair where neither is a superset, do not merge, log the differences for the author, and keep the hard `?` error disabled.
+  - Regenerate OpenAI's definitions once using the new emitter, merging each gated beta pair into its twin with an optional `beta` query parameter. Convert its hand-written pagination overlay to endpoint-level assignments; unknown overlay endpoint ids remain errors.
   - Route the OpenAI assembly/registry through its context; explicitly preserve old component names/order except the ruled container removals. Do not schedule another OpenAI definition rewrite in Phase 6.
 
 ### Wave 11 — Import Regression Coverage (Sequential)
@@ -167,9 +169,9 @@ Phase gate: R14–R15 and new R29–R30 fixtures pass, output-specific validatio
 - [ ] **Prove Reimports**
   - For a small real importer-produced fixture, compile/evaluate emitted builder source and compare its public RestApi/registry result with the in-memory import. Re-import twice to prove determinism and execute JSON/YAML path-normalization matrices.
   - Test a generic configured overlay call and unchanged overlay source; re-import OpenAI into a temporary destination and prove resolved endpoint pagination survives.
-  - Run R10/R24 for OpenAI and all nine-path fixture cases; log actual beta query changes per endpoint/output. Check the isolated generated crate. Refresh committed affected artifacts through the generator so ordinary drift tests remain green.
+  - Run R10/R24 for OpenAI and all nine-path fixture cases; log each removed Beta* endpoint, its surviving twin, and the URL equivalence with and without `beta` per endpoint/output. Check the isolated generated crate. Refresh committed affected artifacts through the generator so ordinary drift tests remain green.
 
-Phase gate: R22 passes, OpenAI's original count/order and pagination resolve identically, all seven constants reach provider URLs once, and artifacts are equal or individually explained against history while matching final committed output exactly.
+Phase gate: R22 passes, OpenAI's original count/order (less exactly the merged Beta* endpoints) and pagination resolve identically, each merged endpoint with `beta=true` reproduces its removed endpoint's URL and without it its twin's URL, and artifacts are equal or individually explained against history while matching final committed output exactly.
 
 ## Phase 6 — Migrate Remaining APIs and Remove Legacy Surface
 
@@ -178,9 +180,9 @@ Phase gate: R22 passes, OpenAI's original count/order and pagination resolve ide
 - [ ] **Convert Providers**
   - Use Phase 1's smallest-first inventory for every remaining REST API. For each batch, migrate its definition function, ordered typed registrations, lookup assembly, headers/auth/params, and every endpoint in one pass. Neither WebSocket definitions nor type-module stored-form tests are wholesale rewritten.
   - Move pagination exceptions to endpoint builders and author each API's small strategy function in its own module. Convert all 35 Gitea/GitHub/GitLab/Bitbucket declarations; preserve page/per_page setters or the predecessor's equivalent caller controls. No shared presets.
-  - Convert Gitea recursive=true and GitLab ref query input within their API batches. Migrate inventoried GitLab call sites in the same batch, preserving git_ref where possible; log unavoidable source changes.
+  - Merge Gitea GetGitTreeRecursive into GetGitTree with an optional `recursive` query parameter, and convert the GitLab ref query input, within their API batches; migrate the inventoried users of the removed Gitea request type. Migrate inventoried GitLab call sites in the same batch, preserving git_ref where possible; log unavoidable source changes.
   - Handle aliases/re-exports/foreign types with register_as/rust_path and schema_name only where needed. Preserve explicit registry order and nested components; enumerate dropped container components by API and name.
-  - End each batch with original endpoint count/ordered-id assertions, R10 JSON comparison, R19 pagination-resolution comparison, R24 generated-byte/file-set comparison, isolated compile checks, and affected dependent tests. Regenerate affected committed outputs before ordinary drift tests. Fix failures before the next batch and log the last completed API for unattended recovery.
+  - End each batch with original endpoint count/ordered-id assertions (less exactly the endpoints R29 merges, listed by id), R10 JSON comparison, R19 pagination-resolution comparison, R24 generated-byte/file-set comparison, isolated compile checks, and affected dependent tests. Regenerate affected committed outputs before ordinary drift tests. Fix failures before the next batch and log the last completed API for unattended recovery.
 
 ### Wave 13 — Legacy Removal and Enforcement (Sequential)
 
@@ -188,13 +190,13 @@ Phase gate: R22 passes, OpenAI's original count/order and pagination resolve ide
   - After the final provider migration, remove pagination exception tables and their validation, PaginationStyle, PaginationResponse, with_pagination, and the two legacy EndpointParams fields. Retain OpenAI overlay id validation.
   - Remove hand-typed registry filling and string-vs-string completeness checks; replace them with destination-context validation while preserving strict OpenAPI completeness coverage. Module-group assembly returns definitions/registry together for all lookup and generator entry points.
   - Repeat oauth_scopes/auth_policy and Schema.module_path reader scans. Remove oauth_scopes from live definition, exporter extension, emitter, and consumers; retain/test auth_policy. Apply/log PD21 without breaking WebSocket readers.
-  - Enable the hard `?` error in shared validation/build/import boundaries only now, after confirming all nine paths are migrated. Assert diagnostics name API, endpoint, and offending path.
+  - Enable the hard `?` error in shared validation/build/import boundaries only now, after confirming all nine paths are migrated and no merge left a same-route duplicate; if the schema gate blocked an OpenAI pair, leave it disabled and log the hold for the author. Assert diagnostics name API, endpoint, and offending path.
 - [ ] **Enforce Construction**
   - Apply non_exhaustive to Endpoint/RestApi after a workspace consumer scan confirms migration. Add external literal compile-fail coverage and source scans forbidding Endpoint literals, ApiResponse/ApiRequest/Schema constructors, json_type strings, and string registrations in provider authoring, with only narrow type/test exceptions.
   - Complete R27's six-entry retirement ledger: name each replacement and preserve pagination-resolution coverage, EndpointParams allow-list coverage, and no-GraphQL coverage. Remove tautological tests/tables only with a logged reason or behavioral replacement.
   - Verify removed identifiers have no live consumers across the workspace; distinguish historical documentation from code. Confirm every API exposes its expected count and id list.
 
-Phase gate: R6, R12, R16, R18–R21, R23, R27–R30 pass across the complete provider set. Every generated URL for the nine cases preserves ordinary decoded path/query behavior; GitLab reserved characters and Unicode form one correctly encoded value. No legacy pagination types, query-bearing paths, or external construction literals remain live.
+Phase gate: R6, R12, R16, R18–R21, R23, R27–R31 pass across the complete provider set. Every generated URL for the nine cases preserves ordinary decoded path/query behavior; GitLab reserved characters and Unicode form one correctly encoded value. No legacy pagination types, query-bearing paths, or external construction literals remain live.
 
 ## Phase 7 — Regenerate and Verify Dependents
 
@@ -222,11 +224,11 @@ Phase gate: generated-schema and all affected consumer checks pass; the evidence
 ### Wave 16 — Documentation and Closure (Parallel)
 
 - [ ] **Update Authoring Guidance**
-  - Update schematic-define README/rustdoc, area and relevant package READMEs, definition/registration and IO topic pages, schematic-define/Schematic skills, and `.claude/commands/create-schematic-api.md` to teach builders, explicit context assembly, typed aliases, auth coherence, pagination, and fixed query inputs (R26).
+  - Update schematic-define README/rustdoc, area and relevant package READMEs, definition/registration and IO topic pages, schematic-define/Schematic skills, and `.claude/commands/create-schematic-api.md` to teach builders, explicit context assembly, typed aliases, auth coherence, pagination, parameter locations with the GET-body rule, and endpoint identity as `(method, path)` (R26).
   - Provide compact compiling examples for ordinary types, alias registration, containers, and one API definition; explain required facts and errors. Use a Mermaid flow for context → endpoint builds → API validation → registry/output assembly. Current-behavior docs never name feature/fix directories.
   - Review docs/comments on every behavior-changed symbol and remove drift. Update dependency docs only for actual crate additions/removals. Search for stale literal/string/pagination authoring patterns, permitting only explicit historical mentions.
 - [ ] **Close Evidence Ledger**
-  - Map every R1–R30 requirement to concrete tests, scan results, artifacts, and platform evidence. Record every PD default, non-exhaustive outcome, dispatcher choice/bounds, structural carrier, fallible signature, Default allow-list, field disposition, normalization, retired test, dependent edit, and unexplained failure as it occurs.
+  - Map every R1–R31 requirement to concrete tests, scan results, artifacts, and platform evidence. Record every PD default, non-exhaustive outcome, dispatcher choice/bounds, structural carrier, fallible signature, Default allow-list, field disposition, normalization, retired test, dependent edit, and unexplained failure as it occurs.
   - Complete all 16 review-agenda entries, including accepted-gap candidates (optional auth, wider auth dual-source cleanup, HuggingFace stub shapes, orphaned types) and the already accepted convenience-method omission. No gap is silently claimed fixed.
   - Document the implemented R13 method table, reserved names, final descriptor/serde/adoption contracts, and facts needed to refresh `2026-10-15-schematic-definition-vocabulary` and `2026-10-16-schematic-response-model-graphql` after author review 1. Do not implement their features or refresh them prematurely.
 
@@ -256,7 +258,7 @@ For imported query-bearing paths, the edited field is the path-map key under an 
 
 | Shape (JSON and YAML, separate runs) | paths object/path key | parameters collection (if consumed) | Each consumed parameter name | Each consumed parameter location |
 | --- | --- | --- | --- | --- |
-| Control | Fixture imports with expected normalized path and fixed/caller query values | Valid declarations preserve query controls | Matching wire name appears in public definition/request | query location matches public request |
+| Control | Fixture imports with expected normalized path and caller query values | Valid declarations preserve query controls | Matching wire name appears in public definition/request | query location matches public request |
 | Absent | Missing paths rejects/no usable API; deleting the selected key removes that endpoint, never invents it | Explicitly means no declared parameters; unambiguous path constants still normalize | Reject missing name | Reject missing location |
 | Explicit null | Reject null paths/operation value | Reject; do not read as omitted declarations | Reject | Reject |
 | Wrong whole type | Reject non-map paths or non-string key | Reject non-array value | Reject | Reject |
@@ -266,7 +268,7 @@ For imported query-bearing paths, the edited field is the path-map key under an 
 | Duplicate key | Reject duplicate authored path keys where forbidden | Reject duplicate collection key | Reject duplicate field key; contradictory repeated wire declarations fail validation | Reject duplicate field key |
 | Trailing/invalid content | Reject whole document | Reject whole document | Reject whole document | Reject whole document |
 
-Keep legal repeated parameters in distinct locations distinct; this table does not forbid valid OpenAPI behavior. If reconciliation reads another field such as a fixed default, schema type, or Rust-name extension, Phase 1 must add its complete column and outcomes before implementation. Do not accept null via Option or silently filter malformed declarations. Import normalization also covers malformed query expressions, unsupported placeholders, duplicate fixed keys, and fixed/caller collisions with endpoint-specific errors. If enforcing these affected-input contracts exposes an existing parser defect, fix it at the shared read boundary or log a concrete unmet requirement; do not treat a one-off negative case as complete coverage.
+Keep legal repeated parameters in distinct locations distinct; this table does not forbid valid OpenAPI behavior. If reconciliation reads another field such as a parameter default, schema type, or Rust-name extension, Phase 1 must add its complete column and outcomes before implementation. Do not accept null via Option or silently filter malformed declarations. Import normalization also covers malformed query expressions, unsupported placeholders, duplicate query keys, and suffixed paths whose merge would conflict with the twin's declared parameters, with endpoint-specific errors. If enforcing these affected-input contracts exposes an existing parser defect, fix it at the shared read boundary or log a concrete unmet requirement; do not treat a one-off negative case as complete coverage.
 
 - [ ] **Verify Input Matrices**
   - Phase 2 owns the descriptor JSON matrix; Phase 5 owns the JSON and YAML import matrices. One test per format walks its entire applicable matrix from a real-tool fixture, making one edit per cell and asserting the public definition/API validation outcome. The unedited control proves the fields affect output; assert endpoint presence, schema/path/shape, and emitted query values rather than just serde success.

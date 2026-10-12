@@ -239,9 +239,12 @@ Restated in full so the implementer need not open the parent. Provenance:
   this spec owns the Postman form. Item 24: the WebSocket endpoint role
   (`Client`, `Host`, `Both`) from spec 6 is exported as `x-schematic-role` on
   the AsyncAPI channel and is part of R27's equality.
-- **D36 (consumed here).** Same-address endpoints that differ by a body
-  selector merge into one OpenAPI operation listing both content types. This
-  spec's exporter changes must not regress that.
+- **REST endpoint identity (D36 withdrawn).** Per the author ruling 2026-10-12 (`2026-10-11-schematic-generation-integrity` review 1, item 1),
+  a REST endpoint is `(method, path)` and never a selector; D36's same-address
+  selector pairs no longer exist. An endpoint with several response shapes
+  exports as one OpenAPI operation listing each shape's content type (`oneOf`
+  where shapes share one), with no selector extension. This spec's exporter
+  changes must not regress that.
 - **D9 (consumed here).** Partial generation regenerates a whole module group
   and keeps siblings. Feature flags and the single API list must work with it.
 - **D53 (no wrapper methods).** The author ruled that no per-endpoint typed
@@ -390,7 +393,7 @@ added it uses `just test-l2` and must never take window focus.
   and on any unsupported major ignores all Schematic extensions in the
   document and emits a WARN diagnostic. A malformed version behaves likewise.
   An absent version means major 1. The document-level version governs operation
-  metadata and `x-schematic-selector` too; operation structs add no version.
+  metadata too; operation structs add no version.
   Decode known fields independently so one malformed field does not discard
   unrelated valid metadata.
   Validated by: L1 import tests for each of the four cases.
@@ -945,7 +948,7 @@ the table.
 | 2 | Bind type references to types | Spec 4a (D2, D44) |
 | 3 | Silent drops become errors or features | Spec 1 (D10, D33; per-output validation) |
 | 4 | Verify fresh code compiles | Spec 1 (D49) |
-| 5 | Streaming and response content types | Spec 5 (D6, D36, D37) |
+| 5 | Streaming and response content types | Spec 5 (D6, D37; multi-shape responses replace D36 per the author ruling 2026-10-12) |
 | 6 | `ApiResponse` as status-to-schema map | Spec 5 (D6, D38) |
 | 7 | Params and required constant headers as OpenAPI parameters | Params done earlier (parent); typed path params and query-param fidelity: spec 4b; constant headers: this spec, R8, R9 |
 | 8 | Schemars bridge | This spec, R1 to R7 |
@@ -1044,7 +1047,7 @@ use.
     vocabulary, `env_auth[0]` retirement, `oneOf`, serializable definitions,
     OAuth2 grants, query-param fidelity).
   - Spec 5: the response vocabulary (R21 saved responses, R2 to R3 error and
-    stream shapes, D36 merged operations).
+    stream shapes, multi-shape operations).
   - Spec 6: WebSocket typed messages and shared REST types (R25 to R28).
 - It must not start before every dependency is at "implementation complete,
   ready for review" and the refresh in "Refresh notes" is done.
@@ -1097,7 +1100,7 @@ its recommended option as the default (D51 item 5).
   Default if not ruled before planning: the subset is what the exporter writes
   and OpenAPI cannot express, **refreshed to include everything written by
   specs 2, 4a, 4b and 5**: rate limit, `deprecated`, auth override, endpoint
-  `cross_origin`, request-id, the error table, `x-schematic-selector`, response
+  `cross_origin`, request-id, the error table, response
   shapes (including the D56 end-marker `keep` modifier and the `Bytes`
   framing), secret markers, and the two auth details OpenAPI cannot express
   (a bearer header override and an API-key value prefix; R54, D57 item 22),
@@ -1397,7 +1400,7 @@ review 1 and their implementation logs:
 - **x-schematic subset (P10-b).** Re-derive the subset from the actual
   extension structs after specs 2, 4a, 4b and 5 land: rate-limit, deprecated,
   auth override, endpoint `cross_origin`, request-id, error table,
-  `x-schematic-selector`, response shapes, and secret markers. Record the final
+  response shapes, and secret markers. Record the final
   subset in the plan.
 - **Spec 4a (definition API) and 4b (definition vocabulary).** Typed registration and whether nested types are
   auto-registered (R7); the shape of API-level constructors that the single
@@ -1409,7 +1412,7 @@ review 1 and their implementation logs:
   JSON snapshots (which may let `x-schematic` carry more); the typed path parameters, `deprecated`, and rate limit
   vocabulary that the exporters and importer must now read or write.
 - **Spec 5 (response model v2 and GraphQL).** Success/error/stream shapes and
-  selector-merged operations in the exporters (R2 to R4, R21); the GraphQL operations added to `RestApi`, whose export treatment
+  multi-shape operations in the exporters (R2 to R4, R21); the GraphQL operations added to `RestApi`, whose export treatment
   is ruled (R55, D57 item 23), and whether spec 5 R42's skip wording names
   this spec as the Postman owner; the extension's `response`
   field type (P10-b).

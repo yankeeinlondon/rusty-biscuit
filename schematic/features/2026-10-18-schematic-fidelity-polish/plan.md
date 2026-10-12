@@ -65,7 +65,7 @@ not new requests for interactive feedback.
 | P10-a and document identity | Export genuine AsyncAPI 3.0 from the client application's perspective, with a genuine 3.0 import path and existing 2.x import compatibility. One document per WebSocket API; a unique module uses `{module}.json`, a shared module uses `{module}--{canonical-selection-name}.json`. Validate selection names and reject case-insensitive collisions. Use `schematic/asyncapi/`. Do not emit 2.x structures under a 3.0 version. |
 | AsyncAPI subset | Preserve info, applied servers/security, endpoint channels/parameters, send/receive operations, message/schema components, auth policy, selectors, per-direction fallback, role, and heartbeat hints. Exclude traits, correlation hints, and bindings beyond WebSocket query/headers. Reject unsupported versions and diagnose remote references without fetching. |
 | AsyncAPI metadata | Adopt message `x-schematic-selectors: [{field, value}]`, message `x-schematic-fallback: true`, channel `x-schematic-role` using the upstream role's serialized values, and channel `x-schematic-heartbeat` using the upstream serde representation. Read hints back as well as exporting them. Confirm exact selector value types and hint placement after spec 6; log any adaptation. Role does not reverse client-perspective operation directions. |
-| P10-b, P10-h, P10-i | Document-level `x-schematic.version` is integer major 1; absence means 1. Unsupported or malformed versions disable all Schematic metadata, including selectors, with WARN. Unknown fields produce INFO; malformed known fields produce WARN independently. Standard OpenAPI wins conflicts with location-bearing WARN. Strict rejects WARN/ERROR and permits INFO. Reuse `OpenApiDiagnostic`; no new diagnostic format. |
+| P10-b, P10-h, P10-i | Document-level `x-schematic.version` is integer major 1; absence means 1. Unsupported or malformed versions disable all Schematic metadata with WARN. Unknown fields produce INFO; malformed known fields produce WARN independently. Standard OpenAPI wins conflicts with location-bearing WARN. Strict rejects WARN/ERROR and permits INFO. Reuse `OpenApiDiagnostic`; no new diagnostic format. |
 | Extension subset | The contract table below is provisional until upstream refresh; exact new field spellings cannot honestly be finalized from today's legacy structs. Freeze an actual field-by-field standard/extension mapping in Phase 1 before implementing Phase 4. Remove `oauth_scopes`; keep only bearer header override and API-key value prefix as auth extension details, at their API or override declaration level. Delete the unused schema/auth extension structs only after preserving those details. |
 | P10-c | Choose validated candidates in order: first example, default, const/single-value enum, first enum value, constrained typed placeholder. Emit required properties and properties with explicit example/default. Try composition branches in declaration order against the full schema; combine allOf. At depth 3 omit optional recursion or use permitted null; diagnose required unbounded recursion. No randomness, clock, general regex solver, or satisfiability engine. Failed candidates never become invalid examples. |
 | GraphQL | Postman emits one POST per operation with authored query, operationName, and variables generated from a registered schema or `{}` when no schema exists. OpenAPI skips each operation with a named diagnostic; GraphQL is outside its round-trip subset. |
@@ -89,7 +89,7 @@ remain authoritative even when extensions preserve additional semantics.
 | rate-limit, endpoint cross_origin, secret markers | Preserve actual upstream metadata at its declaration level. |
 | deprecated, auth override, scopes | Standard deprecated/security/securitySchemes for expressible meaning; no duplicate auth method/location/name/scopes in extensions. |
 | bearer header override, API-key value prefix | Only extra auth fields in versioned document/operation metadata; never credentials. |
-| x-schematic-selector | Preserve selector-merged operation metadata under the document version gate; keep same-address operations and content types reversible. |
+| multi-shape responses | No selector extension: a REST endpoint is `(method, path)` (author ruling 2026-10-12 (`2026-10-11-schematic-generation-integrity` review 1, item 1)). Export one operation per endpoint listing each response shape's content type (`oneOf` where shapes share one); keep content types reversible. |
 | oauth_scopes, obsolete extension structs | Delete removed scopes copy; delete SchematicSchemaExtension and AuthExtension after mapping replacement details. |
 
 ### Wave 1: Dependency gate
@@ -193,17 +193,17 @@ wrong-whole-field outcome; they are not silently skipped.
 
 Known OpenAPI extension fields (both JSON and YAML):
 
-| Shape | version | module_path | request_suffix | env_mapping | API headers | operation headers | request | response | bearer header override | API-key value prefix | selector metadata |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Control | major 1 round trip | custom module | custom suffix | mapped auth names | fixed header | overriding header | multipart detail | runtime response detail | custom header | nonempty prefix | merged endpoints recovered |
-| Absent | major 1 | O | O | O | O: no extra headers | O: no override | O | O | O | O | O |
-| Explicit null | D | W | W | W | W | W | W | W | W | W | W |
-| Wrong whole type | D | W | W | W | W | W | W | W | W | W | W |
-| One wrong element | D | W | W | W | W: reject whole field | W: reject whole field | W | W | W | W | W: reject whole field |
-| All wrong elements | D | W | W | W | W | W | W | W | W | W | W |
-| Empty | D | W: empty name | W: empty suffix | V: no mappings | V: no extra headers | V: no override | W | W | W: empty header | V: empty prefix | W: invalid selector |
-| Duplicate key | E | E | E | E | E | E | E | E | E | E | E |
-| Trailing/invalid content | E | E | E | E | E | E | E | E | E | E | E |
+| Shape | version | module_path | request_suffix | env_mapping | API headers | operation headers | request | response | bearer header override | API-key value prefix |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Control | major 1 round trip | custom module | custom suffix | mapped auth names | fixed header | overriding header | multipart detail | runtime response detail | custom header | nonempty prefix |
+| Absent | major 1 | O | O | O | O: no extra headers | O: no override | O | O | O | O |
+| Explicit null | D | W | W | W | W | W | W | W | W | W |
+| Wrong whole type | D | W | W | W | W | W | W | W | W | W |
+| One wrong element | D | W | W | W | W: reject whole field | W: reject whole field | W | W | W | W |
+| All wrong elements | D | W | W | W | W | W | W | W | W | W |
+| Empty | D | W: empty name | W: empty suffix | V: no mappings | V: no extra headers | V: no override | W | W | W: empty header | V: empty prefix |
+| Duplicate key | E | E | E | E | E | E | E | E | E | E |
+| Trailing/invalid content | E | E | E | E | E | E | E | E | E | E |
 
 Absence of headers is explicitly defined by this extension format as no extra
 headers, matching omission by its writer; it is not a fallback for malformed
@@ -211,7 +211,7 @@ collections. Reproduce omitted fields before adding serde defaults. Version
 controls also cover unsupported integer major, fractional/string/null versions,
 unknown keys (INFO), and malformed fields alongside a valid sibling. Add actual
 columns for rate-limit, cross_origin, request-id, errors, response framing/keep,
-secret markers, and every nested env/header/selector field during the freeze.
+secret markers, and every nested env/header field during the freeze.
 Do not treat nullable JSON Schema instance values as null schema objects.
 
 Known OpenAPI standard fields changed by parameter/multipart/auth reconciliation:
@@ -364,7 +364,7 @@ and export/drift plus common phase checks pass.
     AuthExtension must not be wired as a complete auth duplicate.
   - Compare export/import/export semantic definitions using upstream snapshots
     and every committed artifact plus fixtures. Compare preserved semantics,
-    including merged selectors; explicitly list subset exclusions/differences.
+    including multi-shape responses; explicitly list subset exclusions/differences.
 
 ### Wave 10: Reader acceptance
 

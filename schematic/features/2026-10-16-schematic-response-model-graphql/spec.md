@@ -55,10 +55,13 @@ and 5b, and decisions D6 and D36-D38), unless marked as checked in code.
    like its non-streaming sibling, so the generated method buffers the whole
    body (parent section 5). The parent reports ten Ollama types stranded by
    this; that count is unverified here.
-2. **Same-address endpoints cannot coexist.** Ollama and Anthropic pick the
-   streaming or non-streaming reply with a request-body field (`stream`). The
-   current rule forbids two endpoints on one `(method, path)`, and the OpenAPI
-   exporter merges on `(path, method)`.
+2. **One address can reply with different shapes.** Ollama and Anthropic stream
+   or not depending on a request-body field (`stream`); OpenAI's
+   `GET /responses/{response_id}` does the same with a query parameter. Bitbucket's
+   `/src/{commit}/{path}` returns a JSON directory listing or raw file bytes
+   depending on what the repository path names. An endpoint is its
+   `(method, path)` and holds one response declaration, so today each of these
+   is either mistyped or split into duplicate endpoints that validation rejects.
 3. **Error bodies have no home.** `ApiResponse` is a single value, not a
    status-to-shape map. The exporter can emit only 200 and 204. A correct,
    tested type such as `artificial_analysis` `RateLimitError` exists with no slot
@@ -89,8 +92,10 @@ and 5b, and decisions D6 and D36-D38), unless marked as checked in code.
 **Goal.** An API author can say, in the definition, what an endpoint really
 returns: one or more success shapes (JSON, text, binary, empty, or a stream),
 each with an optional content type, plus a typed list of error shapes mapped from
-status codes. Streaming and non-streaming variants at one address are two typed
-endpoints. A GraphQL operation is a first-class definition item that generates
+status codes. An endpoint stays one `(method, path)` with one request type; when
+its address can reply in several shapes (streaming or not, a directory or a
+file), it declares every shape and its success type is a tagged enum the caller
+matches on. A GraphQL operation is a first-class definition item that generates
 into the same client crate and reports GraphQL errors as typed failures. The
 generated client, the OpenAPI and Postman exporters, and the OpenAPI importer all
 agree on the new vocabulary, and the migrated Ollama, LM Studio, Anthropic, and
@@ -114,8 +119,10 @@ ElevenLabs definitions use it.
   `2026-10-14-schematic-definition-api`, 4a), or the definition vocabulary (spec
   `2026-10-15-schematic-definition-vocabulary`, 4b), except to extend them as stated below.
 - Rewriting any definition other than the four named APIs (Ollama, LM Studio,
-  Anthropic, ElevenLabs). The other roughly 519 endpoint literals (OpenAI alone has
-  265) were rewritten once by spec 4a and are not touched again here.
+  Anthropic, ElevenLabs) and the two named endpoints of R32a and R32b (Bitbucket's
+  source endpoint and OpenAI `GetResponse`). The other roughly 519 endpoint
+  literals (OpenAI alone has 265) were rewritten once by spec 4a and are not
+  touched again here.
 - Generating typed convenience wrapper methods per endpoint (D53 rules none are
   generated; nothing in this spec adds or promises them).
 
@@ -145,14 +152,25 @@ not required reading.
   envelope with its real status and kind `MalformedSuccess`; a body cut off after
   the headers is a failure inside the envelope with kind `BodyInterrupted`, status,
   headers, and partial bytes.
-- **D36. Same-address streaming and non-streaming.** Two endpoint definitions on
-  the same method and path, each declaring a **selector** (a request-body field
-  value, for example `stream=false` versus `stream=true`). The uniqueness rule
-  becomes `(method, path, selector)`. OpenAPI export merges them into one
-  operation whose response lists both content types (`application/json`,
-  `text/event-stream`). Planning details left open: selector syntax, naming of
-  the two generated request types, how the merged request schema shows the
-  selector.
+- **D36 (superseded by the author ruling of 2026-10-12, `2026-10-11-schematic-generation-integrity`
+  review 1, item 1).** The parent's D36 split same-address streaming and
+  non-streaming replies into two endpoints told apart by a request-body
+  **selector**. That design is withdrawn. The ruling, which this spec
+  implements:
+  1. An endpoint is its `(method, normalized path)`, permanently. No selector,
+     parameter, or parameter value joins the uniqueness key; two endpoints on one
+     key fail validation (spec 1's rule, unchanged).
+  2. Each endpoint has one request type and enumerates its possible responses.
+     When one address can reply in several shapes, the definition declares every
+     shape and the generated success type is a tagged enum (D6). Cause and effect
+     ("returned when `stream=true`") is documentation only; the client never
+     routes on, injects, or checks request values. An undeclared reply is an
+     error.
+  3. Declared shapes must be distinguishable on the wire by status code,
+     `Content-Type`, a JSON discriminator field, or JSON shape (array versus
+     object); shapes that no tag separates fail validation.
+  4. Query, body, and header inputs behave alike; location is mechanics, not
+     identity (spec 4a owns parameter locations).
 - **D37. Stream end.** The definition declares the end condition from a small
   vocabulary: **data line equals X** (OpenAI `[DONE]`), **event named X**
   (Anthropic `message_stop`), **field equals X** (Ollama `done=true`), or
@@ -243,9 +261,10 @@ focus. Package names are the crates under `schematic/`: `schematic-define`
 **R1.** An endpoint declares a non-empty set of success shapes. Each shape is
 exactly one of JSON-with-type, text, binary, empty, or stream (with a framing and
 an item type, except raw byte framing whose item type is fixed as `bytes::Bytes`), and may carry an optional content type. A definition with an empty
-set, or two shapes that cannot be told apart by the rule in R3, fails validation
-with a diagnostic naming the API and endpoint. Declared media types must be
-valid concrete media types; wildcard selectors are not supported. An empty shape
+set, or two shapes that cannot be told apart by the rules in R3, R3a, and R3b,
+fails validation with a diagnostic naming the API and endpoint. Declared media
+types must be valid concrete media types; wildcard media ranges are not
+supported (the one exception is the fallback shape of R3c). An empty shape
 has no media type. Comparison uses the normalized effective media type.
 *Validated by:* L1 unit tests in `schematic-define` (construction and validation).
 
@@ -264,7 +283,7 @@ shape is allowed. For example, JSON plus empty accepts JSON on a body-bearing 2x
 and `()` on 204 even when that reply has no `Content-Type`. A non-empty shape on
 204, or an empty shape on a body-bearing status in a multi-shape endpoint, is not
 selected. Two non-empty shapes with the same effective media type are ambiguous
-and fail validation. Missing, invalid, conflicting, or unmatched response content
+and fail validation unless R3a or R3b separates them. Missing, invalid, conflicting, or unmatched response content
 types produce `UnexpectedContentType` inside the envelope, with status, headers,
 and raw bytes retained. This proposed runtime error-kind addition applies only to
 multi-shape selection; it does not restore the removed response-kind guard.
@@ -291,9 +310,44 @@ multi-shape endpoint with a 200 JSON shape and a 202 JSON shape of different typ
 selecting each by status; validation tests cover default-media-type collisions and
 duplicate or out-of-range declared statuses.
 
+**R3b. JSON discriminator and JSON shape (author ruling 2026-10-12, item 1.3).**
+Two JSON shapes that share a status and effective media type are distinguishable
+only by one of these declared tags, checked after the media-type rule:
+
+- **Discriminator field:** every JSON shape in the group declares the same
+  top-level field name with a distinct scalar value (Proposed builder
+  `.tagged("type", "commit_directory")`). The reply's value for that field
+  chooses the shape.
+- **JSON shape:** at most one shape in the group has a top-level array and at
+  most one a top-level object (Proposed `.json_array()`/`.json_object()`,
+  inferred from the registered type when it is a sequence or a struct). The
+  reply's first non-whitespace byte chooses the shape.
+
+For example, GitHub's contents endpoint replies with an array for a directory
+and an object for a file. A group neither tag separates fails validation. A
+reply whose tag matches no shape, or that lacks the discriminator field, is
+`UnexpectedContentType` (the R3 kind) with status, headers, and raw bytes
+retained; a reply that matches a shape but does not decode as it is
+`MalformedSuccess`.
+*Validated by:* L1 validation tests (separable and inseparable groups, mixed
+tags, duplicate discriminator values) in `schematic-define`; L1 mock-server tests
+selecting by discriminator value and by array versus object, plus the unmatched
+and missing-field cases.
+
+**R3c. Fallback shape (Proposed, Default D-31).** One text or binary shape per
+endpoint may be marked as the fallback (Proposed `.fallback()`); it is selected
+for a body-bearing 2xx reply whose media type no other shape matches, and it has
+no declared content type. It exists for replies whose media type is chosen by
+the stored resource rather than by the API (Bitbucket returns a file with the
+file's own media type, R32a). A fallback on a single-shape endpoint is redundant
+and fails validation.
+*Validated by:* L1 validation test (second fallback, fallback on a single-shape
+endpoint); L1 mock-server test where `image/png` selects the fallback and
+`application/json` selects the JSON shape.
+
 **R4.** Binary and text shapes record a content type that the OpenAPI exporter
 reports (R27) and the importer preserves (R28). A declared content type is
-documentation and a selector for R3; it does not cause the client to reject a
+documentation and a selection input for R3; it does not cause the client to reject a
 binary or text body whose actual content type differs.
 *Validated by:* L1 in `schematic-define`/`schematic-gen` (export) plus the R3 mock
 test with a mismatched content type on a single-shape binary endpoint.
@@ -438,41 +492,58 @@ migrated APIs that has such a hook is fixed (D-26).
 `schematic-definitions` carries such a hook; an L1 mock-server test that the global
 hook is not called for a stream or non-2xx reply.
 
-### Same-address endpoints (D36)
+### Several shapes at one address (author ruling 2026-10-12)
 
-**R13.** An endpoint may declare a selector: a top-level request-body JSON field
-name and a scalar value (bool, string, or number). Validation accepts two endpoints
-on the same method and path only when every endpoint on that pair declares a
-selector on the same field, with pairwise distinct scalar values. Different
-fields can both match one body and are rejected, even if their triples differ.
-The grouped endpoints must share the request-body type and all operation-level
-settings other than identity, description, response, and selector; incompatible
-auth, parameters, pagination, or error policies fail validation rather
-than being discarded during export. Numeric selector values compare by their
-JSON numeric meaning, so `1` and `1.0` do not distinguish two endpoints. Two endpoints with
-the same triple, or two with no selectors on one pair, fail validation.
-*Validated by:* L1 unit tests in `schematic-gen` validation (the module that today
-forbids duplicates) and in `schematic-define`.
+R13 to R15 originally implemented the parent's D36 selector pairs. The author
+ruling of 2026-10-12 (`2026-10-11-schematic-generation-integrity` review 1,
+item 1) withdrew that design; the numbers are kept so cross-references stay
+valid, and R13a states what replaces them.
 
-**R14.** The generated request for a selector endpoint sends its selector value in
-the body, overriding whatever the caller's body value holds for that field; the
-caller cannot send the opposite variant through the typed request. Injection
-happens after serialization into an object, using the serialized field name
-(including serde renames), before transmission. A non-object body fails before
-sending with the runtime’s invalid-argument error. For a known schema, the value
-must satisfy the field’s type and any enum restriction; when structural checking
-is unavailable, report that limitation and still enforce an object at runtime.
-*Validated by:* L1 mock-server test that records the received body for each of the
-two endpoints.
+**R13. Withdrawn** (author ruling 2026-10-12). Was: two endpoints on one method
+and path told apart by a request-body selector. No selector exists; see R13a.
 
-**R15.** The OpenAPI exporter emits one operation for the pair, whose response lists
-both content types and whose request schema shows the selector field as a required enum of
-the declared values in an operation-local schema overlay; shared components are
-not mutated. Re-import produces one multi-shape endpoint, not the original pair.
-Its content types are preserved, but selector identity and reinjection are not
-reconstructed until the later fidelity specification; emit a diagnostic explaining
-that loss. This replaces the earlier, unsupported claim of a fully stable round trip.
-*Validated by:* L1 export test in `schematic-gen`/`schematic-define`.
+**R13a. One endpoint per address; shapes carry their cause as documentation.**
+Endpoint identity is `(method, normalized path)`, spec 1's uniqueness key,
+unchanged; no request value enters it. When an address replies in different
+shapes, whether because of a request value (`stream`) or because of server data
+(a directory or a file), the endpoint declares every shape (R1) and its success
+type is the generated enum (R2), chosen by the wire tags of R3 to R3c. A shape
+may carry a short note on when it is returned (Proposed builder
+`.note("returned when stream is true")`); the note appears in the enum
+variant's rustdoc and in the exported OpenAPI response description, and the
+runtime never reads it. Fields such as `stream` are ordinary request fields that
+the caller sets or omits; the client sends them as given.
+
+```rust
+// Pseudo-code; the builder names are Proposed.
+Endpoint::post("CreateMessage", "/v1/messages")
+    .body::<CreateMessageBody>()            // `stream: Option<bool>` is a plain field
+    .returns(Success::json::<Message>().note("returned when `stream` is false or omitted"))
+    .returns(Success::sse::<MessageStreamEvent>()
+        .ends_at_event("message_stop")
+        .note("returned when `stream` is true"));
+
+// Generated: one request type; the success type is an enum.
+match client.send(CreateMessageRequest::new(body)).await?.into_result()? {
+    CreateMessageResponse::Json(message) => { /* ... */ }
+    CreateMessageResponse::Stream(events) => { /* ... */ }
+}
+```
+
+*Validated by:* L1 validation test that two endpoints on one `(method, path)` still
+fail; L1 generator-output test that a note reaches the variant rustdoc and the
+OpenAPI response description; L1 mock-server test of a JSON-plus-SSE endpoint that
+records the caller's `stream` value unchanged and returns each variant by
+`Content-Type`.
+
+**R14. Withdrawn** (author ruling 2026-10-12). Was: selector injection into the
+request body. The client injects nothing; request fields go out as the caller
+set them (R13a).
+
+**R15. Withdrawn** (author ruling 2026-10-12). Was: merging a selector pair into
+one OpenAPI operation. A multi-shape endpoint is already one operation and exports
+by R27; re-import yields the same multi-shape endpoint (R28), so no identity or
+reinjection loss arises.
 
 ### Error shapes (D38)
 
@@ -539,15 +610,16 @@ exporter, and the vendor-extension serializer.
 `schematic/`, and `just test {pkg}` from the root for touched dependents) and the existing L1 suites of
 `schematic-define` and `schematic-gen`.
 
-**R23.** Validation's duplicate rule is `(method, path, selector)` (R13) and endpoint
-ids stay unique. Validation also rejects: an SSE/NDJSON stream with a missing registered item type, an incompatible stream
-end condition, a
-selector field absent from a known body schema (when the schema is known), and a
-multi-shape endpoint whose shapes are indistinguishable by R3.
+**R23.** Validation's duplicate rule stays spec 1's `(method, normalized path)`
+(R13a; author ruling 2026-10-12) and endpoint ids stay unique. Validation also
+rejects: an SSE/NDJSON stream with a missing registered item type, an incompatible
+stream end condition, a multi-shape endpoint whose shapes are indistinguishable by
+R3 to R3b, and a fallback that violates R3c.
 *Validated by:* L1 unit tests in `schematic-gen` validation.
 
 **R24.** Every endpoint in `schematic-definitions` still builds. Only the four named
-APIs' definitions (Ollama, LM Studio, Anthropic, ElevenLabs) are edited; every other
+APIs' definitions (Ollama, LM Studio, Anthropic, ElevenLabs) and the two endpoints of
+R32a and R32b (Bitbucket source, OpenAI `GetResponse`) are edited; every other
 endpoint keeps its call site untouched, because the `.returns`/`.errors` placeholders
 spec 4a created are widened to accept the new vocabulary without changing existing
 calls, and every generated single-shape JSON, text, binary, and empty endpoint keeps its
@@ -567,7 +639,7 @@ compiles; `just lint-schema` passes.
 
 **R26.** The vendor extension (`x-schematic`) serializes the new response vocabulary
 without panicking or dropping fields. It must carry the new response fields, the error
-table, the selector, and (from specs 4a, 4b, and 2) rate-limit, deprecated, auth
+table, the R3b tags, the fallback marker, shape notes, and (from specs 4a, 4b, and 2) rate-limit, deprecated, auth
 override, endpoint `cross_origin`, and request-id, so that spec 7's subset covers
 them. Reading it back is out of scope (the round trip
 is `2026-10-18-schematic-fidelity-polish`).
@@ -584,8 +656,10 @@ ranges export as the expanded exact statuses (Default D-25). Export represents t
 not unresolved overlapping entries: if an exact or narrower match supersedes part
 of a class range, expand that affected class into exact statuses with the winning
 shape at each status. Keep `4XX`/`5XX` only where this preserves lookup semantics.
-Merged selector endpoints use a deterministic operation id (the first declared
-endpoint id) and list both ids in the selector extension. Byte streams export as
+Two JSON shapes under one status and media type export as a `oneOf` in that
+media entry, with an OpenAPI `discriminator` naming the field when R3b declares
+one; the R3c fallback exports under the `*/*` media range; shape notes join the
+response description. Byte streams export as
 a binary string, SSE/NDJSON as an item schema plus framing/end metadata in
 `x-schematic`.
 [OpenAPI’s response map](https://spec.openapis.org/oas/v3.0.3#responses-object)
@@ -596,7 +670,10 @@ the output.
 **R28.** The OpenAPI importer maps: `text/event-stream` to an SSE stream; `application/x-ndjson`
 and `application/jsonl` to an NDJSON stream; `text/*` to text with that content type;
 other non-JSON media types to binary with that content type; several content types
-under one status to a multi-shape success; exact 400–599 responses and `4XX`/`5XX` to endpoint-level error
+under one status to a multi-shape success; a JSON `oneOf` whose members R3b can
+separate (a declared `discriminator`, or array versus object) to several JSON
+shapes, otherwise the existing single-schema import plus a diagnostic; `*/*` to the
+R3c fallback; exact 400–599 responses and `4XX`/`5XX` to endpoint-level error
 entries. Normalize media types before classification; detect NDJSON before general
 JSON, and treat `application/json` and `application/*+json` as JSON. Import followed by export preserves content types (the ElevenLabs audio case)
 and does not hoist common errors to the API list (Default D-20).
@@ -623,9 +700,12 @@ success shape's content type; it needs no new fidelity beyond that.
 any other that streams by default) are migrated to NDJSON stream shapes with registered item
 types and the `done=true` end condition where the reply says so, declared with `keep`
 (R8) so the final `done=true` line, carrying the token statistics, is delivered as the
-last item. For generate and chat
-(which also support `stream: false`) a second endpoint with a non-streaming JSON shape
-exists and the pair is distinguished by the selector (R13). Ollama's OpenAI-compatible
+last item. Generate and chat, which also support `stream: false`, stay one
+endpoint each with two success shapes (R13a): the NDJSON stream and the
+non-streaming JSON reply, chosen by `Content-Type` (R3; expected
+`application/x-ndjson` and `application/json`, unverified), each with a note on
+its cause. Their request keeps `stream` as an ordinary optional field; omitting it
+streams, which is Ollama's default. Ollama's OpenAI-compatible
 chat and completion endpoints use SSE with the data-line `[DONE]` end condition. The
 ten stranded Ollama types referenced by the parent become reachable (each is used by a
 registered endpoint shape or is recorded in the log as still unused with the reason).
@@ -641,11 +721,39 @@ events must not inherit the OpenAI-compatible `[DONE]` convention without eviden
 use connection-close when no explicit terminator is documented, and log the source.
 *Validated by:* L1 definition tests in `schematic-definitions`.
 
-**R32.** Anthropic `CreateMessage` becomes a selector pair: the non-streaming endpoint
-(`stream=false`, JSON message) and a streaming endpoint (`stream=true`, SSE with item
-type for the Messages stream events and end condition event named `message_stop`).
-*Validated by:* L1 definition tests plus mock-server test through the generated
-Anthropic client for both endpoints.
+**R32.** Anthropic `CreateMessage` stays one endpoint with two success shapes
+(R13a): the JSON message (`application/json`, returned when `stream` is false or
+omitted) and an SSE stream (`text/event-stream`, returned when `stream` is true)
+whose item type covers the Messages stream events and whose end condition is the
+event named `message_stop`. The request keeps `stream` as an ordinary optional
+field.
+*Validated by:* L1 definition tests plus mock-server tests through the generated
+Anthropic client receiving each variant.
+
+**R32a. Bitbucket source endpoint.** The single Bitbucket endpoint on
+`GET /repositories/{workspace}/{repo_slug}/src/{commit}/{path}`, left returning
+`Binary` by spec 1's fix cycle, declares two success shapes: `Directory`, the JSON
+`PaginatedResponse<SourceEntry>` listing, and `File`, the R3c binary fallback.
+**Open research (Human review agenda):** Bitbucket serves a file with the file's
+own media type, so a committed `.json` file arrives as `application/json` and
+selects `Directory`; decoding then fails as `MalformedSuccess`, which keeps the raw
+bytes but misreports a file as a malformed listing. The implementer checks what
+Bitbucket actually sends (a distinguishing header, a discriminator in the listing
+such as its `values`/`pagelen` object versus arbitrary JSON, or the `format=meta`
+parameter) and records the finding. If no wire tag separates the two, the endpoint
+keeps this shape set, and the limitation goes into the shape note and the log.
+*Validated by:* L1 definition test; mock-server tests returning a JSON listing and
+a `text/x-rust` file body.
+
+**R32b. OpenAI `GetResponse` streaming.** `GetResponse`
+(`GET /responses/{response_id}`, whose query parameter `stream` replays the
+response as server-sent events) declares a second success shape: an SSE stream of
+the registered `ResponseStreamEvent`, beside the existing `Response` JSON shape,
+each with a note on its cause. The end condition is taken from OpenAI's
+documentation (connection close unless a terminator is documented; unverified) and
+its source is logged. If spec 4a merged the beta twin, the beta form follows the
+same rule.
+*Validated by:* L1 definition test; mock-server test receiving each variant.
 
 **R33.** ElevenLabs `StreamSpeech` declares a streaming binary shape so the generated
 method no longer buffers the whole body (Default D-17: byte-chunk framing with a declared
@@ -830,7 +938,7 @@ the repository forms in the `rust-testing` skill and `docs/cicd/test-inputs.md`.
 **R44.** Spec 4a owns the plain serde derives on `RestApi`, `Endpoint`, `EndpointParams`,
 and `ParamDef` and the JSON snapshots. Every new definition type this spec adds (success
 shapes, stream framing and end conditions including the `keep` modifier, status matches,
-the error set, the selector, the GraphQL operation and address rule) derives
+the error set, the R3b tags, the fallback marker, shape notes, the GraphQL operation and address rule) derives
 `Serialize`, `Deserialize`, and `PartialEq` (and `Debug`/`Clone` as the surrounding types
 do) so that 4a's derives and round-trip test cover `Endpoint::response` and the `RestApi`
 error set and GraphQL operations. Extend the self-contained definition bundle
@@ -838,10 +946,10 @@ introduced by the definition-vocabulary draft: register and serialize success,
 error, stream-item, variables, and GraphQL data schemas and structural models.
 Built-in byte streams and the no-variables unit marker need no catalog entry.
 Loading in isolation rejects a dangling reference with API/operation/type context.
-This spec updates JSON baselines only for the response, error, selector, and GraphQL
+This spec updates JSON baselines only for the response, error, and GraphQL
 fields it introduces, with a per-field explanation (R22).
 *Validated by:* spec 4a's definition round-trip test over the real
-`schematic-definitions`, including the four migrated APIs and a GraphQL fixture bundle loaded without
+`schematic-definitions`, including the four migrated APIs, the R32a/R32b endpoints, and a GraphQL fixture bundle loaded without
 the Rust registry; repeat serialization must be byte-identical.
 
 The stream’s ownership and termination rules are illustrated below. Once headers
@@ -878,8 +986,11 @@ difference.
   `Text`, `Binary`, `Empty`, `Stream { framing: StreamFraming, end: StreamEnd }` with
   registered item descriptors held by SSE/NDJSON framing only. The existing public
   `Success` builder from the definition-API draft is widened in place, with a stored `SuccessShape { shape: ResponseShape, content_type:
-  Option<String>, statuses: Vec<u16> }` if a separate stored form is needed (empty
-  `statuses` means none declared; builder form `.status(202)`, D57 item 16);
+  Option<String>, statuses: Vec<u16>, json_tag: Option<JsonTag>, fallback: bool,
+  note: Option<String> }` if a separate stored form is needed (empty
+  `statuses` means none declared; builder form `.status(202)`, D57 item 16;
+  `JsonTag` is `Field { name, value }` or `Array`/`Object`, R3b; `fallback` is R3c;
+  `note` is R13a documentation);
   an endpoint holds a non-empty `Vec<SuccessShape>`. `StreamFraming` is `Sse`,
   `Ndjson`, and (Default D-17, **Decided** D56-8, extension of D6) `Bytes`, which carries a
   declared content type; the framing set stays non-exhaustive.
@@ -900,8 +1011,6 @@ difference.
   `no_declared_errors` flag); a pure function that merges and resolves them. The
   `.returns`/`.errors` placeholders spec 4a created are widened to accept this
   vocabulary without touching any existing call site.
-- **`Selector` (Proposed).** `{ field: String, value: SelectorValue }`, where
-  `SelectorValue` is bool, string, or number; an optional endpoint field.
 - **Validation (Proposed, Decided in rule).** Overlap and uniqueness checks of R16-R18
   and R23 live beside the types so the generator and the importer can reuse them.
 - **GraphQL (Proposed).** `GraphQlOperation { id, description, document: String,
@@ -938,7 +1047,7 @@ difference.
 
 - **Client and request codegen (Proposed).** Per endpoint: `type Success`, `type
   Failure`, and the codec constant; a generated enum for multi-shape success and for
-  multi-shape failure; selector injection in the request body; no per-endpoint wrapper
+  multi-shape failure, with shape notes as variant rustdoc; no per-endpoint wrapper
   method (spike cost finding: about 7 s extra per 550 calls).
 - **Hooks.** Spec 2 owns the marker-trait mechanism; this spec extends it to the stream
   and GraphQL codecs (R12) and adds no mechanism of its own.
@@ -948,7 +1057,7 @@ difference.
 - **Validation (Proposed).** `validation.rs` gets the new duplicate rule, shape checks,
   and the skipped-feature diagnostics of R42.
 - **Exporters (Proposed).** OpenAPI and Postman exporters read the new vocabulary;
-  merging of selector endpoints; status expansion for ranges.
+  `oneOf`/`discriminator` and `*/*` fallback export (R27); status expansion for ranges.
 
 ### OpenAPI import (package: schematic-define, `openapi/import`)
 
@@ -958,7 +1067,8 @@ difference.
 ### `schematic-definitions` (package: schematic-definitions)
 
 - **Migration (Decided in scope by D6; shapes Proposed).** Ollama, LM Studio, Anthropic,
-  ElevenLabs as in R5, R30-R33. No other API's definitions are edited. API-level default error lists are added only where the API already
+  ElevenLabs as in R5, R30-R33, plus the Bitbucket source and OpenAI `GetResponse`
+  endpoints (R32a, R32b). No other definitions are edited. API-level default error lists are added only where the API already
   has a documented shared error type (Default D-19).
 
 ## Suggested phases
@@ -974,21 +1084,22 @@ so earlier generated fixtures do not depend on absent types.
    body has a `stream` field, definitions with hooks, spec 2's runtime codec inventory,
    and the sniff fixtures present. No code change.
 2. **Vocabulary and validation in `schematic-define`.** New types, error table
-   resolution, selector, validation, all behind unit tests; the old `ApiResponse`
+   resolution, R3b tags and the R3c fallback, validation, all behind unit tests; the old `ApiResponse`
    path still compiles.
 3. **Runtime codecs.** Sse, Ndjson, Bytes, GraphQl, end conditions, multi-shape
    dispatcher, error-table decode, `StreamError`, with mock-server tests in the
    runtime package.
-4. **Generator.** Emit success and failure types, enums, selector injection, hook
+4. **Generator.** Emit success and failure types, enums with note rustdoc, hook
    compile error, GraphQL requests and address; test against a generated fixture
    crate. The old path still works for definitions not yet migrated.
 5. **Switch and migrate.** Change `Endpoint::response` to the new vocabulary; update
    validation, exporters, importer, Postman, extension serializer; migrate all
-   the four named APIs by hand (no other definition is edited); update spec 4a's JSON
+   the four named APIs and the R32a/R32b endpoints by hand (no other definition is
+   edited); update spec 4a's JSON
    baselines and byte-comparison allow-list; regenerate `schematic-schema`; fix
    dependents. Land only when the workspace builds.
 6. **Exporters and importer behavior.** R27-R29, R42 with their tests, including the
-   ElevenLabs content-type case and the selector merge.
+   ElevenLabs content-type case and the `oneOf`/`discriminator`/`*/*` export.
 7. **GraphQL.** Primitive, address rule, failure decode, pagination vocabulary,
    hooks on data, test-only check-status parity (R43).
 8. **Docs, skills, drift, final verification.** Update README, `schematic/docs`
@@ -1046,8 +1157,8 @@ none is assumed. Once confirmed, the run may do the following without pausing:
   crates) only where a migrated endpoint's success or failure type forces a change, and
   log each edit. Do not otherwise refactor them.
 - Rewrite the endpoint definitions of the four named APIs (Ollama, LM Studio,
-  Anthropic, ElevenLabs) in `schematic-definitions` by hand. No other API's definitions
-  are edited.
+  Anthropic, ElevenLabs) and the Bitbucket source and OpenAI `GetResponse` endpoints
+  (R32a, R32b) in `schematic-definitions` by hand. No other definitions are edited.
 - Update `schematic/docs/`, READMEs, and `.claude/skills/` pages as required by
   Drift Maintenance.
 - Run the repo recipes (`just test`, `just test-l2` when it does not take window focus,
@@ -1080,24 +1191,15 @@ parent spec.
 ## Planning-time details assigned to this spec
 
 The parent assigns P9 (selector, end conditions, error mappings, GraphQL names) for
-D34-D38 to this spec. Each default below is adopted by the implementer and logged. They
+D34-D38 to this spec; the selector part was withdrawn by the author ruling of
+2026-10-12. Each default below is adopted by the implementer and logged. They
 are not decisions until the author confirms them in review 1.
 
-- **Default D-1 (selector syntax).** Parent leaves open. *Default if not ruled before
-  planning:* a builder method `.selector("stream", false)` taking a field name and a
-  scalar (bool, string, or number), top-level body field only. A selector on a method
-  without a JSON body, or on a nested field, is a validation error.
-- **Default D-2 (naming the two request types).** *Default if not ruled before planning:*
-  the author names both endpoint ids explicitly; the convention used for the migrated
-  definitions is `<Name>` for the non-streaming endpoint and `<Name>Stream` for the
-  streaming one (for example `CreateMessage` and `CreateMessageStream`). The generated
-  request type name follows the endpoint id as it does today.
-- **Default D-3 (merged OpenAPI request schema).** *Default if not ruled before
-  planning:* one operation, one request body schema (the shared body type) in which the
-  selector property is required and shown as an enum of the declared values using
-  an operation-local overlay; the operation carries an `x-schematic-selector`
-  extension listing each endpoint id, field, and value. Re-import does not split
-  or enforce these selectors yet and reports that limitation.
+- **D-1, D-2, D-3: withdrawn** (author ruling 2026-10-12). They covered selector
+  syntax, naming the two request types of a selector pair, and the merged OpenAPI
+  request schema. One endpoint per address leaves nothing to decide: the endpoint
+  keeps its id and request type, and multi-shape export is R27. The numbers are
+  kept so later references stay valid.
 - **Default D-4 (end-condition names).** *Default if not ruled before planning:*
   `StreamEnd::{DataLineEquals, EventNamed, FieldEquals, ConnectionClose}`; builder forms
   `.ends_at_data_line("[DONE]")`, `.ends_at_event("message_stop")`,
@@ -1148,12 +1250,15 @@ are not decisions until the author confirms them in review 1.
   planning:* not supported; log it as out of scope.
 - **Default D-14 (multi-shape selection).** Parent is silent. *Default if not ruled before
   planning:* effective Content-Type match, with HTTP 204 selecting the empty
-  alternative first. Indistinguishable non-empty media types fail validation.
-  Optional declared success statuses (D57 item 16) refine this as R3a states.
+  alternative first. Optional declared success statuses (D57 item 16) refine this
+  as R3a states; JSON shapes sharing a media type are separated by the R3b tags
+  (author ruling 2026-10-12, item 1.3); the R3c fallback takes any unmatched media
+  type. Shapes no rule separates fail validation.
 - **Default D-15 (multi-shape enum naming).** *Default if not ruled before planning:*
   `<EndpointId>Response` with variants named after the shape (`Json`, `Text`, `Binary`,
   `Empty`, `Stream`), or after the content type when two shapes share a kind
-  (`Json`/`JsonProblem`) -- the author may name variants in the definition.
+  (`Json`/`JsonProblem`) -- the author may name variants in the definition, and
+  does so for R3b groups and R32a (`Directory`, `File`).
 - **Default D-16 (content type checks).** *Default if not ruled before planning:* none for
   single-shape endpoints; only R3 for multi-shape. SSE and NDJSON decoding do not require
   the matching response `Content-Type`.
@@ -1166,9 +1271,10 @@ are not decisions until the author confirms them in review 1.
   the last item instead. Ollama's definition uses `keep` so its final `done=true` line,
   with `eval_count` and the other token statistics, reaches the caller.
 - **Default D-19 (migration scope).** *Default if not ruled before planning:* hand-migrate
-  Ollama, LM Studio, Anthropic, and ElevenLabs only; any other API found with streaming (a
-  `stream` body field or an SSE/NDJSON reply, for example OpenAI chat completions) is
-  recorded in the log and its definitions are not edited. API-level default error lists are added only for APIs that already define a
+  Ollama, LM Studio, Anthropic, and ElevenLabs, plus the two named endpoints of R32a
+  and R32b; any other endpoint found with streaming (a `stream` field or an SSE/NDJSON
+  reply, for example OpenAI chat completions) or with several reply shapes is
+  recorded in the log and its definition is not edited. API-level default error lists are added only for APIs that already define a
   shared error type.
 - **Default D-20 (importer mapping).** See R28. Error entries stay endpoint-level; no
   hoisting to the API list.
@@ -1197,6 +1303,10 @@ are not decisions until the author confirms them in review 1.
 - **Default D-30 (error `Debug` and redaction).** *Default if not ruled before planning:*
   error bodies follow D22 (stored metadata and `Display` are credential-free; a decoded
   error body prints as received in `Debug`); GraphQL `errors` are not redacted.
+- **Default D-31 (fallback shape).** *Default if not ruled before planning:* R3c as
+  written: at most one text or binary fallback per multi-shape endpoint, no declared
+  content type, exported as `*/*`. Alternative considered: a wildcard media range on
+  any shape, rejected because it reopens R1's ambiguity rule.
 
 ## Open Questions
 
@@ -1221,9 +1331,13 @@ All five earlier open questions were ruled in D57:
   baselines, and dependents all compile.
   Mitigation: phases 2-4 are additive; phase 5 lands only when the build is green.
 - **Behavior change on migration.** Making Ollama's `stream` default explicit can change
-  wire behavior (Ollama streams by default when the field is omitted). Mitigation: the
-  streaming endpoint always sends `stream: true`, and the non-streaming one `stream:
-  false`, by the selector; mock tests record the bodies (R14).
+  wire behavior (Ollama streams by default when the field is omitted). Mitigation: no
+  default is made explicit; `stream` stays an optional field sent only when the caller
+  sets it, and both reply shapes are declared, so either default decodes (R13a); mock
+  tests record the bodies.
+- **Callers match on a variant they did not ask for.** A caller who sets
+  `stream: true` still matches on the JSON variant too (accepted by the author
+  ruling of 2026-10-12). Generated convenience accessors are not added here.
 - **Unverified provider facts.** The reply framing and end conditions of Ollama (including
   whether its final `done=true` line carries the statistics as the migration assumes),
   LM Studio, Anthropic, and ElevenLabs are
@@ -1284,7 +1398,7 @@ Because no human is available while the plan runs, the implementer:
 For review 1, `implementation-log.md` must record each of the following, with the phase,
 what was chosen, the alternatives considered, and why:
 
-1. **Every default adopted** (D-1 through D-30), including any that was changed because the
+1. **Every default adopted** (D-4 through D-31; D-1 to D-3 are withdrawn), including any that was changed because the
    code made the default unworkable.
 2. **Every design choice not dictated by this spec**: symbol names and signatures that
    differ from the Proposed names; where each codec and type finally lives; builder-surface
@@ -1303,8 +1417,10 @@ what was chosen, the alternatives considered, and why:
    - **Level precedence (D-7):** the parent says both "endpoint overrides" and "most
      specific wins"; whether endpoint entries should win outright (endpoint-first) or
      specificity decides across the merged table.
-   - **Selector scope (D-1, R13):** a top-level body field only; nested fields and
-     non-JSON bodies are rejected.
+   - **Bitbucket JSON files (R32a):** what Bitbucket sends that separates a JSON file
+     from a directory listing, if anything, and the source of that finding.
+   - **R3b tag inference:** whether array/object tags inferred from registered types
+     held for every migrated group, or needed an explicit declaration.
    - Also: how the ElevenLabs
    `output_format` query parameter relates to the declared audio content type; whether a
    stream's `elapsed` should mean time to headers; what GraphQL batching would need.
@@ -1312,7 +1428,8 @@ what was chosen, the alternatives considered, and why:
 5. **The inventory results** of phase 1 and **the final list of changed public types** (R24),
    plus every dependent call site edited (R34).
 6. **Unverified provider facts** assumed in the migrations (Ollama, LM Studio, Anthropic,
-   ElevenLabs framing, end conditions, and content types) and which research document or
+   ElevenLabs, Bitbucket, and OpenAI `GetResponse` framing, end conditions, and content
+   types) and which research document or
    code each came from.
 7. **Any hook removed** (D-26).
 8. **Which environments were exercised** (macOS, Linux, native Windows, WSL2) and which were
@@ -1343,7 +1460,12 @@ outcomes of the earlier specs' review 1:
   (rate-limit, deprecated, auth override, `cross_origin`, request-id) that R26's
   extension must carry. This is the largest source of change.
 - **Spec 1 (generation integrity):** the diagnostics format for skipped features (R42)
-  and the validation structure this spec extends.
+  and the validation structure this spec extends. Its review 1 ruling (2026-10-12,
+  item 1) is already applied here: same-API duplicate routes are errors, GitHub's tree
+  pair is one endpoint, and Bitbucket's source pair is one `Binary` endpoint that R32a
+  upgrades. Confirm the landed endpoint ids.
+- **Spec 4a's OpenAI beta merge:** whether the seven `?beta=true` endpoints merged into
+  their twins and what response type `GetResponse` landed with (R32b).
 - **Author rulings in review 1** on any default adopted by earlier specs that overlaps
   this one (cross-origin overrides, redaction, deadline), and on any of this spec's
   defaults the author has already seen.
