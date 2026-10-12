@@ -3,7 +3,7 @@ kind: plan
 name: reexports-all-languages
 total_phases: 6
 created: 2026-10-11
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -121,21 +121,114 @@ skills_files_updated_during_phase_4:
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/diagnostics.md
   - .claude/skills/tree-hugger/testing.md
-source_files_during_phase_5: []
+source_files_during_phase_5:
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/reexports_equivalence.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
 docs_updated_during_phase_5:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
-docs_created_during_phase_5: []
-skills_files_updated_during_phase_5: []
+  - tree-hugger/features/2026-10-11-reexports-all-languages/plan.md
+  - tree-hugger/docs/overview.md
+  - tree-hugger/docs/testing.md
+  - tree-hugger/README.md
+docs_created_during_phase_5:
+  - tree-hugger/docs/reexports.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/testing.md
 source_files_during_phase_6: []
 docs_updated_during_phase_6:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/plan.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/src/shared/schema_v2/reexports.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/analysis/reexports.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/lib/src/analysis/reexports/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/common.rs
+  - tree-hugger/lib/src/analysis/reexports/rust.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/bindings.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/cjs.rs
+  - tree-hugger/lib/src/analysis/reexports/python.rs
+  - tree-hugger/lib/src/analysis/reexports/go.rs
+  - tree-hugger/lib/src/analysis/reexports/perl.rs
+  - tree-hugger/lib/src/analysis/reexports/lua.rs
+  - tree-hugger/lib/src/analysis/reexports/swift.rs
+  - tree-hugger/lib/src/analysis/reexports/scala.rs
+  - tree-hugger/lib/src/analysis/reexports/cpp.rs
+  - tree-hugger/lib/src/analysis/reexports/csharp.rs
+  - tree-hugger/lib/tests/l1/reexports_support.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_rust.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_ecma.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_python_perl.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_go_lua.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_swift_scala_csharp.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_cpp.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/lib/src/cache/stored_reexports.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/reexports_consumers.rs
+  - tree-hugger/lib/tests/l1/reexports_equivalence.rs
+  - tree-hugger/cli/tests/symbols/cache_lookup.rs
+documentation:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-module-syntax.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-static-conventions.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-interface-boundaries.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/docs/symbol-records.md
+  - tree-hugger/docs/symbol-records/file-index.md
+  - tree-hugger/docs/symbol-records/versions.md
+  - tree-hugger/docs/cache-design/entry-format.md
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/testing.md
+  - tree-hugger/docs/cache-design/robustness.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/release-notes.md
+  - tree-hugger/docs/symbol-reports.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/plan.md
+  - tree-hugger/docs/overview.md
+  - tree-hugger/docs/testing.md
+  - tree-hugger/README.md
+  - tree-hugger/docs/reexports.md
+  - .claude/skills/tree-hugger/SKILL.md
+completed_phase: 6
+implemented: true
 ---
 
 # Re-exports across all supported languages: implementation plan
@@ -501,7 +594,7 @@ and Rust prelude regressions pass.
 
 ### Wave 8: Concurrent verification and documentation tasks
 
-- [ ] **Verify analysis equivalence**
+- [x] **Verify analysis equivalence**
   - Compare direct API, complete index, equivalent selective queries and CLI
     full-index/import output. Cover fresh, hit, wider-to-narrower projection,
     narrower-to-wider computation, kind/predicate filters, and different scan
@@ -514,7 +607,7 @@ and Rust prelude regressions pass.
   - Prove ordinary extraction succeeds with dependency files absent and cannot
     read forwarding targets; retain the deliberate Rust prelude exception only
     in its existing resolver tests.
-- [ ] **Document supported behavior**
+- [x] **Document supported behavior**
   - Write `docs/reexports.md` for newcomers: how to request the report, concise
     examples per supported rule, all 16 language contracts, evidence/form
     distinctions, qualifiers, scope/reachability limits, and coverage reasons.
@@ -530,7 +623,7 @@ and Rust prelude regressions pass.
 
 ### Wave 9: Conditional terminal validation
 
-- [ ] **Validate styled output**
+- [x] **Validate styled output** (not applicable: no styled view added; `--json-full` only, L1 suffices)
   - Run only if the approved CLI contract adds or changes a styled view. Consult
     `biscuit-terminal` renderable components and the real-terminal test-harness
     skills. Add the appropriate shared scenarios to existing L2 entry points,
@@ -547,7 +640,7 @@ No benchmark or repeated audit spike is introduced here.
 
 ### Wave 10: Sequential completion tasks
 
-- [ ] **Run package checks**
+- [x] **Run package checks**
   - From `tree-hugger/`, run `just test` and `just lint`; run applicable
     `just test-l2` when Wave 9 requires it. Use nextest and test-toolkit
     conventions, never the consolidated `cargo test` runner. Do not run
@@ -561,7 +654,7 @@ No benchmark or repeated audit spike is introduced here.
     the approved support contract, exact matrix, examples, and all specification
     acceptance items; record any departure in the implementation log and
     correct current docs without rewriting the settled specification snapshot.
-- [ ] **Prepare review handoff**
+- [x] **Prepare review handoff**
   - Check off tasks only with observable completion evidence. Record author
     rulings, grammar limitations, tests/commands/results, any pending external
     evidence, and the placeholder-removal coordination outcome.

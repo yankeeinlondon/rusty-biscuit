@@ -2,7 +2,7 @@
 kind: feature
 name: reexports-all-languages
 area: tree-hugger
-status: finalized-spec
+status: implemented
 scheduled: true
 origin: ruling on `2026-10-10-docs-audit-code-defects` (F3), which removed the placeholder `TreeFile::reexported_symbols()` and moved the real capability here
 packages:
@@ -31,10 +31,13 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-11"
-review_iterations: 0
+review_iterations: 3
+completed: true
 human_review: false
+implemented: true
+implemented_by: "claude/sonnet"
 message_to_agent: |-
-  Phase 4 is done: `analysis::reexports::flag_forwarded_imports` is the one place `ImportSymbol::is_reexport` is decided (planner, `imported_symbols()`, lint paths); the Rust visibility-modifier check is deleted so `pub(self) use` loses its `unused-import` exemption. The cache reader refuses inconsistent reports in `cache/stored_reexports.rs`, and the robustness matrix plus inconsistency cases live in `cli/tests/symbols/cache_robustness.rs` (names start `reexport_`/`well_typed_reexport_`). `hug imports` now requests `Capability::Reexports`. Phase 5 must: add the equivalence and work-counter tests, write `docs/reexports.md` (all 16 language contracts, request-to-output Mermaid flow), and correct any remaining docs; I already updated the library, diagnostics, cache entry-format, robustness, cli, symbol-reports and release-notes pages and the skill (analysis-pipeline, api-reference, diagnostics, testing). Known gaps from Phase 3 still stand (Perl has no ImportRecords; Go raw last-segment match; TS `export import A = B.C`; Swift `#if` among top-level siblings; `.cppm` unrecognized). Several cache_robustness tests exceed 5 s under full-suite load; the new complete-report matrix is ~3 s alone.
+  Phase 6 is done: `just test` (2381 passed) and `just lint` are green on macOS; the feature is implementation complete, ready for review. Nothing further to implement.
 ---
 
 # Spec: Re-exports across all supported languages
