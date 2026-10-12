@@ -14,8 +14,9 @@ description: |-
 iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') || 1 : 1 }}"
 review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 log: {{ dirname(spec) + '/log.md' }}
-# is the review "production ready"?
-ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
+# is the review "production ready"? A review that stopped for a human never
+# compared the code with the spec, so it is never ready, whatever it says.
+ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') == true && is_empty(frontmatter(review, 'human_in_the_loop')) : null }}"
 
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 yolo: true
@@ -30,6 +31,10 @@ initialize:
           action:
               - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
               - skip
+        - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop')) && frontmatter(review, 'human_resolved') != true"
+          action:
+              - warn: "{{basename(review)}} is waiting on a human: record your rulings under its `## Human rulings` heading and set `human_resolved: true` before repairing it"
+              - error: "{{basename(review)}} is waiting on a human"
         - action:
             - ensure_file: '{{log}}'
 
@@ -195,13 +200,14 @@ when it is a small, surgical change inside the spec's code.
 ::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop'))"
 **This review stopped for a human instead of reporting findings.** The author
 answered each item under the `## Human rulings` heading of the review file. A
-ruling is a decision with the same authority as the specification. Your task for
-this cycle is to carry the rulings out:
+ruling is a decision with the same authority as the specification. **The
+rulings are this cycle's findings**:
 
-- for each ruling, make the code, test, documentation, and skill changes it implies; a ruling that confirms the existing behavior needs none
-- log each ruling and what you did about it
+- before any code change, list each ruling that requires a change as a **high** finding in the review's `findings` frontmatter, titled `high: carry out ruling on item N: {short description}`. The log, this cycle's completion counts, and the next review's check of the previous review's findings then all see the work. A ruling that confirms existing behavior adds no finding
+- implement those findings exactly as you would any other finding (the steps below), making every code, test, documentation, and skill change each ruling implies
 - a ruling that conflicts with another ruling, or cannot be implemented as written, is logged as **deferred** with the reason; do not guess
-- the sweep and dispute rules above apply to defects you find while doing this; they do not apply to the rulings themselves
+- the sweep and dispute rules above apply to defects you find while doing this; they do not apply to the rulings themselves, which cannot be disputed
+- this review never compared the implementation with the specification; the next review does that, so do not report this feature as production ready
 ::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.

@@ -75,7 +75,9 @@ initialize:
         # Inside the review-loop sequence the step list is static, so a review
         # whose predecessor already closed the loop opts out here and launches
         # nothing. A direct `claudine compose` never sets `in_loop`.
-        - when: "in_loop && previous_review && file_exists(previous_review) && frontmatter(previous_review, 'ready') == true"
+        # A review that stopped for a human never assessed readiness, so its
+        # `ready` cannot end the loop even if a reviewer wrote `true`.
+        - when: "in_loop && previous_review && file_exists(previous_review) && frontmatter(previous_review, 'ready') == true && is_empty(frontmatter(previous_review, 'human_in_the_loop'))"
           action:
               - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
               - skip
@@ -234,6 +236,7 @@ You are performing a review of the functionality defined by the `{{spec_name}}` 
 - If that review stopped for a human (it has a `human_in_the_loop` property), the human recorded **rulings** under its `## Human rulings` heading
     - a ruling is a decision of the author: it has the same authority as the specification and may be cited as the authority for a finding
     - where a ruling and the specification disagree, the ruling wins; say so in the review
+    - **every ruling that requires a change is a finding until the change is done.** Check each one against the code, tests, docs, and skills. One not fully carried out is a **high** finding whose authority is the ruling (cite it as "{{basename(previous_review)}}, item N"), listed in `findings` like any other high finding, so the repair step implements it. A ruling that only confirms existing behavior needs no finding
 
 ::end-block
 
@@ -314,6 +317,7 @@ List these for information; never stop for them. Two guards against over-asking:
     - Set these properties in the frontmatter of the review file ({{review}}):
         - `human_in_the_loop`: an array of those items; use YAML's `|-` for any item longer than a sentence, and Markdown (including Mermaid) inside the items
         - `human_resolved`: `false` (the human sets it to `true` after recording rulings; the next review will not start until then)
+        - `ready`: `false`, and `findings`: `[]`. Readiness was not assessed, because the implementation was never compared with the specification. The readiness rules under "Closure" do not apply to this review: an empty finding list here means "not reviewed", not "nothing wrong". A `ready: true` on this review would make the loop skip the next review and the repair of the rulings.
         - `reviewed_by`: "{{ctx.agent}}/{{ctx.model}}"
         - `created`: "{{ctx.now}}"
         - `spec`: "{{ parent_dir(spec) }}/{{ basename(spec) }}"
