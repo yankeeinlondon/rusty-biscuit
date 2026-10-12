@@ -129,6 +129,89 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/cli-commands.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/alphanumeric.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/fixtures/detect/arrays/expected.yaml
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/cli/src/commands/context/format.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/side_effect_partial.rs
+    - darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/docs/schemas/partials/side-effect.yaml
+    - claudine/docs/schemas/partials/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/doc-list.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/README.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 ---
 
 # Core Schema Types Implementation Plan
@@ -572,7 +655,7 @@ log; do not rewrite the finalized spec.
 
 ### Wave 9 — Final Gates
 
-- [ ] **Package verification**
+- [x] **Package verification**
   - Prerequisite: Phase 5. Run `just test` and `just lint` in `darkmatter/`
     (library, CLI, DMLS, and the recipe's remaining targets), then `just test`
     in `claudine/` for the partial and dependent behavior. Run any additional
@@ -586,7 +669,7 @@ log; do not rewrite the finalized spec.
     claiming an environment cannot be tested. No new matrix cells, remote
     performance fleet, terminal tests, or browser tests are required.
 
-- [ ] **Review readiness**
+- [x] **Review readiness**
   - Review the final diff against the migration inventory and all 14
     acceptance criteria. Confirm no unaccounted presence checks, validator
     builders, display-string option parsing, stale comments, or shipped

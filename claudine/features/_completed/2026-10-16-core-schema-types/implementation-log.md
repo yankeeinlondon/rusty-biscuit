@@ -129,28 +129,89 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/SKILL.md
 human_review: false
-message_to_agent: |-
-    Phase 5 (acceptance matrix, corpus coverage, docs) is done; read the
-    `## Phase 5` section of implementation-log.md first, including its
-    "Acceptance criteria → tests (all phases)" table, which Phase 6's review
-    readiness task can start from. Key points:
-    - All four gates were green on macOS at the end of Phase 5: darkmatter
-      `just test` (9625 passed) and `just lint`, claudine `just test` (8694
-      passed) and `just lint`. Re-run them; nothing has changed since.
-    - One production fix landed: `darkmatter/cli/src/commands/schema/assignment.rs`
-      `atom_prefers_string` now includes `alphanumeric`, so
-      `md schema validate doc.md slug=123` stores text.
-    - Three pre-existing, out-of-scope diagnostic defects are recorded in the
-      log (standalone.rs empty "unsupported keys" list, the options-conflict
-      message naming only the first keyword, nested load errors naming `p`
-      not `o.p`). They are not regressions; do not fix them in Phase 6
-      unless asked.
-    - Four plan-table departures in the robustness matrix are recorded
-      (raw-JSON-Schema fallback when only `$schema:` is removed, closed nested
-      objects, `[](min(1))` instead of `min-items(1)`, no phase flag on
-      `md schema validate`). The spec is unchanged.
-    - The `spec.md` frontmatter no longer carries `message_to_agent`; the
-      handoff now lives only on this log.
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/cli-commands.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/alphanumeric.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/fixtures/detect/arrays/expected.yaml
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/cli/src/commands/context/format.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml
+    - darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/side_effect_partial.rs
+    - darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/docs/schemas/partials/side-effect.yaml
+    - claudine/docs/schemas/partials/lifecycle.yaml
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/doc-list.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/README.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-16-core-schema-types (6 phases)
@@ -1270,3 +1331,104 @@ end-to-end test makes its repository with the fixture's
 `schema_triggers.rs` writes a minimal `.git` by hand.
 The `assignment.rs` change is a type list. No cross-OS rig run was made; CI
 proves Linux and macOS on the pull request and Windows on `main`.
+
+## Phase 6
+
+Phase 6 is verification and review readiness. **No source file or `docs/`
+page changed.** One skill line was corrected (below).
+
+### Wave 9 — Package verification (2026-10-12, macOS host)
+
+| Gate | Command | Result |
+|---|---|---|
+| darkmatter tests | `cd darkmatter && just test` | exit 0, 9625 passed, 11 skipped (29.4 s; same count as Phase 5) |
+| darkmatter lint | `cd darkmatter && just lint` | exit 0: lib, cli, dmls, zed-dmls-cli, and the Zed WASM extension against `wasm32-wasip2` (target installed, no blocker) |
+| claudine tests | `cd claudine && just test` | exit 0, 8694 passed, 9 skipped (48.2 s; same count as Phase 5) |
+| claudine lint | `cd claudine && just lint` | exit 0. Its only warning is the macOS linker notice `__eh_frame section too large` on the `claudine` binary, which is not a lint warning and not caused by this feature |
+
+No downstream API changed in this phase, so no additional focused check was
+needed. No pre-existing or new failures, and no skipped gate. No cross-OS rig
+run: this phase changed no code, and the new tests' OS considerations are
+recorded under Phase 5. CI proves Linux and macOS on the pull request and
+Windows on `main`.
+
+### Wave 9 — Review readiness
+
+Audit of the working tree against the Phase 1 inventories:
+
+- **Presence checks.** Every site in the Phase 1 list now delegates to the
+  shared calculation, `PropertyDef::is_required` / `PropertyAtom::is_required`
+  (`types.rs`), which returns false for a null-admitting whole value: the
+  trigger matcher (`matcher.rs::is_required`), the DMLS provider
+  (`frontmatter.rs::is_required`), Claudine completion
+  (`schema_completion/keys.rs`), and Claudine classification
+  (`classify.rs::is_required`; its fallback for no typed shape is unchanged).
+  The trigger lint and the phase projection (`phase.rs::project_atom`) read
+  `is_required()` before rewriting markers. Lowering (`convert.rs`) computes
+  `admits_null` once per property and skips the optional-null wrapper for it.
+  The remaining direct `Constraint::Required` reads are constructors,
+  serialization, marker stripping, or `detect.rs` inference (authoring, out
+  of scope per Phase 1).
+- **Validator builders.** The catalog parser now builds through
+  `validate::build_structural_validator`, so `darkmatter-shell` and the other
+  Darkmatter formats are registered. The only bare `jsonschema::validator_for`
+  left is inside `resolve.rs`'s `mod tests`. `claudine/contract/src/structured.rs`
+  compiles a caller's raw Draft 2020-12 structured-output schema; it never
+  sees SimplifiedSchema types or Darkmatter formats.
+- **Display-string option parsing.** No production code reads
+  `accepted_constraints` except `md schema about`, which displays it. DMLS
+  completion uses the typed accepted constraints and option keywords.
+- **Presence-dependent `any(required)`.** Searching for `any(...required...)`
+  and `unknown(...required...)` outside `features/` and `fixes/` finds only
+  tests that pin the new meaning, and `definition.md`, which explains that
+  `required` has no effect on a null-admitting type
+  (`steps: unknown(required)` is a guard, `unknown[](required)` a gate). The
+  corpus test fails on any non-array occurrence in a shipped artifact.
+- **Stale wording.** No remaining "presence-only" or "only care that a
+  property exists" wording for `any` (the matches in Claudine's
+  `shell-completions.md` refer to file-existence checks, unrelated). No
+  `docs/` page names this feature; `claudine/docs/rollout-strategy.md` is a
+  pipeline index, not a behavior page.
+- **Contracts kept.** Raw JSON Schema required-nullable, composition stage
+  order, passive validation, and the `initialize` shell ban are covered by the
+  green gates above. The tests are listed in the Phase 5 AC table (AC 7, 11,
+  12) together with the existing `schema_phase_validation` and initialization
+  shell-ban suites. The later features (function-signature `any` in
+  `functions.yaml`/`mutations.yaml`, expression-catalog `DataType::Any`)
+  remain untouched.
+- **Skill drift fixed.** `.claude/skills/claudine/cli-commands.md` described
+  Claudine's schema validation as "`null`-as-absent" only. It now says that
+  presence comes from Darkmatter's shared `PropertyDef::is_required`, and that
+  a null-admitting whole value is never required. No other Claudine skill
+  page described type presence.
+
+### Acceptance and evidence map
+
+The Phase 5 table "Acceptance criteria → tests (all phases)" is the complete
+map for all 14 acceptance criteria. Every test it names ran in the gates
+above. No requirement was weakened in this phase.
+
+### Remaining limitations (carried forward, not fixed here)
+
+- Three pre-existing diagnostic defects (Phase 5): `standalone.rs` reports an
+  empty "unsupported keys" list for `kind: schema` without `types`; the
+  options-conflict message names only the first option keyword of each side;
+  a nested property's load error names `p`, not `o.p`.
+- Four plan-table departures in the robustness matrix (Phase 5): the
+  raw-JSON-Schema fallback when only `$schema:` is removed, closed nested
+  objects, `[](min(1))` as the item-count spelling, and no phase flag on
+  `md schema validate`.
+- `md schema validate --format json` reports `"schema": null` when a trigger
+  selected the schema.
+- The canonical `x-darkmatter-type`/`x-darkmatter-options` export and
+  serializer output are proven by library tests only, because `md` has no
+  command that exports a declared schema.
+
+### Requirement → test mapping for Phase 6
+
+Phase 6 changed no behavior, so it added no tests. Targeted tests added: none.
+Broader gates run: the four in the table above. Skipped or pre-existing
+failures: none.
+
+**Status: implementation complete, ready for review.** Closing the feature's
+lifecycle is left to the author.

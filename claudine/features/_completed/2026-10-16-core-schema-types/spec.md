@@ -28,7 +28,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 1
 human_review: false
 pipeline_step: 6
 related:
@@ -37,6 +37,8 @@ related:
     - 2026-10-23-shell-template-approval
     - 2026-10-28-schema-enhancements
     - 2026-10-31-type-aware-evaluation
+implemented: true
+completed: true
 ---
 
 # Core Schema Types: `unknown`, `null`, `alphanumeric`, `shell`
