@@ -1257,9 +1257,9 @@ async fn handle_eversolo(
     json: bool,
 ) -> Result<()> {
     let (host_str, port, source) = resolve_eversolo(host, port, name)?;
-    let eversolo = Eversolo::new(&host_str, port);
     let suffix = device_suffix(&host_str, port, &source);
     let err_ctx = format!("Eversolo at {host_str}:{port}");
+    let eversolo = Eversolo::new(&host_str, port).wrap_err_with(|| err_ctx.clone())?;
 
     match action {
         EversoloAction::Device(a) => handle_eversolo_device(&eversolo, a, json, &suffix).await,
@@ -1798,9 +1798,10 @@ async fn handle_samsung(
 ) -> Result<()> {
     let (host_str, rest_port, ws_port, use_https, source) =
         resolve_samsung(host, port, ws_port, https, name)?;
-    let tv = SamsungTv::with_https(&host_str, rest_port, ws_port, use_https);
     let suffix = device_suffix(&host_str, rest_port, &source);
     let err_ctx = format!("Samsung TV at {host_str}:{rest_port}");
+    let tv = SamsungTv::with_https(&host_str, rest_port, ws_port, use_https)
+        .wrap_err_with(|| err_ctx.clone())?;
 
     match action {
         SamsungAction::Device(a) => handle_samsung_device(&tv, a, json, &suffix).await,

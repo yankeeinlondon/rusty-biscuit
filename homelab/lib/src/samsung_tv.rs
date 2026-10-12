@@ -9,13 +9,16 @@
 use schematic_schema::samsung_smart_tv::{
     CloseAppRequest, GetAppStatusRequest, GetDeviceInfoRequest, GetServerLogsRequest,
     InstallAppRequest, LaunchApplicationByIdRequest, LaunchApplicationByNameRequest,
-    SamsungSmartTv as RestClient,
+    SamsungSmartTv, SamsungSmartTvClient,
 };
 use schematic_schema::samsung_smart_tv_remote_ws::{
     ArtModeClient, ArtModeConnectionParams, RemoteControlClient, RemoteControlConnectionParams,
     SamsungSmartTvRemoteWs,
 };
+use schematic_schema::schematic_runtime::{ClientBuilder, EndpointSpec, NoDeclaredError};
 use schematic_schema::ws_shared::{WsClientOptions, WsError};
+
+use crate::rest::{self, RestError};
 
 // Re-export response types for consumers
 pub use schematic_schema::samsung_smart_tv::{
@@ -44,9 +47,10 @@ const CLIENT_NAME_B64: &str = "aG9tZWxhYg==";
 /// Errors from the Samsung Smart TV API.
 #[derive(Debug, thiserror::Error)]
 pub enum SamsungTvError {
-    /// REST API error
+    /// The REST client could not be built, or a REST request failed or was
+    /// refused.
     #[error("Samsung TV API error: {0}")]
-    Api(#[from] schematic_schema::shared::SchematicError),
+    Api(#[from] RestError),
 
     /// WebSocket error
     ///
@@ -78,7 +82,7 @@ impl From<WsError> for SamsungTvError {
 
 /// Samsung Smart TV client for REST and WebSocket control.
 pub struct SamsungTv {
-    rest_client: RestClient,
+    rest_client: SamsungSmartTvClient,
     ws_client: SamsungSmartTvRemoteWs,
     host: String,
     rest_port: u16,
@@ -90,39 +94,47 @@ impl SamsungTv {
     ///
     /// The REST client uses a 5-second connect timeout and 10-second request
     /// timeout to avoid long waits when the TV is unreachable.
-    pub fn new(host: impl Into<String>, rest_port: u16, ws_port: u16) -> Self {
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SamsungTvError::Api`] when `host` does not form a valid base
+    /// URL or the HTTP client cannot be initialized.
+    pub fn new(
+        host: impl Into<String>,
+        rest_port: u16,
+        ws_port: u16,
+    ) -> Result<Self, SamsungTvError> {
         Self::with_https(host, rest_port, ws_port, false)
     }
 
     /// Creates a new Samsung TV client with optional HTTPS support.
     ///
     /// When `use_https` is `true`, the REST base URL uses `https://` and
-    /// the reqwest client accepts invalid (self-signed) TLS certificates,
+    /// the REST client accepts invalid (self-signed) TLS certificates,
     /// which Samsung TVs typically serve on port 8002.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SamsungTvError::Api`] when `host` does not form a valid base
+    /// URL or the HTTP client cannot be initialized.
     pub fn with_https(
         host: impl Into<String>,
         rest_port: u16,
         ws_port: u16,
         use_https: bool,
-    ) -> Self {
+    ) -> Result<Self, SamsungTvError> {
         let host = host.into();
-        let scheme = if use_https { "https" } else { "http" };
-        let rest_base = format!("{scheme}://{}:{}", host, rest_port);
         let ws_base = format!("wss://{}:{}", host, ws_port);
-        let mut builder = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(10));
-        if use_https {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-        let http_client = builder.build().expect("failed to build HTTP client");
-        Self {
-            rest_client: RestClient::with_client_and_base_url(http_client, rest_base),
+        let rest_client = rest_builder(&host, rest_port, use_https)
+            .build()
+            .map_err(RestError::from)?;
+        Ok(Self {
+            rest_client,
             ws_client: SamsungSmartTvRemoteWs::with_base_url(ws_base),
             host,
             rest_port,
             ws_port,
-        }
+        })
     }
 
     /// Returns the host address.
@@ -140,40 +152,36 @@ impl SamsungTv {
         self.ws_port
     }
 
+    async fn send<R>(&self, request: R) -> Result<R::Success, SamsungTvError>
+    where
+        R: EndpointSpec<Api = SamsungSmartTv, Failure = NoDeclaredError>,
+    {
+        Ok(rest::send(&self.rest_client, request).await?)
+    }
+
     // ── REST: Device ─────────────────────────────────────────────────
 
     /// Get device information (model, firmware, network details).
     pub async fn get_device_info(&self) -> Result<SamsungDeviceInfoResponse, SamsungTvError> {
-        Ok(self
-            .rest_client
-            .request::<SamsungDeviceInfoResponse>(GetDeviceInfoRequest {})
-            .await?)
+        self.send(GetDeviceInfoRequest {}).await
     }
 
     /// Get server logs from the TV.
     pub async fn get_server_logs(&self) -> Result<String, SamsungTvError> {
-        Ok(self
-            .rest_client
-            .request_text(GetServerLogsRequest {})
-            .await?)
+        self.send(GetServerLogsRequest {}).await
     }
 
     // ── REST: Apps ───────────────────────────────────────────────────
 
     /// Launch an application by its ID.
     pub async fn launch_app_by_id(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.rest_client
-            .request_empty(LaunchApplicationByIdRequest::new(app_id.to_string()))
-            .await?;
-        Ok(())
+        self.send(LaunchApplicationByIdRequest::new(app_id)).await
     }
 
     /// Launch an application by its name.
     pub async fn launch_app_by_name(&self, app_name: &str) -> Result<(), SamsungTvError> {
-        self.rest_client
-            .request_empty(LaunchApplicationByNameRequest::new(app_name.to_string()))
-            .await?;
-        Ok(())
+        self.send(LaunchApplicationByNameRequest::new(app_name))
+            .await
     }
 
     /// Get the running status of an application by its ID.
@@ -181,26 +189,17 @@ impl SamsungTv {
         &self,
         app_id: &str,
     ) -> Result<SamsungAppStatusResponse, SamsungTvError> {
-        Ok(self
-            .rest_client
-            .request::<SamsungAppStatusResponse>(GetAppStatusRequest::new(app_id))
-            .await?)
+        self.send(GetAppStatusRequest::new(app_id)).await
     }
 
     /// Close a running application by its ID.
     pub async fn close_app(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.rest_client
-            .request_empty(CloseAppRequest::new(app_id))
-            .await?;
-        Ok(())
+        self.send(CloseAppRequest::new(app_id)).await
     }
 
     /// Install (or reinstall) an application by its ID.
     pub async fn install_app(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.rest_client
-            .request_empty(InstallAppRequest::new(app_id))
-            .await?;
-        Ok(())
+        self.send(InstallAppRequest::new(app_id)).await
     }
 
     // ── WebSocket: Remote Control ────────────────────────────────────
@@ -393,6 +392,23 @@ impl SamsungTv {
 // ── Command Builders ─────────────────────────────────────────────────
 
 /// Builds a remote control key command for the Samsung TV.
+/// The REST client builder for `{scheme}://{host}:{rest_port}`.
+///
+/// Invalid certificates are accepted only over HTTPS: the TV's certificate is
+/// self-signed, and a plain-HTTP client has no certificate to check.
+fn rest_builder(host: &str, rest_port: u16, use_https: bool) -> ClientBuilder<SamsungSmartTv> {
+    let scheme = if use_https { "https" } else { "http" };
+    let builder = rest::device_builder(
+        SamsungSmartTv::builder(),
+        format!("{scheme}://{host}:{rest_port}"),
+    );
+    if use_https {
+        builder.danger_accept_invalid_certificates()
+    } else {
+        builder
+    }
+}
+
 fn build_key_command(key: &str) -> SamsungRemoteControlCommand {
     SamsungRemoteControlCommand {
         method: SamsungRemoteMethod::Known(SamsungRemoteKnownMethod::MsRemoteControl),
@@ -466,4 +482,150 @@ fn uuid_v4_simple() -> String {
         .unwrap_or_default()
         .subsec_nanos();
     format!("{:08x}-0000-4000-8000-{:012x}", nanos, nanos as u64)
+}
+
+#[cfg(test)]
+mod rest_tests {
+    use schematic_schema::schematic_runtime::{BuildError, SharedTransport};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{SamsungTv, SamsungTvError, rest_builder};
+    use crate::rest::RestError;
+
+    const WS_PORT: u16 = 8002;
+
+    fn tv_for(server: &MockServer) -> SamsungTv {
+        SamsungTv::new("127.0.0.1", server.address().port(), WS_PORT).expect("client builds")
+    }
+
+    /// The first connection option the builder set, revealed by attaching a
+    /// shared transport, which refuses connection options by name.
+    fn first_connection_option(use_https: bool) -> &'static str {
+        let transport = SharedTransport::builder().build().expect("transport");
+        match rest_builder("192.0.2.20", 8001, use_https)
+            .transport(&transport)
+            .build()
+        {
+            Err(BuildError::TransportOptionConflict { option }) => option,
+            other => panic!("expected an option conflict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_rest_base_url_scheme_follows_use_https() {
+        let plain = SamsungTv::with_https("192.0.2.20", 8001, WS_PORT, false).expect("http");
+        let secure = SamsungTv::with_https("192.0.2.20", 8002, WS_PORT, true).expect("https");
+
+        assert!(format!("{:?}", plain.rest_client).contains("http://192.0.2.20:8001"));
+        assert!(format!("{:?}", secure.rest_client).contains("https://192.0.2.20:8002"));
+        assert!(format!("{:?}", plain.rest_client).contains("timeout: 10s"));
+    }
+
+    #[test]
+    fn invalid_certificates_are_accepted_only_over_https() {
+        assert_eq!(
+            first_connection_option(true),
+            "danger_accept_invalid_certificates"
+        );
+        // Over HTTP the connect timeout is the first option set, so the
+        // invalid-certificate option, checked before it, is unset.
+        assert_eq!(first_connection_option(false), "connect_timeout");
+    }
+
+    #[tokio::test]
+    async fn an_https_client_does_not_speak_plain_http() {
+        let server = MockServer::start().await;
+        let tv = SamsungTv::with_https("127.0.0.1", server.address().port(), WS_PORT, true)
+            .expect("client builds");
+
+        let error = tv
+            .get_device_info()
+            .await
+            .expect_err("TLS to a plain server fails");
+
+        assert!(
+            matches!(error, SamsungTvError::Api(RestError::Transport(_))),
+            "{error}"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_server_logs_returns_the_text_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/logs/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("line one\nline two\n"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let logs = tv_for(&server).get_server_logs().await.expect("logs");
+
+        assert_eq!(logs, "line one\nline two\n");
+    }
+
+    #[tokio::test]
+    async fn empty_endpoints_succeed_on_a_success_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/applications/111299001912"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("true"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v2/applications/111299001912"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let tv = tv_for(&server);
+
+        tv.launch_app_by_id("111299001912")
+            .await
+            .expect("launch by id");
+        tv.launch_app_by_name("YouTube")
+            .await
+            .expect("launch by name");
+        tv.close_app("111299001912").await.expect("close");
+        tv.install_app("111299001912").await.expect("install");
+    }
+
+    #[tokio::test]
+    async fn empty_endpoints_fail_on_a_non_success_status() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(404).set_body_string("no such app"))
+            .mount(&server)
+            .await;
+        let tv = tv_for(&server);
+
+        for result in [
+            tv.launch_app_by_id("missing").await,
+            tv.launch_app_by_name("missing").await,
+            tv.close_app("missing").await,
+            tv.install_app("missing").await,
+        ] {
+            match result {
+                Err(SamsungTvError::Api(RestError::Status { status, body })) => {
+                    assert_eq!(status, 404);
+                    assert_eq!(body, "no such app");
+                }
+                other => panic!("expected a 404 status error, got {other:?}"),
+            }
+        }
+    }
 }

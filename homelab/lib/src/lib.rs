@@ -2,6 +2,7 @@ pub mod arcam;
 pub mod config;
 pub mod eversolo;
 pub mod network;
+pub mod rest;
 pub mod samsung_tv;
 pub mod samsung_tv_discovery;
 pub mod sony_receiver;

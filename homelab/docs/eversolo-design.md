@@ -4,7 +4,7 @@ This document describes how to integrate the Eversolo DMP-A8 music streamer into
 
 ## Background
 
-The `schematic-schema` crate already contains a fully generated API client (`schematic_schema::eversolo::Eversolo`) with 24 endpoints covering device identity, remote control, music playback, power management, and display settings. All endpoints use `GET` with query parameters and require no authentication. Default port is **9529**.
+The `schematic-schema` crate already contains a fully generated API client (`schematic_schema::eversolo::EversoloClient`, built from the `Eversolo` API marker) with 24 endpoints covering device identity, remote control, music playback, power management, and display settings. All endpoints use `GET` with query parameters and require no authentication. Default port is **9529**.
 
 ## 1. Homelab Library: `Eversolo` Struct
 
@@ -14,9 +14,10 @@ The `schematic-schema` crate already contains a fully generated API client (`sch
 
 ### Design
 
-The `Eversolo` struct wraps the generated `schematic_schema::eversolo::Eversolo` client, providing a homelab-native interface that:
+The `Eversolo` struct wraps the generated `schematic_schema::eversolo::EversoloClient`, providing a homelab-native interface that:
 
 - Accepts a URL (constructed from host + port) rather than relying on the generated client's default `192.168.1.1:9529`
+- Bounds every call with a 5-second connect timeout and a 10-second request timeout
 - Exposes high-level methods grouped by domain (device, music, power, display, remote)
 - Returns homelab-friendly types (re-exports from `schematic_definitions::eversolo`)
 - Follows the existing pattern where Sony uses a custom struct and Arcam uses a custom struct with TCP
@@ -25,7 +26,7 @@ The `Eversolo` struct wraps the generated `schematic_schema::eversolo::Eversolo`
 // homelab/lib/src/eversolo.rs
 
 use schematic_schema::eversolo::{
-    Eversolo as EversoloClient,
+    Eversolo as EversoloApi, EversoloClient,
     // Request types
     DeviceGetModelRequest, MusicGetStateRequest, MusicPlayOrPauseRequest,
     MusicPlayNextRequest, MusicPlayLastRequest, MusicSeekToRequest,
@@ -56,14 +57,15 @@ pub struct Eversolo {
 ```rust
 impl Eversolo {
     /// Creates a new Eversolo client for the given host and port.
-    pub fn new(host: impl Into<String>, port: u16) -> Self {
+    pub fn new(host: impl Into<String>, port: u16) -> Result<Self, EversoloError> {
         let host = host.into();
-        let base_url = format!("http://{}:{}", host, port);
-        Self {
-            client: EversoloClient::with_base_url(base_url),
-            host,
-            port,
-        }
+        let client = EversoloApi::builder()
+            .base_url(format!("http://{host}:{port}"))
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(RestError::from)?;
+        Ok(Self { client, host, port })
     }
 
     /// Host accessor for display purposes.
@@ -76,7 +78,7 @@ impl Eversolo {
 
 ### Method Groups
 
-Each method delegates to `self.client.request::<ResponseType>(RequestType)`. Methods are organized into `impl` blocks by domain for clarity:
+Each method sends its request with `self.client.send(request, &CallOptions::default())`; the endpoint fixes the response type. Methods are organized into `impl` blocks by domain for clarity:
 
 **Device**
 - `get_model() -> Result<GetModelResponse>` — device identity, firmware, capabilities
@@ -118,12 +120,26 @@ Each method delegates to `self.client.request::<ResponseType>(RequestType)`. Met
 #[derive(Debug, thiserror::Error)]
 pub enum EversoloError {
     #[error("Eversolo API error: {0}")]
-    Api(#[from] schematic_schema::SchematicError),
-
-    #[error("Eversolo returned error status: {0}")]
-    Status(i32),
+    Api(#[from] homelab::rest::RestError),
 }
 ```
+
+`RestError` is shared with the Samsung TV REST client. Every failed call is an
+`Err`, whichever way it failed:
+
+| Variant | When | Display |
+|---------|------|---------|
+| `Build` | the host does not form a valid base URL | the build failure |
+| `Transport` | no reply arrived: connection refused or dropped, TLS failure, timeout | the failure kind and the redacted request URL |
+| `Status` | the device replied with a non-2xx status | `status {code}: {body}` |
+| `Response` | the device replied but the body could not be used, such as a 2xx body that is not the expected JSON | `status {code}: {reason} ({n} body bytes)` |
+
+For example, a device answering `503 device busy` displays as
+`Eversolo API error: status 503: device busy`. No variant displays request
+headers or an unredacted URL.
+
+Callers rely on this: the Unfolded Circle integration treats any
+`EversoloError` as "the device is asleep" and powers it on with Wake-on-LAN.
 
 ### Dependencies
 
@@ -389,9 +405,10 @@ async fn handle_eversolo(
     json: bool,
 ) -> Result<()> {
     let (resolved_host, source) = resolve_eversolo(host, name)?;
-    let eversolo = homelab::eversolo::Eversolo::new(&resolved_host, homelab::eversolo::DEFAULT_PORT);
     let suffix = device_suffix(&resolved_host, homelab::eversolo::DEFAULT_PORT, &source);
     let err_ctx = format!("Eversolo at {resolved_host}:{}", homelab::eversolo::DEFAULT_PORT);
+    let eversolo = homelab::eversolo::Eversolo::new(&resolved_host, homelab::eversolo::DEFAULT_PORT)
+        .wrap_err_with(|| err_ctx.clone())?;
 
     match action {
         EversoloAction::Device(a) => handle_eversolo_device(&eversolo, a, json, &suffix).await,

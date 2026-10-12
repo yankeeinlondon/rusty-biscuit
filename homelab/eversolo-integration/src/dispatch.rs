@@ -453,7 +453,7 @@ async fn snapshot_updates(
 
 fn build_client(config: &DeviceConfig) -> Result<Eversolo, EversoloIntegrationError> {
     let host = parse_host(&config.host).map_err(|e| EversoloIntegrationError::InvalidHost(e.0))?;
-    Ok(Eversolo::new(host.to_string(), config.port))
+    Ok(Eversolo::new(host.to_string(), config.port)?)
 }
 
 async fn fetch_playback_context(
@@ -1341,5 +1341,109 @@ mod tests {
     fn test_power_attrs() {
         assert_eq!(power_attrs(true)["state"], "ON");
         assert_eq!(power_attrs(false)["state"], "OFF");
+    }
+}
+
+/// An unreachable or failing device is treated as asleep, so power-on falls
+/// back to Wake-on-LAN. With no MAC address configured that fallback stops at
+/// `MissingMacAddress` before sending a packet, which makes the path
+/// observable without touching the network.
+#[cfg(test)]
+mod asleep_device_tests {
+    use std::time::Duration;
+
+    use wiremock::matchers::any;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::execute_operation;
+    use crate::error::EversoloIntegrationError;
+    use crate::types::{DeviceConfig, EversoloOperation};
+
+    const TIMEOUT: Duration = Duration::from_secs(3);
+
+    fn config_for(port: u16) -> DeviceConfig {
+        DeviceConfig {
+            host: "127.0.0.1".to_string(),
+            port,
+            mac_address: None,
+            wol_broadcast: "255.255.255.255".to_string(),
+            wol_port: 9,
+            screen_brightness_max: None,
+            knob_brightness_max: None,
+        }
+    }
+
+    async fn failing_device() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// A port whose listener accepts each connection and closes it before
+    /// any reply.
+    async fn closing_listener_port() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local listener");
+        let port = listener.local_addr().expect("listener address").port();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                drop(stream);
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn power_on_wakes_by_lan_when_the_device_returns_a_non_success_status() {
+        let server = failing_device().await;
+        let config = config_for(server.address().port());
+
+        let result = execute_operation(&config, EversoloOperation::PowerOn, TIMEOUT).await;
+
+        assert!(
+            matches!(result, Err(EversoloIntegrationError::MissingMacAddress)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn power_toggle_wakes_by_lan_when_the_device_returns_a_non_success_status() {
+        let server = failing_device().await;
+        let config = config_for(server.address().port());
+
+        let result = execute_operation(&config, EversoloOperation::PowerToggle, TIMEOUT).await;
+
+        assert!(
+            matches!(result, Err(EversoloIntegrationError::MissingMacAddress)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn power_on_wakes_by_lan_when_the_connection_closes_without_a_reply() {
+        let config = config_for(closing_listener_port().await);
+
+        let result = execute_operation(&config, EversoloOperation::PowerOn, TIMEOUT).await;
+
+        assert!(
+            matches!(result, Err(EversoloIntegrationError::MissingMacAddress)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn power_toggle_wakes_by_lan_when_the_connection_closes_without_a_reply() {
+        let config = config_for(closing_listener_port().await);
+
+        let result = execute_operation(&config, EversoloOperation::PowerToggle, TIMEOUT).await;
+
+        assert!(
+            matches!(result, Err(EversoloIntegrationError::MissingMacAddress)),
+            "{result:?}"
+        );
     }
 }
