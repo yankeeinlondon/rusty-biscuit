@@ -240,20 +240,21 @@ md get doc.md title --json5
 ### Document Cleanup
 
 ```bash
-# Normalize formatting (output to stdout)
+# Format under the document's style.markdown rules (output to stdout)
 md clean README.md
 
-# Normalize formatting and collapse editor/LLM fixed-column prose wrapping
-md clean README.md
-
-# Collapse incidental wrapping, then re-wrap prose to 80 display columns
+# Join wrapped prose, then re-wrap it to 80 display columns
 md clean README.md --fixed-width 80
 
-# Preserve source single newlines while keeping the older cleanup behavior
+# Keep source line breaks even if the document asks for unwrap or a width
 md clean README.md --ignore-incidental-newlines
 
-# Normalize formatting and force 4-space nested list indentation
-md clean README.md --indent 4
+# Force 2-space nested list indentation for this run
+md clean README.md --indent 2
+
+# Remove (or add) blank lines between sibling list items
+md clean README.md --compact
+md clean README.md --loose
 
 # Clean from stdin
 cat README.md | md clean
@@ -277,19 +278,17 @@ md clean README.md --save -v
 md README.md --save
 ```
 
-By default, `md clean` collapses incidental single newlines in prose before
-running the rest of cleanup. Blank lines, fenced and indented code blocks,
-tables, HTML blocks, transclusion directives, list markers, and blockquote
-prefixes are preserved. Prose includes paragraphs inside ordered, unordered,
-and task-list items at every nesting depth: default cleanup removes source-only
-continuation indentation, while `--fixed-width <#>` unwraps the complete item
-paragraph and emits list-aware hanging continuation prefixes. For lists inside
-blockquotes, those prefixes retain both the quote and list containers. Use
-`--fixed-width <#>` when you want canonical cleanup followed by prose wrapping
-to a target display width, or
-`--ignore-incidental-newlines` when source line breaks must remain unchanged.
-`--fixed-width` and `--ignore-incidental-newlines` conflict because fixed-width
-reflow first needs the incidental source wrapping removed.
+`md clean` formats the body under the document's
+[`style.markdown`](../docs/topics/markdown-formatting.md) rules; each flag
+above overrides one rule for one run. By default it pads tables, labels
+unlabeled code fences `text`, renumbers misnumbered ordered lists, re-indents
+nested lists to four spaces, and puts a blank line before and after lists. It
+keeps the line breaks you wrote, directive lines, line endings, and
+everything it has no rule for. If the result would change the document's
+structure or meaning, it prints the original unchanged and reports
+`clean.fidelity-fallback` on stderr (exit `0`; `--save` writes nothing).
+`--fixed-width` and `--ignore-incidental-newlines` conflict because
+fixed-width reflow first needs the source wrapping removed.
 
 Deterministic YAML frontmatter repairs are also enabled by default. Analysis is
 limited to the frontmatter block; YAML fences in the body are never inspected.

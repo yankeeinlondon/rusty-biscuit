@@ -31,8 +31,10 @@ fn compose_reports_an_unknown_root_once_per_source_document() {
 
     assert!(output.status.success(), "warnings do not fail composition: {output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.lines().filter(|line| *line == "A").count(), 2, "{stdout}");
-    assert_eq!(stdout.lines().filter(|line| *line == "B").count(), 1, "{stdout}");
+    // An empty interpolation leaves its surrounding spaces, and cleanup no
+    // longer strips trailing whitespace, so `a.md` composes to `A  `.
+    assert_eq!(stdout.lines().filter(|line| line.trim_end() == "A").count(), 2, "{stdout}");
+    assert_eq!(stdout.lines().filter(|line| line.trim_end() == "B").count(), 1, "{stdout}");
     assert_eq!(
         warning_count(&output.stderr, "unknown context variable 'ctx.toady'"),
         3,

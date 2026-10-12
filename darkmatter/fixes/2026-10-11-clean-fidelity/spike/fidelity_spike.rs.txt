@@ -1,0 +1,405 @@
+//! THROWAWAY Phase 1 spike for clean-fidelity: source-edit model vs serializer.
+//! Not production code; removed after the findings are recorded.
+
+use std::ops::Range;
+
+use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
+
+use crate::markdown::compose::block_pairs::{BlockOpenKind, scan_block_pairs};
+use crate::markdown::compose::directives_api::scan_darkmatter_directives;
+use crate::markdown::compose::expression::lexer::ExpressionFinder;
+
+use super::{cleanup_parser, parse_count};
+
+/// Whole source lines removed from the parse view (directive lines and opaque
+/// shell-block regions), plus inline spans that edits must not touch.
+#[derive(Debug, Default)]
+struct Protection {
+    lines: Vec<Range<usize>>,
+    inline: Vec<Range<usize>>,
+}
+
+fn line_range_at(src: &str, start: usize) -> Range<usize> {
+    let ls = src[..start].rfind('\n').map_or(0, |i| i + 1);
+    let le = src[start..].find('\n').map_or(src.len(), |i| start + i + 1);
+    ls..le
+}
+
+fn scan_protection(src: &str) -> Protection {
+    let mut lines: Vec<Range<usize>> = scan_darkmatter_directives(src)
+        .into_iter()
+        .map(|d| line_range_at(src, d.span.start))
+        .collect();
+    if let Ok(pairs) = scan_block_pairs(src) {
+        for p in pairs.into_iter().filter(|p| matches!(p.kind, BlockOpenKind::Shell)) {
+            lines.push(p.span.clone());
+        }
+    }
+    lines.sort_by_key(|r| r.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for r in lines {
+        match merged.last_mut() {
+            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    let inline = ExpressionFinder::new(src)
+        .find_all()
+        .into_iter()
+        .map(|e| e.start..e.end)
+        .collect();
+    Protection { lines: merged, inline }
+}
+
+/// Parse view: the source minus protected lines, with a view->source map.
+struct View {
+    text: String,
+    /// (view_start, source_start, len)
+    segments: Vec<(usize, usize, usize)>,
+}
+
+impl View {
+    fn build(src: &str, prot: &Protection) -> Self {
+        let mut text = String::new();
+        let mut segments = Vec::new();
+        let mut cursor = 0;
+        for r in prot.lines.iter().chain(std::iter::once(&(src.len()..src.len()))) {
+            if r.start > cursor {
+                segments.push((text.len(), cursor, r.start - cursor));
+                text.push_str(&src[cursor..r.start]);
+            }
+            cursor = cursor.max(r.end);
+        }
+        View { text, segments }
+    }
+
+    /// Maps a view range to a contiguous source range; `None` when the range
+    /// crosses a removed (protected) line.
+    fn to_source(&self, r: &Range<usize>) -> Option<Range<usize>> {
+        let seg = self
+            .segments
+            .iter()
+            .find(|(vs, _, len)| r.start >= *vs && r.end <= vs + len)?;
+        let is_last = self.segments.last().map(|l| l.0) == Some(seg.0);
+        if r.end == seg.0 + seg.2 && !is_last && r.end > r.start {
+            return None; // touches the removed line that follows this segment
+        }
+        Some(seg.1 + (r.start - seg.0)..seg.1 + (r.end - seg.0))
+    }
+
+    fn pos_to_source(&self, p: usize) -> usize {
+        self.segments
+            .iter().rev()
+            .find(|(vs, _, len)| p >= *vs && p <= vs + len)
+            .map_or(p, |(vs, ss, _)| ss + (p - vs))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Edit {
+    range: Range<usize>,
+    replacement: String,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Rules {
+    default_language: bool,
+    unwrap: bool,
+    indent: Option<usize>,
+}
+
+fn parse(view: &str) -> Vec<(Event<'_>, Range<usize>)> {
+    cleanup_parser(view).into_offset_iter().collect()
+}
+
+fn line_start(s: &str, p: usize) -> usize {
+    s[..p].rfind('\n').map_or(0, |i| i + 1)
+}
+
+fn plan_edits(src: &str, prot: &Protection, rules: Rules) -> Result<Vec<Edit>, String> {
+    let view = View::build(src, prot);
+    let events = parse(&view.text);
+    let mut edits = Vec::new();
+    let mut in_paragraph = 0usize;
+    for (i, (event, range)) in events.iter().enumerate() {
+        match event {
+            Event::Start(Tag::Paragraph) => in_paragraph += 1,
+            Event::End(TagEnd::Paragraph) => in_paragraph -= 1,
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
+                if rules.default_language && info.is_empty() =>
+            {
+                let fence_src = view.to_source(range).ok_or("fence crosses protection")?;
+                let line = &src[fence_src.start..];
+                let ws = line.len() - line.trim_start_matches([' ', '\t']).len();
+                let ch = line.as_bytes()[ws];
+                let run = line[ws..].bytes().take_while(|b| *b == ch).count();
+                let at = fence_src.start + ws + run;
+                edits.push(Edit { range: at..at, replacement: "text".into() });
+            }
+            Event::SoftBreak if rules.unwrap && in_paragraph > 0 => {
+                // From the break through the next line's container prefix.
+                let next = events[i + 1].1.start;
+                let Some(src_range) = view.to_source(&(range.start..next)) else {
+                    continue; // crosses a removed directive line: protected boundary
+                };
+                if prot
+                    .inline
+                    .iter()
+                    .any(|p| p.start < src_range.end && src_range.start < p.end)
+                {
+                    continue; // inside an expression token
+                }
+                // drop trailing spaces on the joined line too (not a hard break here)
+                edits.push(Edit { range: src_range, replacement: " ".into() });
+            }
+            _ => {}
+        }
+    }
+    if let Some(n) = rules.indent {
+        edits.extend(plan_indent(src, &view, &events, n)?);
+    }
+    Ok(edits)
+}
+
+/// Shifts every line of each nested list by a per-list delta so the nested
+/// marker sits at `parent_marker + n`, clamped to the CommonMark-valid band
+/// `[parent_content, parent_content + 3]`. Lines of the whole subtree
+/// (paragraphs, quotes, fences, deeper lists) move together.
+fn plan_indent(
+    src: &str,
+    view: &View,
+    events: &[(Event<'_>, Range<usize>)],
+    n: usize,
+) -> Result<Vec<Edit>, String> {
+    let vt = &view.text;
+    // Per-view-line cumulative delta.
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(vt.match_indices('\n').map(|(i, _)| i + 1))
+        .filter(|p| *p < vt.len())
+        .collect();
+    let mut delta = vec![0isize; line_starts.len()];
+    let line_of = |p: usize| line_starts.partition_point(|s| *s <= p) - 1;
+    let col = |p: usize| p - line_start(vt, p);
+
+    // Stack of (marker_col, content_col) for open items, in *new* columns.
+    let mut items: Vec<(usize, usize)> = Vec::new();
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::List(_)) if !items.is_empty() => {
+                let (pm, pc) = *items.last().unwrap();
+                let first_line = line_of(range.start);
+                let skip = vt[range.start..].bytes().take_while(|b| *b == b' ').count();
+                let cur = (col(range.start + skip) as isize + delta[first_line]) as usize;
+                let target = (pm + n).clamp(pc, pc + 3);
+                if pm + n > pc + 3 {
+                    return Err(format!("indent {n} needs parent marker padding"));
+                }
+                let d = target as isize - cur as isize;
+                let last_line = line_of(range.end.saturating_sub(1));
+                for l in first_line..=last_line {
+                    delta[l] += d;
+                }
+            }
+            Event::Start(Tag::Item) => {
+                let range = &(range.start + vt[range.start..].bytes().take_while(|b| *b == b' ').count()..range.end);
+                let l = line_of(range.start);
+                let m = (col(range.start) as isize + delta[l]) as usize;
+                let rest = &vt[range.start..];
+                let marker = rest
+                    .find([' ', '\t', '\n', '\r'])
+                    .unwrap_or(rest.len());
+                let pad = rest[marker..].bytes().take_while(|b| *b == b' ').count().max(1);
+                items.push((m, m + marker + pad.min(4)));
+            }
+            Event::End(TagEnd::Item) => {
+                items.pop();
+            }
+            _ => {}
+        }
+    }
+    let mut edits = Vec::new();
+    for (l, d) in delta.iter().enumerate() {
+        if *d == 0 {
+            continue;
+        }
+        let ls = line_starts[l];
+        let line = &vt[ls..];
+        let body = line.split('\n').next().unwrap_or("");
+        if body.trim().is_empty() {
+            continue; // never touch blank lines: no introduced whitespace
+        }
+        let ws = body.len() - body.trim_start_matches(' ').len();
+        if body[ws..].starts_with('\t') {
+            return Err("tab indentation".into());
+        }
+        let new_ws = (ws as isize + d).max(0) as usize;
+        let start = view.pos_to_source(ls);
+        edits.push(Edit { range: start..start + ws, replacement: " ".repeat(new_ws) });
+    }
+    let _ = src;
+    Ok(edits)
+}
+
+fn apply(src: &str, prot: &Protection, mut edits: Vec<Edit>) -> Result<String, String> {
+    edits.sort_by_key(|e| (e.range.start, e.range.end));
+    for w in edits.windows(2) {
+        if w[0].range.end > w[1].range.start {
+            return Err(format!("overlapping edits {:?} {:?}", w[0].range, w[1].range));
+        }
+    }
+    for e in &edits {
+        if prot.lines.iter().any(|p| p.start < e.range.end && e.range.start < p.end) {
+            return Err(format!("edit touches protected line {:?}", e.range));
+        }
+    }
+    let mut out = src.to_string();
+    for e in edits.iter().rev() {
+        out.replace_range(e.range.clone(), &e.replacement);
+    }
+    Ok(out)
+}
+
+/// Normalized semantic event with soft-break/space allowance under unwrap.
+fn semantic(src: &str, prot: &Protection, rules: Rules) -> (Vec<String>, Vec<String>) {
+    let view = View::build(src, prot);
+    let parser = cleanup_parser(&view.text);
+    let mut defs: Vec<String> = parser
+        .reference_definitions()
+        .iter()
+        .map(|(label, def)| format!("{label}|{}|{:?}", def.dest, def.title))
+        .collect();
+    defs.sort();
+    let mut out: Vec<String> = Vec::new();
+    let mut text = String::new();
+    let mut anchors_at: Vec<usize> = Vec::new();
+    let events: Vec<_> = parser.into_offset_iter().collect();
+    let flush = |text: &mut String, out: &mut Vec<String>| {
+        if !text.is_empty() {
+            out.push(format!("Text({text:?})"));
+            text.clear();
+        }
+    };
+    let mut prot_iter = prot.lines.iter().peekable();
+    for (event, range) in events {
+        // anchor protected lines by the semantic index of the next event
+        let src_pos = view.pos_to_source(range.start);
+        while let Some(p) = prot_iter.peek() {
+            if p.start <= src_pos {
+                anchors_at.push(out.len());
+                prot_iter.next();
+            } else {
+                break;
+            }
+        }
+        match event {
+            Event::Text(t) => text.push_str(&t),
+            Event::SoftBreak if rules.unwrap => text.push(' '),
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                flush(&mut text, &mut out);
+                let info = if rules.default_language && info.is_empty() { "text".to_string() } else { info.to_string() };
+                out.push(format!("Fenced({info:?})"));
+            }
+            Event::Start(Tag::List(start)) => {
+                flush(&mut text, &mut out);
+                out.push(format!("List({start:?})"));
+            }
+            other => {
+                flush(&mut text, &mut out);
+                out.push(format!("{other:?}"));
+            }
+        }
+    }
+    flush(&mut text, &mut out);
+    // Protected identity: exact bytes + neighbor blank state + anchor.
+    let mut protected = Vec::new();
+    for (i, p) in prot.lines.iter().enumerate() {
+        let before_blank = src[..p.start]
+            .trim_end_matches(['\n', '\r'])
+            .rsplit('\n')
+            .next()
+            .is_some_and(|l| l.trim().is_empty())
+            && p.start > 0
+            && src[..p.start].ends_with(['\n'])
+            && src[..p.start].trim_end_matches(['\n', '\r']).len() + 2 < p.start;
+        let after = &src[p.end..];
+        let after_blank = after.split('\n').next().is_some_and(|l| l.trim().is_empty())
+            && !after.is_empty();
+        protected.push(format!(
+            "{:?}|{before_blank}|{after_blank}|@{}",
+            &src[p.clone()],
+            anchors_at.get(i).copied().unwrap_or(usize::MAX)
+        ));
+    }
+    for e in &prot.inline {
+        protected.push(format!("inline {:?}", &src[e.clone()]));
+    }
+    protected.extend(defs);
+    (out, protected)
+}
+
+fn run(name: &str, src: &str, rules: Rules) -> Result<String, String> {
+    let prot = scan_protection(src);
+    let edits = plan_edits(src, &prot, rules)?;
+    let out = apply(src, &prot, edits)?;
+    let out_prot = scan_protection(&out);
+    let (a, ap) = semantic(src, &prot, rules);
+    let (b, bp) = semantic(&out, &out_prot, rules);
+    if a != b {
+        return Err(format!("{name}: semantic mismatch\n in: {a:?}\nout: {b:?}"));
+    }
+    if ap != bp {
+        return Err(format!("{name}: protected mismatch\n in: {ap:?}\nout: {bp:?}"));
+    }
+    Ok(out)
+}
+
+const E1: &str = "4. step\n\n    > lead:\n    > \n    > - a\n    > - b\n\n5. next\n";
+const D1: &str = "1. top\n    - Example:\n\n        ```\n        code\n        ```\n\n        after\n2. next\n";
+const C1: &str = "- item:\n\n    > {{message}}\n\n- next\n";
+const A1: &str = "::block when=\"a\"\n\n> note\n::end-block\n";
+const B1: &str = "1. first\n::block when=\"m\"\n    - nested\n::end-block\n2. second\n";
+const F1: &str = "> a\n>\n> b\n";
+const QSHELL: &str = "> intro line\n> ::shell-block\n> echo one\n> echo two\n> ::end-block\n> after\n";
+const EXPR: &str = "Hello {{ name\n }} and\nmore {{ x }}\n";
+const REFDEF: &str = "Text here\nand there.\n\n[unused]: https://example.com \"T\"\n";
+const MIXED: &str = "one\r\ntwo\nthree\r\n\r\n- a\n- b\r\n";
+const DIRECTIVE_CODE: &str = "```md\n::block when=\"x\"\n```\n";
+const PARA_DIRECTIVE: &str = "para one\n::file ./x.md\npara two\n";
+
+#[test]
+fn spike_report() {
+    let cases = [
+        ("E1", E1), ("D1", D1), ("C1", C1), ("A1", A1), ("B1", B1), ("F1", F1),
+        ("QSHELL", QSHELL), ("EXPR", EXPR), ("REFDEF", REFDEF), ("MIXED", MIXED),
+        ("DIRECTIVE_CODE", DIRECTIVE_CODE), ("PARA_DIRECTIVE", PARA_DIRECTIVE),
+    ];
+    let profiles = [
+        ("off", Rules::default()),
+        ("lang", Rules { default_language: true, ..Rules::default() }),
+        ("unwrap", Rules { unwrap: true, ..Rules::default() }),
+        ("indent2", Rules { indent: Some(2), ..Rules::default() }),
+        ("indent4", Rules { indent: Some(4), ..Rules::default() }),
+        ("indent8", Rules { indent: Some(8), ..Rules::default() }),
+        ("all", Rules { default_language: true, unwrap: true, indent: Some(2) }),
+    ];
+    let mut report = String::new();
+    for (name, src) in cases {
+        let prot = scan_protection(src);
+        report.push_str(&format!("### {name} protected={:?} inline={:?}\n", prot.lines, prot.inline));
+        for (pname, rules) in profiles {
+            let (res, parses) = parse_count::measure(|| run(name, src, rules));
+            match res {
+                Ok(out) => {
+                    let idem = run(name, &out, rules).ok() == Some(out.clone());
+                    report.push_str(&format!(
+                        "  {pname}: same={} idempotent={idem} parses={parses} out={out:?}\n",
+                        out == src
+                    ));
+                }
+                Err(e) => report.push_str(&format!("  {pname}: DECLINED {e}\n")),
+            }
+        }
+    }
+    std::fs::write("/tmp/cf-spike/report.txt", &report).unwrap();
+    println!("{report}");
+}

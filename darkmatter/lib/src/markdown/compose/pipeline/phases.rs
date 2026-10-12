@@ -110,51 +110,25 @@ impl Markdown {
                 // comparing (F34). A cache-key-strength collision would only
                 // mis-set the advisory `cleanup_changed` report flag.
                 let original_hash = biscuit_hash::xx_hash(&self.content);
-                // Fixed-width reflow must run over canonical unwrapped prose, so a
-                // requested `fixed_width` forces incidental-newline stripping even
-                // under `Preserve`. Otherwise reflow would re-wrap the source's own
-                // incidental wrapping rather than the document's canonical form.
-                let strip_incidental = options.incidental_newline_mode
-                    == cleanup::IncidentalNewlineMode::Strip
-                    || options.fixed_width.is_some();
-                self.content = match (options.list_spacing, strip_incidental) {
-                    (cleanup::ListSpacingMode::Normal, true) => {
-                        cleanup::cleanup_content_with_indent(&self.content, options.indent_size)
-                    }
-                    (cleanup::ListSpacingMode::Compact, true) => {
-                        cleanup::cleanup_content_with_indent_compact(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
-                    (cleanup::ListSpacingMode::Loose, true) => {
-                        cleanup::cleanup_content_with_indent_loose(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
-                    (cleanup::ListSpacingMode::Normal, false) => {
-                        cleanup::cleanup_content_with_indent_preserving_incidental(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
-                    (cleanup::ListSpacingMode::Compact, false) => {
-                        cleanup::cleanup_content_with_indent_compact_preserving_incidental(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
-                    (cleanup::ListSpacingMode::Loose, false) => {
-                        cleanup::cleanup_content_with_indent_loose_preserving_incidental(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
+                // Compose's cleanup options are explicit rule values for this
+                // run; a document's own `style.markdown` is not consulted.
+                // A width implies unwrapping, so `fixed_width` re-wraps
+                // canonical unwrapped prose even under `Preserve`.
+                let overrides = cleanup::rules::MarkdownRuleOverrides {
+                    unwrap: cleanup::rules::Leaf::Value(
+                        options.incidental_newline_mode == cleanup::IncidentalNewlineMode::Strip,
+                    ),
+                    fixed_width: cleanup::rules::Leaf::Value(match options.fixed_width {
+                        Some(width) => cleanup::rules::FixedWidth::Columns(
+                            u16::try_from(width).unwrap_or(u16::MAX),
+                        ),
+                        None => cleanup::rules::FixedWidth::Off,
+                    }),
+                    indentation: cleanup::rules::Leaf::Value(options.indentation),
+                    list_item_padding: cleanup::rules::Leaf::Value(options.list_spacing),
+                    ..cleanup::rules::MarkdownRuleOverrides::default()
                 };
-                if let Some(width) = options.fixed_width {
-                    self.content = cleanup::reflow_to_width(&self.content, width);
-                }
+                self.content = cleanup::cleanup_content_with(&self.content, &overrides);
                 report.cleanup_changed = biscuit_hash::xx_hash(&self.content) != original_hash;
                 Ok(())
             }

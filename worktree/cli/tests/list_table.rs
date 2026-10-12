@@ -17,7 +17,7 @@ use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::listing::{
     BranchComparisons, Caption, Comparison, LineSteps, ParentComparison, TreeRow, build_tree,
 };
-use worktree::pull_requests::{OpenPullRequest, PrListing};
+use worktree::pull_requests::{OpenPullRequest, PrCheckStatus, PrListing};
 use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
 use worktree_cli::commands::list_table::{
@@ -86,6 +86,7 @@ fn pr(number: u64, repo: &str, branch: &str, target: &str) -> OpenPullRequest {
         source_repo: Some(repo.to_string()),
         source_branch: branch.to_string(),
         target_branch: target.to_string(),
+        status: PrCheckStatus::Unknown,
     }
 }
 

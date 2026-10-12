@@ -107,6 +107,78 @@ flowchart LR
     R --> P[pre-flight] --> I[Inline Pre] --> T[Transclusion] --> Q[Inline Post] --> F[Finalization]
 ```
 
+## Loading Documents
+
+> **Planned.** Nothing described in this section is built yet. Today a
+> document whose frontmatter does not parse fails composition with an error
+> such as `duplicate entry with key "human_review"`.
+
+The pipeline reads other documents as well as the one being composed: an
+expression such as `frontmatter(spec, 'status')` or `markdown_title(doc)`
+loads the file it names, and so does a transclusion. When such a document's
+frontmatter is not valid YAML **because a key appears more than once**, the
+loader repairs it rather than failing:
+
+1. It keeps the **first** entry for each duplicated key and removes every
+   later one, together with that entry's value lines.
+2. It records what it removed in the reserved `_warnings` frontmatter
+   property, replacing any `_warnings` already there.
+3. For a local file, it writes the repaired document back to disk, then
+   continues composing with it. A remote (HTTP) document is repaired in
+   memory only.
+
+Writing back is deliberate: the `_warnings` record lands in the file, where the
+author (or the next agent to edit it) can see what was lost, rather than the
+same silent fix being made again on every read.
+
+```mermaid
+flowchart TD
+    L[load a document] --> P{frontmatter parses?}
+    P -- yes --> C[compose with it; file never modified]
+    P -- no --> D{duplicate keys?}
+    D -- no --> E[fail with the parse error]
+    D -- yes --> K[keep first entry of each key,<br/>record removals in _warnings]
+    K --> W[write back to disk if local] --> C
+```
+
+For example, an agent that re-adds keys instead of updating them leaves:
+
+```yaml
+agent: claude
+model: opus
+agent: claude
+model: sonnet
+```
+
+After loading, the file reads:
+
+```yaml
+agent: claude
+model: opus
+_warnings:
+    - { id: "duplicate-fm-key", property: "agent", message: "A duplicate entry for the 'agent' property made the frontmatter invalid YAML. Both entries had the same value, so no information was lost; the second entry was removed." }
+    - { id: "duplicate-fm-key", property: "model", message: "A duplicate entry for the 'model' property made the frontmatter invalid YAML. The second entry had a different value from the first; it was removed so the frontmatter parses, and both values are kept in `data` (the first is the one in effect).", data: ["opus", "sonnet"] }
+```
+
+Each `_warnings` entry has:
+
+- `id`: the kind of lossy repair; `duplicate-fm-key` is the only kind so far.
+- `property`: the dotted path of the affected key, such as `hash.kind`.
+- `message`: a plain-language account of what happened.
+- `data`: present only when information was lost; every value, in source
+  order, the first being the one kept.
+
+The rules that bound this behavior:
+
+- **Only lossy repairs, only when needed.** A document whose frontmatter
+  parses is never rewritten by a read. Formatting-only fixes (whitespace, line
+  endings, quoting) are not made on load; [`md clean`](./cli/clean.md) makes
+  them and records the same duplicate-key repairs in `_warnings`.
+- **Nothing fails because of `_warnings`.** It is a record for people and
+  tools; no `md` command changes its result because the property is present.
+- **Anything else stays an error.** Frontmatter that still does not parse
+  after the duplicate keys are removed fails exactly as it does today.
+
 ## Pipeline Stages
 
 ### 1. Inline Pre
@@ -140,7 +212,7 @@ However, even in this example, we don't know how expensive the operation is unti
 
 ### 3. Inline Post
 
-- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible. Cleanup strips incidental single newlines from top-level and list-item prose by default, removing source-only continuation indentation before it applies list spacing and indentation cleanup. `ComposeOptions::with_fixed_width(...)` then reflows each complete logical prose block; list continuations use a hanging prefix that retains every enclosing list and blockquote container. Programmatic callers can keep source single newlines with `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`; setting `with_fixed_width(...)` overrides `Preserve` and always strips first, so reflow operates on canonical unwrapped prose rather than the source's own wrapping.
+- [Cleaning](./inline/cleaning.md) - tidies the composed body with the same guarded engine as `md clean`: it never changes meaning or touches a directive line, and it leaves the body unchanged when it cannot format it safely. Its settings come from `ComposeOptions`, not the document's `style.markdown`: by default it joins single newlines inside prose (`with_incidental_newline_mode(IncidentalNewlineMode::Preserve)` keeps them), re-indents nested lists to four spaces (`with_indentation`), and leaves sibling list spacing as written (`with_list_spacing`). `with_fixed_width(...)` re-wraps prose to a width and always unwraps first. Cleaning works on the composed Markdown body only: it never repairs frontmatter, and it never sees the documents an expression or transclusion loads (see [Loading Documents](#loading-documents)).
 - [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
 ### 4. Finalization
