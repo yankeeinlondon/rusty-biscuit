@@ -138,6 +138,12 @@ impl<'a> NamedTypeScope<'a> {
                 self.site_span(site)
             }
             SchemaError::UnionReference { name, site, definition, .. } => {
+                if site.source != self.this {
+                    related.extend(self.site_location(site).map(|location| DiagnosticRelatedInformation {
+                        location,
+                        message: format!("`{name}` is referenced here"),
+                    }));
+                }
                 related.extend(self.definition_location(definition).map(|location| {
                     DiagnosticRelatedInformation {
                         location,

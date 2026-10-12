@@ -243,8 +243,8 @@ pub fn named_type_reference_path(
 /// ## Errors
 ///
 /// [`SchemaError::UnknownNamedType`], [`SchemaError::ConstraintConflict`],
-/// [`SchemaError::ImportCycle`], and any error reading or resolving an
-/// imported file.
+/// [`SchemaError::UnionReference`], [`SchemaError::ImportCycle`], and any
+/// error reading or resolving an imported file.
 pub fn expand_named_types(
     schema: &SimplifiedSchema,
     base_dir: &Path,
@@ -625,6 +625,7 @@ fn load_guarded_in_context(
         | SchemaError::Convert { .. }
         | SchemaError::UnknownNamedType { .. }
         | SchemaError::ConstraintConflict { .. }
+        | SchemaError::UnionReference { .. }
         | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
             path: canonical.clone(),
             source: Box::new(source),
