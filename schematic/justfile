@@ -200,7 +200,7 @@ generate:
         --openapi-out openapi --postman-out postman -v
     @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
-# generate a single API client to schematic/schema
+# regenerate one API's module group in schema/, openapi/, and postman/, keeping every other module
 generate-one api:
     @echo ""
     @echo "Generating {{ api }} API Client"

@@ -47,6 +47,63 @@ pub enum GeneratorError {
         diagnostics: Vec<ValidationDiagnostic>,
     },
 
+    /// An existing output root cannot be updated safely. Nothing was changed.
+    #[error("refusing to update {root}; nothing was changed:{}\n{remedy}", bullet_lines(problems))]
+    UnsafeOutput {
+        /// The output root that was left untouched.
+        root: String,
+        /// Every reason found, one per offending path.
+        problems: Vec<String>,
+        /// What the user can do about it.
+        remedy: String,
+    },
+
+    /// A partial run would replace shared runtime files that retained,
+    /// unregenerated modules were generated against. Nothing was changed.
+    #[error(
+        "refusing a partial update of {root}; nothing was changed: the shared runtime \
+         file(s) {} would change while module(s) {} are retained without being \
+         regenerated. Run full generation (`generate --api all`) instead",
+        changed.join(", "),
+        retained.join(", ")
+    )]
+    RequiresFullGeneration {
+        /// The output root that was left untouched.
+        root: String,
+        /// Shared runtime files whose new content differs from the existing one.
+        changed: Vec<String>,
+        /// Module groups that would have been kept as they are.
+        retained: Vec<String>,
+    },
+
+    /// A write or deletion failed after publication had started.
+    ///
+    /// Every check ran before the first mutation, so this is an I/O failure.
+    /// The output root is partly updated: `completed` mutations happened,
+    /// `failed` and `pending` did not.
+    #[error(
+        "publishing {root} stopped at `{failed}`: {source}\n  completed ({}):{}\n  not done ({}):{}\n\
+         The output is only partly updated. Fix the cause and run the command again; \
+         if a partial run then refuses the output, run full generation (`generate --api all`)",
+        completed.len(),
+        indented_lines(completed),
+        pending.len() + 1,
+        indented_lines(&not_done(failed, pending))
+    )]
+    PublicationFailed {
+        /// The output root being published.
+        root: String,
+        /// The mutation that failed.
+        failed: String,
+        /// Mutations that were applied, in order.
+        completed: Vec<String>,
+        /// Mutations after the failed one, never attempted.
+        pending: Vec<String>,
+        /// The underlying write or deletion error.
+        #[source]
+        source: Box<GeneratorError>,
+    },
+
     /// At least one requested output failed; the others were still attempted.
     #[error(
         "generation failed for output(s) {}{}",
@@ -67,6 +124,20 @@ fn error_count(diagnostics: &[ValidationDiagnostic]) -> usize {
 
 fn render_lines(diagnostics: &[ValidationDiagnostic]) -> String {
     diagnostics.iter().map(|d| format!("\n  {d}")).collect()
+}
+
+fn bullet_lines(lines: &[String]) -> String {
+    lines.iter().map(|line| format!("\n  - {line}")).collect()
+}
+
+fn indented_lines(lines: &[String]) -> String {
+    lines.iter().map(|line| format!("\n    {line}")).collect()
+}
+
+fn not_done(failed: &str, pending: &[String]) -> Vec<String> {
+    std::iter::once(failed.to_string())
+        .chain(pending.iter().cloned())
+        .collect()
 }
 
 fn join_outputs(outputs: &[Output]) -> String {

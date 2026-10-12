@@ -115,6 +115,9 @@ pub enum Feature {
     InvalidTypeSyntax,
     /// Two operations of one OpenAPI document share an `operationId`.
     DuplicateOperationId,
+    /// An OpenAPI link names an `operationId` that no operation of its
+    /// document declares.
+    UnresolvedLinkOperation,
     /// A path template that embeds a query string (`?`).
     QueryInPath,
     /// A name that cannot become the Rust identifier the emitters build from it.
@@ -144,6 +147,7 @@ impl Feature {
             Self::DuplicateMethodPath => "duplicate-method-path",
             Self::InvalidTypeSyntax => "invalid-type-syntax",
             Self::DuplicateOperationId => "duplicate-operation-id",
+            Self::UnresolvedLinkOperation => "unresolved-link-operation",
             Self::QueryInPath => "query-in-path",
             Self::InvalidIdentifier => "invalid-identifier",
             Self::InvalidRequestSuffix => "invalid-request-suffix",
@@ -331,6 +335,7 @@ mod tests {
             Feature::DuplicateMethodPath,
             Feature::InvalidTypeSyntax,
             Feature::DuplicateOperationId,
+            Feature::UnresolvedLinkOperation,
             Feature::QueryInPath,
             Feature::InvalidIdentifier,
             Feature::InvalidRequestSuffix,

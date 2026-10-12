@@ -7,9 +7,10 @@
 //! have no Cargo. The CI build job, which does, runs them before it produces
 //! the test archive (`just test-fresh-output`).
 //!
-//! The 18-API test also compares the fresh Rust output with the committed
-//! `schematic/schema/src` before compiling it; generating all 18 APIs takes
-//! longer than an ordinary L1 test may. The exported OpenAPI and Postman
+//! The 18-API test also runs a partial generation of one Ollama member over
+//! the fresh output, then compares the result with the committed
+//! `schematic/schema/src` and compiles it; generating all 18 APIs takes longer
+//! than an ordinary L1 test may. The exported OpenAPI and Postman
 //! documents are compared by `artifact_drift`, and the generated manifest by
 //! `cargo_gen`'s unit tests.
 
@@ -19,6 +20,7 @@ use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EndpointParams, FormField, QueryParamType,
     RestApi, RestMethod,
 };
+use schematic_gen::output::{RustOutputRequest, Selection, get_module_path, prepare_rust_output};
 use schematic_gen::pipeline::resolve_all_apis;
 
 use crate::common::fresh_output::{
@@ -246,6 +248,35 @@ fn slow_real_apis_compile_offline() {
     assert_eq!(apis.len(), 18, "the guard covers every real REST API");
     let api_refs: Vec<&RestApi> = apis.iter().collect();
     let fresh = FreshCrate::generate(&api_refs, Definitions::Checkout, &lockfile);
+
+    // Partial generation of one Ollama member over the full output: both
+    // Ollama members are regenerated and every other module is kept as it is.
+    // The compile below then builds the retained-plus-regenerated crate.
+    let ollama_requests = fresh.src_dir.join("ollama/requests.rs");
+    let anthropic = fresh.src_dir.join("anthropic.rs");
+    let pristine_anthropic = std::fs::read(&anthropic).unwrap();
+    for edited in [&ollama_requests, &anthropic] {
+        let mut bytes = std::fs::read(edited).unwrap();
+        bytes.extend_from_slice(b"// edited before the partial run\n");
+        std::fs::write(edited, bytes).unwrap();
+    }
+    let edited_anthropic = std::fs::read(&anthropic).unwrap();
+    let ollama_native: Vec<&RestApi> =
+        api_refs.iter().copied().filter(|api| api.name == "OllamaNative").collect();
+    let prepared = prepare_rust_output(&RustOutputRequest {
+        registry: &api_refs,
+        selection: Selection::Apis(&ollama_native),
+        output_dir: &fresh.src_dir,
+        manifest_dir: None,
+    })
+    .expect("prepare the partial run");
+    assert_eq!(prepared.regenerated, ["ollama"]);
+    let groups: std::collections::BTreeSet<String> =
+        api_refs.iter().map(|api| get_module_path(api)).collect();
+    assert_eq!(prepared.retained.len(), groups.len() - 1, "every other module group is retained");
+    prepared.plan.publish().expect("publish the partial run");
+    assert_eq!(std::fs::read(&anthropic).unwrap(), edited_anthropic, "retained module untouched");
+    std::fs::write(&anthropic, pristine_anthropic).unwrap();
 
     let committed = biscuit_test_harness::manifest_dir!().join("../schema/src");
     let differences = diff_summary(&snapshot_tree(&committed), &snapshot_tree(&fresh.src_dir));

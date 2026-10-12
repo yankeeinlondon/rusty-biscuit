@@ -23,30 +23,45 @@
 //!
 //! ## Safety Guarantees
 //!
-//! - **Batch validation**: [`generate_and_write_all`] refuses a batch that
-//!   [`validate_rust_client`] rejects before assembling or writing anything.
+//! - **Prepare, then publish**: [`prepare_rust_output`] validates the batch
+//!   with [`validate_rust_client`], assembles, syntax-checks, and formats
+//!   every file, and checks every target path before anything is written. The
+//!   resulting [`MutationPlan`] is applied by [`MutationPlan::publish`], which
+//!   reports completed and pending mutations if a write fails.
 //! - **Syntax validation**: All generated code is parsed with `syn` before
 //!   writing, which catches grammar/syntax errors only — it does not
 //!   type-check, resolve names, or guarantee the code compiles.
 //! - **Formatting**: Output is formatted with `prettyplease` for consistent style
-//! - **Atomic writes**: Uses temp file + rename pattern to prevent partial writes
-//! - **Ownership-aware cleanup**: Stale-file removal only touches artifacts this
-//!   generator produced (identified by the generated-file header), so
-//!   hand-written files in the output directory are never deleted.
+//! - **Atomic writes**: Each file is written with temp file + rename; a plan
+//!   as a whole is not a transaction.
+//! - **Ownership**: A planned path must be absent or carry the generated-file
+//!   header (or, for `Cargo.toml`, the manifest marker); deletion is limited to
+//!   provably owned files and directories, and symbolic links are never
+//!   followed. Hand-written files are never overwritten or deleted.
+//! - **Partial generation**: [`Selection::Apis`] regenerates complete module
+//!   groups and keeps every other group byte-for-byte; see
+//!   [`prepare_rust_output`].
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use indexmap::IndexMap;
+use proc_macro2::TokenStream;
 use schematic_define::RestApi;
 
+use crate::cargo_gen::generate_cargo_toml;
 use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use crate::validation::{ensure_no_errors, validate_rust_client};
 
+use inventory::{Occupant, Proof, list_entries, occupant};
+
 pub mod assemble;
 pub mod format;
+pub(crate) mod inventory;
 pub mod options;
+pub mod publish;
 pub mod write;
 pub mod ws_modules;
 
@@ -59,6 +74,7 @@ pub use assemble::{
 };
 pub use format::{GENERATED_FILE_HEADER, format_code, validate_code};
 pub use options::OutputOptions;
+pub use publish::{Mutation, MutationPlan, PublicationReport};
 pub use write::write_atomic;
 
 /// Generates and writes all API code to the output directory.
@@ -77,9 +93,7 @@ pub use write::write_atomic;
 ///
 /// ## Errors
 ///
-/// Returns an error if:
-/// - Code generation produces invalid Rust
-/// - File writing fails
+/// As [`generate_and_write_all`].
 pub fn generate_and_write(
     api: &RestApi,
     output_dir: &Path,
@@ -105,175 +119,289 @@ enum GeneratedModule {
     },
 }
 
-/// Generates and writes all API code to the output directory.
+impl GeneratedModule {
+    fn main_source(&self) -> &str {
+        match self {
+            Self::SingleFile { content, .. } => content,
+            Self::Directory { mod_rs, .. } => mod_rs,
+        }
+    }
+}
+
+/// Which module groups a Rust generation run regenerates.
+#[derive(Debug, Clone, Copy)]
+pub enum Selection<'a> {
+    /// Every API of the registry. Obsolete generator-owned modules are
+    /// removed.
+    All,
+    /// The complete module groups of these APIs, matched to the registry by
+    /// name. Every other module group already in the output is kept
+    /// byte-for-byte, and nothing outside the regenerated groups is deleted.
+    Apis(&'a [&'a RestApi]),
+}
+
+/// One Rust generation run.
+#[derive(Debug, Clone, Copy)]
+pub struct RustOutputRequest<'a> {
+    /// Every API the generator knows, in registry order. `lib.rs` and
+    /// `prelude.rs` list modules in this order.
+    pub registry: &'a [&'a RestApi],
+    /// What this run regenerates.
+    pub selection: Selection<'a>,
+    /// The crate's `src` directory.
+    pub output_dir: &'a Path,
+    /// Where the generated `Cargo.toml` goes, when the run writes one.
+    pub manifest_dir: Option<&'a Path>,
+}
+
+/// A Rust output assembled, formatted, and checked, with nothing written.
+#[derive(Debug)]
+pub struct RustOutputPlan {
+    /// The writes and deletions that publish this output.
+    pub plan: MutationPlan,
+    /// Module groups this run regenerates, in file order.
+    pub regenerated: Vec<String>,
+    /// Module groups of the existing output kept as they are.
+    pub retained: Vec<String>,
+    first_module: String,
+}
+
+impl RustOutputPlan {
+    /// The formatted source of the first regenerated module (its `mod.rs`
+    /// when the module is split).
+    pub fn first_module(&self) -> &str {
+        &self.first_module
+    }
+}
+
+/// Generates every API of `apis` into `output_dir`: full generation.
 ///
-/// This is the main entry point for code generation. It produces:
-/// - `lib.rs` - Module declarations and crate documentation
-/// - `prelude.rs` - Convenient re-exports
-/// - `{api_name}.rs` or `{api_name}/` - Per-API module files
-///
-/// Modules whose generated code exceeds [`SPLIT_THRESHOLD_LINES`] are split into
-/// a directory with `mod.rs`, `requests.rs`, `responses.rs`, and `client.rs`.
-/// Smaller modules remain as single files.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to generate code for
-/// * `output_dir` - Directory to write generated files to
-/// * `dry_run` - If true, print code instead of writing files
+/// The output holds `lib.rs`, `shared.rs`, `prelude.rs`, the WebSocket
+/// modules, and one module per module group: `{module}.rs`, or a directory
+/// with `mod.rs`, `requests.rs`, `responses.rs`, and `client.rs` once the
+/// module exceeds [`SPLIT_THRESHOLD_LINES`]. Generator-owned modules no API
+/// produces are removed. See [`prepare_rust_output`] for every check that
+/// runs before the first write.
 ///
 /// ## Returns
 ///
-/// The formatted code for the first API module (for backwards compatibility).
+/// The formatted code for the first API module.
 ///
 /// ## Errors
 ///
-/// Returns an error if:
-/// - [`validate_rust_client`] reports an error for the batch
-///   ([`GeneratorError::Validation`]); nothing is written
-/// - Code generation produces invalid Rust
-/// - File writing fails
+/// As [`prepare_rust_output`], plus [`GeneratorError::PublicationFailed`]
+/// when a write or deletion fails.
 pub fn generate_and_write_all(
     apis: &[&RestApi],
     output_dir: &Path,
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
-    ensure_valid_rust_batch(apis)?;
+    let prepared = prepare_rust_output(&RustOutputRequest {
+        registry: apis,
+        selection: Selection::All,
+        output_dir,
+        manifest_dir: None,
+    })?;
+    if dry_run {
+        prepared.plan.print_dry_run(true);
+    } else {
+        prepared.plan.publish()?;
+    }
+    Ok(prepared.first_module)
+}
 
-    let lib_tokens = assemble_lib_rs(apis);
-    let lib_file = validate_code(&lib_tokens)?;
-    let lib_formatted = format_code(&lib_file);
+/// Prepares one Rust generation run without touching the filesystem.
+///
+/// The selection expands to complete module groups: selecting one member of
+/// a shared module regenerates every member. A partial run
+/// ([`Selection::Apis`]) reads the existing output's inventory, keeps every
+/// other module group it holds, and rebuilds `lib.rs` and `prelude.rs` from
+/// the retained and regenerated groups. Every file is validated, assembled,
+/// syntax-checked, and formatted here. Every planned write must land on an
+/// absent path or on a file the generator provably wrote; obsolete paths are
+/// deleted only when owned, and only within the regenerated groups unless the
+/// run is full. Dry runs print this same plan.
+///
+/// ## Errors
+///
+/// - [`GeneratorError::ConfigError`] when a selected API is not in the
+///   registry
+/// - [`GeneratorError::Validation`] when [`validate_rust_client`] reports an
+///   error for the regenerated APIs
+/// - [`GeneratorError::UnsafeOutput`] when a partial run cannot establish
+///   the existing inventory, or a planned path holds content the generator
+///   did not write
+/// - [`GeneratorError::RequiresFullGeneration`] when a partial run would
+///   change the shared runtime under retained modules
+/// - [`GeneratorError::CodeGenError`] when generated code does not parse
+pub fn prepare_rust_output(
+    request: &RustOutputRequest<'_>,
+) -> Result<RustOutputPlan, GeneratorError> {
+    let root = request.output_dir;
+    let groups = module_groups(request.registry);
+    let selected = selected_groups(request.registry, request.selection)?;
+    let regenerated_apis = expand_selection(request.registry, request.selection)?;
+    ensure_valid_rust_batch(&regenerated_apis)?;
 
-    let shared_tokens = assemble_shared_module();
-    let shared_file = validate_code(&shared_tokens)?;
-    let shared_formatted = format_code(&shared_file);
+    let retained = match request.selection {
+        Selection::All => Vec::new(),
+        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected)?.retained,
+    };
+    let exported: BTreeSet<&str> = selected.iter().chain(&retained).map(String::as_str).collect();
+    let crate_apis: Vec<&RestApi> = request
+        .registry
+        .iter()
+        .copied()
+        .filter(|api| exported.contains(get_module_path(api).as_str()))
+        .collect();
 
-    let prelude_tokens = assemble_prelude(apis);
-    let prelude_file = validate_code(&prelude_tokens)?;
-    let prelude_formatted = format_code(&prelude_file);
+    let lib = render(&assemble_lib_rs(&crate_apis))?;
+    let shared = render(&assemble_shared_module())?;
+    let prelude = render(&assemble_prelude(&crate_apis))?;
+    let generated = assemble_modules(&regenerated_apis)?;
+    let (ws_shared_filename, ws_shared) = ws_modules::generate_ws_shared_module()?;
+    let ws_definition_modules = ws_modules::generate_ws_definition_modules()?;
 
-    let mut module_groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
-    for api in apis {
-        let path = get_module_path(api);
-        module_groups.entry(path).or_default().push(api);
+    inventory::shared_runtime_compatibility(
+        root,
+        &[("shared.rs", &shared), (&ws_shared_filename, &ws_shared)],
+        &retained,
+    )?;
+
+    let mut planner = Planner::new(root);
+    for module in &generated {
+        planner.module(module);
+    }
+    planner.file("shared.rs", shared);
+    planner.file(&ws_shared_filename, ws_shared);
+    for (filename, content) in ws_definition_modules {
+        planner.file(&filename, content);
+    }
+    if let Some(manifest_dir) = request.manifest_dir {
+        planner.write(
+            manifest_dir.join("Cargo.toml"),
+            generate_cargo_toml(None),
+            Proof::Manifest,
+        );
+    }
+    planner.file("prelude.rs", prelude);
+    planner.file("lib.rs", lib);
+    if matches!(request.selection, Selection::All) {
+        planner.remove_obsolete_modules();
     }
 
-    let mut generated: Vec<GeneratedModule> = Vec::new();
+    Ok(RustOutputPlan {
+        plan: planner.finish()?,
+        regenerated: generated.iter().map(|m| m.module_name().to_string()).collect(),
+        retained,
+        first_module: generated
+            .first()
+            .map(|m| m.main_source().to_string())
+            .unwrap_or_default(),
+    })
+}
+
+/// The registry grouped by Rust module path, in registry order.
+fn module_groups<'a>(registry: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>> {
+    let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
+    for api in registry {
+        groups.entry(get_module_path(api)).or_default().push(api);
+    }
+    groups
+}
+
+/// The registry APIs a Rust run regenerates: every member of every module
+/// group `selection` touches, in registry order.
+///
+/// ## Errors
+///
+/// [`GeneratorError::ConfigError`] when a selected API is not in the registry.
+pub fn expand_selection<'a>(
+    registry: &[&'a RestApi],
+    selection: Selection<'_>,
+) -> Result<Vec<&'a RestApi>, GeneratorError> {
+    let selected = selected_groups(registry, selection)?;
+    Ok(registry
+        .iter()
+        .copied()
+        .filter(|api| selected.contains(&get_module_path(api)))
+        .collect())
+}
+
+/// The module groups `selection` regenerates, each API resolved through the
+/// registry by name.
+fn selected_groups(
+    registry: &[&RestApi],
+    selection: Selection<'_>,
+) -> Result<BTreeSet<String>, GeneratorError> {
+    let Selection::Apis(apis) = selection else {
+        return Ok(registry.iter().map(|api| get_module_path(api)).collect());
+    };
+    apis.iter()
+        .map(|api| {
+            registry
+                .iter()
+                .find(|known| known.name == api.name)
+                .map(|known| get_module_path(known))
+                .ok_or_else(|| {
+                    GeneratorError::ConfigError(format!(
+                        "API `{}` is not in the registry, so its module group is unknown",
+                        api.name
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn render(tokens: &TokenStream) -> Result<String, GeneratorError> {
+    Ok(format_code(&validate_code(tokens)?))
+}
+
+/// Assembles one module per module group of `apis`, in module-path order.
+fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, GeneratorError> {
+    let mut module_groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
+    for api in apis {
+        module_groups.entry(get_module_path(api)).or_default().push(api);
+    }
+
+    let mut generated = Vec::new();
     for (module_path, group) in &module_groups {
         let tokens = if group.len() == 1 {
             assemble_api_module(group[0])
         } else {
             assemble_combined_api_module(group)
         };
-        let file = validate_code(&tokens)?;
-        let formatted = format_code(&file);
-        let line_count = formatted.lines().count();
-
-        if line_count > SPLIT_THRESHOLD_LINES {
+        let formatted = render(&tokens)?;
+        if formatted.lines().count() > SPLIT_THRESHOLD_LINES {
             let parts = if group.len() == 1 {
                 assemble_split_api_module(group[0], &OutputOptions::default())
             } else {
                 assemble_split_combined_api_module(group)
             };
-
-            let mod_rs_file = validate_code(&parts.mod_rs)?;
-            let requests_file = validate_code(&parts.requests_rs)?;
-            let responses_file = validate_code(&parts.responses_rs)?;
-            let client_file = validate_code(&parts.client_rs)?;
-
             generated.push(GeneratedModule::Directory {
                 module_path: module_path.clone(),
-                mod_rs: format_code(&mod_rs_file),
-                requests_rs: format_code(&requests_file),
-                responses_rs: format_code(&responses_file),
-                client_rs: format_code(&client_file),
+                mod_rs: render(&parts.mod_rs)?,
+                requests_rs: render(&parts.requests_rs)?,
+                responses_rs: render(&parts.responses_rs)?,
+                client_rs: render(&parts.client_rs)?,
             });
         } else {
-            let filename = format!("{}.rs", module_path);
             generated.push(GeneratedModule::SingleFile {
-                filename,
+                filename: format!("{module_path}.rs"),
                 content: formatted,
             });
         }
     }
+    Ok(generated)
+}
 
-    let (ws_shared_filename, ws_shared_content) = ws_modules::generate_ws_shared_module()?;
-    let ws_modules_list = ws_modules::generate_ws_definition_modules()?;
-
-    if dry_run {
-        println!("=== lib.rs ===\n{}\n", lib_formatted);
-        println!("=== shared.rs ===\n{}\n", shared_formatted);
-        println!("=== prelude.rs ===\n{}\n", prelude_formatted);
-        for module in &generated {
-            match module {
-                GeneratedModule::SingleFile { filename, content } => {
-                    println!("=== {} ===\n{}\n", filename, content);
-                }
-                GeneratedModule::Directory {
-                    module_path,
-                    mod_rs,
-                    requests_rs,
-                    responses_rs,
-                    client_rs,
-                } => {
-                    println!("=== {}/mod.rs ===\n{}\n", module_path, mod_rs);
-                    println!("=== {}/requests.rs ===\n{}\n", module_path, requests_rs);
-                    println!("=== {}/responses.rs ===\n{}\n", module_path, responses_rs);
-                    println!("=== {}/client.rs ===\n{}\n", module_path, client_rs);
-                }
-            }
+impl GeneratedModule {
+    fn module_name(&self) -> &str {
+        match self {
+            Self::SingleFile { filename, .. } => filename.strip_suffix(".rs").unwrap_or(filename),
+            Self::Directory { module_path, .. } => module_path,
         }
-        println!("=== {} ===\n{}\n", ws_shared_filename, ws_shared_content);
-        for (filename, content) in &ws_modules_list {
-            println!("=== {} ===\n{}\n", filename, content);
-        }
-    } else {
-        remove_conflicting_paths(output_dir, &generated)?;
-
-        write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
-
-        write_atomic(&output_dir.join("shared.rs"), &shared_formatted)?;
-
-        write_atomic(&output_dir.join("prelude.rs"), &prelude_formatted)?;
-
-        for module in &generated {
-            match module {
-                GeneratedModule::SingleFile { filename, content } => {
-                    write_atomic(&output_dir.join(filename), content)?;
-                }
-                GeneratedModule::Directory {
-                    module_path,
-                    mod_rs,
-                    requests_rs,
-                    responses_rs,
-                    client_rs,
-                } => {
-                    let dir = output_dir.join(module_path);
-                    write_atomic(&dir.join("mod.rs"), mod_rs)?;
-                    write_atomic(&dir.join("requests.rs"), requests_rs)?;
-                    write_atomic(&dir.join("responses.rs"), responses_rs)?;
-                    write_atomic(&dir.join("client.rs"), client_rs)?;
-                }
-            }
-        }
-
-        write_atomic(&output_dir.join(&ws_shared_filename), &ws_shared_content)?;
-        for (filename, content) in &ws_modules_list {
-            write_atomic(&output_dir.join(filename), content)?;
-        }
-
-        let stale_names = collect_expected_files(&generated, &ws_shared_filename, &ws_modules_list);
-        cleanup_stale_files(output_dir, &stale_names)?;
     }
-
-    Ok(generated
-        .into_iter()
-        .next()
-        .map(|m| match m {
-            GeneratedModule::SingleFile { content, .. } => content,
-            GeneratedModule::Directory { mod_rs, .. } => mod_rs,
-        })
-        .unwrap_or_default())
 }
 
 /// Fails with [`GeneratorError::Validation`] when the batch cannot produce a
@@ -282,123 +410,207 @@ fn ensure_valid_rust_batch(apis: &[&RestApi]) -> Result<(), GeneratorError> {
     ensure_no_errors(Output::Rust, validate_rust_client(apis))
 }
 
-/// Collects the set of expected filenames (and directory names) that should
-/// exist after generation.
-fn collect_expected_files(
-    generated: &[GeneratedModule],
-    ws_shared_filename: &str,
-    ws_modules: &[(String, String)],
-) -> HashSet<String> {
-    let mut files = HashSet::new();
-    files.insert("lib.rs".to_string());
-    files.insert("shared.rs".to_string());
-    files.insert("prelude.rs".to_string());
-    files.insert(ws_shared_filename.to_string());
-    for (filename, _) in ws_modules {
-        files.insert(filename.clone());
+/// Remedy shown when a planned path holds content the generator did not write.
+const CONFLICT_REMEDY: &str = "Move or remove the listed paths, or generate into an \
+     isolated output directory.";
+
+/// Collects one Rust output root's mutations and checks each target's
+/// ownership as it is planned.
+struct Planner<'a> {
+    root: &'a Path,
+    writes: Vec<Mutation>,
+    deletions: Vec<Mutation>,
+    problems: Vec<String>,
+    /// Top-level names this run writes.
+    planned: BTreeSet<String>,
+}
+
+impl<'a> Planner<'a> {
+    fn new(root: &'a Path) -> Self {
+        let mut problems = Vec::new();
+        if let Ok(metadata) = fs::metadata(root)
+            && !metadata.is_dir()
+        {
+            problems.push(format!("{} is not a directory", root.display()));
+        }
+        Self {
+            root,
+            writes: Vec::new(),
+            deletions: Vec::new(),
+            problems,
+            planned: BTreeSet::new(),
+        }
     }
-    for module in generated {
-        match module {
-            GeneratedModule::SingleFile { filename, .. } => {
-                files.insert(filename.clone());
+
+    /// Plans a write to `path`, which must be absent or provably owned.
+    fn write(&mut self, path: PathBuf, content: String, proof: Proof) {
+        match occupant(&path, proof) {
+            Occupant::Absent | Occupant::OwnedFile => {}
+            Occupant::OwnedDir | Occupant::Foreign { is_dir: true, .. } => self
+                .problems
+                .push(format!("{} is a directory where a file is planned", path.display())),
+            Occupant::Foreign { reason, .. } => {
+                self.problems.push(format!("{} {reason}", path.display()));
             }
-            GeneratedModule::Directory { module_path, .. } => {
-                files.insert(module_path.clone());
+        }
+        self.writes.push(Mutation::Write { path, content });
+    }
+
+    /// Plans a top-level `.rs` file.
+    fn file(&mut self, filename: &str, content: String) {
+        self.planned.insert(filename.to_string());
+        self.write(self.root.join(filename), content, Proof::RustSource);
+    }
+
+    fn module(&mut self, module: &GeneratedModule) {
+        match module {
+            GeneratedModule::SingleFile { filename, content } => {
+                self.file(filename, content.clone());
+                self.replace(self.root.join(module.module_name()));
+            }
+            GeneratedModule::Directory {
+                module_path,
+                mod_rs,
+                requests_rs,
+                responses_rs,
+                client_rs,
+            } => {
+                self.planned.insert(module_path.clone());
+                let dir = self.root.join(module_path);
+                let files = [
+                    ("mod.rs", mod_rs),
+                    ("requests.rs", requests_rs),
+                    ("responses.rs", responses_rs),
+                    ("client.rs", client_rs),
+                ];
+                let is_real_dir = fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+                if !is_real_dir && dir.symlink_metadata().is_ok() {
+                    self.problems.push(format!(
+                        "{} is not a directory where module `{module_path}` is planned",
+                        dir.display()
+                    ));
+                }
+                for (name, content) in files {
+                    self.write(dir.join(name), content.clone(), Proof::RustSource);
+                }
+                if is_real_dir {
+                    self.remove_stale_in(&dir, &files.map(|(name, _)| name));
+                }
+                self.replace(self.root.join(format!("{module_path}.rs")));
             }
         }
     }
-    files
-}
 
-/// Returns whether `path` is a `.rs` file this generator wrote.
-///
-/// Ownership is proven by the [`GENERATED_FILE_HEADER`] on the first line.
-/// Files without the header (hand-written, or produced by another tool) are
-/// reported as not owned and are therefore never removed by cleanup.
-fn is_generator_owned_rs_file(path: &Path) -> bool {
-    if path.extension().is_none_or(|ext| ext != "rs") {
-        return false;
+    /// Deletes the other layout of a regenerated module once its new layout
+    /// is written. Content the generator did not write is a conflict.
+    fn replace(&mut self, obsolete: PathBuf) {
+        match occupant(&obsolete, Proof::RustSource) {
+            Occupant::Absent => {}
+            Occupant::OwnedFile => self.delete(Mutation::RemoveFile { path: obsolete }),
+            Occupant::OwnedDir => self.delete(Mutation::RemoveDir { path: obsolete }),
+            Occupant::Foreign { reason, .. } => self.problems.push(format!(
+                "{} must be replaced by the module's new layout, but it {reason}; it is left intact",
+                obsolete.display()
+            )),
+        }
     }
-    match fs::read_to_string(path) {
-        Ok(contents) => contents
-            .lines()
-            .next()
-            .is_some_and(|line| line.starts_with(GENERATED_FILE_HEADER)),
-        Err(_) => false,
-    }
-}
 
-/// Returns whether `dir` and its entire subtree were produced by this generator.
-///
-/// True only when every regular file carries the generated header and every
-/// subdirectory is itself generator-owned. An empty directory is owned
-/// vacuously. This is the gate for recursively removing a directory: the
-/// generator never `remove_dir_all`s a tree it cannot prove it created.
-fn is_generator_owned_dir(dir: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let owned = if path.is_dir() {
-            is_generator_owned_dir(&path)
+    /// Deletes owned files and directories inside a regenerated directory
+    /// module that this run does not write.
+    fn remove_stale_in(&mut self, dir: &Path, keep: &[&str]) {
+        match list_entries(dir) {
+            Ok(entries) => {
+                for name in entries.unwrap_or_default() {
+                    if !keep.contains(&name.as_str()) {
+                        self.remove_if_owned(dir.join(name));
+                    }
+                }
+            }
+            Err(problem) => self.problems.push(problem),
+        }
+    }
+
+    /// Full generation: deletes owned top-level modules no API produces.
+    fn remove_obsolete_modules(&mut self) {
+        match list_entries(self.root) {
+            Ok(entries) => {
+                for name in entries.unwrap_or_default() {
+                    if !self.planned.contains(&name) {
+                        self.remove_if_owned(self.root.join(name));
+                    }
+                }
+            }
+            Err(problem) => self.problems.push(problem),
+        }
+    }
+
+    fn remove_if_owned(&mut self, path: PathBuf) {
+        match occupant(&path, Proof::RustSource) {
+            Occupant::OwnedFile => self.delete(Mutation::RemoveFile { path }),
+            Occupant::OwnedDir => self.delete(Mutation::RemoveDir { path }),
+            Occupant::Absent | Occupant::Foreign { .. } => {}
+        }
+    }
+
+    /// Plans a deletion once, however many rules find the same path.
+    fn delete(&mut self, deletion: Mutation) {
+        if !self.deletions.iter().any(|planned| planned.path() == deletion.path()) {
+            self.deletions.push(deletion);
+        }
+    }
+
+    fn finish(self) -> Result<MutationPlan, GeneratorError> {
+        if self.problems.is_empty() {
+            Ok(MutationPlan::new(self.root, self.writes, self.deletions))
         } else {
-            is_generator_owned_rs_file(&path)
-        };
-        if !owned {
-            return false;
+            Err(GeneratorError::UnsafeOutput {
+                root: self.root.display().to_string(),
+                problems: self.problems,
+                remedy: CONFLICT_REMEDY.to_string(),
+            })
         }
     }
-    true
 }
 
-/// Removes a generator-owned file, surfacing any I/O error.
-fn remove_owned_file(path: &Path) -> Result<(), GeneratorError> {
-    fs::remove_file(path).map_err(|source| GeneratorError::WriteError {
-        path: path.display().to_string(),
-        source,
-    })
-}
-
-/// Removes a generator-owned directory tree, surfacing any I/O error.
-fn remove_owned_dir(path: &Path) -> Result<(), GeneratorError> {
-    fs::remove_dir_all(path).map_err(|source| GeneratorError::WriteError {
-        path: path.display().to_string(),
-        source,
-    })
-}
-
-/// Removes files or directories that would conflict with new module output.
+/// Plans the publication of one export root (OpenAPI or Postman).
 ///
-/// When a module transitions from single-file to directory (or vice versa),
-/// the old artifact must be removed before the new one is written, because
-/// a file and directory cannot share the same path. Only generator-owned
-/// artifacts are removed; a conflicting hand-written file or directory is left
-/// in place (the subsequent write will surface the conflict instead of this
-/// helper silently destroying user content).
-fn remove_conflicting_paths(
-    output_dir: &Path,
-    generated: &[GeneratedModule],
-) -> Result<(), GeneratorError> {
-    for module in generated {
-        match module {
-            GeneratedModule::SingleFile { filename, .. } => {
-                let dir_name = filename.strip_suffix(".rs").unwrap_or(filename);
-                let dir_path = output_dir.join(dir_name);
-                if dir_path.is_dir() && is_generator_owned_dir(&dir_path) {
-                    remove_owned_dir(&dir_path)?;
+/// `files` are the artifacts to write, by file name. Each must land on an
+/// absent path or a regular file; a directory or symbolic link there is a
+/// conflict. Export artifacts carry no header, so a regular file whose name
+/// `is_artifact` accepts counts as generator-owned. A `complete` run deletes
+/// such files that no module produced; a partial run deletes nothing.
+///
+/// ## Errors
+///
+/// [`GeneratorError::UnsafeOutput`] listing every conflict.
+pub(crate) fn prepare_export_output(
+    root: &Path,
+    files: Vec<(String, String)>,
+    complete: bool,
+    is_artifact: impl Fn(&str) -> bool,
+) -> Result<MutationPlan, GeneratorError> {
+    let mut planner = Planner::new(root);
+    for (name, content) in files {
+        planner.planned.insert(name.clone());
+        planner.write(root.join(name), content, Proof::Artifact);
+    }
+    if complete {
+        match list_entries(root) {
+            Ok(entries) => {
+                for name in entries.unwrap_or_default() {
+                    let path = root.join(&name);
+                    if !planner.planned.contains(&name)
+                        && is_artifact(&name)
+                        && occupant(&path, Proof::Artifact) == Occupant::OwnedFile
+                    {
+                        planner.delete(Mutation::RemoveFile { path });
+                    }
                 }
             }
-            GeneratedModule::Directory { module_path, .. } => {
-                let rs_filename = format!("{}.rs", module_path);
-                let rs_path = output_dir.join(&rs_filename);
-                if rs_path.is_file() && is_generator_owned_rs_file(&rs_path) {
-                    remove_owned_file(&rs_path)?;
-                }
-            }
+            Err(problem) => planner.problems.push(problem),
         }
     }
-    Ok(())
+    planner.finish()
 }
 
 /// Generates and writes standalone API code (for imported OpenAPI specs).
@@ -407,6 +619,9 @@ fn remove_conflicting_paths(
 /// - Does NOT include `pub use schematic_definitions::...` imports
 /// - Uses `pub use crate::types::*` to reference locally generated types
 /// - Adds `pub mod types;` to lib.rs if types were generated
+///
+/// The same ownership rules as [`prepare_rust_output`] apply: a planned path
+/// holding content the generator did not write fails before any write.
 ///
 /// ## Arguments
 ///
@@ -424,7 +639,8 @@ fn remove_conflicting_paths(
 /// Returns an error if:
 /// - [`validate_rust_client`] reports an error ([`GeneratorError::Validation`])
 /// - Code generation produces invalid Rust
-/// - File writing fails
+/// - A planned path is not owned ([`GeneratorError::UnsafeOutput`])
+/// - File writing fails ([`GeneratorError::PublicationFailed`])
 pub fn generate_and_write_standalone(
     api: &RestApi,
     output_dir: &Path,
@@ -438,87 +654,30 @@ pub fn generate_and_write_standalone(
         include_types_module: has_types,
     };
 
-    let lib_tokens = assemble_lib_rs_with_options(&apis, &options);
-    let lib_file = validate_code(&lib_tokens)?;
-    let lib_formatted = format_code(&lib_file);
+    let lib = render(&assemble_lib_rs_with_options(&apis, &options))?;
+    let shared = render(&assemble_shared_module())?;
+    let prelude = render(&assemble_prelude_with_options(&apis, false))?;
+    let api_formatted = render(&assemble_api_module_with_options(api, &options))?;
 
-    let shared_tokens = assemble_shared_module();
-    let shared_file = validate_code(&shared_tokens)?;
-    let shared_formatted = format_code(&shared_file);
-
-    let prelude_tokens = assemble_prelude_with_options(&apis, false);
-    let prelude_file = validate_code(&prelude_tokens)?;
-    let prelude_formatted = format_code(&prelude_file);
-
-    let api_tokens = assemble_api_module_with_options(api, &options);
-    let api_file = validate_code(&api_tokens)?;
-    let api_formatted = format_code(&api_file);
-    let api_filename = format!("{}.rs", get_module_path(api));
-
+    // The import path writes the API as a single `{module}.rs` file; an owned
+    // directory-form `{module}/` left by a prior run is removed after it, so
+    // `foo.rs` never stays beside `foo/`, which Rust rejects as ambiguous.
+    let mut planner = Planner::new(output_dir);
+    planner.module(&GeneratedModule::SingleFile {
+        filename: format!("{}.rs", get_module_path(api)),
+        content: api_formatted.clone(),
+    });
+    planner.file("shared.rs", shared);
+    planner.file("prelude.rs", prelude);
+    planner.file("lib.rs", lib);
+    let plan = planner.finish()?;
     if dry_run {
-        println!("=== lib.rs ===\n{}\n", lib_formatted);
-        println!("=== shared.rs ===\n{}\n", shared_formatted);
-        println!("=== prelude.rs ===\n{}\n", prelude_formatted);
-        println!("=== {} ===\n{}\n", api_filename, api_formatted);
+        plan.print_dry_run(true);
     } else {
-        // The import path writes the API as a single `{module}.rs` file. If a
-        // prior run left a directory-form `{module}/`, remove it first (when
-        // owned) so we don't leave `foo.rs` beside `foo/`, which Rust rejects
-        // as an ambiguous module.
-        let module = GeneratedModule::SingleFile {
-            filename: api_filename.clone(),
-            content: api_formatted.clone(),
-        };
-        remove_conflicting_paths(output_dir, std::slice::from_ref(&module))?;
-
-        write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
-
-        write_atomic(&output_dir.join("shared.rs"), &shared_formatted)?;
-
-        write_atomic(&output_dir.join("prelude.rs"), &prelude_formatted)?;
-
-        write_atomic(&output_dir.join(&api_filename), &api_formatted)?;
+        plan.publish()?;
     }
 
     Ok(api_formatted)
-}
-
-/// Removes stale generator-owned artifacts from the output directory that are
-/// not part of the current generation set.
-///
-/// For single-file modules, removes `{name}.rs` if no longer expected.
-/// For directory modules, the directory itself is expected; stale `.rs`
-/// files at the top level are also removed.
-///
-/// Only artifacts this generator provably owns are removed: `.rs` files must
-/// carry the generated header, and directories must contain only
-/// generator-owned content. Anything else (hand-written files, unrelated
-/// subdirectories such as `bin/`) is left untouched. Removal errors are
-/// surfaced rather than discarded.
-fn cleanup_stale_files(
-    output_dir: &Path,
-    expected: &HashSet<String>,
-) -> Result<(), GeneratorError> {
-    let Ok(entries) = fs::read_dir(output_dir) else {
-        return Ok(());
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if expected.contains(name) {
-            continue;
-        }
-        if path.is_file() {
-            if is_generator_owned_rs_file(&path) {
-                remove_owned_file(&path)?;
-            }
-        } else if path.is_dir() && is_generator_owned_dir(&path) {
-            remove_owned_dir(&path)?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1216,16 +1375,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let module = get_module_path(&api);
 
-        // A conflicting directory that is NOT generator-owned must be left in
-        // place rather than destroyed.
+        // A conflicting directory that is NOT generator-owned is a conflict:
+        // the run refuses before writing anything and leaves it in place.
         let dir = temp_dir.path().join(&module);
         fs::create_dir_all(&dir).unwrap();
         let keep = dir.join("keep.rs");
         fs::write(&keep, "pub fn keep() {}\n").unwrap();
 
-        generate_and_write_standalone(&api, temp_dir.path(), false, false).unwrap();
+        let err = generate_and_write_standalone(&api, temp_dir.path(), false, false).unwrap_err();
 
+        assert!(matches!(err, GeneratorError::UnsafeOutput { .. }), "{err:?}");
         assert!(keep.exists(), "hand-written directory content must survive");
+        assert!(
+            !temp_dir.path().join(format!("{module}.rs")).exists(),
+            "nothing is written when a conflict is found"
+        );
     }
 
     #[test]

@@ -115,7 +115,7 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
 
     let report = generate_batch(
         &[valid, broken],
-        BatchScope::Selection,
+        &BatchScope::Complete,
         &roots.opts(),
         &registry_for,
     );
@@ -184,7 +184,7 @@ fn incomplete_registry_blocks_only_openapi() {
 
     let report = generate_batch(
         &[inventory, catalog],
-        BatchScope::Selection,
+        &BatchScope::Complete,
         &roots.opts(),
         &registry_for,
     );
@@ -207,6 +207,93 @@ fn incomplete_registry_blocks_only_openapi() {
             .is_file()
     );
     assert!(report.into_result().is_err());
+}
+
+/// Two members of module `paired`. `PairedA` declares `ListThings` at
+/// `GET /things`; `PairedB` declares the given id, path, and request suffix.
+fn paired_group(second_id: &str, second_path: &str, second_suffix: Option<&str>) -> [RestApi; 2] {
+    let first = fixture_api("PairedA", "paired", "serde_json::Value");
+    let mut second = fixture_api("PairedB", "paired", "serde_json::Value");
+    second.endpoints[0].id = second_id.to_string();
+    second.endpoints[0].path = second_path.to_string();
+    second.request_suffix = second_suffix.map(str::to_string);
+    [first, second]
+}
+
+#[test]
+fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
+    let roots = Roots::new();
+    // `inventory` is valid and comes first, so a writer that published module
+    // by module would already have written it when `paired` fails.
+    let inventory = fixture_api("Inventory", "inventory", "serde_json::Value");
+    let [paired_a, paired_b] = paired_group("FetchThings", "/things", None);
+    let registry_for = |_: &str| Some(SchemaRegistry::new());
+
+    let report = generate_batch(
+        &[inventory, paired_a, paired_b],
+        &BatchScope::Complete,
+        &roots.opts(),
+        &registry_for,
+    );
+
+    assert_eq!(report.failed(), vec![Output::OpenApi]);
+    assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
+    let Some(Err(GeneratorError::Validation {
+        output: Output::OpenApi,
+        diagnostics,
+    })) = report.get(Output::OpenApi).map(|o| &o.result)
+    else {
+        panic!("expected an OpenAPI validation failure");
+    };
+    let rendered: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        rendered,
+        ["severity=error api=PairedA,PairedB endpoint=<none> feature=duplicate-method-path \
+          output=openapi: module 'paired': GET /things is declared by both APIs with \
+          different operations; an OpenAPI document holds one operation per method and path"]
+    );
+
+    // No OpenAPI document was written, not even the valid `inventory` one.
+    assert_eq!(snapshot_or_absent(Path::new(&roots.openapi)), None);
+    // Cross-API route overlap is not a Rust or Postman error.
+    assert!(Path::new(&roots.rust).join("paired.rs").is_file());
+    assert!(
+        Path::new(&roots.postman)
+            .join("paired.postman_collection.json")
+            .is_file()
+    );
+}
+
+#[test]
+fn grouped_document_renames_a_shared_raw_id() {
+    let roots = Roots::new();
+    // The Ollama shape: one raw id in two group members, distinct routes,
+    // distinct request suffixes.
+    let [paired_a, paired_b] = paired_group("ListThings", "/v2/things", Some("Compat"));
+    let registry_for = |_: &str| Some(SchemaRegistry::new());
+
+    let report = generate_batch(
+        &[paired_a, paired_b],
+        &BatchScope::Complete,
+        &roots.opts(),
+        &registry_for,
+    );
+    assert!(report.failed().is_empty(), "{:?}", report.failed());
+
+    let written: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(Path::new(&roots.openapi).join("paired.json")).unwrap(),
+    )
+    .unwrap();
+    let ids: Vec<(&str, &str)> = written["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(path, item)| (path.as_str(), item["get"]["operationId"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        ids,
+        [("/things", "ListThings"), ("/v2/things", "PairedBListThings")]
+    );
 }
 
 /// The nine shipped endpoints whose path template embeds a query string.

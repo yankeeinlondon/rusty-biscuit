@@ -1,0 +1,513 @@
+//! Ownership proofs and the retained inventory of an existing Rust output.
+//!
+//! The generator only overwrites or deletes what it can prove it wrote: a
+//! `.rs` file whose first line is [`GENERATED_FILE_HEADER`], a manifest
+//! carrying [`MANIFEST_OWNERSHIP_MARKER`], an export artifact by its name, or
+//! a directory whose whole tree is such files. Symbolic links are never
+//! followed, and a path that cannot be read is never proven owned.
+//!
+//! A partial run keeps every module group it does not regenerate. It learns
+//! which ones exist from the output itself ([`read_rust_inventory`]) and
+//! refuses the output when that evidence is missing, inconsistent, or does
+//! not match the current definitions.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+
+use indexmap::IndexMap;
+use schematic_define::RestApi;
+
+use crate::cargo_gen::MANIFEST_OWNERSHIP_MARKER;
+use crate::errors::GeneratorError;
+use crate::output::format::GENERATED_FILE_HEADER;
+use crate::output::ws_modules::ws_definition_modules;
+
+/// How a file proves the generator wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Proof {
+    /// A `.rs` file starting with [`GENERATED_FILE_HEADER`].
+    RustSource,
+    /// A manifest containing the [`MANIFEST_OWNERSHIP_MARKER`] line.
+    Manifest,
+    /// An export artifact: a regular file whose name the caller matched to
+    /// the artifact naming rule. JSON and YAML carry no header to check.
+    Artifact,
+}
+
+/// What occupies one path, as far as ownership can be proven.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Occupant {
+    Absent,
+    /// A regular file carrying its ownership proof.
+    OwnedFile,
+    /// A directory whose entire tree is generator-owned `.rs` files.
+    OwnedDir,
+    /// Anything else, with the reason ownership could not be proven.
+    Foreign { is_dir: bool, reason: String },
+}
+
+/// Inspects `path` without following a symbolic link.
+pub(crate) fn occupant(path: &Path, proof: Proof) -> Occupant {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Occupant::Absent,
+        Err(err) => return foreign(false, format!("cannot be inspected ({err})")),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return foreign(false, "is a symbolic link, which is never followed".to_string());
+    }
+    if file_type.is_dir() {
+        return match owned_tree(path) {
+            Ok(()) => Occupant::OwnedDir,
+            Err(reason) => foreign(true, reason),
+        };
+    }
+    if !file_type.is_file() {
+        return foreign(false, "is not a regular file".to_string());
+    }
+    match file_is_owned(path, proof) {
+        Ok(true) => Occupant::OwnedFile,
+        Ok(false) => foreign(false, "was not written by schematic-gen".to_string()),
+        Err(reason) => foreign(false, reason),
+    }
+}
+
+fn foreign(is_dir: bool, reason: String) -> Occupant {
+    Occupant::Foreign { is_dir, reason }
+}
+
+fn file_is_owned(path: &Path, proof: Proof) -> Result<bool, String> {
+    let unreadable = |err: std::io::Error| format!("cannot be read to prove ownership ({err})");
+    match proof {
+        Proof::Artifact => Ok(true),
+        Proof::RustSource => {
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                return Ok(false);
+            }
+            let mut start = vec![0; GENERATED_FILE_HEADER.len()];
+            let mut file = fs::File::open(path).map_err(unreadable)?;
+            match file.read_exact(&mut start) {
+                Ok(()) => Ok(start == GENERATED_FILE_HEADER.as_bytes()),
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+                Err(err) => Err(unreadable(err)),
+            }
+        }
+        Proof::Manifest => {
+            let bytes = fs::read(path).map_err(unreadable)?;
+            Ok(String::from_utf8_lossy(&bytes)
+                .lines()
+                .any(|line| line == MANIFEST_OWNERSHIP_MARKER))
+        }
+    }
+}
+
+/// `Ok` when every entry under `dir` is a generator-owned `.rs` file or an
+/// owned subdirectory. An empty directory is owned vacuously.
+fn owned_tree(dir: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|err| format!("cannot be listed ({err})"))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("cannot be listed ({err})"))?;
+        let path = entry.path();
+        match occupant(&path, Proof::RustSource) {
+            Occupant::OwnedFile | Occupant::OwnedDir | Occupant::Absent => {}
+            Occupant::Foreign { reason, .. } => {
+                return Err(format!("contains {} which {reason}", path.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The module groups an existing Rust output keeps through a partial run.
+#[derive(Debug, Default)]
+pub(crate) struct RustInventory {
+    /// REST module groups declared by the existing output and not selected,
+    /// in the order its `lib.rs` declares them.
+    pub retained: Vec<String>,
+}
+
+/// Remedy shown when a partial run cannot trust the existing output.
+pub(crate) const INVENTORY_REMEDY: &str = "Run full generation (`generate --api all`) or \
+     generate into an isolated output directory.";
+
+/// Establishes which REST module groups `root` holds, before a partial run
+/// writes anything.
+///
+/// `groups` are the current definitions grouped by module, and `selected` the
+/// groups this run regenerates. An absent or empty root holds nothing. Any
+/// other root must be fully explained: a generator-owned `lib.rs` and
+/// `prelude.rs` that parse, every declared module present in exactly one
+/// owned layout, every owned module declared, every declared module known to
+/// the current definitions, and the prelude exports of every retained group
+/// equal to what the current definitions would export. Unowned content that
+/// is not a declared module stays outside the inventory and is preserved.
+///
+/// ## Errors
+///
+/// [`GeneratorError::UnsafeOutput`] listing every problem found.
+pub(crate) fn read_rust_inventory(
+    root: &Path,
+    groups: &IndexMap<String, Vec<&RestApi>>,
+    selected: &BTreeSet<String>,
+) -> Result<RustInventory, GeneratorError> {
+    let refuse = |problems: Vec<String>| GeneratorError::UnsafeOutput {
+        root: root.display().to_string(),
+        problems,
+        remedy: INVENTORY_REMEDY.to_string(),
+    };
+    let entries = match list_entries(root) {
+        Ok(None) => return Ok(RustInventory::default()),
+        Ok(Some(entries)) if entries.is_empty() => return Ok(RustInventory::default()),
+        Ok(Some(entries)) => entries,
+        Err(problem) => return Err(refuse(vec![problem])),
+    };
+
+    let mut problems = Vec::new();
+    let lib = read_owned_source(root, "lib.rs", &mut problems);
+    let prelude = read_owned_source(root, "prelude.rs", &mut problems);
+    let (Some(lib), Some(prelude)) = (lib, prelude) else {
+        return Err(refuse(problems));
+    };
+    let declared = declared_modules(&lib);
+    let exports = prelude_exports(&prelude);
+
+    let ws_modules: BTreeSet<&str> = ws_definition_modules()
+        .iter()
+        .map(|ws| ws.module)
+        .chain(["ws_shared"])
+        .collect();
+
+    let mut owned_modules = BTreeSet::new();
+    for name in &entries {
+        let path = root.join(name);
+        let module = if is_module_dir(&path) {
+            Some(name.as_str())
+        } else if occupant(&path, Proof::RustSource) == Occupant::OwnedFile {
+            name.strip_suffix(".rs")
+        } else {
+            None
+        };
+        if let Some(module) = module
+            && !["lib", "prelude", "shared"].contains(&module)
+        {
+            owned_modules.insert(module.to_string());
+        }
+    }
+    for module in &owned_modules {
+        if !declared.contains(module) && !selected.contains(module) {
+            problems.push(format!(
+                "generated module `{module}` is not declared in lib.rs"
+            ));
+        }
+    }
+
+    let mut retained = Vec::new();
+    for module in &declared {
+        let known_rest = groups.contains_key(module);
+        if !known_rest && !ws_modules.contains(module.as_str()) {
+            problems.push(format!(
+                "lib.rs declares module `{module}`, which no current definition generates"
+            ));
+            continue;
+        }
+        if !known_rest || selected.contains(module) {
+            continue;
+        }
+        let file = occupant(&root.join(format!("{module}.rs")), Proof::RustSource);
+        match (&file, is_module_dir(&root.join(module))) {
+            (Occupant::OwnedFile, true) => problems.push(format!(
+                "module `{module}` exists both as {module}.rs and as {module}/"
+            )),
+            (Occupant::OwnedFile, false) | (_, true) => {}
+            (Occupant::Foreign { reason, .. }, false) => {
+                problems.push(format!("module `{module}`: {module}.rs {reason}"));
+            }
+            _ => problems.push(format!(
+                "lib.rs declares module `{module}`, but neither {module}.rs nor {module}/mod.rs \
+                 is a generated file"
+            )),
+        }
+        let expected = expected_exports(&groups[module]);
+        let found = exports.get(module).cloned().unwrap_or_default();
+        if found != expected {
+            problems.push(format!(
+                "prelude.rs exports {found:?} from `{module}`, but the current definitions \
+                 export {expected:?}"
+            ));
+        }
+        retained.push(module.clone());
+    }
+    for module in exports.keys() {
+        if !declared.contains(module) {
+            problems.push(format!(
+                "prelude.rs re-exports from `{module}`, which lib.rs does not declare"
+            ));
+        }
+    }
+
+    if problems.is_empty() {
+        Ok(RustInventory { retained })
+    } else {
+        Err(refuse(problems))
+    }
+}
+
+/// Whether `path` is a real directory (not a link) holding a generated
+/// `mod.rs`. Other content inside does not change that; it only keeps the
+/// directory from being deleted as a whole.
+fn is_module_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+        && occupant(&path.join("mod.rs"), Proof::RustSource) == Occupant::OwnedFile
+}
+
+/// Lists the names directly under `root`; `None` when it does not exist.
+pub(crate) fn list_entries(root: &Path) -> Result<Option<Vec<String>>, String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("{} cannot be listed ({err})", root.display())),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("{} cannot be listed ({err})", root.display()))?;
+        match entry.file_name().into_string() {
+            Ok(name) => names.push(name),
+            Err(name) => {
+                return Err(format!(
+                    "{} holds an entry whose name is not UTF-8: {name:?}",
+                    root.display()
+                ));
+            }
+        }
+    }
+    names.sort();
+    Ok(Some(names))
+}
+
+fn read_owned_source(root: &Path, name: &str, problems: &mut Vec<String>) -> Option<syn::File> {
+    let path = root.join(name);
+    match occupant(&path, Proof::RustSource) {
+        Occupant::OwnedFile => {}
+        Occupant::Absent => {
+            problems.push(format!("{name} is missing, so the existing modules are unknown"));
+            return None;
+        }
+        Occupant::OwnedDir => {
+            problems.push(format!("{name} is a directory"));
+            return None;
+        }
+        Occupant::Foreign { reason, .. } => {
+            problems.push(format!("{name} {reason}"));
+            return None;
+        }
+    }
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            problems.push(format!("{name} cannot be read ({err})"));
+            return None;
+        }
+    };
+    match syn::parse_file(&text) {
+        Ok(file) => Some(file),
+        Err(err) => {
+            problems.push(format!("{name} does not parse as Rust ({err})"));
+            None
+        }
+    }
+}
+
+/// `pub mod x;` declarations of a `lib.rs`, without `shared` and `prelude`.
+fn declared_modules(lib: &syn::File) -> BTreeSet<String> {
+    lib.items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Mod(module) if module.content.is_none() => Some(module.ident.to_string()),
+            _ => None,
+        })
+        .filter(|name| name != "shared" && name != "prelude")
+        .collect()
+}
+
+/// Names each `pub use crate::<module>::…` of a `prelude.rs` imports, sorted,
+/// keyed by module. `shared` and the WebSocket helper re-exports are included
+/// under their own modules.
+fn prelude_exports(prelude: &syn::File) -> BTreeMap<String, Vec<String>> {
+    let mut exports: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for item in &prelude.items {
+        let syn::Item::Use(item_use) = item else {
+            continue;
+        };
+        let syn::UseTree::Path(krate) = &item_use.tree else {
+            continue;
+        };
+        if krate.ident != "crate" {
+            continue;
+        }
+        let syn::UseTree::Path(module) = krate.tree.as_ref() else {
+            continue;
+        };
+        let names = exports.entry(module.ident.to_string()).or_default();
+        collect_use_names(&module.tree, names);
+        names.sort();
+    }
+    exports.remove("shared");
+    for ws in ws_definition_modules() {
+        exports.remove(ws.module);
+    }
+    exports
+}
+
+fn collect_use_names(tree: &syn::UseTree, names: &mut Vec<String>) {
+    match tree {
+        syn::UseTree::Name(name) => names.push(name.ident.to_string()),
+        syn::UseTree::Rename(rename) => names.push(rename.ident.to_string()),
+        syn::UseTree::Glob(_) => names.push("*".to_string()),
+        syn::UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_names(item, names);
+            }
+        }
+        syn::UseTree::Path(path) => names.push(format!("{}::…", path.ident)),
+    }
+}
+
+/// What the prelude exports from one module group under current definitions.
+fn expected_exports(group: &[&RestApi]) -> Vec<String> {
+    let mut names: Vec<String> = group
+        .iter()
+        .flat_map(|api| [api.name.clone(), format!("{}Request", api.name)])
+        .collect();
+    names.sort();
+    names
+}
+
+/// Refuses a partial run whose newly assembled runtime files differ from the
+/// ones retained modules were generated against.
+///
+/// `planned` pairs each runtime-bearing shared file (`shared.rs` and the
+/// WebSocket `ws_shared.rs`) with its new content. With no retained module there is nothing to keep compatible;
+/// otherwise any byte difference, or a missing existing file, requires full
+/// generation. This is the single place the generator decides runtime
+/// compatibility: a persisted compatibility marker, once one exists, replaces
+/// this conservative comparison here.
+///
+/// ## Errors
+///
+/// [`GeneratorError::RequiresFullGeneration`] naming the changed files and
+/// the retained modules.
+pub(crate) fn shared_runtime_compatibility(
+    root: &Path,
+    planned: &[(&str, &str)],
+    retained: &[String],
+) -> Result<(), GeneratorError> {
+    if retained.is_empty() {
+        return Ok(());
+    }
+    let changed: Vec<String> = planned
+        .iter()
+        .filter(|(name, content)| {
+            fs::read(root.join(name)).ok().as_deref() != Some(content.as_bytes())
+        })
+        .map(|(name, _)| name.to_string())
+        .collect();
+    if changed.is_empty() {
+        Ok(())
+    } else {
+        Err(GeneratorError::RequiresFullGeneration {
+            root: root.display().to_string(),
+            changed,
+            retained: retained.to_vec(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owned(text: &str) -> String {
+        format!("{GENERATED_FILE_HEADER}\n\n{text}")
+    }
+
+    #[test]
+    fn ownership_proofs() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("owned.rs"), owned("pub fn a() {}")).unwrap();
+        fs::write(dir.join("hand.rs"), "pub fn a() {}").unwrap();
+        fs::write(dir.join("short.rs"), "//").unwrap();
+        fs::write(dir.join("notes.txt"), owned("")).unwrap();
+        fs::write(dir.join("Cargo.toml"), format!("[package]\n{MANIFEST_OWNERSHIP_MARKER}\n")).unwrap();
+        fs::write(dir.join("Other.toml"), "[package]\n").unwrap();
+        fs::create_dir_all(dir.join("gen/inner")).unwrap();
+        fs::write(dir.join("gen/inner/x.rs"), owned("")).unwrap();
+        fs::create_dir_all(dir.join("mixed")).unwrap();
+        fs::write(dir.join("mixed/x.rs"), owned("")).unwrap();
+        fs::write(dir.join("mixed/keep.rs"), "fn keep() {}").unwrap();
+
+        assert_eq!(occupant(&dir.join("owned.rs"), Proof::RustSource), Occupant::OwnedFile);
+        assert!(matches!(occupant(&dir.join("hand.rs"), Proof::RustSource), Occupant::Foreign { .. }));
+        assert!(matches!(occupant(&dir.join("short.rs"), Proof::RustSource), Occupant::Foreign { .. }));
+        assert!(matches!(occupant(&dir.join("notes.txt"), Proof::RustSource), Occupant::Foreign { .. }));
+        assert_eq!(occupant(&dir.join("Cargo.toml"), Proof::Manifest), Occupant::OwnedFile);
+        assert!(matches!(occupant(&dir.join("Other.toml"), Proof::Manifest), Occupant::Foreign { .. }));
+        assert_eq!(occupant(&dir.join("gen"), Proof::RustSource), Occupant::OwnedDir);
+        assert!(matches!(
+            occupant(&dir.join("mixed"), Proof::RustSource),
+            Occupant::Foreign { is_dir: true, .. }
+        ));
+        assert_eq!(occupant(&dir.join("missing.rs"), Proof::RustSource), Occupant::Absent);
+        assert_eq!(occupant(&dir.join("any.json"), Proof::Artifact), Occupant::Absent);
+        fs::write(dir.join("any.json"), "{}").unwrap();
+        assert_eq!(occupant(&dir.join("any.json"), Proof::Artifact), Occupant::OwnedFile);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_are_never_followed() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("target.rs"), owned("")).unwrap();
+        std::os::unix::fs::symlink(dir.join("target.rs"), dir.join("link.rs")).unwrap();
+        fs::create_dir(dir.join("tree")).unwrap();
+        std::os::unix::fs::symlink(dir.join("target.rs"), dir.join("tree/link.rs")).unwrap();
+        assert!(matches!(occupant(&dir.join("link.rs"), Proof::RustSource), Occupant::Foreign { .. }));
+        assert!(matches!(occupant(&dir.join("tree"), Proof::RustSource), Occupant::Foreign { .. }));
+    }
+
+    #[test]
+    fn compatibility_passes_identical_runtime_and_refuses_a_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("shared.rs"), "same").unwrap();
+        fs::write(root.join("ws_shared.rs"), "ws").unwrap();
+        let retained = vec!["beta".to_string()];
+
+        shared_runtime_compatibility(root, &[("shared.rs", "same"), ("ws_shared.rs", "ws")], &retained)
+            .expect("identical runtime is compatible");
+        shared_runtime_compatibility(root, &[("shared.rs", "new")], &[])
+            .expect("nothing retained, nothing to keep compatible");
+
+        let err = shared_runtime_compatibility(
+            root,
+            &[("shared.rs", "new"), ("ws_shared.rs", "ws")],
+            &retained,
+        )
+        .unwrap_err();
+        let GeneratorError::RequiresFullGeneration { changed, retained, .. } = &err else {
+            panic!("expected RequiresFullGeneration, got {err:?}");
+        };
+        assert_eq!(changed, &["shared.rs"]);
+        assert_eq!(retained, &["beta"]);
+        assert!(err.to_string().contains("generate --api all"), "{err}");
+
+        fs::remove_file(root.join("ws_shared.rs")).unwrap();
+        let err = shared_runtime_compatibility(root, &[("ws_shared.rs", "ws")], &["beta".into()])
+            .unwrap_err();
+        assert!(matches!(err, GeneratorError::RequiresFullGeneration { .. }));
+    }
+}

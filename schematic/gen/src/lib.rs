@@ -83,7 +83,9 @@ pub mod ws_codegen;
 
 pub use inference::infer_module_path;
 
-pub use export::openapi::{write_openapi, write_openapi_grouped};
+pub use export::openapi::{
+    build_openapi_grouped, operation_id_diagnostics, write_openapi, write_openapi_grouped,
+};
 pub use export::postman::{write_postman, write_postman_grouped};
 
 pub use validation::{

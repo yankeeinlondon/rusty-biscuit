@@ -152,5 +152,25 @@ pub fn write_postman_grouped(
     Ok(path)
 }
 
+/// Serializes the Postman collection of one export module.
+///
+/// A module with one API gets that API's collection
+/// ([`build_postman_collection`]); a shared module gets the grouped
+/// collection ([`build_postman_collection_grouped`]). The text is what
+/// [`write_postman`] and [`write_postman_grouped`] write for the same input.
+///
+/// ## Errors
+///
+/// [`GeneratorError::CodeGenError`] when serialization fails.
+pub fn render_postman_module(apis: &[&RestApi], module_name: &str) -> Result<String, GeneratorError> {
+    let collection = match apis {
+        [api] => build_postman_collection(api),
+        _ => build_postman_collection_grouped(apis, module_name),
+    };
+    serde_json::to_string_pretty(&collection).map_err(|e| {
+        GeneratorError::CodeGenError(format!("Failed to serialize Postman collection: {}", e))
+    })
+}
+
 #[cfg(test)]
 mod tests;
