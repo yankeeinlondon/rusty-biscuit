@@ -505,82 +505,53 @@ impl Markdown {
         inline_html::extract_inline_html_images(&self.content)
     }
 
-    /// Cleans up markdown content by normalizing formatting.
+    /// Formats the body under the runtime default `style.markdown` rules.
     ///
-    /// This method collapses incidental single newlines inside prose, injects
-    /// blank lines between block elements, and aligns table columns for visual
-    /// consistency.
-    ///
-    /// The cleanup operation mutates the content in place and returns a mutable
-    /// reference to self for method chaining.
+    /// The frontmatter is untouched. Formatting is guarded: when it would
+    /// change the body's meaning, or the body holds a malformed directive
+    /// region, the body is left as it was. Use
+    /// [`cleanup::clean_body`] for the outcome and diagnostics, or
+    /// [`cleanup::clean_document`] to clean a raw document including its
+    /// frontmatter and document-level rules.
     ///
     /// ## Examples
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
     ///
-    /// let content = "# Header\nParagraph\n## Subheader";
-    /// let mut md: Markdown = content.into();
+    /// let mut md: Markdown = "```\nlet x = 1;\n```\n".into();
     /// md.cleanup();
-    /// // Content now has proper spacing between elements
+    /// assert_eq!(md.content(), "```text\nlet x = 1;\n```\n");
     /// ```
     pub fn cleanup(&mut self) -> &mut Self {
         self.content = cleanup::cleanup_content(&self.content);
         self
     }
 
-    /// Collapses incidental single newlines inside prose.
-    pub fn strip_incidental_newlines(&mut self) -> &mut Self {
-        self.content = cleanup::strip_incidental_newlines(&self.content);
-        self
-    }
-
-    /// Cleans up markdown content and wraps prose to a fixed display width.
-    pub fn cleanup_with_fixed_width(&mut self, width: usize) -> &mut Self {
-        self.content = cleanup::cleanup_to_fixed_width(&self.content, width);
-        self
-    }
-
-    /// Cleans up markdown content and enforces a consistent list indentation width.
-    ///
-    /// Each nested list level is normalized to `indent_size` spaces.
+    /// Formats the body with `overrides` taking precedence over the runtime
+    /// defaults; guarded like [`Self::cleanup`].
     ///
     /// ## Examples
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::cleanup::rules::{Indentation, Leaf, MarkdownRuleOverrides};
     ///
-    /// let content = "- Parent\n  - Child";
-    /// let mut md: Markdown = content.into();
-    /// md.cleanup_with_indent(4);
-    /// assert!(md.content().contains("\n    - Child"));
+    /// let mut md: Markdown = "- Parent\n  - Child\n".into();
+    /// md.cleanup_with(&MarkdownRuleOverrides {
+    ///     indentation: Leaf::Value(Indentation::Four),
+    ///     ..MarkdownRuleOverrides::default()
+    /// });
+    /// assert_eq!(md.content(), "- Parent\n    - Child\n");
     /// ```
-    pub fn cleanup_with_indent(&mut self, indent_size: usize) -> &mut Self {
-        self.content = cleanup::cleanup_content_with_indent(&self.content, indent_size);
+    pub fn cleanup_with(&mut self, overrides: &cleanup::rules::MarkdownRuleOverrides) -> &mut Self {
+        self.content = cleanup::cleanup_content_with(&self.content, overrides);
         self
     }
 
-    /// Cleans up markdown in compact mode (removes blank lines between list items).
-    pub fn cleanup_compact(&mut self) -> &mut Self {
-        self.content = cleanup::cleanup_content_compact(&self.content);
-        self
-    }
-
-    /// Cleans up markdown in loose mode (blank lines between all list items).
-    pub fn cleanup_loose(&mut self) -> &mut Self {
-        self.content = cleanup::cleanup_content_loose(&self.content);
-        self
-    }
-
-    /// Cleans up markdown with forced indentation in compact mode.
-    pub fn cleanup_with_indent_compact(&mut self, indent_size: usize) -> &mut Self {
-        self.content = cleanup::cleanup_content_with_indent_compact(&self.content, indent_size);
-        self
-    }
-
-    /// Cleans up markdown with forced indentation in loose mode.
-    pub fn cleanup_with_indent_loose(&mut self, indent_size: usize) -> &mut Self {
-        self.content = cleanup::cleanup_content_with_indent_loose(&self.content, indent_size);
+    /// Collapses incidental single newlines inside prose (unguarded).
+    pub fn strip_incidental_newlines(&mut self) -> &mut Self {
+        self.content = cleanup::strip_incidental_newlines(&self.content);
         self
     }
 
@@ -1377,10 +1348,12 @@ title: Test
         let content = "- Parent\n  - Child\n    - Grandchild";
         let mut md: Markdown = content.into();
 
-        md.cleanup_with_indent(4);
+        md.cleanup_with(&cleanup::rules::MarkdownRuleOverrides {
+            indentation: cleanup::rules::Leaf::Value(cleanup::rules::Indentation::Four),
+            ..Default::default()
+        });
 
-        assert!(md.content().contains("\n    - Child"));
-        assert!(md.content().contains("\n        - Grandchild"));
+        assert_eq!(md.content(), "- Parent\n    - Child\n        - Grandchild");
     }
 
     #[test]
@@ -1388,7 +1361,10 @@ title: Test
         let content = "This paragraph is long enough to wrap at a narrow display width.";
         let mut md: Markdown = content.into();
 
-        md.cleanup_with_fixed_width(24);
+        md.cleanup_with(&cleanup::rules::MarkdownRuleOverrides {
+            fixed_width: cleanup::rules::Leaf::Value(cleanup::rules::FixedWidth::Columns(24)),
+            ..Default::default()
+        });
 
         assert_eq!(
             md.content(),
@@ -1396,9 +1372,8 @@ title: Test
         );
     }
 
-    /// Wrapped top-level prose followed by a wrapped list once produced two
-    /// overlapping strip edits for the list's soft break and panicked in both
-    /// debug and release. See `cleanup::reflow`'s mixed prose/list regressions.
+    /// Wrapped top-level prose followed by a wrapped list: each paragraph is
+    /// unwrapped and re-wrapped inside its own container.
     #[test]
     fn test_cleanup_with_fixed_width_method_mixes_prose_and_wrapped_list() {
         let content = concat!(
@@ -1407,7 +1382,10 @@ title: Test
         );
         let mut md: Markdown = content.into();
 
-        md.cleanup_with_fixed_width(30);
+        md.cleanup_with(&cleanup::rules::MarkdownRuleOverrides {
+            fixed_width: cleanup::rules::Leaf::Value(cleanup::rules::FixedWidth::Columns(30)),
+            ..Default::default()
+        });
 
         assert_eq!(
             md.content(),

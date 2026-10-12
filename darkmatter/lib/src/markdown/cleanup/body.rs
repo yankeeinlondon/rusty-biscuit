@@ -35,10 +35,12 @@ pub enum CleanOutcome {
 }
 
 /// Why and where cleanup declined.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Fallback {
     pub reason: FallbackReason,
-    /// Byte offset, in the cleaned text, of the first affected input block.
+    /// Byte offset of the first affected input block: in the cleaned text
+    /// for a [`BodyCleanup`], in the whole document once carried by a
+    /// [`CleanDiagnostic`].
     pub offset: usize,
     /// What differed, for the diagnostic message.
     pub detail: String,
@@ -61,18 +63,22 @@ impl Fallback {
             let index = lines.index_of(offset);
             (index + 1, offset.saturating_sub(lines.get(index).start) + 1)
         };
+        let located = Self { offset, ..self.clone() };
+        CleanDiagnostic::fidelity_fallback(0..document.len(), located.message(line, column), located)
+    }
+
+    /// The finding's message with the first affected block at `line` and
+    /// `column` (1-based, in whatever column unit the caller reports).
+    #[must_use]
+    pub fn message(&self, line: usize, column: usize) -> String {
         let reason = match self.reason {
             FallbackReason::MalformedRegion => "a malformed directive region",
             FallbackReason::SerializationFailure => "the formatted text could not be produced",
             FallbackReason::SemanticMismatch => "formatting would change the document's meaning",
         };
-        CleanDiagnostic::fidelity_fallback(
-            0..document.len(),
-            format!(
-                "cleanup left the document unchanged because of {reason} at line {line}, column {column}: {}",
-                self.detail
-            ),
-            self.reason,
+        format!(
+            "cleanup left the document unchanged because of {reason} at line {line}, column {column}: {}",
+            self.detail
         )
     }
 }

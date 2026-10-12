@@ -8,6 +8,8 @@
 use biscuit_file::{SourceSpan, YamlCertainty, YamlDiagnostic, YamlDiagnosticCode, YamlRepair};
 use serde::{Serialize, Serializer};
 
+use super::body::Fallback;
+
 /// Which stage of a clean run produced a diagnostic.
 ///
 /// This identifies the diagnostic's owner, not its coordinate space: every
@@ -87,9 +89,12 @@ pub struct CleanDiagnostic {
     pub message: String,
     /// Candidate repairs, in the same document coordinates as `span`.
     pub repairs: Vec<YamlRepair>,
-    /// Set only for [`CleanCode::FidelityFallback`].
+    /// Set only for [`CleanCode::FidelityFallback`]: why cleanup declined
+    /// and the source offset of the first affected input block, so a caller
+    /// can restate the location in its own coordinates (an LSP client's
+    /// position encoding, for example).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<FallbackReason>,
+    pub fallback: Option<Fallback>,
 }
 
 impl CleanDiagnostic {
@@ -108,7 +113,7 @@ impl CleanDiagnostic {
                 .into_iter()
                 .map(|repair| shift_repair(repair, yaml_offset))
                 .collect(),
-            reason: None,
+            fallback: None,
         }
     }
 
@@ -122,7 +127,7 @@ impl CleanDiagnostic {
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
             message: message.into(),
             repairs: Vec::new(),
-            reason: None,
+            fallback: None,
         }
     }
 }
@@ -131,7 +136,7 @@ impl CleanDiagnostic {
     /// A report-only `clean.fidelity-fallback` finding: cleanup kept the
     /// original, so nothing is repaired.
     #[must_use]
-    pub fn fidelity_fallback(span: SourceSpan, message: impl Into<String>, reason: FallbackReason) -> Self {
+    pub fn fidelity_fallback(span: SourceSpan, message: impl Into<String>, fallback: Fallback) -> Self {
         Self {
             stage: CleanStage::Fidelity,
             code: CleanCode::FidelityFallback,
@@ -139,7 +144,7 @@ impl CleanDiagnostic {
             classification: YamlCertainty::NonDeterministicFind,
             message: message.into(),
             repairs: Vec::new(),
-            reason: Some(reason),
+            fallback: Some(fallback),
         }
     }
 }
@@ -183,6 +188,6 @@ mod tests {
         let shifted = CleanDiagnostic::from_yaml(CleanStage::Syntax, diagnostic, 4);
         assert_eq!(shifted.span, 6..8);
         assert_eq!(shifted.repairs[0].span, 6..8);
-        assert_eq!(shifted.reason, None);
+        assert_eq!(shifted.fallback, None);
     }
 }

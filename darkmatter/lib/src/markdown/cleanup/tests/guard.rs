@@ -43,7 +43,7 @@ fn assert_refused(cleaned: &BodyCleanup, source: &str, location: &str) {
     assert_eq!(diagnostic.stage, CleanStage::Fidelity);
     assert_eq!(diagnostic.classification, YamlCertainty::NonDeterministicFind);
     assert!(diagnostic.repairs.is_empty());
-    assert_eq!(diagnostic.reason, Some(FallbackReason::SemanticMismatch));
+    assert_eq!(diagnostic.fallback.as_ref().map(|fallback| fallback.reason), Some(FallbackReason::SemanticMismatch));
     assert_eq!(diagnostic.span, 0..source.len(), "the finding spans the whole text");
     assert!(diagnostic.message.contains(location), "{location} in {:?}", diagnostic.message);
 }

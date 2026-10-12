@@ -133,7 +133,7 @@ fn a_malformed_region_is_reported_at_its_line() {
     assert_eq!(fallback.reason, FallbackReason::MalformedRegion);
     assert_eq!(fallback.offset, source.find("::end-block").unwrap());
     assert!(cleaned.diagnostics[0].message.contains("line 4, column 1"), "{}", cleaned.diagnostics[0].message);
-    assert_eq!(cleaned.diagnostics[0].reason, Some(FallbackReason::MalformedRegion));
+    assert_eq!(cleaned.diagnostics[0].fallback.as_ref().map(|fallback| fallback.reason), Some(FallbackReason::MalformedRegion));
 }
 
 #[test]

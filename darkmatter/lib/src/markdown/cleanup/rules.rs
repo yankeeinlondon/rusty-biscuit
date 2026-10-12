@@ -91,6 +91,17 @@ impl Indentation {
             Indentation::Eight => Some(8),
         }
     }
+
+    /// The value for `spaces` per level; `None` unless it is 2, 4, or 8.
+    #[must_use]
+    pub fn from_spaces(spaces: usize) -> Option<Self> {
+        match spaces {
+            2 => Some(Indentation::Two),
+            4 => Some(Indentation::Four),
+            8 => Some(Indentation::Eight),
+            _ => None,
+        }
+    }
 }
 
 /// `list-item-padding`: blank lines between sibling items.
