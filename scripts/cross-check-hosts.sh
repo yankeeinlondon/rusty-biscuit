@@ -43,7 +43,7 @@ SSH=(ssh -o BatchMode=yes -o ConnectTimeout=15)
 # exchange, which the build hosts do not offer yet. Older clients reject the
 # option, so it is added only when this client accepts it (`ssh -G` resolves
 # the configuration locally, without connecting).
-if ssh -G -o WarnWeakCrypto=no localhost > /dev/null 2>&1; then
+if ssh -G -o BatchMode=yes -o WarnWeakCrypto=no localhost > /dev/null 2>&1; then
     SSH+=(-o WarnWeakCrypto=no)
 fi
 
