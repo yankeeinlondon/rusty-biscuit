@@ -193,7 +193,7 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
         // reason.
         return true;
     };
-    any_atom_constraint(def, |c| matches!(c, Constraint::Required))
+    def.is_required()
 }
 
 /// Classify a validation problem set as a
@@ -274,7 +274,7 @@ pub(super) fn provided_partial_value(value: Option<&serde_json::Value>) -> Optio
 /// Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
 ///
 /// Returns `None` when the atom describes a shape that cannot be
-/// collected via a single TUI widget (e.g. `object`, `any`, or a semantic
+/// collected via a single TUI widget (e.g. `object`, `unknown`, or a semantic
 /// definition artifact).
 pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
     match &atom.ty {
@@ -311,7 +311,9 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
             SimplifiedType::String
             | SimplifiedType::Yaml
             | SimplifiedType::Json
-            | SimplifiedType::Expression,
+            | SimplifiedType::Expression
+            | SimplifiedType::Alphanumeric
+            | SimplifiedType::Shell,
         ) => {
             let (min_len, max_len) = string_length_constraints(atom);
             Some(InteractiveShape::Text {
@@ -359,11 +361,12 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
                 alternatives: if groups.is_empty() { Vec::new() } else { vec![groups] },
             })
         }
-        // A `literal(...)` is a fixed `const` with exactly one valid value, so
-        // there is nothing to prompt for.
+        // A `literal(...)` is a fixed `const` with exactly one valid value,
+        // and `null` admits only null, so there is nothing to prompt for.
         TypeExpr::Primitive(
             SimplifiedType::Object
-            | SimplifiedType::Any
+            | SimplifiedType::Unknown
+            | SimplifiedType::Null
             | SimplifiedType::Literal
             | SimplifiedType::TypeDefinition
             | SimplifiedType::Schema,

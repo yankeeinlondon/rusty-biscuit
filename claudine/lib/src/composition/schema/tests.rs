@@ -2451,3 +2451,31 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
     // of the union exactly as it times the union.
     assert!(classify::is_eager(Some(shape), "loose_list"), "an eager arm times the list");
 }
+
+#[test]
+fn null_admitting_whole_values_are_not_required() {
+    let dir = TempDir::new().unwrap();
+    let schema = serde_json::json!({
+        "nothing": "null(required)",
+        "anything": "unknown(required)",
+        "maybe": ["string(required)", "null"],
+        "nulls": "null[](required)",
+        "concrete": "string(required)",
+    });
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
+        &schema,
+        dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
+    )
+    .unwrap();
+    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    else {
+        panic!("a single shape");
+    };
+    for optional in ["nothing", "anything", "maybe"] {
+        assert!(!classify::is_required(Some(shape), optional), "{optional}");
+    }
+    for required in ["nulls", "concrete"] {
+        assert!(classify::is_required(Some(shape), required), "{required}");
+    }
+}
