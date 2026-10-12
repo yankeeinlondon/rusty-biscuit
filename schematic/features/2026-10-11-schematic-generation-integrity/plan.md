@@ -22,6 +22,29 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - schematic/skill/SKILL.md
   - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2:
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/assemble/mod.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+docs_updated_during_phase_2:
+  - schematic/gen/README.md
+docs_created_during_phase_2:
+  - schematic/docs/generation/validation.md
+skills_files_updated_during_phase_2:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 packages:
   - schematic-gen
   - test-toolkit
@@ -119,9 +142,9 @@ Run `just test` and `just lint`; show the new non-ignored `slow_` tests in norma
 
 ### Wave 4 — Validation foundation (parallelizable)
 
-- [ ] **Define scoped diagnostics** — Task 2.1; depends on Phase 1; owns a new diagnostics module and its tests.
+- [x] **Define scoped diagnostics** — Task 2.1; depends on Phase 1; owns a new diagnostics module and its tests.
   - Implement the public reusable diagnostic/severity/feature surface from defaults 1, 2, and 20. Prove construction from outside `validation.rs`, both severities, API/group scope, endpoint omission, rendered format, and serialized severity (R9).
-- [ ] **Check emitted identities** — Task 2.2; depends on Phase 1; owns validator helpers and accept/reject tables.
+- [x] **Check emitted identities** — Task 2.2; depends on Phase 1; owns validator helpers and accept/reject tables.
   - Check duplicate raw ids within an API, actual emitted names across shared groups, and one centralized `(method, normalized_path)` uniqueness key. `/items/{id}` and `/items/{name}` collide on the same method; different methods do not. Add no selector model (R12–R13).
   - Parse Rust request/response types with the Rust type grammar, definitions module paths with their supported path grammar, and output filenames as safe single components. Accept generic/qualified types; reject traversal/absolute filenames.
   - Use exactly the emitters' identifier transformations for path/query/header/cookie/body/multipart/helper fields, builders, and methods. Record newly found gaps. Keep valid Ollama/EMQX overlaps and legitimate `/api/api` compositions accepted (R11).
@@ -129,7 +152,7 @@ Run `just test` and `just lint`; show the new non-ignored `slow_` tests in norma
 
 ### Wave 5 — Output orchestration (sequential)
 
-- [ ] **Integrate batch validation** — Task 2.3; depends on Tasks 2.1–2.2; owns validation entry points and CLI integration.
+- [x] **Integrate batch validation** — Task 2.3; depends on Tasks 2.1–2.2; owns validation entry points and CLI integration.
   - Validate the whole batch for Rust, OpenAPI, and Postman independently before writing each root. Keep Rust-only type errors out of export validators. Ensure public generation entry points and the CLI follow the same boundary (R8–R10).
   - Add a mixed valid/invalid batch asserting zero mutation for its failing output; malformed Rust type syntax must fail Rust but permit both export artifacts. Assert every requested output is attempted, successes are named, errors yield final nonzero status, and warnings alone succeed.
   - Update affected validator comments and diagnostic docs with examples and ownership of the public surface.

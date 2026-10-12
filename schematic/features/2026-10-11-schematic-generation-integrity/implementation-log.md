@@ -21,6 +21,29 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - schematic/skill/SKILL.md
   - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2:
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/errors.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/output/assemble/mod.rs
+  - schematic/gen/src/codegen/client/mod.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+docs_updated_during_phase_2:
+  - schematic/gen/README.md
+docs_created_during_phase_2:
+  - schematic/docs/generation/validation.md
+skills_files_updated_during_phase_2:
+  - schematic/skill/SKILL.md
+  - .claude/skills/schematic-define/schematic/gen.md
 packages:
   - schematic-gen
   - test-toolkit
@@ -413,3 +436,239 @@ No dependency was added. `schematic/docs/dependencies.md` is unchanged.
    change real OpenAI output.
 7. Pre-split wire quirks recorded verbatim: a base URL with a query, and
    JSON-quoted `Vec<serde_json::Value>` query items.
+
+## Phase 2
+
+### Authorization state
+
+- No pre-authorization item is exercised by Phase 2: no regeneration of
+  committed artifacts, no deletion, no `RequestParts` change, no dependency
+  added, no `schematic-define` change, no CI change. Items 1–8 remain
+  unconfirmed, as recorded in Phase 1.
+
+### What was built (Tasks 2.1–2.3)
+
+- **`schematic/gen/src/diagnostics.rs` (new, public):** `ValidationDiagnostic
+  { severity, api: Vec<String>, endpoint: Option<String>, feature, output,
+  message }`, `Severity { Warning, Error }`, `Output { Rust, OpenApi, Postman }`,
+  `Feature` (kebab-case ids), constructors `new` (one API) and `for_group`
+  (every API of a module group, `endpoint = None`), `is_error`, `has_errors`.
+  `Display` renders `severity=<s> api=<a,b> endpoint=<e|<none>> feature=<f>
+  output=<o>: <message>`; `Serialize` emits the same ids (`severity`,
+  `feature`, `output` as strings, `api` as an array, `endpoint` as null when
+  absent).
+- **`schematic/gen/src/validation.rs` (rewritten):** whole-batch validators
+  `validate_rust_client`, `validate_openapi`, `validate_openapi_registry`,
+  `validate_postman`; the single route key `endpoint_uniqueness_key` returning
+  `EndpointUniquenessKey { method, normalized_path }`; the severity constants
+  `QUERY_IN_PATH_SEVERITY` and `DUPLICATE_METHOD_PATH_SEVERITY`; and
+  `pub(crate) ensure_no_errors` used by every public writer.
+- **Pipeline (`schematic/gen/src/pipeline.rs`):** `run_generate` now builds a
+  batch (one API, or all with `BatchScope::Complete`) and calls the new public
+  `generate_batch(apis, scope, opts, registry_for) -> GenerationReport`. Each
+  output is validated over the whole batch and published by its own step
+  (Rust, then OpenAPI, then Postman); a validation error or a write error fails
+  only that output, every requested output is attempted, and the report names
+  succeeded and failed outputs. `GenerationReport::into_result` returns
+  `GeneratorError::OutputsFailed { succeeded, failed }`, which `main` already
+  maps to exit 1. Diagnostics print to stderr as `[WARN]`/`[ERROR]` + the
+  rendered line; one `[OK]`/`[FAILED] <output> output` line per output prints
+  at the end. `run_validate` (`validate --api`) runs all three validators and
+  prints `[PASS]`/`[FAIL]` per output. The Rust step no longer runs before a
+  global abort: `Cargo.toml` is written only when the Rust output passes.
+- **Same boundary for library callers:** `output::generate_and_write_all`,
+  `generate_and_write_standalone`, `export::openapi::write_openapi[_grouped]`,
+  and `export::postman::write_postman[_grouped]` call their validator first and
+  return `GeneratorError::Validation { output, diagnostics }` without writing.
+- **Removed:** `validation::validate_api`, `pipeline::run_validation`,
+  `pipeline::missing_schemas_error`, `pipeline::run_generate_all`, and the
+  `GeneratorError` variants `NamingCollision`, `InvalidRequestSuffix`,
+  `InvalidIdentifier` (no users outside the crate; replaced by diagnostics).
+  The OpenAPI registry-completeness error became the diagnostic
+  `feature=incomplete-schema-registry output=openapi`, checked for every module
+  before any document is written (previously checked module by module, after
+  the Rust crate had already been written).
+
+### Checks per output
+
+| Feature id | Rust | OpenAPI | Postman | Severity |
+| --- | :-: | :-: | :-: | --- |
+| `duplicate-endpoint-id` (raw id twice in one API) | ✓ | ✓ | ✓ | error |
+| `duplicate-method-path` (same API, same `endpoint_uniqueness_key`) | ✓ | ✓ | ✓ | `DUPLICATE_METHOD_PATH_SEVERITY` = warning (deviation, below) |
+| `query-in-path` | ✓ | ✓ | ✓ | `QUERY_IN_PATH_SEVERITY` = warning |
+| `invalid-output-filename` (export stem not one safe component; Rust module equal to `lib`/`shared`/`prelude`/`ws_shared`/a WebSocket module) | ✓ | ✓ | ✓ | error |
+| `invalid-identifier` (API name, endpoint id, path/query/form names) | ✓ | | | error |
+| `invalid-request-suffix` | ✓ | | | error |
+| `invalid-module-path` (not one plain identifier; definitions path segments) | ✓ | | | error |
+| `invalid-type-syntax` (JSON request/response and form JSON types via `syn::Type`) | ✓ | | | error |
+| `generated-name-collision` (request-struct fields, form fields, client convenience methods, module-group type names, referenced type shadowed by a generated item) | ✓ | | | error |
+| `incomplete-schema-registry` | | ✓ | | error |
+| `text-request-body`, `binary-request-body`, `api-key-param` (through `effective_auth_policy`) | ✓ | | | error |
+| `header-parameter`, `cookie-parameter` (not sent) | ✓ | | ✓ | error if `required`, warning otherwise |
+
+### Design choices not dictated by the spec
+
+- **Default 1 (format):** adopted as stated. `api` is a `Vec<String>` so a
+  group diagnostic names every contributing API (`api=A,B`); one-API
+  diagnostics render a single name. `endpoint=<none>` for API/group scope.
+- **Default 2 (machine readability):** adopted. `Serialize` derive, no new
+  CLI flag, diagnostics on stderr, nonzero exit only for errors or write
+  failures.
+- **Default 6 (duplicate id scope):** adopted. Raw ids within one API; across
+  a module group, generated Rust names (`{id}{suffix}`, `{id}Form`, `{api}`,
+  `{api}Request`, `{api}VariantBuilder`, plus the imported names `Serialize`,
+  `Deserialize`, `RequestParts`, `SchematicError`, `Paginated`). Ollama and
+  EMQX groups are accepted (`validation::tests::live_shared_groups_are_accepted`).
+- **Default 20 (feature ids):** the ten listed ids exist; six were **added**
+  because the checks R11 requires need a feature to name:
+  `invalid-identifier`, `invalid-request-suffix`, `generated-name-collision`,
+  `invalid-module-path`, `invalid-output-filename`,
+  `incomplete-schema-registry`. `duplicate-operation-id` exists but is not
+  emitted until Phase 3.
+- **Output ids:** `rust`, `openapi`, `postman`.
+- **Client method collisions** are found by generating the client impl for
+  the API (`generate_api_struct` + `generate_request_method_with_suffix`),
+  parsing it with `syn`, and counting inherent method names. A hard-coded
+  "fixed methods" list would drift, and the fixed set depends on the
+  response kinds present (`request` exists only with a JSON endpoint).
+- **Unsupported request inputs are now reported, not silently dropped**
+  (R10's backstop until Phase 6 implements them): text/binary bodies and
+  `ApiKeyParam` are Rust errors (no live user); header and cookie parameters
+  are errors when `required`, warnings when optional. The 7 live OpenAI
+  `openai-beta` header parameters are optional, so they produce 7 Rust and
+  7 Postman warnings and block nothing.
+- **Newly found gap:** Postman collections drop `EndpointParams.header` and
+  `.cookie` (`export/postman/request.rs` reads only `params.query`). Reported
+  by `validate_postman` with the same requiredness rule; not fixed (not in this
+  spec's scope).
+- **Base-plus-path composition warning not implemented.** R11 says an exact
+  duplicated segment "may" be a warning; the spec also calls `/api/api`
+  legitimate. A warning that fires on a legitimate composition is noise, so
+  no composition check exists; `/api/api/items` is in the accept table.
+- **Docs page:** default 19 names one page for "partial generation and
+  validation". Phase 2 created `schematic/docs/generation/validation.md`
+  (validation only). Phase 4 can add the partial-generation page beside it or
+  merge them.
+- **`generate --api <one>`** keeps today's behavior for the Rust root
+  (`generate_and_write_all` with one API, including its cleanup); OpenAPI and
+  Postman are written for that API's module with no stale cleanup
+  (`BatchScope::Selection`). Partial-generation safety is Phase 4.
+
+### Deviation from R13 — duplicate method+path is a warning (review item)
+
+The live definitions contain two same-API duplicate routes:
+
+| API | Endpoints | Route | How they differ |
+| --- | --- | --- | --- |
+| GitHub | `GetGitTree`, `GetGitTreeRecursive` | `GET /repos/{owner}/{repo}/git/trees/{tree_sha}` | declared query `recursive` |
+| Bitbucket | `ListDirectoryContents`, `GetFileContentRaw` | `GET /repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | JSON vs text response |
+
+R13 says these "fail validation". As errors they would block GitHub and
+Bitbucket in all three outputs (the real-API compile guard and `just generate`
+would fail), and fixing them needs definition edits or the selector of the
+response-model/GraphQL follow-up, neither of which is authorized. The check is
+therefore implemented with severity `DUPLICATE_METHOD_PATH_SEVERITY = Warning`
+— one constant, so the follow-up that adds selectors raises it in one place.
+**Finding:** the committed `openapi/github.json` and `openapi/bitbucket.json`
+each hold only one operation on that route (`GetGitTreeRecursive`,
+`GetFileContentRaw`); `GetGitTree` and `ListDirectoryContents` are silently
+missing from the OpenAPI documents today. The OpenAPI diagnostic says so. R13
+is **partially met**: the key, its single function, and the detection are
+done; the blocking severity is not.
+
+### Fixture corrections
+
+The Rust boundary rejected three test fixtures whose JSON body type equals the
+endpoint's own request struct (a recursive type that could never compile):
+`output::tests::make_complex_api` and `test_utils` (`CreateCompletionRequest`
+→ `CreateCompletionBody`), and `e2e_generation`'s `Patch` endpoint
+(`PatchRequest` → `PatchBody`). `openapi_strict_completeness.rs` copied the
+removed `missing_schemas_error` format by hand; it now renders the real
+`validate_openapi_registry` diagnostic.
+
+### Comment and doc drift found (code assumed correct)
+
+- `.claude/skills/schematic-define/schematic/gen.md` listed `GeneratorError`
+  with `PathBuf` fields and an `OpenApiError` variant that do not exist; now
+  matches the code (and the new variants).
+- `openapi_strict_completeness.rs` header said the binary exercises
+  `validate_completeness` in `run_generate`/`run_generate_all`; rewritten for
+  `validate_openapi_registry`.
+- `schematic/gen/README.md` validation section described only two checks and
+  "generation is aborted"; rewritten for per-output validation.
+- Pre-existing rustdoc warnings (not touched): unresolved `ResponseKind`
+  (`codegen/error.rs`), `codec`/`routing` (`ws_codegen/mod.rs`), private link
+  in `parser.rs`.
+
+### Requirement → test mapping (Phase 2)
+
+| Requirement | Test(s) | Result |
+| --- | --- | --- |
+| R8 whole batch per output, zero files for a failing output | `output_validation::malformed_rust_type_blocks_only_the_rust_client` (pre-existing Rust files byte-identical, no `Cargo.toml`), `::incomplete_registry_blocks_only_openapi` (no OpenAPI root created although one module was valid) | pass |
+| R9 diagnostic scope, severities, render, serialize, outside construction | `diagnostics::tests::*` (5), `output_validation::downstream_code_can_build_and_render_both_severities` (outside the crate) | pass |
+| R10 independence both ways, all outputs attempted, named, nonzero exit; warnings succeed | `::malformed_rust_type_blocks_only_the_rust_client` (malformed Rust type → Rust fails; OpenAPI carries `Vec<Thing` as data; Postman written), `::incomplete_registry_blocks_only_openapi`, `::cli_reports_each_output_and_exits_nonzero_when_one_fails` (real binary, exit 1, Postman after the OpenAPI failure), `::cli_warnings_alone_exit_successfully` (real binary, `gitea`, exit 0, one warning per output) | pass |
+| R11 type syntax, module path, filenames, identifier collisions, `/api/api` | `validation::tests::accepted_definitions_produce_no_diagnostics_for_any_output` (generic/qualified types, `/api/api`, sanitizing names), `::rust_only_rejections_name_feature_and_endpoint` (29 reject rows; each asserts the feature never reaches the exports), `::export_file_names_must_be_one_safe_component`, `::body_collision_message_suggests_a_rename` | pass |
+| R12 duplicate ids and emitted names | `::duplicate_endpoint_id_in_one_api_fails_every_output`, `::group_members_may_share_raw_ids_when_suffixes_differ`, `::group_members_whose_emitted_names_collide_name_both_apis`, `::live_shared_groups_are_accepted` | pass |
+| R13 `(method, normalized_path)` key | `::path_parameter_names_do_not_distinguish_routes` (`/items/{id}` = `/items/{name}`, GET ≠ DELETE, `{+repo}`; detection in every output) | pass; severity is warning (deviation above) |
+| R33 nine warnings, one constant | `output_validation::live_definitions_warn_once_per_output_for_each_embedded_query` (9 named endpoints per output, 27 lines, 9 unique, zero live errors), `validation::tests::query_in_path_is_one_warning_per_output`, `::interim_route_checks_are_warnings` | pass |
+| Gap reporting (R10 backstop) | `::api_key_param_is_found_through_the_effective_policy` (explicit method found; policy override hides legacy auth), `::unsent_header_and_cookie_parameters_are_reported_by_requiredness` | pass |
+
+Fidelity: the R8/R10 tests run the public `generate_batch` against real
+temporary directories (filesystem boundary) and the two CLI tests spawn the
+real `schematic-gen` binary through `bin_exe!` (process boundary); all are
+ordinary L1 (each under 1 s). No test invokes Cargo, so none is `slow_`.
+
+Input Robustness Matrix: not applicable. The validators read typed Rust
+definitions; no file format or configuration reader was added.
+
+### Broader gates
+
+- `just test` (schematic): exit 0. L1 **1718 passed, 9 skipped**; then the
+  fresh-output guard **4 passed** (55 s, warm). The guard's
+  `slow_real_apis_compile_offline` now generates the 18 APIs through the
+  validating `generate_and_write_all`, so the live batch passes the Rust
+  validator.
+- `just lint` (schematic): exit 0 (clippy only; no formatter).
+- `just check-tier-coverage schematic`: 0 stranded.
+- Doc examples of the two new modules: `cargo test --doc -p schematic-gen --
+  diagnostics validation`, 2 passed (nextest does not run doctests).
+- `cargo doc -p schematic-gen --no-deps`: no new warnings.
+
+### Platform evidence
+
+- macOS (this host): `just test` and `just lint` pass (above).
+- Native Windows: `just cross-check schematic-gen --os windows` against the
+  local tree: **569 passed, 12 skipped**, including all six
+  `output_validation::*` tests (the file-occupying-a-directory write failure,
+  exit code 1, and `bin_exe!` spawn behave the same as on macOS). L1 only:
+  `cross-check` runs no `slow_` tests, so the fresh-output guard was not run
+  there.
+- Linux and WSL2: not run in Phase 2. The new code is pure validation plus
+  `std::fs` writes already exercised on Windows; CI's pull-request Linux leg
+  covers it.
+
+### Files touched outside `schematic/`
+
+- `.claude/skills/schematic-define/schematic/gen.md` (validation section,
+  library example, error enum).
+
+No dependency was added.
+
+### Human review agenda items raised in Phase 2
+
+1. R13 deviation: `duplicate-method-path` is a warning
+   (`DUPLICATE_METHOD_PATH_SEVERITY`) because GitHub and Bitbucket each
+   declare two endpoints on one route; the committed OpenAPI documents silently
+   lack `GetGitTree` and `ListDirectoryContents`. Options: keep the warning
+   until selectors exist; make it an error for OpenAPI only (blocks
+   `github.json`/`bitbucket.json`); or migrate the two definitions.
+2. Six feature ids added to default 20's list (above).
+3. Unsupported request inputs are reported now: errors for text/binary bodies
+   and `ApiKeyParam`, error/warning by `required` for header/cookie
+   parameters (Rust and Postman). Phase 6 removes the Rust ones as it
+   implements them.
+4. Postman drops header and cookie parameters (a gap outside this spec).
+5. No base-plus-path composition warning (the spec's "may").
+6. Removed public items: `validate_api`, `run_validation`,
+   `missing_schemas_error`, `run_generate_all`, and three `GeneratorError`
+   variants.
