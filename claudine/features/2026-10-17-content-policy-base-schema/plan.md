@@ -4,6 +4,48 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1:
+    - Cargo.lock
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/content_policy_disk_baseline.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+docs_updated_during_phase_1:
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
+    - content-policy
+    - dmls
+source_files_during_phase_2:
+    - content-policy/schemas/content-policy.yaml
+    - content-policy/lib/tests/editor_schema.rs
+    - darkmatter/docs/schemas/darkmatter.yaml
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/union_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+    - darkmatter/lib/tests/l1/schemas_union_fixture_controls.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - content-policy/docs/topics/policy-lifecycle.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/content-policy/SKILL.md
 ---
 
 # Content Policy Base Schema Implementation Plan
@@ -34,17 +76,17 @@ Waves are globally numbered. Finish each wave and its checkpoint before starting
 
 ### Wave 1 — Contract Inventory (Sequential)
 
-- [ ] **Verify Prerequisites**
+- [x] **Verify Prerequisites**
   - Inspect and run the existing focused nextest-backed checks for constrained lists of named unions, bare local references with `(required)`, definition survival through merging, DMLS's typed view, and node-level diagnostic positions.
   - Exercise the actual target declaration `policy[](min(1))@…` with `rule: short_form(required)` in a temporary disk fixture. Assert empty-list and missing/null-rule rejection, item diagnostics, and baseline/trigger/document precedence.
   - Record existing evidence and blockers in an implementation log alongside this plan. A blocked prerequisite stops dependent waves, not independent inventory work. This is a prerequisite checkpoint, not a repeated spike.
 
-- [ ] **Map Integration**
+- [x] **Map Integration**
   - Inventory `schemas/resolve.rs` (`ImportEngine`, `NamespaceKey`, namespace cache, dependency collection), `schemas/mod.rs` (baseline `OnceLock`s and accessors), source-identity types, baseline merging, and `darkmatter/dmls/src/overlay/schema.rs`'s typed and JSON consumers.
   - Identify CLI argument/dispatch sites under `darkmatter/cli/src/args/`, `commands/schema/validate.rs::load_api`, request snapshot access, and compose's current disable predicate. Inventory tests that assume no CLI baseline or parse the authored baseline without import expansion.
   - Confirm dependency direction and feature boundaries in the manifests. Identify existing `CliProcessFixture`, DMLS stdio fixtures, Test Toolkit helpers, and all environment inputs requiring isolation. Load the OS skill before modifying Windows handling or path comparison.
 
-- [ ] **Define Fixtures**
+- [x] **Define Fixtures**
   - Establish one complete valid mixed-policy fixture from the specification's authoring example, with a valid long-form `rule` and `action`. Establish a second control containing every supported rule form, with `Evergreen` alone in its own declaration.
   - Define a shared declaration-case table with separately named parser and baseline-validator expectations, preserved source strings, and expected diagnostic paths/positions. Reuse it across consumers rather than constructing unrelated `p0`/`p1` properties.
   - Pin the robustness tables below to concrete mutations. For each YAML reading surface, one matrix test walks its positive fixture and changes one cell at a time; assert the public validation report, compose result, or document/schema-load failure rather than only a YAML parser return. Internal embedded-source failures separately assert typed schema errors.
@@ -105,12 +147,12 @@ Before declaring these tables complete, search affected load-bearing reads for `
 
 ### Wave 2 — Independent Foundations (Parallel)
 
-- [ ] **Update Artifact**
+- [x] **Update Artifact**
   - Owner: Content Policy schema and its own tests. Change `long_form.rule` to `short_form(required)`, use bare local names in `policy`, and remove the obsolete missing-rule header note. Preserve suggestions, descriptions, regex escaping, and remaining limitations.
   - Update `content-policy/lib/tests/editor_schema.rs` as needed to prove the exported text equals the shipped artifact. Correct patterns only where the shared case table proves drift, keeping schema ownership in Content Policy.
   - Validate the artifact through the existing disk resolver. Do not add a Darkmatter dependency to Content Policy, including all-features builds.
 
-- [ ] **Separate Sources**
+- [x] **Separate Sources**
   - Owner: Darkmatter internal resolver. Introduce a small internal source-loading seam around namespace acquisition in `schemas/resolve.rs`; both sources feed existing parsing and expansion.
   - Add a test-owned embedded source table and distinct namespace identities. Resolve virtual paths lexically; cover legal parent traversal, above-root traversal, absolute/drive/UNC forms, URLs, missing documents/types, malformed imports, bare local names, and existing cycle/depth/definition rules.
   - Preserve filesystem request-scoped `FileReference` resolution, dependency tracking, namespace caching, provenance, and definition isolation. Embedded entries contribute no disk watcher paths and perform no disk/network fallback.
@@ -120,13 +162,13 @@ Before declaring these tables complete, search affected load-bearing reads for `
 
 ### Wave 3 — Baseline Integration (Sequential)
 
-- [ ] **Wire Baseline**
+- [x] **Wire Baseline**
   - Depends on **Update Artifact** and **Separate Sources**. Add `content-policy` to the Darkmatter library with `default-features = false` and no `file-adapter`; update the lockfile if dependency resolution requires it.
   - Register exactly the baseline's embedded text and `content_policy::EDITOR_SCHEMA` under the two virtual paths in the spec. Add the exact `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"` declaration to the runtime baseline, without a default.
   - Replace bare YAML baseline loading with internal preparation, then use the existing `OnceLock` caches for resolved typed and lowered JSON representations. Keep accessor signatures and documented invalid-artifact panic behavior; no partial or empty fallback.
   - Preserve referenced definitions and their identities through baseline merging and typed DMLS views, including schema unions. Update behavior-linked accessor/resolver comments to reflect imports and virtual identity.
 
-- [ ] **Prove Resolution**
+- [x] **Prove Resolution**
   - Depends on **Wire Baseline**. Add a passive test that prepares, lowers, and compiles the actual shipped baseline. Update `shipped_schema_corpus.rs`, `base_schema_end_to_end.rs`, and other located corpus checks that currently bypass import expansion.
   - Compare disk and embedded real-artifact validation, typed rule alternatives, constraints, descriptions, suggestions, and required fields. Test documents and triggers using the same local type names, including union declarations, without namespace collisions.
   - Assert baseline origin, typed problem information, instance paths, and node positions for bad entries, null fields, wrong list shape, and empty list; missing-field diagnostics use the containing mapping.
