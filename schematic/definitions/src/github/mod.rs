@@ -30,7 +30,7 @@
 //! | Category | Endpoints |
 //! |----------|-----------|
 //! | Repository | `GetRepository` |
-//! | Git Trees | `GetGitTree`, `GetGitTreeRecursive` |
+//! | Git Trees | `GetGitTree` |
 //! | Contents | `GetRepositoryContentRaw` |
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
@@ -105,8 +105,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | ID | Method | Path | Description |
 /// |----|--------|------|-------------|
 /// | GetRepository | GET | /repos/{owner}/{repo} | Get repository metadata |
-/// | GetGitTree | GET | /repos/{owner}/{repo}/git/trees/{tree_sha} | Get tree (non-recursive) |
-/// | GetGitTreeRecursive | GET | /repos/{owner}/{repo}/git/trees/{tree_sha} | Get tree recursively |
+/// | GetGitTree | GET | /repos/{owner}/{repo}/git/trees/{tree_sha} | Get tree (optionally recursive) |
 /// | GetRepositoryContentRaw | GET | /repos/{owner}/{repo}/contents/{path} | Get raw file content |
 /// | ListPullRequests | GET | /repos/{owner}/{repo}/pulls | List pull requests |
 /// | ListPullRequestFiles | GET | /repos/{owner}/{repo}/pulls/{pull_number}/files | List PR files |
@@ -123,7 +122,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | ListOrgRepos | GET | /orgs/{org}/repos | List organization repositories |
 ///
 /// All `List*` endpoints support pagination via `page` and `per_page` query parameters.
-/// The `GetGitTreeRecursive` endpoint has a required `recursive` boolean parameter.
+/// `GetGitTree` takes an optional `recursive` boolean query parameter.
 ///
 /// ## Examples
 ///
@@ -132,7 +131,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 ///
 /// let api = define_github_api();
 /// assert_eq!(api.name, "GitHub");
-/// assert_eq!(api.endpoints.len(), 17);
+/// assert_eq!(api.endpoints.len(), 16);
 /// ```
 pub fn define_github_api() -> RestApi {
     RestApi {
@@ -178,18 +177,8 @@ pub fn define_github_api() -> RestApi {
                 id: "GetGitTree".to_string(),
                 method: RestMethod::Get,
                 path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
-                description: "Get a Git tree (non-recursive, single level)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitTreeResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetGitTreeRecursive".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
-                description: "Get a Git tree recursively (may truncate at 100k entries or 7MB)"
+                description: "Get a Git tree; set `recursive` to include every nested entry \
+                              (may truncate at 100k entries or 7MB)"
                     .to_string(),
                 request: None,
                 response: ApiResponse::json_type("GitTreeResponse"),
@@ -197,8 +186,8 @@ pub fn define_github_api() -> RestApi {
                 params: Some(EndpointParams::default().with_query_param(
                     "recursive",
                     QueryParamType::Boolean,
-                    true,
-                    Some("Fetch tree recursively (always true for this endpoint)"),
+                    false,
+                    Some("Fetch the tree recursively instead of a single level"),
                 )),
                 oauth_scopes: None,
             },
@@ -627,7 +616,7 @@ mod tests {
     #[test]
     fn api_has_seventeen_endpoints() {
         let api = define_github_api();
-        assert_eq!(api.endpoints.len(), 17);
+        assert_eq!(api.endpoints.len(), 16);
     }
 
     #[test]
@@ -646,23 +635,25 @@ mod tests {
     }
 
     #[test]
-    fn git_tree_endpoints() {
+    fn git_tree_endpoint_has_optional_recursive_query_param() {
         let api = define_github_api();
 
         let tree = api.endpoints.iter().find(|e| e.id == "GetGitTree").unwrap();
         assert_eq!(tree.path, "/repos/{owner}/{repo}/git/trees/{tree_sha}");
         assert!(!tree.path.contains("recursive"));
-        assert!(tree.params.is_none());
-
-        let recursive = api
-            .endpoints
+        assert!(
+            matches!(&tree.response, ApiResponse::Json(schema) if schema.type_name == "GitTreeResponse")
+        );
+        let params = tree.params.as_ref().expect("should have params");
+        let recursive = params
+            .query
             .iter()
-            .find(|e| e.id == "GetGitTreeRecursive")
-            .unwrap();
-        assert_eq!(recursive.path, "/repos/{owner}/{repo}/git/trees/{tree_sha}");
-        // recursive param is now explicit
-        let params = recursive.params.as_ref().expect("should have params");
-        assert!(params.query.iter().any(|p| p.name == "recursive"));
+            .find(|p| p.name == "recursive")
+            .expect("recursive query param missing");
+        assert!(!recursive.required);
+        assert!(matches!(recursive.param_type, QueryParamType::Boolean));
+
+        assert!(api.endpoints.iter().all(|e| e.id != "GetGitTreeRecursive"));
     }
 
     #[test]
@@ -861,7 +852,6 @@ mod tests {
         let single_endpoints = [
             "GetRepository",
             "GetGitTree",
-            "GetGitTreeRecursive",
             "GetIssue",
             "GetTagReference",
             "GetBranchReference",

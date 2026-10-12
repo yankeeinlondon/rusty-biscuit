@@ -222,33 +222,15 @@ impl Bitbucket {
         let bytes = response.bytes().await?;
         Ok(bytes)
     }
-    /// Executes an API request expecting a plain text response.
+    /// Convenience method for the `GetSource` endpoint.
     ///
-    /// Returns the response body as a String.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
+    /// Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request_text(
+    pub async fn get_source(
         &self,
-        request: impl Into<BitbucketRequest>,
-    ) -> Result<String, SchematicError> {
-        let (response, _ctx) = self.build_and_send_request(request).await?;
-        let text = response.text().await?;
-        Ok(text)
-    }
-    /// Convenience method for the `GetFileContentRaw` endpoint.
-    ///
-    /// Get raw file content at a specific commit
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn get_file_content_raw(
-        &self,
-        request: GetFileContentRawRequest,
-    ) -> Result<String, SchematicError> {
-        self.request_text(request).await
+        request: GetSourceRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
     }
     /// Convenience method for the `GetDownload` endpoint.
     ///

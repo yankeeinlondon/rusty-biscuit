@@ -57,20 +57,20 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
     type Response = Repository;
     const ENDPOINT_ID: &'static str = "GetRepository";
 }
-/// Request for `ListDirectoryContents` endpoint.
+/// Request for `GetSource` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::bitbucket::ListDirectoryContentsRequest;
+/// use schematic_schema::bitbucket::GetSourceRequest;
 ///
-/// let request = ListDirectoryContentsRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
+/// let request = GetSourceRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
 ///     .with_page(/* value */)
 ///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListDirectoryContentsRequest {
+pub struct GetSourceRequest {
     /// Path parameter: workspace
     pub workspace: String,
     /// Path parameter: repo_slug
@@ -84,7 +84,7 @@ pub struct ListDirectoryContentsRequest {
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
 }
-impl ListDirectoryContentsRequest {
+impl GetSourceRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(
         workspace: impl Into<String>,
@@ -144,82 +144,9 @@ impl ListDirectoryContentsRequest {
         Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
-impl crate::shared::EndpointSpec for ListDirectoryContentsRequest {
-    type Response = PaginatedResponse<SourceEntry>;
-    const ENDPOINT_ID: &'static str = "ListDirectoryContents";
-}
-/// Request for `GetFileContentRaw` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::bitbucket::GetFileContentRawRequest;
-///
-/// let request = GetFileContentRawRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GetFileContentRawRequest {
-    /// Path parameter: workspace
-    pub workspace: String,
-    /// Path parameter: repo_slug
-    pub repo_slug: String,
-    /// Path parameter: commit
-    pub commit: String,
-    /// Path parameter: path
-    pub path: String,
-}
-impl GetFileContentRawRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(
-        workspace: impl Into<String>,
-        repo_slug: impl Into<String>,
-        commit: impl Into<String>,
-        path: impl Into<String>,
-    ) -> Self {
-        Self {
-            workspace: workspace.into(),
-            repo_slug: repo_slug.into(),
-            commit: commit.into(),
-            path: path.into(),
-        }
-    }
-    /// Converts the request into (method, path, body, headers, query) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Path with path parameters substituted; declared query parameters
-    ///   are not part of it
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    /// - Declared query parameters as unencoded key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/src/{}/{}", urlencoding::encode(& self.workspace
-            .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
-            urlencoding::encode(& self.commit.to_string()), urlencoding::encode(& self
-            .path.to_string())
-        );
-        let query: Vec<(String, String)> = Vec::new();
-        Ok((
-            "GET",
-            path,
-            crate::shared::RequestBody::Empty,
-            vec![("Accept".to_string(), "text/plain".to_string())],
-            query,
-        ))
-    }
-}
-impl crate::shared::EndpointSpec for GetFileContentRawRequest {
-    type Response = String;
-    const ENDPOINT_ID: &'static str = "GetFileContentRaw";
+impl crate::shared::EndpointSpec for GetSourceRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "GetSource";
 }
 /// Request for `ListPullRequests` endpoint.
 ///
@@ -1205,7 +1132,7 @@ impl crate::shared::EndpointSpec for ListWorkspaceReposRequest {
     type Response = PaginatedResponse<Repository>;
     const ENDPOINT_ID: &'static str = "ListWorkspaceRepos";
 }
-impl Paginated for ListDirectoryContentsRequest {}
+impl Paginated for GetSourceRequest {}
 impl Paginated for ListPullRequestsRequest {}
 impl Paginated for ListPullRequestCommentsRequest {}
 impl Paginated for ListIssuesRequest {}
@@ -1220,10 +1147,8 @@ impl Paginated for ListWorkspaceReposRequest {}
 pub enum BitbucketRequest {
     /// Get repository metadata including default branch and workspace info
     GetRepository(GetRepositoryRequest),
-    /// List directory contents at a specific commit
-    ListDirectoryContents(ListDirectoryContentsRequest),
-    /// Get raw file content at a specific commit
-    GetFileContentRaw(GetFileContentRawRequest),
+    /// Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit
+    GetSource(GetSourceRequest),
     /// List pull requests (all states)
     ListPullRequests(ListPullRequestsRequest),
     /// Get a single pull request by ID
@@ -1252,19 +1177,20 @@ pub enum BitbucketRequest {
     ListWorkspaceRepos(ListWorkspaceReposRequest),
 }
 impl BitbucketRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// Delegates to the inner request struct's `into_parts()` method.
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns the inner request's error: `SchematicError::SerializationError`
+    /// if a JSON request body fails to serialize, or `SchematicError::Header`
+    /// if an endpoint's static `Cookie` header cannot be parsed while
+    /// cookie parameters are merged into it.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::GetRepository(req) => req.into_parts(),
-            Self::ListDirectoryContents(req) => req.into_parts(),
-            Self::GetFileContentRaw(req) => req.into_parts(),
+            Self::GetSource(req) => req.into_parts(),
             Self::ListPullRequests(req) => req.into_parts(),
             Self::GetPullRequest(req) => req.into_parts(),
             Self::ListPullRequestComments(req) => req.into_parts(),
@@ -1289,11 +1215,8 @@ impl BitbucketRequest {
             Self::GetRepository(_) => {
                 <GetRepositoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListDirectoryContents(_) => {
-                <ListDirectoryContentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetFileContentRaw(_) => {
-                <GetFileContentRawRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            Self::GetSource(_) => {
+                <GetSourceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListPullRequests(_) => {
                 <ListPullRequestsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
@@ -1344,8 +1267,7 @@ impl BitbucketRequest {
     pub fn response_kind(&self) -> crate::shared::ResponseKind {
         match self {
             Self::GetRepository(_) => crate::shared::ResponseKind::Json,
-            Self::ListDirectoryContents(_) => crate::shared::ResponseKind::Json,
-            Self::GetFileContentRaw(_) => crate::shared::ResponseKind::Text,
+            Self::GetSource(_) => crate::shared::ResponseKind::Binary,
             Self::ListPullRequests(_) => crate::shared::ResponseKind::Json,
             Self::GetPullRequest(_) => crate::shared::ResponseKind::Json,
             Self::ListPullRequestComments(_) => crate::shared::ResponseKind::Json,
@@ -1367,14 +1289,9 @@ impl From<GetRepositoryRequest> for BitbucketRequest {
         Self::GetRepository(req)
     }
 }
-impl From<ListDirectoryContentsRequest> for BitbucketRequest {
-    fn from(req: ListDirectoryContentsRequest) -> Self {
-        Self::ListDirectoryContents(req)
-    }
-}
-impl From<GetFileContentRawRequest> for BitbucketRequest {
-    fn from(req: GetFileContentRawRequest) -> Self {
-        Self::GetFileContentRaw(req)
+impl From<GetSourceRequest> for BitbucketRequest {
+    fn from(req: GetSourceRequest) -> Self {
+        Self::GetSource(req)
     }
 }
 impl From<ListPullRequestsRequest> for BitbucketRequest {

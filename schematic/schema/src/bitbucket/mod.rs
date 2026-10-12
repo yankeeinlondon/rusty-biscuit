@@ -12,8 +12,7 @@
 //!
 //! **GET**:
 //! - `GetRepository` - Get repository metadata including default branch and workspace info
-//! - `ListDirectoryContents` - List directory contents at a specific commit
-//! - `GetFileContentRaw` - Get raw file content at a specific commit
+//! - `GetSource` - Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit
 //! - `ListPullRequests` - List pull requests (all states)
 //! - `GetPullRequest` - Get a single pull request by ID
 //! - `ListPullRequestComments` - List comments on a pull request

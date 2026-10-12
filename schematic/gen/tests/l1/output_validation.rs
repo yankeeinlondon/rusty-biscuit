@@ -10,10 +10,13 @@ use std::path::Path;
 use std::process::Command;
 
 use biscuit_test_harness::bin_exe;
+use schematic_define::auth::ApiKeyLocation;
+use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
+use schematic_gen::export::postman::{write_postman, write_postman_grouped};
 use schematic_gen::pipeline::{
     BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
 };
@@ -265,6 +268,311 @@ fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
 }
 
 #[test]
+fn same_api_duplicate_route_blocks_every_output() {
+    let roots = Roots::new();
+    let mut routes = fixture_api("Routes", "routes", "serde_json::Value");
+    routes.endpoints[0].path = "/things/{id}".to_string();
+    // Only the path-parameter name differs, so the route is the same.
+    let mut twin = routes.endpoints[0].clone();
+    twin.id = "FetchThing".to_string();
+    twin.path = "/things/{name}".to_string();
+    routes.endpoints.push(twin);
+    let registry_for = |_: &str| Some(SchemaRegistry::new());
+
+    let report = generate_batch(
+        &[routes],
+        &BatchScope::Complete,
+        &roots.opts(),
+        &registry_for,
+    );
+
+    assert_eq!(
+        report.failed(),
+        vec![Output::Rust, Output::OpenApi, Output::Postman]
+    );
+    for output in [Output::Rust, Output::OpenApi, Output::Postman] {
+        let diagnostics = &report.get(output).unwrap().diagnostics;
+        let found: Vec<_> = diagnostics
+            .iter()
+            .map(|d| (d.severity, d.feature, d.endpoint.as_deref()))
+            .collect();
+        assert_eq!(
+            found,
+            vec![(
+                Severity::Error,
+                Feature::DuplicateMethodPath,
+                Some("FetchThing")
+            )],
+            "{output}"
+        );
+    }
+    // Nothing of any output was published.
+    assert_eq!(snapshot_or_absent(roots.schema_dir()), None);
+    assert_eq!(snapshot_or_absent(Path::new(&roots.openapi)), None);
+    assert_eq!(snapshot_or_absent(Path::new(&roots.postman)), None);
+    assert!(report.into_result().is_err());
+}
+
+fn located_param(name: &str, required: bool) -> ParamDef {
+    ParamDef {
+        name: name.to_string(),
+        required,
+        description: Some(format!("{name} input")),
+        param_type: QueryParamType::String,
+        explode: false,
+        style: ParamStyle::Form,
+    }
+}
+
+/// An API whose one endpoint declares a required and an optional parameter
+/// in both the header and the cookie location.
+fn header_and_cookie_api() -> RestApi {
+    let mut api = fixture_api("Located", "located", "serde_json::Value");
+    api.endpoints[0].params = Some(EndpointParams {
+        header: vec![
+            located_param("x-required", true),
+            located_param("x-optional", false),
+        ],
+        cookie: vec![
+            located_param("session", true),
+            located_param("theme", false),
+        ],
+        ..EndpointParams::default()
+    });
+    api
+}
+
+/// `(key, value, disabled)` for every header of the collection's only request.
+fn request_headers(collection: &serde_json::Value) -> Vec<(String, String, bool)> {
+    crate::postman_schema::validate_postman_json(collection).expect("valid Postman collection");
+    // Requests sit inside folders; descend to the only one.
+    let mut item = collection;
+    while item.get("request").is_none() {
+        let children = item["item"].as_array().expect("items");
+        assert_eq!(children.len(), 1, "{collection:#}");
+        item = &children[0];
+    }
+    item["request"]["header"]
+        .as_array()
+        .expect("header array")
+        .iter()
+        .map(|header| {
+            (
+                header["key"].as_str().unwrap().to_string(),
+                header["value"].as_str().unwrap().to_string(),
+                header["disabled"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect()
+}
+
+fn read_json(path: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn header_and_cookie_parameters_reach_every_postman_writer() {
+    let expected = vec![
+        ("x-required".to_string(), "<x-required>".to_string(), false),
+        ("x-optional".to_string(), "<x-optional>".to_string(), true),
+        ("Cookie".to_string(), "session=<session>".to_string(), false),
+        ("Cookie".to_string(), "theme=<theme>".to_string(), true),
+    ];
+    let api = header_and_cookie_api();
+
+    // Batch generator: every output succeeds with no diagnostic at all.
+    let roots = Roots::new();
+    let report = generate_batch(
+        std::slice::from_ref(&api),
+        &BatchScope::Complete,
+        &roots.opts(),
+        &|_: &str| Some(SchemaRegistry::new()),
+    );
+    assert!(report.failed().is_empty(), "{:#?}", report.outputs);
+    for output in [Output::Rust, Output::OpenApi, Output::Postman] {
+        assert!(
+            report.get(output).unwrap().diagnostics.is_empty(),
+            "{output}: {:#?}",
+            report.get(output).unwrap().diagnostics
+        );
+    }
+    let batch = read_json(&Path::new(&roots.postman).join("located.postman_collection.json"));
+    assert_eq!(request_headers(&batch), expected);
+
+    // OpenAPI declares all four in their own locations.
+    let openapi = std::fs::read_to_string(Path::new(&roots.openapi).join("located.json")).unwrap();
+    let openapi: serde_json::Value = serde_json::from_str(&openapi).unwrap();
+    let declared: Vec<(&str, &str, bool)> = openapi["paths"]["/things"]["get"]["parameters"]
+        .as_array()
+        .expect("parameters")
+        .iter()
+        .map(|p| {
+            (
+                p["in"].as_str().unwrap(),
+                p["name"].as_str().unwrap(),
+                p["required"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            ("header", "x-required", true),
+            ("header", "x-optional", false),
+            ("cookie", "session", true),
+            ("cookie", "theme", false),
+        ]
+    );
+
+    // The single-API and grouped writers produce the same request headers.
+    let dir = tempfile::tempdir().unwrap();
+    let single = write_postman(&api, dir.path(), false).expect("single-API writer");
+    assert_eq!(request_headers(&read_json(&single)), expected);
+    let grouped =
+        write_postman_grouped(&[&api], "grouped", dir.path(), false).expect("grouped writer");
+    assert_eq!(request_headers(&read_json(&grouped)), expected);
+}
+
+#[test]
+fn cookie_api_key_rides_a_cookie_header_in_postman() {
+    let mut api = fixture_api("CookieKey", "cookie_key", "serde_json::Value");
+    api.auth = AuthStrategy::ApiKeyParam {
+        name: "sid".to_string(),
+        location: ApiKeyLocation::Cookie,
+    };
+    api.env_auth = vec!["COOKIE_KEY".to_string()];
+    let dir = tempfile::tempdir().unwrap();
+
+    let collection = read_json(&write_postman(&api, dir.path(), false).unwrap());
+
+    crate::postman_schema::validate_postman_json(&collection).expect("valid Postman collection");
+    // Postman's API-key auth places a key only in a header or the query.
+    assert_eq!(
+        collection["auth"],
+        serde_json::json!({
+            "type": "apikey",
+            "apikey": [
+                { "key": "key", "value": "Cookie" },
+                { "key": "value", "value": "sid={{apiKey}}" },
+                { "key": "in", "value": "header" },
+            ],
+        })
+    );
+}
+
+fn array_of(inner: QueryParamType) -> QueryParamType {
+    QueryParamType::Array(Box::new(inner))
+}
+
+/// An API whose one endpoint declares `param_type` as its only parameter, at
+/// the location `place` puts it.
+fn api_with_located_type(
+    place: fn(ParamDef) -> EndpointParams,
+    param_type: QueryParamType,
+) -> RestApi {
+    let mut api = fixture_api("Located", "located", "serde_json::Value");
+    api.endpoints[0].params = Some(place(ParamDef {
+        param_type,
+        ..located_param("flags", false)
+    }));
+    api
+}
+
+type Placement = (&'static str, Feature, fn(ParamDef) -> EndpointParams);
+
+const PLACEMENTS: [Placement; 3] = [
+    ("query", Feature::QueryParameter, |param| EndpointParams {
+        query: vec![param],
+        ..EndpointParams::default()
+    }),
+    ("header", Feature::HeaderParameter, |param| EndpointParams {
+        header: vec![param],
+        ..EndpointParams::default()
+    }),
+    ("cookie", Feature::CookieParameter, |param| EndpointParams {
+        cookie: vec![param],
+        ..EndpointParams::default()
+    }),
+];
+
+#[test]
+fn nested_arrays_fail_the_rust_client_at_every_parameter_location() {
+    for (location, feature, place) in PLACEMENTS {
+        let flat = api_with_located_type(place, array_of(QueryParamType::Boolean));
+        assert!(
+            validate_rust_client(&[&flat]).is_empty(),
+            "{location}: flat array"
+        );
+
+        let nested = api_with_located_type(place, array_of(array_of(QueryParamType::Boolean)));
+        let diagnostics = validate_rust_client(&[&nested]);
+        assert_eq!(
+            diagnostics,
+            vec![ValidationDiagnostic::new(
+                Severity::Error,
+                "Located",
+                Some("ListThings"),
+                feature,
+                Output::Rust,
+                format!(
+                    "{location} parameter `flags` is an array of arrays, which has no \
+                     {location} serialization"
+                ),
+            )],
+            "{location}"
+        );
+        // OpenAPI states the nested shape as a schema; Postman carries no
+        // parameter type. Neither export has anything to reject.
+        assert!(validate_openapi(&[&nested]).is_empty(), "{location}");
+        assert!(validate_postman(&[&nested]).is_empty(), "{location}");
+    }
+}
+
+#[test]
+fn nested_query_array_leaves_earlier_rust_output_untouched() {
+    let roots = Roots::new();
+    std::fs::create_dir_all(&roots.rust).unwrap();
+    std::fs::write(Path::new(&roots.rust).join("lib.rs"), "// earlier output\n").unwrap();
+    let rust_before = snapshot_tree(roots.schema_dir());
+    let (_, _, query) = PLACEMENTS[0];
+    let api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
+    let registry_for = |module: &str| (module == "located").then(SchemaRegistry::new);
+
+    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts(), &registry_for);
+
+    assert_eq!(report.failed(), vec![Output::Rust]);
+    assert_eq!(report.succeeded(), vec![Output::OpenApi, Output::Postman]);
+    assert_eq!(snapshot_tree(roots.schema_dir()), rust_before);
+    assert!(!roots.schema_dir().join("Cargo.toml").exists());
+}
+
+#[test]
+fn live_definitions_declare_no_nested_array_parameters() {
+    let apis = resolve_all_apis();
+    let refs: Vec<&RestApi> = apis.iter().collect();
+
+    let nested: Vec<ValidationDiagnostic> = validate_rust_client(&refs)
+        .into_iter()
+        .filter(|d| d.message.contains("array of arrays"))
+        .collect();
+    assert!(nested.is_empty(), "{nested:#?}");
+}
+
+#[test]
+fn live_definitions_declare_no_duplicate_routes() {
+    let apis = resolve_all_apis();
+    let refs: Vec<&RestApi> = apis.iter().collect();
+
+    let duplicates: Vec<ValidationDiagnostic> = validate_rust_client(&refs)
+        .into_iter()
+        .chain(validate_openapi(&refs))
+        .chain(validate_postman(&refs))
+        .filter(|d| d.feature == Feature::DuplicateMethodPath)
+        .collect();
+    assert!(duplicates.is_empty(), "{duplicates:#?}");
+}
+
+#[test]
 fn grouped_document_renames_a_shared_raw_id() {
     let roots = Roots::new();
     // The Ollama shape: one raw id in two group members, distinct routes,
@@ -349,6 +657,12 @@ fn live_definitions_warn_once_per_output_for_each_embedded_query() {
     for (output, diagnostics) in &by_output {
         let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
         assert!(errors.is_empty(), "{output}: {errors:#?}");
+        // Embedded queries are the only accepted gap in any output.
+        let other: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.feature != Feature::QueryInPath)
+            .collect();
+        assert!(other.is_empty(), "{output}: {other:#?}");
 
         let warned: Vec<(String, String)> = diagnostics
             .iter()

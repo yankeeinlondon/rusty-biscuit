@@ -21,32 +21,35 @@ pub(crate) fn build_collection_auth(auth: &ExportAuth) -> Option<PostmanAuth> {
             header,
             variable,
             location,
-        } => Some(PostmanAuth {
-            type_field: "apikey".to_string(),
-            bearer: None,
-            apikey: Some(vec![
-                PostmanVariable {
-                    key: "key".to_string(),
-                    value: Some(header.clone()),
-                    description: None,
-                },
-                PostmanVariable {
-                    key: "value".to_string(),
-                    value: Some(format!("{{{{{}}}}}", variable)),
-                    description: None,
-                },
-                PostmanVariable {
-                    key: "in".to_string(),
-                    value: Some(match location {
-                        ApiKeyLocation::Header => "header".to_string(),
-                        ApiKeyLocation::Query => "query".to_string(),
-                        ApiKeyLocation::Cookie => "cookie".to_string(),
-                    }),
-                    description: None,
-                },
-            ]),
-            basic: None,
-        }),
+        } => {
+            let reference = format!("{{{{{}}}}}", variable);
+            // Postman's API-key auth adds only a header or a query parameter,
+            // so a cookie key is sent as a `Cookie` header holding the pair.
+            let (key, value, placement) = match location {
+                ApiKeyLocation::Header => (header.clone(), reference, "header"),
+                ApiKeyLocation::Query => (header.clone(), reference, "query"),
+                ApiKeyLocation::Cookie => (
+                    "Cookie".to_string(),
+                    format!("{header}={reference}"),
+                    "header",
+                ),
+            };
+            let attribute = |key: &str, value: String| PostmanVariable {
+                key: key.to_string(),
+                value: Some(value),
+                description: None,
+            };
+            Some(PostmanAuth {
+                type_field: "apikey".to_string(),
+                bearer: None,
+                apikey: Some(vec![
+                    attribute("key", key),
+                    attribute("value", value),
+                    attribute("in", placement.to_string()),
+                ]),
+                basic: None,
+            })
+        }
         ExportAuth::Basic {
             username_var,
             password_var,

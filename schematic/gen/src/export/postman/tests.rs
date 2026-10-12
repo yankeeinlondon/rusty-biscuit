@@ -156,8 +156,19 @@ fn auth_api_key_cookie_location() {
 
     assert_eq!(postman_auth.type_field, "apikey");
     let apikey = postman_auth.apikey.unwrap();
-    assert_eq!(apikey[2].key, "in");
-    assert_eq!(apikey[2].value, Some("cookie".to_string()));
+    let attributes: Vec<(&str, Option<&str>)> = apikey
+        .iter()
+        .map(|a| (a.key.as_str(), a.value.as_deref()))
+        .collect();
+    // Postman has no cookie placement for API keys; the key rides a Cookie header.
+    assert_eq!(
+        attributes,
+        vec![
+            ("key", Some("Cookie")),
+            ("value", Some("api_key={{apiKey}}")),
+            ("in", Some("header")),
+        ]
+    );
 }
 
 #[test]

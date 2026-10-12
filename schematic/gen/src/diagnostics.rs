@@ -103,6 +103,8 @@ pub enum Feature {
     BinaryRequestBody,
     /// An API key sent as a query parameter or cookie.
     ApiKeyParam,
+    /// `EndpointParams.query` entries.
+    QueryParameter,
     /// `EndpointParams.header` entries.
     HeaderParameter,
     /// `EndpointParams.cookie` entries.
@@ -141,6 +143,7 @@ impl Feature {
             Self::TextRequestBody => "text-request-body",
             Self::BinaryRequestBody => "binary-request-body",
             Self::ApiKeyParam => "api-key-param",
+            Self::QueryParameter => "query-parameter",
             Self::HeaderParameter => "header-parameter",
             Self::CookieParameter => "cookie-parameter",
             Self::DuplicateEndpointId => "duplicate-endpoint-id",
@@ -329,6 +332,7 @@ mod tests {
             Feature::TextRequestBody,
             Feature::BinaryRequestBody,
             Feature::ApiKeyParam,
+            Feature::QueryParameter,
             Feature::HeaderParameter,
             Feature::CookieParameter,
             Feature::DuplicateEndpointId,

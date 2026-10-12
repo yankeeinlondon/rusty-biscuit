@@ -65,6 +65,7 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
 /// use schematic_schema::github::GetGitTreeRequest;
 ///
 /// let request = GetGitTreeRequest::new("owner_value", "repo_value", "tree_sha_value")
+///     .with_recursive(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -75,73 +76,10 @@ pub struct GetGitTreeRequest {
     pub repo: String,
     /// Path parameter: tree_sha
     pub tree_sha: String,
-}
-impl GetGitTreeRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(
-        owner: impl Into<String>,
-        repo: impl Into<String>,
-        tree_sha: impl Into<String>,
-    ) -> Self {
-        Self {
-            owner: owner.into(),
-            repo: repo.into(),
-            tree_sha: tree_sha.into(),
-        }
-    }
-    /// Converts the request into (method, path, body, headers, query) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Path with path parameters substituted; declared query parameters
-    ///   are not part of it
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    /// - Declared query parameters as unencoded key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/git/trees/{}", urlencoding::encode(& self.owner.to_string()),
-            urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
-            .tree_sha.to_string())
-        );
-        let query: Vec<(String, String)> = Vec::new();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
-    }
-}
-impl crate::shared::EndpointSpec for GetGitTreeRequest {
-    type Response = GitTreeResponse;
-    const ENDPOINT_ID: &'static str = "GetGitTree";
-}
-/// Request for `GetGitTreeRecursive` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::github::GetGitTreeRecursiveRequest;
-///
-/// let request = GetGitTreeRecursiveRequest::new("owner_value", "repo_value", "tree_sha_value")
-///     .with_recursive(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GetGitTreeRecursiveRequest {
-    /// Path parameter: owner
-    pub owner: String,
-    /// Path parameter: repo
-    pub repo: String,
-    /// Path parameter: tree_sha
-    pub tree_sha: String,
-    /// Query parameter: Fetch tree recursively (always true for this endpoint)
+    /// Query parameter: Fetch the tree recursively instead of a single level
     pub recursive: Option<bool>,
 }
-impl GetGitTreeRecursiveRequest {
+impl GetGitTreeRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(
         owner: impl Into<String>,
@@ -189,9 +127,9 @@ impl GetGitTreeRecursiveRequest {
         Ok(("GET", path, crate::shared::RequestBody::Empty, vec![], query))
     }
 }
-impl crate::shared::EndpointSpec for GetGitTreeRecursiveRequest {
+impl crate::shared::EndpointSpec for GetGitTreeRequest {
     type Response = GitTreeResponse;
-    const ENDPOINT_ID: &'static str = "GetGitTreeRecursive";
+    const ENDPOINT_ID: &'static str = "GetGitTree";
 }
 /// Request for `GetRepositoryContentRaw` endpoint.
 ///
@@ -1413,10 +1351,8 @@ impl Paginated for ListOrgReposRequest {}
 pub enum GitHubRequest {
     /// Get repository metadata including default branch
     GetRepository(GetRepositoryRequest),
-    /// Get a Git tree (non-recursive, single level)
+    /// Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)
     GetGitTree(GetGitTreeRequest),
-    /// Get a Git tree recursively (may truncate at 100k entries or 7MB)
-    GetGitTreeRecursive(GetGitTreeRecursiveRequest),
     /// Get raw file content from repository
     GetRepositoryContentRaw(GetRepositoryContentRawRequest),
     /// List pull requests with metadata
@@ -1447,19 +1383,20 @@ pub enum GitHubRequest {
     ListOrgRepos(ListOrgReposRequest),
 }
 impl GitHubRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// Delegates to the inner request struct's `into_parts()` method.
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns the inner request's error: `SchematicError::SerializationError`
+    /// if a JSON request body fails to serialize, or `SchematicError::Header`
+    /// if an endpoint's static `Cookie` header cannot be parsed while
+    /// cookie parameters are merged into it.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::GetRepository(req) => req.into_parts(),
             Self::GetGitTree(req) => req.into_parts(),
-            Self::GetGitTreeRecursive(req) => req.into_parts(),
             Self::GetRepositoryContentRaw(req) => req.into_parts(),
             Self::ListPullRequests(req) => req.into_parts(),
             Self::ListPullRequestFiles(req) => req.into_parts(),
@@ -1487,9 +1424,6 @@ impl GitHubRequest {
             }
             Self::GetGitTree(_) => {
                 <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetGitTreeRecursive(_) => {
-                <GetGitTreeRecursiveRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::GetRepositoryContentRaw(_) => {
                 <GetRepositoryContentRawRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
@@ -1544,7 +1478,6 @@ impl GitHubRequest {
         match self {
             Self::GetRepository(_) => crate::shared::ResponseKind::Json,
             Self::GetGitTree(_) => crate::shared::ResponseKind::Json,
-            Self::GetGitTreeRecursive(_) => crate::shared::ResponseKind::Json,
             Self::GetRepositoryContentRaw(_) => crate::shared::ResponseKind::Text,
             Self::ListPullRequests(_) => crate::shared::ResponseKind::Json,
             Self::ListPullRequestFiles(_) => crate::shared::ResponseKind::Json,
@@ -1570,11 +1503,6 @@ impl From<GetRepositoryRequest> for GitHubRequest {
 impl From<GetGitTreeRequest> for GitHubRequest {
     fn from(req: GetGitTreeRequest) -> Self {
         Self::GetGitTree(req)
-    }
-}
-impl From<GetGitTreeRecursiveRequest> for GitHubRequest {
-    fn from(req: GetGitTreeRecursiveRequest) -> Self {
-        Self::GetGitTreeRecursive(req)
     }
 }
 impl From<GetRepositoryContentRawRequest> for GitHubRequest {

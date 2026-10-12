@@ -37,12 +37,12 @@
 //!     .with_pagelen(100);
 //! ```
 //!
-//! ## Endpoint Coverage (16 endpoints)
+//! ## Endpoint Coverage (15 endpoints)
 //!
 //! | Category | Endpoints |
 //! |----------|-----------|
 //! | Repository | `GetRepository` |
-//! | Contents | `ListDirectoryContents`, `GetFileContentRaw` |
+//! | Contents | `GetSource` |
 //! | Pull Requests | `ListPullRequests`, `GetPullRequest`, `ListPullRequestComments` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueChanges` |
 //! | Branches | `GetBranch` |
@@ -116,8 +116,7 @@ fn bitbucket_pagination() -> EndpointParams {
 /// | ID | Method | Path | Description |
 /// |----|--------|------|-------------|
 /// | GetRepository | GET | /repositories/{workspace}/{repo_slug} | Get repository metadata |
-/// | ListDirectoryContents | GET | /repositories/{workspace}/{repo_slug}/src/{commit}/{path} | List directory contents |
-/// | GetFileContentRaw | GET | /repositories/{workspace}/{repo_slug}/src/{commit}/{path} | Get raw file content |
+/// | GetSource | GET | /repositories/{workspace}/{repo_slug}/src/{commit}/{path} | Directory listing or raw file content |
 /// | ListPullRequests | GET | /repositories/{workspace}/{repo_slug}/pullrequests | List pull requests |
 /// | GetPullRequest | GET | /repositories/{workspace}/{repo_slug}/pullrequests/{id} | Get single PR |
 /// | ListPullRequestComments | GET | /repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments | List PR comments |
@@ -139,7 +138,7 @@ fn bitbucket_pagination() -> EndpointParams {
 ///
 /// let api = define_bitbucket_api();
 /// assert_eq!(api.name, "Bitbucket");
-/// assert_eq!(api.endpoints.len(), 16);
+/// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_bitbucket_api() -> RestApi {
     RestApi {
@@ -173,25 +172,20 @@ pub fn define_bitbucket_api() -> RestApi {
             // Directory and File Contents
             // =================================================================
             Endpoint {
-                id: "ListDirectoryContents".to_string(),
+                id: "GetSource".to_string(),
                 method: RestMethod::Get,
                 path: "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}".to_string(),
-                description: "List directory contents at a specific commit".to_string(),
+                // One route serves both shapes: a directory path answers with a
+                // paginated JSON listing (`PaginatedResponse<SourceEntry>`), a
+                // file path with the raw file bytes. `Binary` is the one
+                // response that is truthful for both; the caller decodes.
+                description: "Get a directory listing (paginated JSON of SourceEntry) or the \
+                              raw content of a file at a specific commit"
+                    .to_string(),
                 request: None,
-                response: ApiResponse::json_type("PaginatedResponse<SourceEntry>"),
+                response: ApiResponse::Binary,
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetFileContentRaw".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}".to_string(),
-                description: "Get raw file content at a specific commit".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![("Accept".to_string(), "text/plain".to_string())],
-                params: None,
                 oauth_scopes: None,
             },
             // =================================================================
@@ -451,7 +445,7 @@ mod tests {
     #[test]
     fn api_has_sixteen_endpoints() {
         let api = define_bitbucket_api();
-        assert_eq!(api.endpoints.len(), 16);
+        assert_eq!(api.endpoints.len(), 15);
     }
 
     #[test]
@@ -470,53 +464,32 @@ mod tests {
     }
 
     #[test]
-    fn directory_contents_endpoint() {
+    fn source_endpoint_serves_directories_and_files_as_binary() {
         let api = define_bitbucket_api();
         let endpoint = api
             .endpoints
             .iter()
-            .find(|e| e.id == "ListDirectoryContents")
-            .expect("ListDirectoryContents endpoint missing");
+            .find(|e| e.id == "GetSource")
+            .expect("GetSource endpoint missing");
 
-        assert!(endpoint.path.contains("{commit}"));
-        assert!(endpoint.path.contains("{path}"));
-        // No hardcoded query params - they're in params field now
-        assert!(!endpoint.path.contains("?"));
-
-        match &endpoint.response {
-            ApiResponse::Json(schema) => {
-                assert!(
-                    schema.type_name.contains("PaginatedResponse<SourceEntry>"),
-                    "Expected PaginatedResponse<SourceEntry>, got {}",
-                    schema.type_name
-                );
-            }
-            _ => panic!("Expected JSON response"),
-        }
-
-        // Check pagination params
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(
+            endpoint.path,
+            "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}"
+        );
+        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        // No `Accept` override: it would break the JSON directory listing.
+        assert!(endpoint.headers.is_empty());
+        // Directory listings page through `page` / `pagelen`.
         let params = endpoint
             .params
             .as_ref()
             .expect("Should have pagination params");
         assert!(params.has_pagination());
-    }
 
-    #[test]
-    fn raw_content_endpoint_has_accept_override() {
-        let api = define_bitbucket_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "GetFileContentRaw")
-            .expect("GetFileContentRaw endpoint missing");
-
-        assert_eq!(endpoint.method, RestMethod::Get);
-        assert!(matches!(endpoint.response, ApiResponse::Text));
-
-        let accept_header = endpoint.headers.iter().find(|(k, _)| k == "Accept");
-        assert!(accept_header.is_some());
-        assert_eq!(accept_header.unwrap().1, "text/plain");
+        for removed in ["ListDirectoryContents", "GetFileContentRaw"] {
+            assert!(api.endpoints.iter().all(|e| e.id != removed), "{removed}");
+        }
     }
 
     #[test]
@@ -706,7 +679,6 @@ mod tests {
         let api = define_bitbucket_api();
 
         let list_endpoints = [
-            "ListDirectoryContents",
             "ListPullRequests",
             "ListPullRequestComments",
             "ListIssues",
@@ -757,7 +729,7 @@ mod tests {
                 .find(|e| e.id == id)
                 .unwrap_or_else(|| panic!("Endpoint {} not found", id));
 
-            // GetFileContentRaw returns Text, GetDownload returns Binary;
+            // GetSource and GetDownload return Binary;
             // only assert single-item shape for JSON responses.
             if let ApiResponse::Json(schema) = &endpoint.response {
                 assert!(
@@ -799,7 +771,7 @@ mod tests {
         let api = define_bitbucket_api();
 
         let list_endpoints = [
-            "ListDirectoryContents",
+            "GetSource",
             "ListPullRequests",
             "ListPullRequestComments",
             "ListIssues",

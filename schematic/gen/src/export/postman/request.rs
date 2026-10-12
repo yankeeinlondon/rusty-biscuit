@@ -69,25 +69,46 @@ pub(crate) fn build_url(
 }
 
 /// Builds headers for a request.
+///
+/// Declared header and cookie parameters follow the static headers, one
+/// entry each, valued with a `<name>` placeholder like path variables. A
+/// cookie parameter is a `Cookie` header carrying `name=<name>`. An optional
+/// parameter is `disabled`, so Postman sends it only once the user enables it.
 pub(crate) fn build_headers(endpoint: &Endpoint, api: &RestApi) -> Vec<PostmanHeader> {
-    let mut headers = Vec::new();
-
-    // Add API-level headers
-    for (key, value) in &api.headers {
-        headers.push(PostmanHeader {
-            key: key.clone(),
-            value: value.clone(),
-        });
-    }
+    let static_header = |key: &String, value: &String| PostmanHeader {
+        key: key.clone(),
+        value: value.clone(),
+        disabled: false,
+        description: None,
+    };
+    let mut headers: Vec<PostmanHeader> = api
+        .headers
+        .iter()
+        .map(|(key, value)| static_header(key, value))
+        .collect();
 
     // Add endpoint-level headers (override API-level)
     for (key, value) in &endpoint.headers {
         // Remove any API-level header with same key (case-insensitive)
         headers.retain(|h| !h.key.eq_ignore_ascii_case(key));
-        headers.push(PostmanHeader {
-            key: key.clone(),
-            value: value.clone(),
-        });
+        headers.push(static_header(key, value));
+    }
+
+    if let Some(params) = &endpoint.params {
+        let declared = params
+            .header
+            .iter()
+            .map(|param| (param.name.clone(), format!("<{}>", param.name), param))
+            .chain(params.cookie.iter().map(|param| {
+                let pair = format!("{}=<{}>", param.name, param.name);
+                ("Cookie".to_string(), pair, param)
+            }));
+        headers.extend(declared.map(|(key, value, param)| PostmanHeader {
+            key,
+            value,
+            disabled: !param.required,
+            description: param.description.clone(),
+        }));
     }
 
     headers

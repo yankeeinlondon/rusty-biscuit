@@ -79,17 +79,6 @@ use crate::parser::extract_path_params;
 /// change needed once they are migrated to declared query parameters.
 pub const QUERY_IN_PATH_SEVERITY: Severity = Severity::Warning;
 
-/// Severity of the `duplicate-method-path` check within one API.
-///
-/// Two endpoints of one API on the same method and normalized path are told
-/// apart only by their response or query (GitHub `GetGitTree` and
-/// `GetGitTreeRecursive`, Bitbucket `ListDirectoryContents` and
-/// `GetFileContentRaw`). The Rust client keeps both, but an OpenAPI path item
-/// holds one operation per method, so the document keeps only the later one.
-/// The finding is a warning until endpoints can be distinguished on the same
-/// route; raising this constant is the single change that makes it blocking.
-pub const DUPLICATE_METHOD_PATH_SEVERITY: Severity = Severity::Warning;
-
 /// Names every generated module brings into scope with `use`.
 ///
 /// A generated item with one of these names would clash with the import.
@@ -224,16 +213,13 @@ pub fn validate_openapi_registry(
 
 /// Validates a batch of APIs for Postman export.
 ///
-/// Checks route identity, the `query-in-path` warning, the collection file
-/// name, and header or cookie parameters, which collections do not carry.
+/// Checks route identity, the `query-in-path` warning, and the collection
+/// file name.
 pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::Postman, &mut diagnostics);
         check_export_filename(api, Output::Postman, &mut diagnostics);
-        for endpoint in &api.endpoints {
-            check_unsent_params(api, endpoint, Output::Postman, &mut diagnostics);
-        }
     }
     diagnostics
 }
@@ -276,19 +262,15 @@ fn check_routes(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationD
 
         let key = endpoint_uniqueness_key(endpoint);
         if let Some(first) = routes.get(&key) {
-            let consequence = if output == Output::OpenApi {
-                "; the document keeps only one of the two operations"
-            } else {
-                ""
-            };
             diagnostics.push(ValidationDiagnostic::new(
-                DUPLICATE_METHOD_PATH_SEVERITY,
+                Severity::Error,
                 &api.name,
                 Some(&endpoint.id),
                 Feature::DuplicateMethodPath,
                 output,
                 format!(
-                    "{} {} is already declared by endpoint `{first}`{consequence}",
+                    "{} {} is already declared by endpoint `{first}`; an endpoint is its \
+                     method and path, so merge the two into one endpoint",
                     key.method, key.normalized_path
                 ),
             ));
@@ -419,7 +401,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
 
         check_request_struct_fields(api, endpoint, diagnostics);
         check_raw_body_content_type(api, endpoint, diagnostics);
-        check_named_params(api, endpoint, diagnostics);
+        check_sent_params(api, endpoint, diagnostics);
     }
 }
 
@@ -555,20 +537,22 @@ fn check_raw_body_content_type(
     ));
 }
 
-/// Checks the header and cookie parameters the client sends.
+/// Checks the query, header, and cookie parameters the client sends.
 ///
-/// Wire names must be HTTP tokens, since they are sent as written. Array
-/// elements are joined with `,`, so an array of arrays has no
-/// representation and is rejected rather than dropped.
-fn check_named_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
+/// Header and cookie names are sent as written, so they must be HTTP tokens;
+/// query names are percent-encoded and need no check here. Every location
+/// sends each array element through its `to_string()`, so an array of arrays
+/// has no serialization anywhere and is rejected rather than dropped.
+fn check_sent_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<ValidationDiagnostic>) {
     let Some(params) = &endpoint.params else {
         return;
     };
     let located = [
-        (Feature::HeaderParameter, "header", &params.header),
-        (Feature::CookieParameter, "cookie", &params.cookie),
+        (Feature::QueryParameter, "query", &params.query, false),
+        (Feature::HeaderParameter, "header", &params.header, true),
+        (Feature::CookieParameter, "cookie", &params.cookie, true),
     ];
-    for (feature, location, declared) in located {
+    for (feature, location, declared, wire_name_is_token) in located {
         for param in declared {
             let mut push = |message: String| {
                 diagnostics.push(ValidationDiagnostic::new(
@@ -580,7 +564,7 @@ fn check_named_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<
                     message,
                 ));
             };
-            if !is_http_token(&param.name) {
+            if wire_name_is_token && !is_http_token(&param.name) {
                 push(format!(
                     "{location} parameter name `{}` is not a valid {location} name",
                     param.name.escape_debug()
@@ -614,46 +598,6 @@ fn is_header_value(value: &str) -> bool {
     value
         .bytes()
         .all(|byte| byte == b'\t' || (0x20..=0x7E).contains(&byte))
-}
-
-/// Reports header and cookie parameters `output` does not send.
-///
-/// A required parameter that cannot be sent is an error; an optional one is a
-/// warning, since every request the output can build is still valid.
-fn check_unsent_params(
-    api: &RestApi,
-    endpoint: &Endpoint,
-    output: Output,
-    diagnostics: &mut Vec<ValidationDiagnostic>,
-) {
-    let Some(params) = &endpoint.params else {
-        return;
-    };
-    let located = [
-        (Feature::HeaderParameter, "header", &params.header),
-        (Feature::CookieParameter, "cookie", &params.cookie),
-    ];
-    for (feature, location, declared) in located {
-        for param in declared {
-            let severity = if param.required {
-                Severity::Error
-            } else {
-                Severity::Warning
-            };
-            diagnostics.push(ValidationDiagnostic::new(
-                severity,
-                &api.name,
-                Some(&endpoint.id),
-                feature,
-                output,
-                format!(
-                    "{} {location} parameter `{}` is not sent by this output",
-                    if param.required { "required" } else { "optional" },
-                    param.name
-                ),
-            ));
-        }
-    }
 }
 
 /// Lists the type names an endpoint asks the Rust client to spell, with the
@@ -1607,11 +1551,7 @@ mod tests {
             assert_eq!(features(&rust), vec![(Severity::Error, feature)], "{name}");
             assert_eq!(rust[0].endpoint.as_deref(), endpoint, "{name}");
             assert!(validate_openapi(&[&api]).is_empty(), "{name}");
-            // Postman reports only that it does not send the parameter.
-            assert!(
-                validate_postman(&[&api]).iter().all(|d| d.severity == Severity::Warning),
-                "{name}"
-            );
+            assert!(validate_postman(&[&api]).is_empty(), "{name}");
         }
     }
 
@@ -1710,12 +1650,31 @@ mod tests {
                 .collect();
             assert_eq!(
                 features(&found),
-                vec![(DUPLICATE_METHOD_PATH_SEVERITY, Feature::DuplicateMethodPath)]
+                vec![(Severity::Error, Feature::DuplicateMethodPath)]
             );
             assert_eq!(found[0].endpoint.as_deref(), Some("ByName"));
             assert!(found[0].message.contains("`ById`"), "{}", found[0]);
         }
         assert!(all_outputs(&api_with(distinct.to_vec())).is_empty());
+    }
+
+    #[test]
+    fn same_route_in_different_apis_is_not_a_duplicate() {
+        let route = || endpoint("ById", RestMethod::Get, "/items/{id}");
+        let first = RestApi {
+            name: "First".to_string(),
+            module_path: Some("first".to_string()),
+            ..api_with(vec![route()])
+        };
+        let second = RestApi {
+            name: "Second".to_string(),
+            module_path: Some("second".to_string()),
+            ..api_with(vec![route()])
+        };
+
+        assert!(validate_rust_client(&[&first, &second]).is_empty());
+        assert!(validate_openapi(&[&first, &second]).is_empty());
+        assert!(validate_postman(&[&first, &second]).is_empty());
     }
 
     #[test]
@@ -1737,9 +1696,8 @@ mod tests {
     }
 
     #[test]
-    fn interim_route_checks_are_warnings() {
+    fn query_in_path_severity_is_a_warning() {
         assert_eq!(QUERY_IN_PATH_SEVERITY, Severity::Warning);
-        assert_eq!(DUPLICATE_METHOD_PATH_SEVERITY, Severity::Warning);
     }
 
     #[test]
@@ -1769,30 +1727,6 @@ mod tests {
             assert!(validate_openapi(&[&api]).is_empty(), "{module_path}");
             assert!(validate_postman(&[&api]).is_empty(), "{module_path}");
         }
-    }
-
-    #[test]
-    fn postman_reports_unsent_header_and_cookie_parameters_by_requiredness() {
-        let api = api_with(vec![Endpoint {
-            params: Some(params(
-                vec![],
-                vec![param("x-optional", false), param("x-required", true)],
-                vec![param("session", false)],
-            )),
-            ..get("Items")
-        }]);
-
-        assert_eq!(
-            features(&validate_postman(&[&api])),
-            vec![
-                (Severity::Warning, Feature::HeaderParameter),
-                (Severity::Error, Feature::HeaderParameter),
-                (Severity::Warning, Feature::CookieParameter),
-            ]
-        );
-        // The Rust client sends them; OpenAPI declares them.
-        assert!(rust(&api).is_empty());
-        assert!(validate_openapi(&[&api]).is_empty());
     }
 
     // ---- module groups ----

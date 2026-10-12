@@ -61,29 +61,46 @@
     },
     "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}": {
       "get": {
-        "summary": "Get raw file content at a specific commit",
-        "description": "Get raw file content at a specific commit",
-        "operationId": "GetFileContentRaw",
+        "summary": "Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit",
+        "description": "Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit",
+        "operationId": "GetSource",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "description": "Page number (1-indexed, default: 1)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "pagelen",
+            "description": "Items per page (default: 50, max: 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Successful text response",
+            "description": "Successful binary response",
             "content": {
-              "text/plain": {
+              "application/octet-stream": {
                 "schema": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
           }
         },
         "x-schematic": {
-          "headers": [
-            [
-              "Accept",
-              "text/plain"
-            ]
-          ],
-          "response": "Text"
+          "response": "Binary"
         }
       },
       "parameters": [
