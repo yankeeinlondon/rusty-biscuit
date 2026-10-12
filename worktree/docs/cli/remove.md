@@ -50,6 +50,35 @@ each directory in the checkout uses one inotify watch, so a checkout with more
 directories than `fs.inotify.max_user_watches` allows, or a user already at
 `fs.inotify.max_user_instances`, cannot be watched and exits 4.
 
+On macOS, watching uses FSEvents, which watches paths rather than folders: it
+watches the checkout's path and the hidden path (each with everything below
+it) instead of the folder holding them, with the same effect. Each check for
+new activity first writes a marker file into a private folder in your
+per-user temporary directory (`wt-observe-<random>`, removed when the
+removal ends) and waits until the system reports it, because only then has
+every earlier change been reported. A check that is not confirmed within 5
+seconds counts as lost coverage, and so does the folder holding the checkout,
+or Git's record of the worktree, being moved or deleted while watching runs.
+macOS can report a folder's removal or rename in place of changes inside it
+that happened just before, so `wt` checks for activity before each such step
+of its own (**planned**: the deletion steps that need it are not built yet).
+
+On Windows, watching uses one watch on the folder holding the checkout,
+covering everything below it, and one on Git's record of the worktree.
+Changes in sibling worktrees still reach `wt` there, which ignores them. Each
+check for new activity creates a hidden marker file
+(`.wt-observe-<random>-<number>`) in each of those two folders and waits until
+Windows reports it, because Windows reports each folder's changes in order. The
+marker deletes itself when `wt` closes it, even if `wt` crashes. As on macOS,
+a check that is not confirmed within 5 seconds counts as lost coverage, and
+so does either folder being moved or deleted. So does Windows reporting that
+it dropped changes because too many arrived at once. `wt` stops watching
+Git's record before the step that removes it, so that step is never blocked.
+Windows reports a change to a file's attributes the same way as a change to its
+content. On a ReFS volume (such as a Dev Drive), a folder deleted by some
+tools is not reported at all. `wt` therefore checks every entry again
+before deleting it (**planned**: the deletion steps are not built yet).
+
 Deletion and observation cannot be atomic with all possible writers. A report
 will identify partial deletion and coverage limits rather than promise that
 every concurrent write was preserved.

@@ -255,8 +255,12 @@
   `std::fs::rename` is not used for it because it may replace an existing
   destination.
   `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
-  features, so no tokio stream) on Linux only, the same crate `notify` builds
-  on. `notify` itself is not used: it hides overflow and lost watches on
+  features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
+  FSEvents and Core Foundation declarations, including
+  `FSEventStreamFlushSync`) on macOS only; both are the crates `notify` builds
+  on. On Windows it calls `ReadDirectoryChangesW` through the same
+  `windows-sys`, adding `Win32_Security`, `Win32_System_IO`, and
+  `Win32_System_Threading` for overlapped reads and their events. `notify` itself is not used: it hides overflow and lost watches on
   Windows, drops the watch on a directory `wt` moves on Linux, and offers no
   flush on macOS, so it cannot report lost coverage.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
