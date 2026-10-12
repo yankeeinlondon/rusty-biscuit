@@ -122,7 +122,7 @@ standalone schema file. Four library errors are projected this way:
 | Library error | Example | Primary range | Related locations |
 |---|---|---|---|
 | `UnknownNamedType` | `title: nope` | the reference name | the reference and the schema searched, when they are in another file |
-| `ConstraintConflict` | `title: label(max(2))` over `label: string(min(5))` | the consuming reference name | each conflicting declaration, in its own file |
+| `ConstraintConflict` | `title: label(max(2))` over `label: string(min(5))`; `c: slug(allow-periods)` over `slug: alphanumeric(allow-dashes)` | the consuming reference name | each conflicting declaration, in its own file (for options, the definition's option group and the use site) |
 | `ImportCycle` | `a: b`, `b: a` | the whole `$schema` declaration | none |
 | `UnionReference` | `p: choice(max(10))` over `choice: [string, number]` | the consuming reference name | the reference, when it is in another file, and the union's definition (`` `choice` is defined here``), in this buffer or its own file |
 
@@ -152,7 +152,7 @@ standalone schema file. Four library errors are projected this way:
   resolved type, as `dm.schema.invalid_suggestion`. An invalid candidate the
   type inherits is reported in the file that declared it.
 
-In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. This also holds for the two line-wrapped spellings the schema grammar accepts, a plain value continued onto more-indented lines and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](./definition.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling. Ranges are converted to the editor's negotiated position encoding (UTF-8 or UTF-16).
+In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. The same holds for the core types: an unknown, repeated, misplaced, or mixed `alphanumeric` option is ranged on the option, and a non-null default on `null` (`null(default(1))`) on its argument. A native YAML null definition (`review: null`, `review: ~`, or `review:` with no value) is the `null` type and produces no diagnostic, while a quoted `""` is still *expected a type name*. A value that breaks a type is an ordinary value diagnostic: under a schema whose `initialize` actions exclude `{ shell: shell(required) }`, a `shell` action there is ranged on that list item, exactly as `md schema validate` reports it. This also holds for the two line-wrapped spellings the schema grammar accepts, a plain value continued onto more-indented lines and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](./definition.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling. Ranges are converted to the editor's negotiated position encoding (UTF-8 or UTF-16).
 
 ### Completion
 
@@ -171,7 +171,8 @@ Completion is a merged provider chain (substrate → wiki → frontmatter → DS
 
 While *authoring a schema* — inside an inline `$schema` value, a `type-definition`-typed value, or a standalone schema file — the same request flips to grammar completion, driven by the shared descriptor catalogs:
 
-- type keywords from the [`SimplifiedSchema` Types](./schema-types.md) catalog (each offered with its `[]` array form)
+- type keywords from the [`SimplifiedSchema` Types](./schema-types.md) catalog (each offered with its `[]` array form), plus each alias labeled with its canonical type (`any`, an alias of `unknown`)
+- `alphanumeric` options inside `alphanumeric(` before the first `;`, leaving out the options already written there; after the `;`, only constraints
 - definition scaffolds: `{}`, `[]`, and `Name@./types.yaml`
 - constraint keywords from the [`SimplifiedSchema` Constraints](./schema-constraints.md) catalog, **filtered by the subject type's accepted-constraint list** — `min(` is not offered under a `boolean`, and the postfix `[](...)` list offers only the array-level constraint surface
 - `$schema` file references (`./schema.yaml` scaffolds plus workspace paths)
@@ -190,7 +191,7 @@ Hovering a schema-declared frontmatter property renders its full declaration —
 
 Hover also understands schema *authoring*:
 
-- hovering a property definition inside a `$schema` value or a standalone schema file renders a `type-definition` block — what the definition declares, whether it is required, its eager timing
+- hovering a property definition inside a `$schema` value or a standalone schema file renders a `type-definition` block — what the definition declares, whether it is required, its eager timing, and each built-in type's catalog description (`any` shows as `unknown` with its alias); an `alphanumeric` definition adds its canonical options and the characters it allows overall and first
 - hovering an `expression`-typed value gets the shared expression hover (parsed form plus the `ctx.*`/function catalog)
 - hovering a declared-but-unset key inside a body `{{ … }}` interpolation falls back to the schema property's description — a set frontmatter value always wins
 
@@ -228,6 +229,9 @@ reads no other file and adds no dependency.
   names of every inline arm, although each arm resolves bare names and `@this`
   only against its own top-level entries. A name offered from another arm is
   then reported as unknown.
+- `alphanumeric` options are not completed inside a reference to a named
+  `alphanumeric` type (`slug(`): a use site may only repeat its definition's
+  options, so offering them would mostly lead to a conflict.
 - When a named type and its use site both declare `suggest(...)`, the "at
   most one `suggest`" error is ranged on the whole `$schema`, because the
   inherited candidate's span belongs to another file.

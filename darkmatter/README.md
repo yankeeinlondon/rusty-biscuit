@@ -18,6 +18,8 @@ last_updated: 2026-09-17
       - start/0/then/1 Additional properties are not allowed ('sya' was unexpected) (at line 5, column 9)
   ```
 
+  Schemas are written in the compact [SimplifiedSchema](./docs/topics/schemas/definition.md#types) grammar. Its types cover text (`string`, `email`, `url`, dates and times), numbers and booleans, files, `enum` and `literal` values, objects and unions, content formats (`yaml`, `json`, `expression`, and `shell` for a shell command that is never run), `alphanumeric` for ASCII identifiers with options such as `allow-dashes`, and `unknown` (alias `any`) and `null` for values that may be anything or must be absent. `md schema about` prints the full vocabulary.
+
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 

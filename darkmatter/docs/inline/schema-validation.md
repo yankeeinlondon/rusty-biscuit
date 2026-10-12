@@ -51,7 +51,7 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `url`, `email`, `any` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
+All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
 
 ### 2. File reference
 
@@ -146,7 +146,10 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
 - Missing and explicit `null` are both **absence**, and `required` alone decides
   whether absence is an error. An eager-only `null` is therefore allowed at both
   phases; a `required; eager` `null` fails at launch; a required-but-not-eager
-  `null` is tolerated at launch and fails at completion.
+  `null` is tolerated at launch and fails at completion. A null-admitting
+  property (`null`, `unknown`, or a union with such an arm) is the exception:
+  it is optional at both phases, whatever `required`, `eager`, or `generated`
+  says (see [Null-Admitting Properties](../topics/schemas/definition.md#null-admitting-properties)).
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
@@ -330,7 +333,8 @@ When a frontmatter value is *trivially* the wrong JSON type but **unambiguously*
 | `string` (incl. `date`/`url`/`email`/`file`…) | a number or boolean scalar | its canonical string (`42` → `"42"`) |
 | `array` of `T` | an array | each element coerced by `T`'s rule |
 | `array` of a union `U` | an array | each element coerced on its own by the property-union rule: committed only when exactly one arm's coerced candidate validates |
-| `object`, `any`, bare `enum`, `null` | — | untouched |
+| `expression` / `shell` | a number or boolean scalar | its canonical string (`true` → `"true"`) |
+| `object`, `unknown`, `alphanumeric`, bare `enum`, `null` | — | untouched (`3` against `alphanumeric` is a type mismatch) |
 
 Two consequences matter:
 

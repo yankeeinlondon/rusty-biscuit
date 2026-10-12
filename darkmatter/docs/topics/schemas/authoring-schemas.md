@@ -81,7 +81,7 @@ $schema:
 
 A **constraint** is the a way to further _constrain_ a base type. There are some constraints that are available to _all_ types and others which can only be used with a subset of types:
 
-- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value)
+- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
 For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schema-constraints.md) but here's an update of our example that takes advantage of constraints:
@@ -218,9 +218,9 @@ types:
 ```
 
 Do not define the variant as `draft_owner: owner`: an alias inherits
-`required` again. A nullable union such as `[owner, "null"]`, which would
-accept `null` or an omitted value in place of an `owner`, is **planned** and not
-available yet.
+`required` again. A union with `null` does make it optional:
+`draft_owner: [owner, null]` accepts `null`, an omitted value, or a valid
+`owner` (see [Null-Admitting Properties](./definition.md#null-admitting-properties)).
 
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,

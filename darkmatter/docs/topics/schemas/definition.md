@@ -62,7 +62,7 @@ Every property value follows one of four shapes:
 
 - **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
-- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key.
+- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key. A property whose type itself admits `null` (`null`, `unknown`, or a union with one of those arms) is always optional, even when it is marked `required`; see [Null-Admitting Properties](#null-admitting-properties).
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
 - **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)). When a property fails validation, its declared description surfaces at the point of failure — in `md schema validate` (pretty and JSON output) and in compose schema-failure blocks (see [Error Rendering](#error-rendering)).
 - **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
@@ -96,9 +96,17 @@ $schema:
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
 | `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. See [Semantic Meta-Types](#semantic-meta-types).              |
 | `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. See [Semantic Meta-Types](#semantic-meta-types).  |
-| `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. Require a value with a concrete type, e.g. `unknown[](required)`.          |
+| `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. To require a value, use a concrete type, e.g. `unknown[](required)` for a required list. See [`unknown` and `null`](#unknown-and-null). |
+| `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
+| `alphanumeric` | A string of ASCII letters and digits (`[A-Za-z0-9]`), widened or narrowed by type options.          | Options before `;`, constraints after: `alphanumeric(allow-dashes; min(1))`. Lowers to a string `pattern`. Never coerces numbers or booleans. See [Alphanumeric Strings](#alphanumeric-strings). |
+| `shell`      | A string that holds a shell command: at least one non-whitespace character. Never parsed or run.       | JSON Schema `format: darkmatter-shell`. Constraints and coercion mirror `expression`. See [Shell Commands](#shell-commands). |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
+
+`unknown`, `null`, `alphanumeric`, and `shell` are built-in keywords, so a
+bare `shell` always means the built-in type. A local named type that happens
+to share one of these names is referenced explicitly as `shell@this` (see
+[Local Type References](./local-type-references.md)).
 
 ### Semantic Meta-Types
 
@@ -265,7 +273,8 @@ Every type accepts:
 
 - `required` — the property must be present. Presence may still be deferred at
   stabilized launch so an actor inside the run can supply it; it is mandatory at
-  completion.
+  completion. `required` has no effect on a property whose type admits `null`
+  (see [Null-Admitting Properties](#null-admitting-properties)).
 - `eager` — a supplied value is validated at stabilized launch. `eager` is
   timing metadata, not a presence rule: absence is allowed unless `required` is
   also declared. It is not encoded into authored JSON Schema. On a `file` item
@@ -290,7 +299,10 @@ SimplifiedSchema without mutating the instance or authored schema:
 
 Missing and explicit `null` both count as absence at these seams. An
 eager-only `null` is therefore allowed at both phases, `required; eager`
-rejects it at launch, and `required` rejects it at completion. Raw JSON Schema
+rejects it at launch, and `required` rejects it at completion. The table holds
+for every type except a null-admitting one, which is optional at both phases
+whatever its markers: neither `required`, `eager`, nor `generated` makes
+`maybe: [string(required; eager), null]` demand a value. Raw JSON Schema
 has no phase vocabulary, so its authored `required` behavior remains in force
 at launch and completion. Authors who need an actor *inside* the run to produce
 a value must therefore use SimplifiedSchema, which is the only surface where
@@ -309,6 +321,76 @@ as it hoists `required` — the constraint governs the property as a whole, whil
 the selected arm still governs the value. Interactive collection is a
 top-level-property UI, so a missing nested property is reported rather than
 synthesized.
+
+### Null-Admitting Properties
+
+Use a null-admitting type when a whole value may be left out even though the
+type you reuse says `required`. A property is **null-admitting** when its
+whole value is typed:
+
+- `null`, or `unknown` (alias `any`), without `[]`; or
+- a union, written at the property or through a named union reference, with a
+  `null` or `unknown` arm.
+
+A null-admitting property is never required. A `required` written on it,
+inherited from a named type, or hoisted from another union arm has no effect,
+and neither `eager` nor `generated` restores presence. This is how you make
+an optional variant of a required named type:
+
+```yaml
+kind: schema
+types:
+    code: string(required; min(3))
+    record: "{ code: code }"        # record.code is required (inherited)
+    draft_code: [code, null]        # optional: null, omitted, or a valid code
+```
+
+The other arms keep their constraints for non-null values, so a property
+typed `draft_code@./types.yaml` accepts `null`, omission, and `abc`, and
+rejects `ab`.
+
+The decision is made in this order:
+
+```mermaid
+flowchart LR
+    R["Resolve named types<br/>code → string(required; min(3))"] --> N{"Does the whole value<br/>admit null?"}
+    N -->|"yes: null, unknown,<br/>or a union with such an arm"| O["Optional<br/>required, eager, generated ignored"]
+    N -->|no| P{"required marker?<br/>(written, inherited, hoisted)"}
+    P -->|yes| Q[Required]
+    P -->|no| O2["Optional<br/>null counts as absent"]
+    O --> V["Validate a present value<br/>against its arms"]
+    Q --> V
+    O2 --> V
+```
+
+Named references are resolved first, so a reference to a type defined as
+`[code, null]` is optional wherever it is used. Null admission is decided
+before the ordinary optional-property `null` wrapper is added; otherwise every
+optional concrete type would look null-admitting and could never be required.
+
+The rule concerns the **whole value**, not its items or fields:
+
+| Declaration | Missing or `null` | Notes |
+|---|---|---|
+| `unknown(required)`, `null(required)` | accepted | `required` has no effect |
+| `[string(required; min(3)), null]` | accepted | `ab` is still rejected |
+| `unknown[](required)` | rejected | a list is required; its items may be anything, including `null` |
+| `null[](required)` | rejected | a list is required; every item must be `null` |
+| `"{ note: null, id: string }(required)"` | rejected | a nullable field leaves its object required |
+
+The same calculation governs validation, generated JSON Schema, trigger
+matching, composition's optional-property materialization, and launch and
+completion validation. A null-admitting property lowers to its bare fragment
+(`{}` or `{"type": "null"}`, or the union's arms) and is never placed in the
+parent's `required` list.
+
+Raw JSON Schema is unaffected: a property listed in its authored `required`
+array is required even when its schema is `{}` or `{"type": "null"}`.
+
+A host may apply its own policy to an invalid optional value. Claudine, for
+example, drops an invalid optional value with a warning instead of failing, so
+`c: ab` against `c: [string(required; min(3)), null]` is dropped by Claudine
+while `md schema validate` reports it.
 
 ### Numeric Constraints (`number`)
 
@@ -352,9 +434,11 @@ $schema:
 
 #### Eligibility
 
-`suggest(...)` is available only on exact `string` and `number` types. `number(integer)` remains eligible because `integer` is a constraint on `number`. Array forms (`string[]`, `number[]`) are eligible — their candidates describe individual elements, not whole arrays.
+`suggest(...)` is available only on exact `string` and `number` types and on `alphanumeric`. `number(integer)` remains eligible because `integer` is a constraint on `number`. Array forms (`string[]`, `number[]`) are eligible — their candidates describe individual elements, not whole arrays.
 
-`suggest(...)` is not available on `numberlike`, `date`, `datetime`, `time`, `url`, `email`, `boolean`, `boolish`, `enum`, `any`, `object`, `file`, or raw JSON Schema.
+`suggest(...)` is not available on `numberlike`, `date`, `datetime`, `time`, `url`, `email`, `boolean`, `boolish`, `enum`, `unknown`, `null`, `object`, `file`, `shell`, `expression`, or raw JSON Schema.
+
+On `alphanumeric` the check is stricter: every candidate must be a valid value of the type, or the schema fails to load (see [Alphanumeric Strings](#alphanumeric-strings)). Everywhere else an invalid candidate is only linted.
 
 #### Cardinality
 
@@ -474,7 +558,7 @@ The positional value is lexed as a YAML-style scalar, so the literal's JSON type
 
 `version: 2` in a document therefore satisfies `literal(2)` without coercion gymnastics, and quoting opts out (`literal('2')` matches the string `"2"`, not the number `2`). Number detection reuses the existing numberlike-shape test — no scientific notation, no leading-zero octal surprises; anything that fails the shape test is text.
 
-A **bare `null`** is rejected with an actionable error (*quote it or drop the key*): optional properties already accept `null`, so a null literal is always an authoring mistake.
+A **bare `null`** is rejected with an actionable error (*quote it or drop the key*): optional properties already accept `null`, so a null literal is always an authoring mistake. To declare a property that must be `null` or absent, use the [`null` type](#unknown-and-null).
 
 #### Constraints
 
@@ -537,6 +621,219 @@ Emits `{ "type": "string", "format": "darkmatter-expression" }`, backed by a pur
 #### Consumer Layering
 
 The type ships in Darkmatter; consumers adopt it in their own schemas. Claudine's extension baseline retypes `when: string` → `when: expression` with zero Claudine-specific code in Darkmatter, then DMLS lights up schema-driven expression completion, hover, and diagnostics inside those frontmatter values.
+
+### `unknown` and `null`
+
+`unknown` names "any value at all"; `null` names "deliberately absent". Both
+admit `null`, so both are always optional (see
+[Null-Admitting Properties](#null-admitting-properties)).
+
+```yaml
+$schema:
+    payload: unknown            # any value, null, or omitted
+    legacy:  any                # the same type, spelled with its alias
+    review:  null               # only null, or omitted
+    spec:    [file, null]       # a file reference, null, or omitted
+```
+
+**`unknown`** accepts every value: a string, number, boolean, mapping,
+sequence, or `null`, and omission. It lowers to the empty JSON Schema `{}`.
+`any` parses to the same type and is never written back: serialization, `md
+schema about`, and DMLS hover all say `unknown` and list `any` as its alias.
+Values keep their native types, including nested `null`s; `unknown` performs
+no coercion. Because it accepts everything, `unknown(required)` cannot demand
+that a key be present. Use a concrete type for that, such as
+`agent: string(required)` or `steps: unknown[](required)`. "Anything except
+`null`" is a union of the accepted types:
+`value: [string(required), number, boolean, object, "unknown[]"]`.
+
+An expression variable that no frontmatter key, caller input, or schema
+property declares is of type `unknown`. That is a description, not a static
+check: an invalid operation on such a value is still a runtime error.
+
+**`null`** accepts an explicit `null` or omission and rejects every other
+value. It lowers to `{"type": "null"}`.
+
+- At a type position (a property, a union arm, a nested property, or a named
+  type), the YAML null scalars `null`, `Null`, `NULL`, and `~`, an empty
+  value (`review:`), an empty sequence item (`-`), and the string `"null"` all
+  mean the `null` type. A quoted empty string `""` is a string, not a null
+  spelling, so `d: ""` is still the grammar error *expected a type name*.
+- `null(required)` is legal and behaves exactly like `null`.
+- A `default(...)` on `null` must itself be `null`. `null(default(1))` fails
+  to load, with the error ranged on `1`.
+- `null` is a property type only. An empty root (`$schema:` with no value), a
+  `null` arm of a root union, and `literal(null)` remain errors.
+- Serialization writes the explicit `"null"` type string, never an empty
+  YAML value.
+
+`null` is how a [root union](#root-level-unions) excludes a key from an arm.
+
+### Alphanumeric Strings
+
+`alphanumeric` is a string made of ASCII letters and digits (`[A-Za-z0-9]`).
+Type options widen or narrow that character set. No option is on by default.
+
+```yaml
+$schema:
+    slug: alphanumeric(allow-dashes; min(1); max(40))
+    path: alphanumeric(allow-slashes, allow-periods, block-double-periods, block-leading-slash)
+    name: alphanumeric(leading-alpha, allow-underscores)
+    code: alphanumeric(min(1))       # no options; constraints only
+```
+
+Options are written first, separated by commas; ordinary constraints follow
+the `;`, as with `enum` members.
+
+| Option | Effect |
+|---|---|
+| `allow-dashes` | also allows `-` |
+| `allow-underscores` | also allows `_` |
+| `allow-slashes` | also allows `/` (never `\`) |
+| `allow-periods` | also allows `.` |
+| `allow-whitespace` | also allows the ASCII space (U+0020); never tabs, newlines, or other Unicode whitespace |
+| `block-double-periods` | the value may not contain `..` |
+| `block-leading-dash` | the first character may not be `-` |
+| `block-leading-slash` | the first character may not be `/` |
+| `leading-alpha` | the first character must be an ASCII letter |
+
+- **Grammar.** Options are a closed set. An unknown option, a repeated
+  option, an option with arguments, and an option after the `;` are grammar
+  errors. A list with no `;` that holds no option is read as constraints
+  (`alphanumeric(min(1))`, `alphanumeric(required)`); a list with no `;` that
+  mixes options and constraints is an error whose message shows the
+  `alphanumeric(allow-dashes; min(1))` form. An option on another type
+  (`string(allow-dashes)`) is an error too.
+- **Empty values.** The empty string is accepted unless `min(1)` or
+  `not-empty` excludes it. The leading-character options only constrain a
+  first character when there is one.
+- **Canonical form.** An option that cannot change the accepted values is
+  redundant and dropped: `block-double-periods` without `allow-periods`,
+  `block-leading-dash` without `allow-dashes` or with `leading-alpha`, and
+  `block-leading-slash` without `allow-slashes` or with `leading-alpha`. The
+  remaining options are ordered as in the table, whatever the authored order.
+  Identity, serialization, `md schema about`, DMLS hover, and the
+  [subtype relation](#subtype-relation-is_subtype) all use the canonical
+  form, so `alphanumeric(block-leading-dash)` serializes as `alphanumeric`.
+- **Constraints.** After the `;`: `min(n)` and `max(n)` (characters),
+  `not-empty`, `pattern(re)`, `suggest(...)`, `default(...)`, `example(...)`,
+  and the universal `required`, `generated`, and `eager`. Every pattern
+  applies: the option pattern, each `pattern(...)`, and `not-empty`.
+- **Defaults and suggestions must be valid values.** A `default(...)` or
+  `suggest(...)` value that the type rejects fails the schema load, without
+  coercion. `alphanumeric(default(12))` fails because `12` is a number; write
+  `default('12')`.
+- **No coercion.** A native number or boolean is a type mismatch, never
+  converted to text: `n: 3` fails against `n: alphanumeric`. In a union, the
+  other arms keep their own coercion, so `[alphanumeric, string]` still turns
+  `3` into `"3"` through the `string` arm.
+- **Host-independent.** The type does not establish that a value is a safe
+  path or a safe shell argument; quoting and path policy belong to the code
+  that uses the value.
+
+**Named types.** Options are part of a named type's identity. A use site may
+add ordinary constraints, and may repeat the exact option set, but any other
+option set is a `SchemaError::ConstraintConflict`, never a widening.
+Options are compared after canonicalization, so equivalent spellings agree:
+
+```yaml
+kind: schema
+types:
+    slug: alphanumeric(allow-dashes)
+    a: slug(max(10))                     # ok: constraints only
+    b: slug(allow-dashes; max(10))       # ok: the same option set
+    c: slug(allow-periods)               # error: a different option set
+```
+
+The error names both declarations: the definition's option group and the use
+site.
+
+**JSON Schema.** The type lowers to a string with a linear-time `pattern`
+that encodes exactly the canonical options and checks the whole value, plus
+two annotations that record the type identity for JSON consumers. The
+annotations do not validate anything. `alphanumeric(allow-dashes,
+block-leading-dash; min(1))` lowers to:
+
+```json
+{
+  "type": "string",
+  "minLength": 1,
+  "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9\\-]*)?$",
+  "x-darkmatter-type": "alphanumeric",
+  "x-darkmatter-options": ["allow-dashes", "block-leading-dash"]
+}
+```
+
+`x-darkmatter-options` is `[]` for the base type. When a user `pattern(...)`
+or `not-empty` is also present, each pattern becomes its own `allOf` entry,
+so none overwrites another.
+
+### Shell Commands
+
+`shell` types a string that is a shell command. It joins `expression`,
+`yaml`, and `json` in the content-format family. Its job is type identity: a
+schema can say "this value is a shell command", and a union of action types
+can include or exclude it.
+
+```yaml
+$schema:
+    build: shell(required)          # e.g. `cargo build --release`
+    hooks: shell[](min(1))
+```
+
+- **Validation.** A value must contain at least one non-whitespace character
+  (Unicode whitespace). There is **no shell-syntax check**: Darkmatter's own
+  `$( … )` and `::shell` grammar is narrower than the system shell that a host
+  such as Claudine runs (`sh -c` or `cmd /C`), so no single parser is right
+  for every host. `ls | wc -l; echo done` is valid; `"   "` is not.
+- **Passive.** Validation never runs, approves, or reads anything.
+- **Constraints, coercion, and pending values mirror `expression`.**
+  `required`, `default(...)`, `generated`, `eager`, `example(...)`, and array
+  constraints after `[]` are allowed; string constraints and `suggest(...)`
+  are rejected. Native booleans and numbers coerce to their text
+  (`shell: true` → `"true"`); mappings and sequences are type mismatches. A
+  `default(...)` is converted to text the same way and must contain a
+  non-whitespace character; a `null`, list, or mapping default fails to load.
+  An authored whole-value `$( … )` or `{{ … }}` is deferred as on
+  `expression`, while data that merely contains that syntax is validated as
+  text.
+- **JSON Schema.** `shell` lowers to
+  `{"type": "string", "format": "darkmatter-shell"}`. Every Darkmatter
+  validator registers and asserts that format. A consumer of exported JSON
+  Schema must enforce the custom format itself; a validator that ignores
+  unknown formats accepts any string, including a blank one.
+
+A lifecycle-style schema can allow a shell action under one event and not
+another by typing each event as a list of a different action union. Action
+alternatives are closed inline objects with a required action key, so an
+object that mixes an allowed action with a `shell` key, or an empty `{}`, is
+rejected as well:
+
+```yaml
+# actions.yaml
+kind: schema
+types:
+    say_action: "{ say: string(required) }"
+    set_action: "{ set: object(required) }"
+    shell_action: "{ shell: shell(required) }"
+    initialize_action: [say_action, set_action]
+    start_action: [say_action, set_action, shell_action]
+```
+
+```yaml
+$schema:
+    initialize: initialize_action[]@./actions.yaml
+    start: start_action[]@./actions.yaml
+```
+
+With this schema `start: [{shell: echo hi}]` is valid and
+`initialize: [{shell: echo hi}]` is reported by `md schema validate`,
+composition, and DMLS. An opaque `object` or `unknown` alternative would
+accept a shell action anyway, so do not add one. This is authoring
+validation only: a host that must never run a shell during an event, as
+Claudine refuses during `initialize`, still enforces that ban at run time,
+including for shell-valued `set` and `$(...)` forms that a schema does not
+see as a `shell` key.
 
 ### Files
 
@@ -957,6 +1254,7 @@ $schema:
 | Repeated `default(…)` | Must be equal; different values are a `ConstraintConflict` | `default(3)` + `default(3.0)` is fine; `default(3)` + `default("3")` is not |
 | Repeated `suggest(…)` | Error: at most one `suggest` per property | |
 | Repeated `example(…)` | All kept, inherited first | each resolves from the file that declared it |
+| `alphanumeric` options | The same canonical set is accepted; a different set is a `ConstraintConflict` | `slug(allow-dashes; max(10))` over `slug: alphanumeric(allow-dashes)` is fine; `slug(allow-periods)` is not (see [Alphanumeric Strings](#alphanumeric-strings)) |
 
 The rules in detail:
 
@@ -1021,7 +1319,7 @@ Inside an inline object (or a YAML-block schema object), keys may follow a **pat
 $schema:
     headers: "{ <string>: string }"                 # any string key → string value
     parameter:
-        "<string>": any                             # any string key → any value
+        "<string>": unknown                         # any string key → any value
 ```
 
 Key forms:
@@ -1051,11 +1349,11 @@ They can be authored as **postfix constraints** or via the reserved **`$constrai
 ```yaml
 $schema:
     # Postfix form — exactly one key/value pair
-    parameter: "{ <string>: any }(min-keys(1); max-keys(1))"
+    parameter: "{ <string>: unknown }(min-keys(1); max-keys(1))"
 
     # $constraints block form — identical desugaring
     parameter:
-        "<string>": any
+        "<string>": unknown
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -1115,7 +1413,7 @@ $schema:
     status:
       - "enum(draft, published, archived)"
       - "number(integer; min(0))"
-      - any
+      - unknown
 
     # accepts a positive number or a CSS-length string
     width:
@@ -1125,8 +1423,9 @@ $schema:
 
 **Hoisting.** `required`, `eager`, and `default(...)` are property-level — they
 are extracted from whichever arm declares them and applied to the property as a
-whole. `required` on any arm makes the property required; `eager` on any arm
-makes a supplied value launch-validated without requiring it. Convention is to
+whole. `required` on any arm makes the property required, unless another arm
+is `null` or `unknown` (see [Null-Admitting Properties](#null-admitting-properties));
+`eager` on any arm makes a supplied value launch-validated without requiring it. Convention is to
 place them on the first arm. Differing
 `default(...)` values on multiple arms is a compile-time error.
 
@@ -1252,7 +1551,10 @@ $schema:
 - `required` and `generated` declared on any arm hoist to the property that
   holds the reference, whether that property is the union (`U`, `U(eager)`) or
   a list of it (`U[]`), just as they do for a property-level union. Markers
-  written at the use site add to them.
+  written at the use site add to them. A union with a `null` or `unknown` arm
+  is the exception: `U` and `U(required)` stay optional (see
+  [Null-Admitting Properties](#null-admitting-properties)), while `U[]` is a
+  list and keeps its markers.
 - `generated` keeps its [usual meaning](#universal-constraints): it adds the
   `x-darkmatter-generated` annotation and removes the property from the static
   `required` list. It supplies no value.
@@ -1444,6 +1746,32 @@ $schema:
 
 The effective schema is `{ "anyOf": [arm0, arm1, ...] }`. **Baseline merging is applied to each arm independently** — a baseline declares the fields every arm inherits.
 
+**Root unions are inclusive.** A document is valid when it matches **one or
+more** arms. A root mapping is open, so a property an arm does not declare is
+unconstrained in that arm. This schema accepts a `schema` file, a `review`
+file, or both, and rejects a document with neither:
+
+```yaml
+$schema:
+  - schema: file(required)
+  - review: file(required)
+```
+
+To accept **exactly one**, exclude the other key in each arm with the
+[`null` type](#unknown-and-null). The excluded key may be omitted or `null`,
+so this schema rejects both files and neither:
+
+```yaml
+$schema:
+  - schema: file(required)
+    review: null
+  - review: file(required)
+    schema: null
+```
+
+Pattern-key dictionaries and explicit raw JSON Schema restrictions inside an
+arm still apply.
+
 When validation fails against a root union, Darkmatter reports the **closest-matching arm** — the one producing the fewest problems — and prefixes problems with the arm index. JSON output carries an `arm_index` field on every problem.
 
 ## Schema Resolution
@@ -1623,6 +1951,7 @@ Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-type
 | `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
 | `yaml` | a native mapping / sequence / scalar | its YAML string serialization (validated as YAML) |
 | `json` | a native mapping / sequence / scalar | its JSON string serialization (validated as strict JSON) |
+| `expression` / `shell` | a `number` or `boolean` scalar | its canonical string (`true` → `"true"`) |
 | `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
 
 The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
@@ -1636,6 +1965,8 @@ These remain uncoerced and continue to fail strict validation on a type mismatch
 - any string that does not match the numeric regex → number.
 - arrays, objects, or `null` → any scalar type.
 - a string → object, or an object → string.
+- a `number` or `boolean` → `alphanumeric`. The value must already be a string; in a union, another arm such as `string` may still coerce it.
+- anything → `unknown` or `null`. `unknown` keeps every value as written, and `null` accepts only `null`.
 
 Nested object properties are not deeply coerced — coercion applies to top-level properties and to the elements of top-level typed arrays. Coercing an already-correctly-typed value is a no-op (idempotent).
 
@@ -1712,14 +2043,14 @@ md schema validate a.md b.md c.md title=shared
 
 Malformed YAML on the right-hand side (e.g. `user={broken`) is reported as a **usage error** with exit code `64` rather than silently treated as a file path. Bare strings with special YAML characters (commas in flow context, leading `&`, etc.) should be quoted in the shell.
 
-**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, or `file`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)` without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly.
+**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, `file`, or `alphanumeric`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)`, and `slug=123` against `slug: alphanumeric`, without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly.
 
 Coercion is intentionally conservative:
 
 - It only fires for **top-level** scalar paths. Nested `user.email=...` paths land inside `object`-typed properties, which are opaque in v1, so the original YAML parse is used.
 - Array-typed properties (`tags: string[]`) are excluded so `tags=[a, b, c]` still flows through the YAML flow-sequence parser.
 - Schemas that produce no SimplifiedSchema projection — raw JSON Schema input or root-level unions — also fall back to the plain YAML parse.
-- `boolean`, `boolish`, `number`, `numberlike`, `object`, and `any` keep the YAML-parsed value. For `boolish` this means a bare `flag=true` is stored as the boolean variant `true`; pass `flag=\"true\"` (or `'flag="true"'`) to get the quoted-string variant.
+- `boolean`, `boolish`, `number`, `numberlike`, `object`, `unknown`, `null`, `shell`, and `expression` keep the YAML-parsed value (`shell` and `expression` then turn a number or boolean into text during validation). A number written in the document itself (`slug: 123`) is still a type mismatch for `alphanumeric`. For `boolish` this means a bare `flag=true` is stored as the boolean variant `true`; pass `flag=\"true\"` (or `'flag="true"'`) to get the quoted-string variant.
 
 **Nested assignments.** Dot-separated paths create or merge intermediate objects:
 
@@ -1909,7 +2240,7 @@ For each top-level frontmatter property (excluding `$schema`), the inferred type
 - email string → `email`
 - string that resolves via `FileReference` to an existing path → `file`
 - other string → `string`
-- array → recursive item-type inference; mixed items fall back to `any[]`
+- array → recursive item-type inference; mixed items fall back to `unknown[]`
 - object → `object` (v1 does not synthesise nested SimplifiedSchemas)
 
 **No constraints are inferred** — detection produces base types only. Patterns, `min` / `max`, enum members, and other constraints are never synthesised from values. All detected properties are marked **optional**: a single sample cannot prove requiredness.
@@ -1939,7 +2270,7 @@ boolean ──> boolish
 file ──> string   (only if the strings stop resolving)
 ```
 
-When inferred types are **genuinely disjoint** (e.g. `string` and `boolean`), the merger emits a SimplifiedSchema union for that property rather than collapsing to `any`:
+When inferred types are **genuinely disjoint** (e.g. `string` and `boolean`), the merger emits a SimplifiedSchema union for that property rather than collapsing to `unknown`:
 
 ```yaml
 $schema:
@@ -1962,7 +2293,7 @@ $schema:
 md schema about
 ```
 
-`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the constraint vocabulary, inline object rules, validation behavior, and coercion rules.
+`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the `alphanumeric` type options, the constraint vocabulary, inline object rules, validation behavior, and coercion rules. A type's aliases appear under its canonical keyword (`unknown` shows `alias: any`; there is no separate `any` row), and the options table lists each option's effect and the options that make it redundant.
 
 ```
 SimplifiedSchema Language Reference
@@ -1977,6 +2308,9 @@ SimplifiedSchema Language Reference
     - Marked union reference
   ## Type Vocabulary
     - string, date, datetime, time, number, numberlike, …
+    - unknown (alias: any), null, alphanumeric, shell
+  ## Type Options: alphanumeric
+    - allow-dashes, allow-underscores, …, leading-alpha
   ## Constraint Vocabulary
     - min, max, not-empty, pattern, default, required, …
   ## Inline Object Rules
@@ -2062,7 +2396,8 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `SchemaShape`         | Ordered map of property names to `PropertyDef`.                                                                     |
 | `PropertyDef`         | Either `Single(PropertyAtom)` or `Union(Vec<PropertyAtom>)`.                                                        |
 | `PropertyAtom`        | `ty`, `is_array`, `constraints`, `array_constraints`, `description`.                                                |
-| `SimplifiedType`      | Enum of the supported types (`String`, `Date`, `Number`, …, `Any`).                                                 |
+| `SimplifiedType`      | Enum of the supported types (`String`, `Date`, `Number`, …, `Unknown`, `Null`, `Alphanumeric`, `Shell`). `aliases()` lists alternative spellings (`any` for `Unknown`). |
+| `AlphanumericOptions` | The canonical option set of an `alphanumeric` type (`PropertyAtom::alphanumeric_options()`), with its allowed and first-character sets (`AsciiCharSet`), `accepts(&str)`, and `pattern()`. |
 | `Constraint`          | Enum of all constraint variants (`Required`, `Default`, `Min`, `Max`, `Members`, `Match`, `Suggest`, …).           |
 | `SuggestionCandidate` | One interpreted `suggest(...)` argument: decoded text, interpreted value, canonical decimal, byte span.             |
 | `SuggestionLintProblem` | One invalid suggestion candidate with decoded text, interpreted value, reason (`SuggestionLintReason`), and exact authored byte span. |
@@ -2082,6 +2417,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 
 Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
+- `is_subtype(&PropertyAtom, &PropertyAtom)` — whether every non-null value one resolved type accepts is accepted by another; see [Subtype Relation](#subtype-relation-is_subtype).
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
@@ -2096,12 +2432,57 @@ the built-in baseline; each configured instance shares the cached JSON Schema.
 
 `EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values still holding a `$(...)` shell expression or an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
 
+### Subtype Relation (`is_subtype`)
+
+`is_subtype(a, b)` answers "does every non-null value accepted by type `a`
+also satisfy type `b`?". It is passive and works on resolved
+`PropertyAtom`s, so resolve named types first. Use it to decide whether a
+saved rule typed `b` covers a value typed `a`, for example whether an
+approval for `alphanumeric(allow-slashes)` covers an argument typed
+`alphanumeric`.
+
+```rust
+use darkmatter::markdown::schemas::is_subtype;
+use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+
+let atom = |text| parse_type_expr("p", text).unwrap();
+let rule = atom("alphanumeric(allow-slashes)");
+assert!(is_subtype(&atom("alphanumeric(min(3))"), &rule)); // constraints are ignored
+assert!(!is_subtype(&atom("string"), &rule));
+assert!(is_subtype(&atom("email"), &atom("string")));
+```
+
+Only the type and its canonical options count. Ordinary constraints (`min`,
+`max`, `pattern`, …), presence, the optional `null` wrapper, and coercion are
+outside the relation.
+
+| `a` | `b` | `a` ⊆ `b`? |
+|---|---|---|
+| any type | the same type with the same canonical options (including an identical array, inline object, or union) | yes |
+| `alphanumeric(X)` | `alphanumeric(Y)` | yes when X's allowed characters and allowed first characters are subsets of Y's, and X guarantees any ban on `..` that Y makes |
+| an always-text type: `string`, `date`, `datetime`, `time`, `file`, `enum(…)`, `url`, `email`, `yaml`, `json`, `expression`, `alphanumeric(…)`, `shell`, or a string `literal(…)` | `string` | yes |
+| `string`, `email`, or any other non-`alphanumeric` type | `alphanumeric(…)` | no |
+| `unknown`, `null`, `number`, `boolean`, an array, … | `string` | no |
+| any other pair, including an unresolved reference | | no |
+
+The `alphanumeric` row compares what the options permit, not the keywords
+written. X guarantees no `..` when it blocks double periods or does not allow
+periods at all, so base `alphanumeric` ⊆
+`alphanumeric(allow-periods, block-double-periods)`, and
+`alphanumeric(leading-alpha, allow-dashes)` ⊆
+`alphanumeric(allow-dashes, block-leading-dash)`. Redundant options cancel
+out: `alphanumeric(block-leading-dash)` and `alphanumeric` are subtypes of
+each other. This is bounded reasoning over the option table, not inclusion
+checking for user regexes, and it never replaces a runtime check of the
+actual value or shell quoting.
+
 ### Schema Descriptor Catalog
 
 The descriptor catalog that backs `md schema about` is exposed to library callers. Each function returns a `&'static [...]` slice in a deterministic, stable order:
 
 - `schema_shape_descriptors()` — supported schema shapes and grammar forms.
-- `schema_type_descriptors()` — supported type keywords and their display descriptions.
+- `schema_type_descriptors()` — supported type keywords, their aliases (`unknown` lists `any`), display descriptions, the item-level constraint keywords each type accepts (`accepts_constraint("min")`), and any type options. `schema_type_descriptor(name)` finds one by keyword or alias.
+- `alphanumeric_option_descriptors()` — the `alphanumeric` type options in canonical order, each with its effect and the options that make it redundant (`block-leading-dash` is redundant without `allow-dashes` or with `leading-alpha`).
 - `schema_constraint_descriptors()` — supported constraints, their argument forms, their applicable target types, and their JSON Schema effect.
 - `inline_object_rule_descriptors()` — inline object grammar rules and limits (postfix constraints, arrays, nesting depth, identifier rules, description termination, `additionalProperties: false`).
 - `coercion_rule_descriptors()` — coercion rules and the matrix of declared-type / incoming-value pairs that fire.
@@ -2183,7 +2564,7 @@ All failure modes are variants of `SchemaError`:
 | `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
 | `ImportCycle`           | A named-type reference (bare or `Name@file`) references itself directly or transitively (or exceeds the import-depth cap). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
-| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, or `Default`). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
+| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
@@ -2281,7 +2662,6 @@ unless the same baseline is supplied explicitly.
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
 - **No `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile), which are inlined at each use site; recursive types are not supported.
-- **No nullable unions yet.** A `null` type and unions such as `[person, "null"]` are **planned**; until then, declare an optional variant of a required named type separately.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
@@ -2413,7 +2793,10 @@ $schema: docs.yaml
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
-wrong type defeats the match. `required` makes it a presence gate. Match-safe
+wrong type defeats the match. `required` makes it a presence gate, except on
+a [null-admitting](#null-admitting-properties) type: `steps: unknown(required)`
+is only a guard and cannot make an arm satisfiable, while
+`steps: unknown[](required)` is a gate that requires a list. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
 Stateful or phase-specific constraints (`eager`, imports, `example`,

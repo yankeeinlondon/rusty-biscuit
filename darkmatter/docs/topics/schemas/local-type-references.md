@@ -46,7 +46,9 @@ them is a schema error.
 - **Built-in keywords win.** `string`, `email`, `file`, and the other
   [built-in types](./definition.md#types) keep their meaning. If you define a
   local type with a built-in's name, select it with `@this`: `string` is the
-  built-in, `string@this` is your type.
+  built-in, `string@this` is your type. This includes `unknown` (and its
+  alias `any`), `null`, `alphanumeric`, and `shell`, so a schema with its own
+  `shell` type refers to it as `shell@this`.
 - **Names are case-sensitive** and use the identifier characters ASCII letters,
   digits, `-`, and `_`. `Person` and `person` are different types.
 - **Forward references work.** A reference can name a type declared later in
@@ -54,7 +56,7 @@ them is a schema error.
 - **Unknown names are errors.** A bare name that is neither a built-in nor a
   local type is a `SchemaError::UnknownNamedType` naming the type, the schema
   that was searched, and the property holding the reference. It is never
-  treated as `any`, and it is never looked up in other active schemas,
+  treated as `unknown`, and it is never looked up in other active schemas,
   frontmatter, or runtime globals. A misspelled built-in such as `strng`
   therefore fails at the reference, unless a local type happens to have that
   name.
@@ -137,6 +139,17 @@ Constraints on array elements and on the array itself keep their own
 meanings. A named `string(min(3))` used as `label[]` requires each item to
 have at least three characters, while `label[](min(1))` additionally requires
 at least one item. The two minima never merge.
+
+An `alphanumeric` type's options are part of its identity, not constraints
+to merge. A use site may repeat them exactly, but a different option set,
+such as `slug(allow-periods)` over `slug: alphanumeric(allow-dashes)`, is a
+`SchemaError::ConstraintConflict` (see
+[Alphanumeric Strings](./definition.md#alphanumeric-strings)).
+
+The one way to make a reused required type optional is a union with `null`:
+`draft_code: [code, null]` accepts `null`, omission, or a valid `code`,
+whatever `code`'s inherited `required` says (see
+[Null-Admitting Properties](./definition.md#null-admitting-properties)).
 
 This is different from [Schema Layering](./authoring-schemas.md#schema-layering).
 Reusing a type combines its constraints with the property's additional
