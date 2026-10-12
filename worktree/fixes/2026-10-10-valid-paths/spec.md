@@ -19,39 +19,26 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
-implemented: false
+status: implemented
+implemented: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 3 (CLI) is done. What Phase 4 (docs) needs to know about actual behavior:
-  - `wt create` enters setup only when no source is configured AND stdin/stderr
-    are terminals AND `CI` is unset/empty; otherwise it exits 1 with
-    `BaseDirectoryNotConfigured`, whose message now tells scripts to set `WT`
-    or create `~/.worktree.json` with `{"base_dir": "<absolute directory>"}`.
-  - Every base-directory/config error is rendered once by `main` through
-    `commands::base_dir_error_markup` (exit 1, stderr, no `cd:` line). Config-file
-    origins add an "Edit ~/.worktree.json" link to the actual path; a foreign
-    drive path under WSL adds "Under WSL, Windows drive B: is usually mounted at
-    /mnt/b. If it is mounted there, use /mnt/b/wt." (lib `config::wsl_drive_hint`).
-  - Setup retry: an unusable suggested directory (file, repo root) returns to the
-    menu; an unusable typed path (relative, `~/wt`, foreign, blank, file, repo
-    root) asks for another path. Nothing is created or saved until syntax passes;
-    a missing directory is created, re-checked, then saved. A creation/read
-    failure stops setup (exit 1); Esc/Ctrl-C exits 0.
-  - Setup now omits non-Unicode candidate directories from the menu.
-  - Repository-root wording is "a directory without .git directly inside it"
-    everywhere in create.rs; the setup intro/comment drift in other files (if
-    any) and `create_worktree`'s doc prerequisite are still Phase 4's.
-  - `config::example_base_dir()` is now public (host example path used in
-    messages: /Users/me/wt, /home/me/wt, C:\Users\me\wt).
-  - From Phase 2, still to document: a duplicate `base_dir` key is rejected as
-    `ConfigInvalidFormat` (serde refuses repeated fields), not last-wins.
-  - Testing trap recorded in the skill: a `wt create` child must
-    `env_remove("WT")`; the developer shell exports a real `WT`.
+  All 5 phases are implemented and verified; the fix is ready for review.
+  - Gates: `just test` (1173 passed) and `just lint` are clean from
+    worktree/ on macOS. Cross-check passed on native Windows (worktree 558,
+    worktree-cli 561 including the incident-replay integration tests), Linux
+    (worktree 582), and WSL2 (worktree config tests).
+  - Two departures from the spec, both reflected in the docs: a duplicate
+    `base_dir` key is rejected (not last-wins), and a
+    BaseDirectoryUnreadable error variant carries non-NotFound I/O causes.
+  - Follow-up outside this fix: scripts/kache-host.sh and
+    docs/initialization.md claim to resolve the worktree base "the way wt
+    does" but skip the new validation rules.
+  - Do not move this fix to _completed; the author does that after review.
 ---
 
 # Valid base-directory paths

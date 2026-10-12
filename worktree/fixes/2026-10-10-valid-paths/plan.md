@@ -33,6 +33,45 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_4:
+  - worktree/lib/src/api_preference.rs
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/worktree.rs
+docs_updated_during_phase_4:
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_4:
+  - worktree/docs/base-directory.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+  - Cargo.lock
+  - worktree/lib/Cargo.toml
+  - worktree/lib/src/api_preference.rs
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/cli/src/commands/create.rs
+  - worktree/cli/src/commands/mod.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/tests/base_dir_fixture/mod.rs
+  - worktree/cli/tests/create_base_dir.rs
+  - worktree/cli/tests/create_config_errors.rs
+documentation:
+  - worktree/README.md
+  - worktree/docs/base-directory.md
+  - docs/dependencies.md
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/testing.md
+completed_phase: 5
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -381,7 +420,7 @@ the new integration tests on the development host.
 
 Wave 7 (three independent tasks, parallelizable):
 
-- [ ] **User documentation**
+- [x] **User documentation**
     - Rewrite the README "Directory Resolution" section: absolute-path and
       directory rules, empty-`WT` fallback, foreign-path errors, setup retry
       behavior, exit-1 semantics.
@@ -391,7 +430,7 @@ Wave 7 (three independent tasks, parallelizable):
       recovery; state the repository-root-only check accurately without
       claiming all in-repository paths are blocked; written for a developer
       new to this repository; no reference to this fix's snapshot.
-- [ ] **Skill and dependency documentation**
+- [x] **Skill and dependency documentation**
     - Update `.claude/skills/worktree/cli-contracts.md` with validation,
       precedence, exit behavior, home isolation (configuration lookups only;
       cache/store lookups unchanged), and WSL's POSIX path rule; update
@@ -399,7 +438,7 @@ Wave 7 (three independent tasks, parallelizable):
     - Update the repository dependency documentation for the enabled
       `biscuit-file` `file-reference` feature and the `test-toolkit`
       dev-dependency.
-- [ ] **Comment and doc drift sweep**
+- [x] **Comment and doc drift sweep**
     - Amend `create_worktree`'s documentation in
       `worktree/lib/src/worktree.rs` to state explicitly that callers must
       resolve and validate `base` beforehand.
@@ -415,7 +454,7 @@ and the README; `git diff` of doc-only tasks shows no source changes.
 
 Wave 8 (sequential final validation):
 
-- [ ] **Full local validation**
+- [x] **Full local validation**
     - Run `just test` and `just lint` from `worktree/` (implementation-time
       requirement from the spec).
     - Grep the config read path for the matrix smells: `#[serde(default)]`
@@ -423,7 +462,7 @@ Wave 8 (sequential final validation):
       `filter_map(.. as_str())`, `unwrap_or_default()`, `.ok()` on a
       load-bearing parse — none may remain.
     - Confirm comment/code agreement on every function this fix touched.
-- [ ] **Cross-OS acceptance**
+- [x] **Cross-OS acceptance**
     - Target-specific acceptance rides the existing coverage workflow: the
       pull request proves Linux and macOS (macOS also on this development
       host), push to `main` adds native Windows, the nightly schedule adds
@@ -432,7 +471,7 @@ Wave 8 (sequential final validation):
       extended-length syntax, drive-relative rejection) — load the `os`
       skill before claiming a host cannot produce evidence. No new CI
       matrix is added.
-- [ ] **Implementation log**
+- [x] **Implementation log**
     - Write `worktree/fixes/2026-10-10-valid-paths/implementation-log.md`
       recording what was built and any departure from the spec (docs are
       corrected to match reality; the spec is left saying what was decided).

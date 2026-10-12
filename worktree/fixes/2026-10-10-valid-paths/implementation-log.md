@@ -32,6 +32,45 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/worktree/testing.md
+source_files_during_phase_4:
+  - worktree/lib/src/api_preference.rs
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/worktree.rs
+docs_updated_during_phase_4:
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_4:
+  - worktree/docs/base-directory.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+  - Cargo.lock
+  - worktree/lib/Cargo.toml
+  - worktree/lib/src/api_preference.rs
+  - worktree/lib/src/config.rs
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/worktree.rs
+  - worktree/cli/src/commands/create.rs
+  - worktree/cli/src/commands/mod.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/tests/base_dir_fixture/mod.rs
+  - worktree/cli/tests/create_base_dir.rs
+  - worktree/cli/tests/create_config_errors.rs
+documentation:
+  - worktree/README.md
+  - worktree/docs/base-directory.md
+  - docs/dependencies.md
+  - .claude/skills/worktree/SKILL.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/testing.md
+completed_phase: 5
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -308,3 +347,166 @@ packages:
   `testing.md`.
 - left for Phase 4: README/docs (`docs/base-directory.md`), `cli-contracts.md`,
   dependency docs, `create_worktree` doc prerequisite, remaining drift sweep.
+
+## Phase 4
+
+- started: documentation and drift (Wave 7); docs-only phase, the three source
+  edits below are comment-only.
+- **user docs:**
+  - created `worktree/docs/base-directory.md`: what the base directory is,
+    `WT` and `~/.worktree.json` with examples, a Mermaid precedence flowchart
+    (unset/empty `WT` falls back; any other invalid `WT` never does), the
+    usability rules table (host-absolute, host syntax, not blank, existing
+    directory/symlink to one, not a repository root, with deeper in-repo paths
+    allowed), surprises (`~` never expanded, values used verbatim except
+    trimmed prompt text, root-only `.git` check, WSL is Linux, `WT` must be
+    Unicode), a per-host example table including WSL `/mnt/b/wt` and Windows
+    JSON escaping, interactive setup steps and retry rules, the noninteractive
+    exit-1 message, per-problem message examples with per-source fixes, the
+    no-recreate rule for missing directories, the conditional WSL hint, the
+    malformed-config list (duplicate `base_dir` is **rejected**, matching the
+    Phase 2 departure, not last-wins), and a short library-caller section. No
+    reference to this fix.
+  - rewrote the README "Directory Resolution" block under `wt create` as a
+    compact summary linking to the new page; the old text described setup as
+    unconditional, claimed "NOT part of a git repo", and promised directory
+    checks that did not exist.
+- **skill:** `.claude/skills/worktree/cli-contracts.md` gained a "Base
+  directory" section (precedence, validation order, host `is_absolute` as the
+  authority and WSL-is-POSIX, `origin` field naming, byte-then-decode parsing
+  and duplicate-key rejection, writer guarantees, setup gating and retry,
+  render-once through `base_dir_error_markup`, lazy WSL detection, home
+  isolation limited to config lookups). `SKILL.md` router row and user-doc list
+  now point at it. `testing.md` already carried the home-isolation and
+  `env_remove("WT")` facts from Phases 2–3; re-read, still accurate.
+- **dependencies:** `docs/dependencies.md` now says `worktree/lib` enables
+  `biscuit-file`'s `file-reference` feature for `home_dir()` (no second `gix`;
+  both pin `=0.84.0`), and lists `test-toolkit` as a worktree/lib
+  dev-dependency for `EnvGuard` (Cargo.lock gained only that edge).
+- **drift sweep (comment-only):**
+  - `lib/src/worktree.rs` `create_worktree`: states that `base` is not checked
+    and callers must resolve and validate it (`resolve_base_dir`, or
+    `validate_base_dir` plus an existing-directory check). Also fixed its
+    intra-doc link from `worktree::config::…` to `crate::config::…`.
+  - **drift found:** `lib/src/api_preference.rs` `preference_path` claimed
+    `~/.wt.json` uses "the same home-directory lookup as `~/.worktree.json`".
+    Untrue since Phase 2 (config uses biscuit-file's env-first `home_dir`;
+    `~/.wt.json` keeps `dirs::home_dir`, which ignores `USERPROFILE` on native
+    Windows). Code kept as is (Ruling 8); comment corrected.
+  - `lib/src/config.rs` `resolve_base_dir` docs: `BaseDirectoryNotConfigured`
+    now says "an interactive caller may run setup" instead of implying every
+    caller should.
+  - "inside a git repo" wording: the only remaining base-directory instances
+    were in the README block that was rewritten; `create.rs` and `error.rs`
+    were already root-only after Phase 3. Other "inside a Git repository"
+    hits concern the current directory (`NotInGitRepo`), which is correct.
+  - reviewed `///` docs of `validate_base_dir`, `save_config`,
+    `resolve_base_dir`, `wsl_drive_hint`, `base_dir_error_markup`,
+    `choose_base_dir`, `prepare_base_dir`, and the error variants: consistent
+    with the code.
+- **out-of-area drift, not changed:** `scripts/kache-host.sh` (`just
+  kache-status`, `init`) says it resolves the worktree base "the way `wt`
+  does, including every setting `wt` refuses", but it checks only existence,
+  `.git`, and JSON shape. It does not apply the new absolute-path,
+  foreign-syntax, blank, or not-a-directory rules, and it checks `.git` before
+  existence for the config side. `docs/initialization.md` repeats the claim.
+  Left for a follow-up because it is a different area with its own tests; noted
+  for Phase 5 / review.
+- gates: `just lint` (worktree/) clean. `cargo doc -p worktree` with
+  `-D rustdoc::broken_intra_doc_links`: no errors in edited files; it fails on
+  existing unresolved links in `git.rs` (`recorder`, `CallScope`,
+  `TaskHandle`) and `remote_head.rs` (`origin_url`), not touched here.
+- `just test` (worktree/): 1173 passed, 14 skipped. 6 SLOW (>5 s) reports, all
+  pre-existing graph/list/remove tests (`fork_origin_cutoff_matrix`,
+  `a_ref_change_during_the_wait_is_regathered_from_the_final_tips`,
+  `each_fallback_reason_and_condition_is_recorded`,
+  `a_split_index_whose_shared_file_changes_after_inspection_refuses` 12.4 s,
+  two `worktree-cli::remove` tests), on a host shared with other sessions'
+  test runs; none touched here. (A first `just test` was mistakenly started from
+  the repository root, which tests the whole workspace; it was stopped and
+  rerun from `worktree/`.)
+- tests: none added. This phase changes no behavior (three comment-only source
+  edits). Each documented claim is backed by an existing Phases 2–3 test:
+  precedence/no-fallback → `invalid_nonempty_wt_blocks_a_valid_config`,
+  `unset_or_empty_wt_falls_back_to_the_config`,
+  `an_invalid_wt_is_refused_even_when_the_config_is_valid`; rules table →
+  `validator_matches_the_spec_table_on_this_host`,
+  `foreign_syntax_helper_classifies_both_styles_on_every_host`,
+  `a_directory_inside_a_repository_is_allowed`,
+  `a_symlink_to_a_directory_is_allowed`; malformed config list →
+  `config_base_dir_robustness_matrix`; setup retry/cancel/stop →
+  `commands::create::tests::*`; noninteractive exit 1 →
+  `no_configuration_and_no_terminal_exits_1_without_setup`; WSL hint →
+  `wsl_drive_hint_*`, `foreign_drive_paths_get_the_wsl_hint_only_under_wsl`;
+  incident replay → `a_foreign_saved_base_dir_is_refused_without_changing_anything`.
+- cross-OS: not run; nothing compiled differs (comments and Markdown only).
+
+## Phase 5
+
+- started: verification and acceptance (Wave 8). No source, doc, or skill
+  file changed in this phase; only this log and the plan's checkboxes and
+  frontmatter.
+- **local gates (macOS, from `worktree/`):** `just lint` clean (both crates).
+  `just test` 1173 passed, 14 skipped, 3 SLOW (>5 s) reports, all
+  pre-existing tests this fix did not touch
+  (`remove::missing::tests::a_split_index_whose_shared_file_changes_after_inspection_refuses`,
+  `worktree-cli::remove a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it`,
+  and one more list/remove test under full-suite load).
+- **matrix smell grep** over `lib/src/config.rs` (the only `base_dir` read
+  path): no `#[serde(default)]`, `unwrap_or_default()`, `.ok()`, or
+  `filter_map` on the read path. The only `Option`s are `config_path()`
+  (no home → not configured), `wsl_drive_hint`'s return, and
+  `resolve_with`'s `wt: Option<OsString>`, where unset and exactly-empty
+  are the same by spec (Ruling 6), so `filter(|wt| !wt.is_empty())` is
+  correct. `WorktreeConfig { base_dir: String }` has no default, so absent,
+  null, and wrong-type all fail parsing; serde's derived struct visitor
+  rejects a duplicate `base_dir` (the Phase 2 departure from the plan's
+  last-wins row, already documented). The `filter_map` in the CLI's
+  `setup_candidates` only drops non-Unicode *suggestions* before they are
+  offered, not a parsed value.
+- **comment/code agreement:** re-read `///` docs and inline comments of
+  `validate_base_dir`, `is_foreign_syntax`, `wsl_drive_hint`,
+  `save_config`/`save_config_to`, `resolve_base_dir`/`resolve_with`/
+  `check_base_dir`, `config_path`, `considered_dirs`, `create::run`,
+  `base_dir_error_markup`, `setup_base_dir`, `setup_candidates`,
+  `SetupPrompt`, `choose_base_dir`, `can_choose_again`, and
+  `prepare_base_dir`. All match the code; no drift found.
+- **cross-OS acceptance** (`just cross-check`, local uncommitted tree; no
+  receipt published because the tested tree is not a committed head):
+  - native Windows (build-win-native): `worktree` 558/558 passed, which
+    includes the Windows rows of the spec table on a Windows host
+    (`validator_matches_the_spec_table_on_this_host`: network share and
+    `\\?\` extended-length accepted, `b:`/`b:wt`/`\wt` rejected as not
+    absolute, `/home/me/wt` foreign). `worktree-cli` 561 passed, 43 skipped
+    (Unix-only tests), including every `create_base_dir` and
+    `create_config_errors` integration test (the incident replay with
+    `/home/me/wt` saved on Windows) and both module paths of
+    `commands::create::tests`.
+  - Linux (build-linux): `worktree` 582/582 passed.
+  - WSL2 (build-win): `worktree` `config` filter 37/37 passed, including
+    the `wsl_drive_hint_*` and foreign-syntax tests.
+  - macOS: the local `just test` above.
+  - note: `just cross-check … worktree-cli create` does not select the
+    `create_base_dir` / `create_config_errors` binaries; nextest's
+    substring filter matches test names, not binary names, and none of
+    those test names contain "create". The full-suite run covered them.
+- **incident replay** (Definition of Success): proven by
+  `create_base_dir::a_foreign_saved_base_dir_is_refused_without_changing_anything`
+  on macOS and native Windows: exit 1, stderr names the value, the config
+  file, and a host-valid remedy, no `cd:` line, config bytes unchanged, no
+  new directory, branch, or worktree registration. The WSL `/mnt/b/wt` hint
+  is proven by the injected-runtime unit tests (no real WSL mount needed,
+  Ruling 9).
+- **departures from the spec, cumulative** (docs already match the code):
+  1. a duplicate `base_dir` key is rejected as `ConfigInvalidFormat`, not
+     last-wins (Phase 2).
+  2. added `BaseDirectoryUnreadable { value, origin, cause }` for non-NotFound
+     metadata errors, and reshaped `BaseDirectoryIsGitRepo` to
+     `{ value, origin }` (Phase 1).
+- **follow-up outside this fix (not changed):** `scripts/kache-host.sh` and
+  `docs/initialization.md` claim to resolve the worktree base "the way `wt`
+  does", but skip the absolute-path, foreign-syntax, blank, and
+  not-a-directory rules, and check `.git` before existence on the config
+  side (found in Phase 4).
+- terminal state: implementation complete, ready for review. The fix was not
+  moved to `_completed` and `just complete` was not run.
