@@ -211,6 +211,11 @@ Measured 2026-10-11 with `notify` 8.2 (FSEvents backend; latency 0,
 - **History flags are cumulative.** A file created and later deleted can be
   reported, at deletion time, as `Create` plus `Remove` plus a data change,
   so event kind alone cannot tell "we deleted it" from "someone wrote it".
+  The same holds for a rename (measured 2026-10-12): a directory created
+  moments before it was renamed away was reported with `Created` beside the
+  rename flag, so `wt remove`'s deletion engine first stopped on its own
+  quarantine move. Match by "the history includes the expected flag" and the
+  path's current state, never by "every flag is expected".
 - **Watches are path-based.** After a watched directory is renamed, writes
   under the new name are unobserved until that name is watched. A recursive
   watch on the parent covers both names.
