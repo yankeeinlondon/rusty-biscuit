@@ -1,57 +1,63 @@
 //! Integration tests for the Artificial Analysis API clients.
 //!
-//! These tests use [`wiremock`] to verify the user-observable HTTP behaviour
+//! These tests use [`wiremock`] to verify the user-observable HTTP behavior
 //! of the generated `ArtificialAnalysisData` and `ArtificialAnalysisCritPt`
 //! clients without touching the network. They cover query-string serialization,
-//! authentication header injection (explicit override and env-var fallback),
-//! the missing-credentials error path, and JSON body serialization for the
-//! CritPt evaluation endpoint (including `skip_serializing_if` on
+//! credential precedence (client credential over the env-var fallback), the
+//! anonymous send when no credential resolves, and JSON body serialization for
+//! the CritPt evaluation endpoint (including `skip_serializing_if` on
 //! `batch_metadata`).
 //!
-//! Tests that mutate `ARTIFICIAL_ANALYSIS_API_KEY` are serialized via
-//! `serial_test::serial` so concurrent test execution does not see torn
-//! environment state.
+//! Tests that read or write `ARTIFICIAL_ANALYSIS_API_KEY` hold an
+//! [`EnvGuard`] and are serialized via `serial_test::serial`.
 
-#![allow(
-    clippy::needless_borrows_for_generic_args,
-    clippy::field_reassign_with_default
-)]
+mod common;
 
+use common::EnvGuard;
 use schematic_schema::artificial_analysis::{
-    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest, ArtificialAnalysisData,
-    ArtificialAnalysisDataRequest, CritPtEvaluateBody, CritPtEvaluateResponse, CritPtMessage,
-    CritPtSubmission, EvaluateCritPtRequest, ListImageEditingModelsRequest, ListLlmModelsRequest,
+    CritPtEvaluateBody, CritPtEvaluateResponse, CritPtMessage, CritPtSubmission,
+    EvaluateCritPtRequest, ListImageEditingModelsRequest, ListLlmModelsRequest,
     ListTextToImageModelsRequest, LlmModelsResponse, MediaModelsResponse,
 };
-use schematic_schema::shared::SchematicError;
+use schematic_schema::prelude::*;
+use schematic_schema::schematic_runtime::{AuthMethod, EndpointSpec, ErrorKind, Outcome};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const ENV_KEY: &str = "ARTIFICIAL_ANALYSIS_API_KEY";
 
-/// Removes `ARTIFICIAL_ANALYSIS_API_KEY` from the environment.
-///
-/// ## Safety
-///
-/// Tests that touch the env are gated by `#[serial_test::serial]` to avoid
-/// concurrent reads/writes of process-wide env state.
-fn clear_env() {
-    // SAFETY: gated by `#[serial]`, so no other test thread is touching the env.
-    unsafe {
-        std::env::remove_var(ENV_KEY);
-    }
+fn data_client(base_url: &str) -> ArtificialAnalysisDataClient {
+    ArtificialAnalysisData::builder()
+        .base_url(base_url)
+        .build()
+        .expect("client builds")
 }
 
-/// Sets `ARTIFICIAL_ANALYSIS_API_KEY` to `value`.
-///
-/// ## Safety
-///
-/// Tests that touch the env are gated by `#[serial_test::serial]` to avoid
-/// concurrent reads/writes of process-wide env state.
-fn set_env(value: &str) {
-    // SAFETY: gated by `#[serial]`, so no other test thread is touching the env.
-    unsafe {
-        std::env::set_var(ENV_KEY, value);
+fn critpt_client(base_url: &str) -> ArtificialAnalysisCritPtClient {
+    ArtificialAnalysisCritPt::builder()
+        .base_url(base_url)
+        .build()
+        .expect("client builds")
+}
+
+/// Sends `request` with default options and returns the decoded success value,
+/// failing the test on a transport error or a failure outcome.
+async fn send_ok<A, R>(
+    client: &schematic_schema::schematic_runtime::Client<A>,
+    request: R,
+) -> R::Success
+where
+    A: schematic_schema::schematic_runtime::Api,
+    R: EndpointSpec<Api = A>,
+{
+    let response = client
+        .send(request, &CallOptions::default())
+        .await
+        .expect("a response head arrived");
+    let status = response.meta.status;
+    match response.into_result() {
+        Ok(value) => value,
+        Err(error) => panic!("expected success, got {error} with status {status}"),
     }
 }
 
@@ -210,16 +216,10 @@ fn media_models_response_one_without_optionals() -> serde_json::Value {
     })
 }
 
-/// Test 1: Data API exercise of `ListTextToImageModelsRequest` with the
+/// Data API exercise of `ListTextToImageModelsRequest` with the
 /// `include_categories=true` query parameter.
-///
-/// Verifies that:
-/// - The generated client hits `GET /data/media/text-to-image`.
-/// - The `include_categories=true` query string is serialized.
 #[tokio::test]
-#[serial_test::serial]
 async fn list_text_to_image_models_emits_include_categories_query() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -231,35 +231,22 @@ async fn list_text_to_image_models_emits_include_categories_query() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let request = ListTextToImageModelsRequest::default().with_include_categories(true);
+    let body: MediaModelsResponse = send_ok(&client, request).await;
 
-    let request = ArtificialAnalysisDataRequest::ListTextToImageModels(
-        ListTextToImageModelsRequest::default().with_include_categories(true),
-    );
-    let result: Result<MediaModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
     assert!(body.data.is_empty());
-
-    clear_env();
 }
 
-/// Test 2: Data API exercise of `ListLlmModelsRequest::default()` — no query
-/// parameters.
-///
-/// Verifies the generated client hits `GET /data/llms/models` with no query
-/// string at all.
+/// `ListLlmModelsRequest::default()` hits `GET /data/llms/models` with no
+/// query string at all.
 #[tokio::test]
-#[serial_test::serial]
 async fn list_llm_models_uses_no_query_string() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
-    // Use a custom matcher to assert query is empty (wiremock has no
-    // built-in "no query string" matcher).
+    // wiremock has no built-in "no query string" matcher.
     let no_query = |request: &Request| -> bool { request.url.query().is_none() };
 
     Mock::given(method("GET"))
@@ -269,125 +256,123 @@ async fn list_llm_models_uses_no_query_string() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let body: LlmModelsResponse = send_ok(&client, ListLlmModelsRequest::default()).await;
 
-    let request = ArtificialAnalysisDataRequest::ListLlmModels(ListLlmModelsRequest::default());
-    let result: Result<LlmModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 1);
     assert_eq!(body.prompt_options.prompt_length, "medium");
     assert!(body.data.is_empty());
-
-    clear_env();
 }
 
-/// Test 3: Data API missing-auth behaviour.
-///
-/// With `ARTIFICIAL_ANALYSIS_API_KEY` unset and no explicit `.api_key(...)`
-/// call, the client must fail with `SchematicError::AuthenticationRequired`
-/// before any HTTP request is made.
+/// With no client credential and `ARTIFICIAL_ANALYSIS_API_KEY` unset, the
+/// request goes out without `x-api-key`, and the provider's 401 comes back
+/// as an envelope failure with its status and raw body.
 #[tokio::test]
 #[serial_test::serial]
-async fn missing_auth_returns_authentication_required_error() {
-    clear_env();
+async fn missing_credential_sends_anonymously_and_returns_the_401() {
+    let _env = EnvGuard::clear(&[ENV_KEY]);
     let mock_server = MockServer::start().await;
+    let rejection = br#"{"error":"missing x-api-key"}"#;
 
-    // No mock is registered: if the client erroneously sent a request, the
-    // mock server would reply with 404 and we'd see `ApiError`, not
-    // `AuthenticationRequired`.
+    Mock::given(method("GET"))
+        .and(path("/data/llms/models"))
+        .respond_with(
+            ResponseTemplate::new(401).set_body_raw(rejection.as_slice(), "application/json"),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let response = client
+        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .await
+        .expect("a 401 is a response, not a transport error");
 
-    let request = ArtificialAnalysisDataRequest::ListLlmModels(ListLlmModelsRequest::default());
-    // Intentionally typed as `serde_json::Value`: this test exercises the
-    // pre-flight `AuthenticationRequired` error path, where no HTTP request
-    // is made and no response body is decoded. Typed-response decoding is
-    // covered by other tests in this file.
-    let result: Result<serde_json::Value, _> = client.request(request).await;
-
-    match result {
-        Err(SchematicError::AuthenticationRequired {
-            ref env_fallback_vars,
-            ..
-        }) => {
+    assert_eq!(response.meta.status.as_u16(), 401);
+    assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
+    match &response.outcome {
+        Outcome::Failure(error) => {
             assert!(
-                env_fallback_vars.iter().any(|name| name == ENV_KEY),
-                "expected env_fallback_vars to mention {ENV_KEY}, got {env_fallback_vars:?}"
+                matches!(error.kind, ErrorKind::Undeclared),
+                "kind: {}",
+                error.kind
             );
+            assert_eq!(error.body.as_ref(), rejection.as_slice());
         }
-        other => panic!("expected AuthenticationRequired, got {other:?}"),
+        Outcome::Success(_) => panic!("a 401 must not decode as success"),
     }
+    let received = mock_server
+        .received_requests()
+        .await
+        .expect("recording is on");
+    assert!(received[0].headers.get("x-api-key").is_none());
 }
 
-/// Test 4: Explicit `.api_key("...")` injection beats the env-var fallback.
-///
-/// `ARTIFICIAL_ANALYSIS_API_KEY` is set to an empty string, while
-/// `.api_key("explicit-key")` is invoked on the builder. The mock asserts
-/// that the wire request carries `x-api-key: explicit-key`.
+/// A client-level `Credential::api_key` beats a non-empty env-var fallback.
 #[tokio::test]
 #[serial_test::serial]
-async fn explicit_api_key_overrides_env_fallback() {
-    set_env("");
+async fn client_api_key_overrides_env_fallback() {
+    let env = EnvGuard::clear(&[ENV_KEY]);
+    env.set(ENV_KEY, "env-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/data/llms/models"))
         .and(header("x-api-key", "explicit-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(llm_models_response_empty()))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri()).api_key("explicit-key");
+    let client = ArtificialAnalysisData::builder()
+        .base_url(mock_server.uri())
+        .credentials(Credential::api_key("explicit-key"))
+        .build()
+        .expect("client builds");
+    let response = client
+        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .await
+        .expect("a response head arrived");
 
-    let request = ArtificialAnalysisDataRequest::ListLlmModels(ListLlmModelsRequest::default());
-    let result: Result<LlmModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
-    assert_eq!(body.status, 200);
-
-    clear_env();
+    assert_eq!(response.meta.request.auth, AuthMethod::ClientLevel);
+    assert_eq!(response.into_result().expect("success").status, 200);
 }
 
-/// Test 5: Env-var fallback is consulted when no explicit `.api_key(...)`
-/// is set.
-///
-/// Sets `ARTIFICIAL_ANALYSIS_API_KEY=env-key` and asserts the request goes
-/// out with `x-api-key: env-key`.
+/// The env-var fallback is consulted when no client credential is set.
 #[tokio::test]
 #[serial_test::serial]
 async fn env_api_key_is_used_when_no_explicit_key() {
-    set_env("env-key");
+    let env = EnvGuard::clear(&[ENV_KEY]);
+    env.set(ENV_KEY, "env-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/data/llms/models"))
         .and(header("x-api-key", "env-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(llm_models_response_empty()))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let response = client
+        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .await
+        .expect("a response head arrived");
 
-    let request = ArtificialAnalysisDataRequest::ListLlmModels(ListLlmModelsRequest::default());
-    let result: Result<LlmModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
-    assert_eq!(body.status, 200);
-
-    clear_env();
+    assert_eq!(
+        response.meta.request.auth,
+        AuthMethod::EnvVar(ENV_KEY.to_string())
+    );
+    assert_eq!(response.into_result().expect("success").status, 200);
 }
 
-/// Test 6a: CritPt API serializes the full evaluation body (including
-/// populated `batch_metadata`) exactly as expected.
+/// The CritPt API serializes the full evaluation body (including populated
+/// `batch_metadata`) exactly as expected.
 #[tokio::test]
-#[serial_test::serial]
 async fn critpt_evaluate_serializes_populated_batch_metadata() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     let expected = serde_json::json!({
@@ -412,7 +397,7 @@ async fn critpt_evaluate_serializes_populated_batch_metadata() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisCritPt::with_base_url(&mock_server.uri());
+    let client = critpt_client(&mock_server.uri());
 
     let body = CritPtEvaluateBody {
         submissions: vec![CritPtSubmission {
@@ -428,43 +413,32 @@ async fn critpt_evaluate_serializes_populated_batch_metadata() {
         batch_metadata: serde_json::json!({ "run_id": "abc" }),
     };
 
-    let request = ArtificialAnalysisCritPtRequest::EvaluateCritPt(EvaluateCritPtRequest::new(body));
-    let result: Result<CritPtEvaluateResponse, _> = client.request(request).await;
+    let body: CritPtEvaluateResponse = send_ok(&client, EvaluateCritPtRequest::new(body)).await;
 
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.accuracy, 0.0);
     assert_eq!(body.timeout_rate, 0.0);
     assert_eq!(body.server_timeout_count, 0);
     assert_eq!(body.judge_error_count, 0);
-
-    clear_env();
 }
 
-/// Test 6b: CritPt API drops `batch_metadata` from the wire body when it is
-/// `serde_json::Value::Null`, honouring the `skip_serializing_if =
+/// The CritPt API drops `batch_metadata` from the wire body when it is
+/// `serde_json::Value::Null`, honoring the `skip_serializing_if =
 /// "serde_json::Value::is_null"` rule on the field.
-///
-/// Wiremock has no built-in absent-field matcher; we use a closure-based
-/// `Match` to inspect the recorded request body.
 #[tokio::test]
-#[serial_test::serial]
 async fn critpt_evaluate_omits_null_batch_metadata() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
-    // Closure matcher: parse body as JSON and assert `batch_metadata` is
-    // not present at all (not just present-but-null).
+    // wiremock has no built-in absent-field matcher; present-but-null must
+    // not match either.
     let assert_field_absent = |request: &Request| -> bool {
-        let parsed: serde_json::Value = match serde_json::from_slice(&request.body) {
-            Ok(value) => value,
-            Err(_) => return false,
-        };
-        let object = match parsed.as_object() {
-            Some(map) => map,
-            None => return false,
-        };
-        !object.contains_key("batch_metadata")
+        serde_json::from_slice::<serde_json::Value>(&request.body)
+            .ok()
+            .and_then(|parsed| {
+                parsed
+                    .as_object()
+                    .map(|object| !object.contains_key("batch_metadata"))
+            })
+            .unwrap_or(false)
     };
 
     Mock::given(method("POST"))
@@ -474,7 +448,7 @@ async fn critpt_evaluate_omits_null_batch_metadata() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisCritPt::with_base_url(&mock_server.uri());
+    let client = critpt_client(&mock_server.uri());
 
     let body = CritPtEvaluateBody {
         submissions: vec![CritPtSubmission {
@@ -487,16 +461,8 @@ async fn critpt_evaluate_omits_null_batch_metadata() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    let request = ArtificialAnalysisCritPtRequest::EvaluateCritPt(EvaluateCritPtRequest::new(body));
-    // Intentionally typed as `serde_json::Value`: this test asserts on the
-    // **request body** the client emits (specifically that
-    // `batch_metadata` is omitted when null). Typed-response decoding is
-    // covered by `critpt_evaluate_serializes_populated_batch_metadata`.
-    let result: Result<serde_json::Value, _> = client.request(request).await;
+    send_ok(&client, EvaluateCritPtRequest::new(body)).await;
 
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-
-    // Cross-check by inspecting the recorded request body directly.
     let received = mock_server
         .received_requests()
         .await
@@ -508,17 +474,13 @@ async fn critpt_evaluate_omits_null_batch_metadata() {
         recorded.get("batch_metadata").is_none(),
         "batch_metadata should be absent when null, got: {recorded}"
     );
-
-    clear_env();
 }
 
-/// Test 7: Decode a populated `LlmModelsResponse` with a fully-formed
-/// `LlmModel` entry, exercising every required nested struct
-/// (`ModelCreator`, `LlmEvaluations`, `LlmPricing`).
+/// Decodes a populated `LlmModelsResponse` with a fully-formed `LlmModel`
+/// entry, exercising every required nested struct (`ModelCreator`,
+/// `LlmEvaluations`, `LlmPricing`).
 #[tokio::test]
-#[serial_test::serial]
 async fn list_llm_models_decodes_populated_response() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -527,13 +489,9 @@ async fn list_llm_models_decodes_populated_response() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let body: LlmModelsResponse = send_ok(&client, ListLlmModelsRequest::default()).await;
 
-    let request = ArtificialAnalysisDataRequest::ListLlmModels(ListLlmModelsRequest::default());
-    let result: Result<LlmModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 4);
     assert_eq!(body.data.len(), 1);
@@ -549,18 +507,13 @@ async fn list_llm_models_decodes_populated_response() {
         model.evaluations.artificial_analysis_intelligence_index,
         0.5
     );
-
-    clear_env();
 }
 
-/// Test 8: Decode a populated `MediaModelsResponse` whose single `MediaModel`
-/// carries a non-empty `categories` array including the optional
-/// `format_category` field. Exercises `Option<Vec<CategoryBreakdown>>` and
-/// `Option<String>` decode in their populated form.
+/// Decodes a populated `MediaModelsResponse` whose single `MediaModel` carries
+/// a non-empty `categories` array including the optional `format_category`
+/// field.
 #[tokio::test]
-#[serial_test::serial]
 async fn list_text_to_image_models_decodes_populated_categories() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -573,15 +526,10 @@ async fn list_text_to_image_models_decodes_populated_categories() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let request = ListTextToImageModelsRequest::default().with_include_categories(true);
+    let body: MediaModelsResponse = send_ok(&client, request).await;
 
-    let request = ArtificialAnalysisDataRequest::ListTextToImageModels(
-        ListTextToImageModelsRequest::default().with_include_categories(true),
-    );
-    let result: Result<MediaModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
     assert_eq!(body.data.len(), 1);
@@ -600,18 +548,12 @@ async fn list_text_to_image_models_decodes_populated_categories() {
     );
     assert_eq!(categories[0].elo, 1510);
     assert_eq!(categories[0].appearances, 50);
-
-    clear_env();
 }
 
-/// Test 9: Decode a `MediaModelsResponse` whose `MediaModel` omits the
-/// optional `release_date` and `categories` fields entirely. Exercises
-/// `Option<...>` decode-from-absent behaviour, complementing the populated
-/// case in `list_text_to_image_models_decodes_populated_categories`.
+/// Decodes a `MediaModelsResponse` whose `MediaModel` omits the optional
+/// `release_date` and `categories` fields entirely.
 #[tokio::test]
-#[serial_test::serial]
 async fn list_image_editing_models_decodes_response_without_optional_fields() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -622,15 +564,10 @@ async fn list_image_editing_models_decodes_response_without_optional_fields() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::with_base_url(&mock_server.uri());
+    let client = data_client(&mock_server.uri());
+    let body: MediaModelsResponse =
+        send_ok(&client, ListImageEditingModelsRequest::default()).await;
 
-    let request = ArtificialAnalysisDataRequest::ListImageEditingModels(
-        ListImageEditingModelsRequest::default(),
-    );
-    let result: Result<MediaModelsResponse, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, None);
     assert_eq!(body.data.len(), 1);
@@ -646,18 +583,12 @@ async fn list_image_editing_models_decodes_response_without_optional_fields() {
         model.categories.is_none(),
         "categories should decode to None when key absent"
     );
-
-    clear_env();
 }
 
-/// Test 10: Decode a realistic non-zero `CritPtEvaluateResponse`. Complements
-/// `critpt_evaluate_serializes_populated_batch_metadata` (all-zero payload)
-/// by proving non-zero numeric decoding round-trips correctly. Uses
-/// exactly-representable f64 values (`0.5`, `0.25`) so `assert_eq!` is safe.
+/// Decodes a realistic non-zero `CritPtEvaluateResponse`, complementing the
+/// all-zero payload of `critpt_evaluate_serializes_populated_batch_metadata`.
 #[tokio::test]
-#[serial_test::serial]
 async fn critpt_evaluate_decodes_realistic_response() {
-    set_env("test-key");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -668,7 +599,7 @@ async fn critpt_evaluate_decodes_realistic_response() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisCritPt::with_base_url(&mock_server.uri());
+    let client = critpt_client(&mock_server.uri());
 
     let body = CritPtEvaluateBody {
         submissions: vec![CritPtSubmission {
@@ -681,15 +612,10 @@ async fn critpt_evaluate_decodes_realistic_response() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    let request = ArtificialAnalysisCritPtRequest::EvaluateCritPt(EvaluateCritPtRequest::new(body));
-    let result: Result<CritPtEvaluateResponse, _> = client.request(request).await;
+    let body: CritPtEvaluateResponse = send_ok(&client, EvaluateCritPtRequest::new(body)).await;
 
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
-    let body = result.expect("ok");
     assert_eq!(body.accuracy, 0.5);
     assert_eq!(body.timeout_rate, 0.25);
     assert_eq!(body.server_timeout_count, 3);
     assert_eq!(body.judge_error_count, 1);
-
-    clear_env();
 }
