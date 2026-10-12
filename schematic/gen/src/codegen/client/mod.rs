@@ -16,6 +16,8 @@ mod methods;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use helpers::to_snake_case;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::RestApi;

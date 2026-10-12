@@ -23,6 +23,8 @@
 //!
 //! ## Safety Guarantees
 //!
+//! - **Batch validation**: [`generate_and_write_all`] refuses a batch that
+//!   [`validate_rust_client`] rejects before assembling or writing anything.
 //! - **Syntax validation**: All generated code is parsed with `syn` before
 //!   writing, which catches grammar/syntax errors only — it does not
 //!   type-check, resolve names, or guarantee the code compiles.
@@ -38,7 +40,9 @@ use std::path::Path;
 
 use schematic_define::RestApi;
 
+use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
+use crate::validation::{ensure_no_errors, validate_rust_client};
 
 pub mod assemble;
 pub mod format;
@@ -125,6 +129,8 @@ enum GeneratedModule {
 /// ## Errors
 ///
 /// Returns an error if:
+/// - [`validate_rust_client`] reports an error for the batch
+///   ([`GeneratorError::Validation`]); nothing is written
 /// - Code generation produces invalid Rust
 /// - File writing fails
 pub fn generate_and_write_all(
@@ -132,6 +138,8 @@ pub fn generate_and_write_all(
     output_dir: &Path,
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
+    ensure_valid_rust_batch(apis)?;
+
     let lib_tokens = assemble_lib_rs(apis);
     let lib_file = validate_code(&lib_tokens)?;
     let lib_formatted = format_code(&lib_file);
@@ -266,6 +274,12 @@ pub fn generate_and_write_all(
             GeneratedModule::Directory { mod_rs, .. } => mod_rs,
         })
         .unwrap_or_default())
+}
+
+/// Fails with [`GeneratorError::Validation`] when the batch cannot produce a
+/// valid Rust client, before anything is assembled or written.
+fn ensure_valid_rust_batch(apis: &[&RestApi]) -> Result<(), GeneratorError> {
+    ensure_no_errors(Output::Rust, validate_rust_client(apis))
 }
 
 /// Collects the set of expected filenames (and directory names) that should
@@ -408,6 +422,7 @@ fn remove_conflicting_paths(
 /// ## Errors
 ///
 /// Returns an error if:
+/// - [`validate_rust_client`] reports an error ([`GeneratorError::Validation`])
 /// - Code generation produces invalid Rust
 /// - File writing fails
 pub fn generate_and_write_standalone(
@@ -417,6 +432,7 @@ pub fn generate_and_write_standalone(
     has_types: bool,
 ) -> Result<String, GeneratorError> {
     let apis = [api];
+    ensure_valid_rust_batch(&apis)?;
     let options = OutputOptions {
         standalone: true,
         include_types_module: has_types,
@@ -581,7 +597,7 @@ mod tests {
                     method: RestMethod::Post,
                     path: "/completions".to_string(),
                     description: "Creates a completion".to_string(),
-                    request: Some(ApiRequest::json_type("CreateCompletionRequest")),
+                    request: Some(ApiRequest::json_type("CreateCompletionBody")),
                     response: ApiResponse::json_type("Completion"),
                     headers: vec![],
                     params: None,

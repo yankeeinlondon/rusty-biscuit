@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+use crate::diagnostics::{Output, ValidationDiagnostic};
+
 /// Errors that can occur during code generation.
 #[derive(Debug, Error)]
 pub enum GeneratorError {
@@ -29,48 +31,56 @@ pub enum GeneratorError {
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
 
-    /// Naming collision between body type and generated wrapper struct.
+    /// One output's validator reported blocking diagnostics.
     ///
-    /// This occurs when an endpoint's body type name matches the generated
-    /// request struct name (e.g., body type "CreateUserRequest" conflicts
-    /// with endpoint "CreateUser" + suffix "Request").
+    /// Nothing of that output was written. The rendered message lists every
+    /// diagnostic, warnings included, one per line.
     #[error(
-        "Naming collision for endpoint '{endpoint_id}': body type '{body_type}' conflicts with generated request struct name. Suggestion: rename the body type to '{suggestion}'"
+        "validation failed for output {output} ({} error(s)):{}",
+        error_count(diagnostics),
+        render_lines(diagnostics)
     )]
-    NamingCollision {
-        /// The endpoint ID that has the collision.
-        endpoint_id: String,
-        /// The body type name that conflicts.
-        body_type: String,
-        /// Suggested alternative name for the body type.
-        suggestion: String,
+    Validation {
+        /// The output that was not written.
+        output: Output,
+        /// Every diagnostic its validator reported.
+        diagnostics: Vec<ValidationDiagnostic>,
     },
 
-    /// Invalid request suffix configuration.
-    ///
-    /// The request suffix must be alphanumeric (letters and numbers only)
-    /// to ensure valid Rust identifier generation.
-    #[error("Invalid request suffix '{suffix}': {reason}")]
-    InvalidRequestSuffix {
-        /// The invalid suffix value.
-        suffix: String,
-        /// Explanation of why the suffix is invalid.
-        reason: String,
+    /// At least one requested output failed; the others were still attempted.
+    #[error(
+        "generation failed for output(s) {}{}",
+        join_outputs(failed),
+        succeeded_suffix(succeeded)
+    )]
+    OutputsFailed {
+        /// Outputs that were written (or would be, in a dry run).
+        succeeded: Vec<Output>,
+        /// Outputs that failed validation or writing.
+        failed: Vec<Output>,
     },
+}
 
-    /// A definition name cannot be turned into a valid Rust identifier.
-    ///
-    /// Emitters build type and variant identifiers directly from names such as
-    /// the API name and endpoint IDs. A name that is empty, starts with a
-    /// digit, contains punctuation, or is a Rust keyword would make identifier
-    /// construction panic during generation; this error surfaces it up front.
-    #[error("Invalid {context} '{name}': {reason}")]
-    InvalidIdentifier {
-        /// Where the offending name came from (e.g. "endpoint ID", "API name").
-        context: String,
-        /// The offending name.
-        name: String,
-        /// Why the name cannot be used as a Rust identifier.
-        reason: String,
-    },
+fn error_count(diagnostics: &[ValidationDiagnostic]) -> usize {
+    diagnostics.iter().filter(|d| d.is_error()).count()
+}
+
+fn render_lines(diagnostics: &[ValidationDiagnostic]) -> String {
+    diagnostics.iter().map(|d| format!("\n  {d}")).collect()
+}
+
+fn join_outputs(outputs: &[Output]) -> String {
+    outputs
+        .iter()
+        .map(|output| output.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn succeeded_suffix(succeeded: &[Output]) -> String {
+    if succeeded.is_empty() {
+        String::new()
+    } else {
+        format!(" (succeeded: {})", join_outputs(succeeded))
+    }
 }

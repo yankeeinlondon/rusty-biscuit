@@ -12,14 +12,16 @@
 //! 3. Real registries (`openai`, `samsung-smart-tv`, `ollama`, ...) still
 //!    satisfy the strict check — i.e. the production data set is healthy.
 //!
-//! The CLI binary exercises the same `validate_completeness` call inside
-//! `run_generate` / `run_generate_all`; this integration test pins the
-//! registry-level contract so the binary keeps holding it.
+//! The generator reports a gap through
+//! `schematic_gen::validation::validate_openapi_registry`, which the OpenAPI
+//! output runs over the whole batch before writing any document; these tests
+//! pin the registry-level contract and that diagnostic.
 
 use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::{
     SchemaRegistry, get_registries_for_module, get_registry, registry_key_for,
 };
+use schematic_gen::validation::validate_openapi_registry;
 
 /// Builds a tiny `RestApi` whose single endpoint references the supplied JSON
 /// response type by name. Used by these tests to inject a missing-schema
@@ -54,21 +56,13 @@ fn synthetic_api(name: &str, response_type: &str) -> RestApi {
     }
 }
 
-/// Mirrors `schematic_gen::main::missing_schemas_error` exactly. Kept here so
-/// that the integration test can assert the full diagnostic format without
-/// depending on a private binary helper.
-fn render_error(module_name: &str, api_name: &str, missing: &[String]) -> String {
-    let first = missing.first().map(String::as_str).unwrap_or("MissingType");
-    format!(
-        "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
-         missing schema(s) {missing:?}. \
-         Add JsonSchema derive + register::<T>(\"{first}\") entries in \
-         schematic-definitions, or skip with --no-openapi.",
-        module = module_name,
-        api = api_name,
-        missing = missing,
-        first = first,
-    )
+/// Renders the OpenAPI validator's diagnostic for `api` against `registry`,
+/// exactly as the generator prints it.
+fn render_error(module_name: &str, api: &RestApi, registry: &SchemaRegistry) -> String {
+    let diagnostics = validate_openapi_registry(module_name, &[api], Some(registry));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert!(diagnostics[0].is_error());
+    diagnostics[0].to_string()
 }
 
 #[test]
@@ -88,14 +82,14 @@ fn single_api_with_missing_schema_fails_validation() {
 
     // Verify the rendered error message contains every diagnostic field that
     // a generator user needs: module, API, and missing list.
-    let rendered = render_error("synthetic", &api.name, &missing);
+    let rendered = render_error("synthetic", &api, &registry);
     assert!(
-        rendered.contains("\"synthetic\""),
+        rendered.contains("`synthetic`"),
         "expected module name in: {}",
         rendered
     );
     assert!(
-        rendered.contains("\"SyntheticOne\""),
+        rendered.contains("api=SyntheticOne "),
         "expected API name in: {}",
         rendered
     );
@@ -133,9 +127,9 @@ fn grouped_module_with_missing_schema_in_one_member_fails() {
     let missing = result.expect_err("MemberB should fail validation");
     assert_eq!(missing, vec!["TotallyMissing".to_string()]);
 
-    let rendered = render_error("synthetic-group", &bad.name, &missing);
-    assert!(rendered.contains("\"synthetic-group\""));
-    assert!(rendered.contains("\"MemberB\""));
+    let rendered = render_error("synthetic-group", &bad, &merged);
+    assert!(rendered.contains("`synthetic-group`"));
+    assert!(rendered.contains("api=MemberB "));
     assert!(rendered.contains("TotallyMissing"));
 }
 
@@ -150,19 +144,19 @@ fn dangling_json_ref_cannot_be_emitted() {
     // Empty registry stands in for the broken state: caller forgot to
     // register the schema.
     let broken = SchemaRegistry::new();
-    let missing = broken
+    broken
         .validate_completeness(&api)
         .expect_err("dangling $ref must be rejected");
 
-    let rendered = render_error("openai", &api.name, &missing);
+    let rendered = render_error("openai", &api, &broken);
     assert!(
         rendered.contains("ListModelsResponse"),
         "rendered error must name the dangling type, got: {}",
         rendered,
     );
     assert!(
-        rendered.contains("OpenAPI registry incomplete"),
-        "rendered error must use the canonical strict-mode prefix, got: {}",
+        rendered.contains("feature=incomplete-schema-registry output=openapi"),
+        "rendered error must use the canonical diagnostic scope, got: {}",
         rendered,
     );
 }
@@ -207,7 +201,7 @@ fn real_registries_still_pass_strict_completeness() {
 
 #[test]
 fn real_module_registries_still_pass_strict_completeness() {
-    // Mirrors what `run_generate_all` does: for each module, build the
+    // Mirrors what the OpenAPI output does: for each module, build the
     // merged registry and validate every member API against it.
     let grouped = schematic_definitions::apis_by_module();
     for (module_name, member_apis) in grouped.iter() {

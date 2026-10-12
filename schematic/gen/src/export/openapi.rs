@@ -19,8 +19,10 @@ use schematic_define::openapi::{
     ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
 };
 
+use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
+use crate::validation::{ensure_no_errors, validate_openapi};
 
 /// Writes an OpenAPI specification file to the specified directory.
 ///
@@ -46,6 +48,8 @@ use crate::export::resolve_module_name;
 ///
 /// ## Errors
 ///
+/// Returns `GeneratorError::Validation` if [`validate_openapi`] reports an
+/// error; nothing is written.
 /// Returns `GeneratorError::WriteError` if file writing fails.
 /// Returns `GeneratorError::ConfigError` if the directory doesn't exist or export fails.
 ///
@@ -70,6 +74,8 @@ pub fn write_openapi<R: SchemaRegistryLike>(
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<std::path::PathBuf, GeneratorError> {
+    ensure_no_errors(Output::OpenApi, validate_openapi(&[api]))?;
+
     // Validate directory exists
     if !dir.exists() {
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
@@ -137,6 +143,8 @@ pub fn write_openapi<R: SchemaRegistryLike>(
 ///
 /// ## Errors
 ///
+/// - [`GeneratorError::Validation`] when [`validate_openapi`] reports an
+///   error for any member; nothing is written.
 /// - [`GeneratorError::ConfigError`] when the directory does not exist, when
 ///   per-API export or serialization fails, or when two member APIs collide
 ///   on the same `path` + `method`.
@@ -156,6 +164,7 @@ pub fn write_openapi_grouped<R: SchemaRegistryLike>(
         !apis.is_empty(),
         "write_openapi_grouped requires at least one API"
     );
+    ensure_no_errors(Output::OpenApi, validate_openapi(apis))?;
 
     if !dir.exists() {
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));

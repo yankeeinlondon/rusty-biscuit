@@ -161,7 +161,7 @@ pub fn make_complex_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/completions".to_string(),
                 description: "Creates a completion".to_string(),
-                request: Some(ApiRequest::json_type("CreateCompletionRequest")),
+                request: Some(ApiRequest::json_type("CreateCompletionBody")),
                 response: ApiResponse::json_type("Completion"),
                 headers: vec![],
                 params: None,

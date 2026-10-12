@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 
 use schematic_define::RestApi;
 
+use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use crate::export::naming::resolve_module_name;
+use crate::validation::{ensure_no_errors, validate_postman};
 
 mod auth;
 mod collection;
@@ -31,6 +33,11 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 /// Writes a Postman collection to disk.
 ///
 /// File naming: `<module_name>.postman_collection.json`
+///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] when [`validate_postman`] reports an error
+/// (nothing is written), or a serialization or write error.
 ///
 /// ## Examples
 ///
@@ -60,6 +67,7 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 /// assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
 /// ```
 pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf, GeneratorError> {
+    ensure_no_errors(Output::Postman, validate_postman(&[api]))?;
     let collection = build_postman_collection(api);
     let module_name = resolve_module_name(api);
     let filename = format!("{}.postman_collection.json", module_name);
@@ -84,6 +92,11 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 /// Writes a grouped Postman collection to disk.
 ///
 /// File naming: `<module_name>.postman_collection.json`
+///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] when [`validate_postman`] reports an error
+/// for any member (nothing is written), or a serialization or write error.
 ///
 /// ## Examples
 ///
@@ -118,6 +131,7 @@ pub fn write_postman_grouped(
     dir: &Path,
     dry_run: bool,
 ) -> Result<PathBuf, GeneratorError> {
+    ensure_no_errors(Output::Postman, validate_postman(apis))?;
     let collection = build_postman_collection_grouped(apis, module_name);
     let filename = format!("{}.postman_collection.json", module_name);
     let path = dir.join(&filename);

@@ -15,6 +15,7 @@ mod fresh_output_compile;
 mod http_client;
 mod openapi_import_test;
 mod openapi_strict_completeness;
+mod output_validation;
 mod path_substitution;
 mod postman_artifact_validation;
 mod postman_golden;

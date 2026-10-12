@@ -315,7 +315,7 @@ fn generate_code_for_various_api_configurations() {
                     method: RestMethod::Patch,
                     path: "/resource/{id}".to_string(),
                     description: "PATCH".to_string(),
-                    request: Some(ApiRequest::json_type("PatchRequest")),
+                    request: Some(ApiRequest::json_type("PatchBody")),
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,

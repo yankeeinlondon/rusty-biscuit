@@ -16,6 +16,7 @@
 //! - [`cargo_gen`] - Cargo.toml generation for the output package
 //! - [`parser`] - Path parameter extraction utilities
 //! - [`errors`] - Error types for the generator
+//! - [`validation`] / [`diagnostics`] - Per-output validation and its diagnostics
 //!
 //! ## Example Usage
 //!
@@ -66,6 +67,7 @@ pub mod cargo_gen;
 pub mod codegen;
 pub mod commands;
 pub mod definition_gen;
+pub mod diagnostics;
 pub mod errors;
 pub mod export;
 pub mod import_pipeline;
@@ -84,7 +86,9 @@ pub use inference::infer_module_path;
 pub use export::openapi::{write_openapi, write_openapi_grouped};
 pub use export::postman::{write_postman, write_postman_grouped};
 
-pub use validation::validate_api;
+pub use validation::{
+    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+};
 
 #[cfg(test)]
 pub mod test_utils;
