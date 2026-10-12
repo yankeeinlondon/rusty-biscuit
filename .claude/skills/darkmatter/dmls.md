@@ -116,6 +116,12 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   resolve their references through `resolve::expand_named_types`. Imported
   files are dependency edges, and a failed assembly records the files its
   error names so a fix clears it; local references add no edge.
+- Type keywords come from `schema_type_descriptors()` plus each descriptor's
+  `aliases`; `alphanumeric` options come from its `type_options`, offered only
+  while `SchemaCursorRole::Constraint.leading_group` is `Some` (no `;` yet).
+  Definition hover adds `schema_type_descriptor` text and, for
+  `alphanumeric`, `PropertyAtom::alphanumeric_options()` with the
+  `AsciiCharSet` `Display` rendering.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.

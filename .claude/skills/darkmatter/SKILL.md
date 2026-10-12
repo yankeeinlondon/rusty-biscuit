@@ -108,7 +108,13 @@ root `$schema` document or a `kind: schema` document with a `types` mapping.
 
 Important contracts:
 
-- Optional schema properties accept missing or `null` values.
+- Optional schema properties accept missing or `null` values. A property whose
+  whole value admits null (`null`, `unknown`/`any`, or a union with such an
+  arm) is never required, whatever its `required`, `eager`, or `generated`
+  markers; one shared presence calculation decides this for every consumer.
+- `alphanumeric` options are type identity (canonical, never merged or
+  widened); `shell` is a passive `darkmatter-shell` format, never parsed or
+  run. See [schema.md](schema.md#core-types-unknown-null-alphanumeric-shell).
 - Validation keeps source positions, origin information, typed problem codes,
   pending values, and file-reference diagnostics.
   `FileReferenceDiagnostic::resolution_failure()` gives the biscuit-file

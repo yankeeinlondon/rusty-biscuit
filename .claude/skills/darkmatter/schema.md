@@ -10,6 +10,7 @@ and DMLS schema behavior.
 - [Imports and dictionaries](#imports-and-dictionaries)
 - [Named union references](#named-union-references)
 - [Special types](#special-types)
+- [Core types](#core-types-unknown-null-alphanumeric-shell)
 - [Suggestions and DMLS](#suggestions-and-dmls)
 - [Testing](#testing)
 
@@ -80,7 +81,9 @@ axes, derived recursively:
 | `required; eager` | must be present and valid | must be present and valid |
 
 Explicit null counts as absence, so an eager-only null is allowed at both
-phases. Completion observes the final working instance without coercion, while
+phases. Exception: a null-admitting whole value (see
+[Core types](#core-types-unknown-null-alphanumeric-shell)) is optional at both
+phases whatever its markers. Completion observes the final working instance without coercion, while
 the existing unphased `validate*` authoring behavior remains unchanged. Raw JSON
 Schema retains its authored `required` behavior at both phases, and trigger
 match conditions reject `eager` because matching has no runtime phase.
@@ -143,8 +146,13 @@ source snapshot, shared by every problem and root-union arm):
 - Every constraint survives a reference, including `required` and `generated`
   (nothing is stripped; no use-site opt-out). Presence declared inside an
   object type does not make the holding property required. An optional variant
-  is declared directly; aliasing the required type re-inherits presence.
-  Nullable unions are planned.
+  is declared directly or as `[T, null]`; aliasing the required type
+  re-inherits presence.
+- `alphanumeric` options are identity, not mergeable constraints:
+  `check_use_site_options` (`resolve.rs`, before merging) drops an equal
+  canonical set and raises `ConstraintConflict` with
+  `SchemaConstraintConflictKind::Options` for a different one (origins: the
+  definition's option group and the use site).
 - `apply_import_postfix` (`resolve.rs`) merges use-site constraints: stricter
   bound wins per kind (string length, number, item count, keys), lower > upper
   is `SchemaError::ConstraintConflict` (`Bounds`/`Scheme`/`Default`, each
@@ -260,6 +268,8 @@ References; Choosing an Arm: Reporting versus Changing Data).
   to strings, but no expression is evaluated.
 - `yaml` and `json` accept string or native structured values and validate the
   encoded content format.
+- Core types (`unknown`, `null`, `alphanumeric`, `shell`): see
+  [Core types](#core-types-unknown-null-alphanumeric-shell).
 - `type-definition` validates one property definition.
 - `schema` validates one complete `$schema` declaration.
 - `eager` is universal timing metadata and never controls presence. Ordinary
@@ -270,6 +280,67 @@ References; Choosing an Arm: Reporting versus Changing Data).
 
 The meta-types delegate to the same passive parser used by authoring and DMLS.
 They do not perform imports, I/O, matching side effects, or rewrites.
+
+## Core types (`unknown`, `null`, `alphanumeric`, `shell`)
+
+User docs: `darkmatter/docs/topics/schemas/definition.md` (`unknown` and
+`null`; Null-Admitting Properties; Alphanumeric Strings; Shell Commands;
+Subtype Relation). All four are built-in keywords, so a same-named local type
+needs `@this`.
+
+- `SimplifiedType::Unknown` is canonical; `any` parses to it
+  (`SimplifiedType::aliases()`), and serialization, `md schema about`
+  (`alias: any`), and DMLS say `unknown`. It lowers to `{}`, never coerces,
+  and keeps nested nulls. An undeclared expression variable is described as
+  unknown-typed; no static check follows from that.
+- `null` lowers to `{"type":"null"}`. YAML null scalars (`null`/`Null`/`NULL`/
+  `~`, empty value, empty item) and the string `"null"` spell it at property,
+  union-arm, nested, and named positions; a quoted `""` is still "expected a
+  type name". Root `$schema: null`, a null root-union arm, and `literal(null)`
+  stay errors. A non-null `default` is a `Grammar` error ranged on the
+  argument (the converter backstops a use-site default on a `null` named
+  type).
+- **Effective presence** is one calculation: `PropertyDef::is_required` /
+  `PropertyAtom::is_required` = a `required` marker (written, inherited,
+  hoisted, or after `[]`) and not `admits_null()`. `admits_null()` is true for
+  a non-array `null`/`unknown` or a non-array union (property-level or
+  `TypeExpr::Union`) with such an arm, on resolved input. Lowering, trigger
+  matching and the vacuous-arm lint, phase projection, completion,
+  composition materialization, DMLS, and Claudine all read it; never re-derive
+  presence from the raw marker (`marks_required` is crate-private). `eager`
+  and `generated` never restore presence. `unknown[](required)` /
+  `null[](required)` still require the list; a nullable child leaves its
+  parent's presence alone. Raw JSON Schema keeps its authored `required`.
+- Root unions are inclusive (`anyOf`, one or more arms); XOR is written with
+  `key: null` in each arm.
+- `alphanumeric` (`simplified/alphanumeric.rs`): `AlphanumericOption` (nine,
+  table order), `AlphanumericOptions` (`canonical()`, `keywords()`,
+  `allowed_characters()`, `first_characters()`, `forbids_double_period()`,
+  `accepts()`, `pattern()`), `AsciiCharSet` (with `Display` for hover).
+  Options ride in `Constraint::Options` before `;`; read the canonical set via
+  `PropertyAtom::alphanumeric_options()`, never from display strings. Lowering:
+  `string` + canonical linear-time `pattern` (user patterns and `not-empty`
+  as further `allOf` entries) + `x-darkmatter-type` /
+  `x-darkmatter-options`. `coerce.rs` skips fragments annotated
+  `x-darkmatter-type: alphanumeric`, so numbers and booleans stay mismatches
+  (other union arms keep their coercion). `default`/`suggest` values must
+  validate, without coercion, or the load fails; other types' suggestions
+  stay lint-only. `md schema validate` assignments force a string for a
+  top-level `alphanumeric` (`assignment.rs::atom_prefers_string`), so
+  `slug=123` is the text `123`.
+- `shell` lowers to `format: darkmatter-shell` (registered and asserted by
+  every validator builder, including the expression catalog's): non-blank
+  text, no syntax check, passive. Constraints, scalar coercion, defaults, and
+  pending deferral mirror `expression`. Exported-schema consumers must
+  enforce the format. Excluding `shell` from an action union is authoring
+  validation only; Claudine's runtime `initialize` shell ban stays.
+- `is_subtype(a, b)` (`simplified/subtype.rs`) is passive over resolved
+  atoms: identical identity (type, canonical options, enum member set,
+  literal value, structural inline objects/unions) is a subtype;
+  `alphanumeric` compares character sets and the `..` ban; always-text types
+  are subtypes of `string`; everything else, including unresolved references,
+  `unknown`, `null`, and arrays against `string`, is not. Constraints are
+  ignored.
 
 ## Suggestions and DMLS
 
