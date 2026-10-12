@@ -16846,6 +16846,7 @@ dependencies = [
  "serial_test",
  "sniff",
  "tempfile",
+ "test-toolkit",
  "thiserror 2.0.18",
  "which 8.0.2",
 ]

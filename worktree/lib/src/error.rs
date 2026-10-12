@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::config::BaseDirSource;
+use crate::config::{BaseDirSource, example_base_dir};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -10,8 +10,11 @@ pub enum WorktreeError {
     #[error("This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again.")]
     NotInGitRepo,
 
+    /// Neither `WT` nor `~/.worktree.json` names a base directory. The
+    /// message is written for a caller that cannot answer the setup prompt.
     #[error(
-        "base directory not configured: set the WT environment variable or create ~/.worktree.json"
+        "No worktree base directory is configured. Set the WT environment variable to an absolute directory on this host (for example {}), or create ~/.worktree.json containing {{\"base_dir\": \"<absolute directory>\"}}. Running wt create in an interactive terminal offers to set one up.",
+        example_base_dir()
     )]
     BaseDirectoryNotConfigured,
 
@@ -259,16 +262,6 @@ fn remedy_lowercase(origin: &BaseDirSource) -> String {
     match chars.next() {
         Some(first) => first.to_lowercase().chain(chars).collect(),
         None => remedy,
-    }
-}
-
-fn example_base_dir() -> &'static str {
-    if cfg!(windows) {
-        r"C:\Users\me\wt"
-    } else if cfg!(target_os = "macos") {
-        "/Users/me/wt"
-    } else {
-        "/home/me/wt"
     }
 }
 
