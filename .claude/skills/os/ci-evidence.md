@@ -31,7 +31,9 @@ The JUnit reports behind a hook receipt stay on the host that produced it, at
 the receipt's `host.report_dir`
 (`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence`). Investigating a reused cell means asking that
-host.
+host. On that host, `just ci-evidence` maps the SHA directories to branches,
+subjects, results and durations (`--json` adds full paths); never rename the
+directories, because published receipts name them.
 
 ## Execution bans
 
