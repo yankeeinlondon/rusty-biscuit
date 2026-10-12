@@ -21060,14 +21060,16 @@ Returns an object with `object` set to `response.input_tokens` and an `input_tok
     BetaGetinputtokencounts(BetaGetinputtokencountsRequest),
 }
 impl OpenAIRequest {
-    /// Converts the request into (method, path, body, headers) parts.
+    /// Converts the request into (method, path, body, headers, query) parts.
     ///
     /// Delegates to the inner request struct's `into_parts()` method.
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns the inner request's error: `SchematicError::SerializationError`
+    /// if a JSON request body fails to serialize, or `SchematicError::Header`
+    /// if an endpoint's static `Cookie` header cannot be parsed while
+    /// cookie parameters are merged into it.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::CreateSpeech(req) => req.into_parts(),
