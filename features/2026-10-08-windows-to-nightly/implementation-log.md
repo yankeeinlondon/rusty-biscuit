@@ -875,3 +875,69 @@ because they are not implemented yet, and must be tested as soon as they are.
   a 90 s limit), timed out alone at a host load average of 89. This change
   touches neither `ci-build` nor the two packages it builds; it was not
   re-run on a quiet host.
+
+## Phase 5 — Resumable workspace seeding (2026-10-11)
+
+### What changed
+
+- `just ci-seed` (`scripts/ci/seed.py`): pins a clean checkout reachable from
+  `origin/main`, fetches observation notes without force, resolves the
+  full-workspace `schedule` plan through `affected_scope.py`, asks
+  `local_evidence.verify_cells` (all-zero base) which `windows-latest` and
+  `wsl2-ubuntu` cells are proved, and runs `cross-check.sh <package> --os
+  windows|wsl` for each package still owing one. Phase 4's
+  `publish_rig_observation` publishes each finished leg; the package's cells
+  are verified again after every leg.
+- Outcomes reported apart: `reused`, `proved`, `gap`, `busy` (exit 75),
+  `unreachable` (255), `failed`, `unproved` (exit 0, nothing qualifying
+  published), `no-host`. Exit 0 only when nothing requested is owed.
+- `--plan` previews and proves nothing; `--os`, `--package` narrow a pass.
+
+### Departures from the Phase 1 rulings
+
+- **No `--resume` flag; resume is the default.** What a pass owes is always
+  re-derived from published proof, so the state file cannot decide anything
+  and a separate resume mode would only add a way to disagree with it.
+- **State file reduced** to `{schema_version, seed_id, repository.remote,
+  pinned{revision, tree}, plan{sha256, cell_count}, attempts, cells}`. The
+  ruling's policy/contract digests are covered by `seed_id`, which binds the
+  pinned commit and the resolved plan's bytes; a different plan is a
+  different seed directory, never a rewritten state.
+- **Observations are `rig`, not `seed`.** The seed drives the same
+  `cross-check.sh` legs, which already publish `rig` observations with proof;
+  a separate producer kind would duplicate that path for no reader.
+- **`--plan` is allowed off `main`** (warning only); it creates no proof.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+|---|---|
+| Fully seeded bootstrap: every cell reused, no build, no dispatch row | `test_affected_scope.EventSchedulingTests.test_a_fully_seeded_bootstrap_nightly_builds_and_runs_nothing` |
+| Partial seed runs exactly the rest; no Windows producer for proved Windows cells | `...test_a_partly_seeded_nightly_runs_exactly_the_rest` |
+| Pinning: clean, the checkout, on `origin/main`; preview off main | `test_seed.PinTests` |
+| Reuse, per-leg outcomes, missing rig, interruption then resume, retry after failure, attempts accumulate, package filter, preview | `test_seed.SeedRunTests` |
+| Atomic state, foreign/unreadable state ignored, lock, seed id binding | `test_seed.StateTests` |
+
+### Validation
+
+- `test_seed` 18, `test_affected_scope` all pass; `test-toolkit` 473 passed;
+  `just check-canonical` clean.
+- `just ci-seed --plan` on this branch's real metadata: 162 cells, 128 owed,
+  34 governed gaps, in about 7 s.
+
+### Operational seeding: not performed
+
+The operational seed cannot run yet. It must run at a clean `origin/main`
+checkout, and `main` has neither `seed.py` nor Phase 4's rig publication in
+`cross-check.sh`; a pass from this branch would publish proof on a commit no
+nightly descends from. It also pushes `refs/notes/ci-local/*` to GitHub,
+which needs the author's go-ahead. Recovery inventory once this merges:
+
+```sh
+git fetch origin && git switch --detach origin/main
+just ci-seed --plan                    # expect 128 owed cells, 34 gaps
+just ci-seed --os windows --package biscuit-file   # one small sample first
+just ci-seed                           # the rest; rerun to resume
+```
+
+No nightly baseline exists, and nothing here is a certified workspace.
