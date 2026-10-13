@@ -80,6 +80,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
         system_prompt_scoped_tmp: PathBuf::new(),
         sandbox_requested: false,
         has_model_env: false,
+        environment: claudine::invocation_context::DocumentEnvironment::default(),
         mcp: None,
         opencode_config_base: None,
         kilo_config_base: None,
@@ -161,15 +162,11 @@ fn installed_without(absent: &[Provider]) -> InstalledProviderSnapshot {
 
 /// An environment carrying none of the variables model precedence consults.
 ///
-/// Every fixture below uses it, because these tests run in the binary's shared
-/// test process and the precedence chain's steps 2 and 3 read the *process*
-/// environment. A Claudine-wrapped agent session exports `MODEL` into every
-/// command it launches, so a suite run from inside one saw an ambient `opus`
-/// out-rank each fixture's frontmatter — and the process environment cannot be
-/// scrubbed from here, since `std::env::set_var` is unsound while sibling
-/// tests share the process.
-fn no_ambient_env(_key: &str) -> Option<String> {
-    None
+/// Every fixture below uses it, so a `MODEL` the host shell exports (a
+/// Claudine-wrapped agent session exports one into every command it launches)
+/// can never out-rank a fixture's frontmatter.
+fn no_ambient_env() -> claudine::invocation_context::DocumentEnvironment {
+    claudine::invocation_context::DocumentEnvironment::default()
 }
 
 /// The invocation intent an unchanged run resolves against: Goose,
@@ -188,7 +185,7 @@ fn intent() -> LaunchRebuildIntent {
         fallback_model: None,
         dispatch_context: invocation_dispatch_context(),
         launch_plan_inputs: plan_inputs(),
-        env_lookup: no_ambient_env,
+        environment: no_ambient_env(),
     }
 }
 
@@ -342,7 +339,7 @@ fn the_supplied_environment_outranks_the_targets_frontmatter_model() {
     let target = target_with_model(Some("llamacpp/frontmatter"));
 
     let mut generic = intent();
-    generic.env_lookup = |key| (key == "MODEL").then(|| "llamacpp/from-generic-env".to_string());
+    generic.environment = [("MODEL", "llamacpp/from-generic-env")].into_iter().collect();
     let rebuild = rebuild_target_launch(&generic, None, None, Path::new("."), &target).unwrap();
     assert_eq!(
         value_of(&rebuild.env_overrides, "MODEL"),
@@ -352,11 +349,12 @@ fn the_supplied_environment_outranks_the_targets_frontmatter_model() {
 
     // Goose is the fixture provider, so `GOOSE_MODEL` is its step-2 variable.
     let mut provider_specific = intent();
-    provider_specific.env_lookup = |key| match key {
-        "GOOSE_MODEL" => Some("llamacpp/from-provider-env".to_string()),
-        "MODEL" => Some("llamacpp/from-generic-env".to_string()),
-        _ => None,
-    };
+    provider_specific.environment = [
+        ("GOOSE_MODEL", "llamacpp/from-provider-env"),
+        ("MODEL", "llamacpp/from-generic-env"),
+    ]
+    .into_iter()
+    .collect();
     let rebuild =
         rebuild_target_launch(&provider_specific, None, None, Path::new("."), &target).unwrap();
     assert_eq!(

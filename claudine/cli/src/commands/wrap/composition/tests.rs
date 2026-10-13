@@ -420,8 +420,8 @@ fn make_hints_with_model(model: &str) -> claudine::composition::EffectiveSelecti
 #[test]
 #[serial_test::serial]
 fn opencode_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("OPENCODE_MODEL", "fast");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("OPENCODE_MODEL", "fast")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -430,7 +430,7 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
 
     // Probe resolution without catalog tells us the model comes from env
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::ProviderEnv("OPENCODE_MODEL")
@@ -445,8 +445,8 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn generic_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("MODEL", "fast");
-    let _g2 = EnvGuard::clear("OPENCODE_MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("MODEL", "fast")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -454,7 +454,7 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(probe_reason, ModelResolutionReason::GenericEnv));
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
@@ -465,8 +465,8 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("CLAUDE_MODEL", "claude-3-7-sonnet-20250219");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -474,7 +474,7 @@ fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::ProviderEnv("CLAUDE_MODEL")
@@ -491,8 +491,7 @@ fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
-    let _g1 = EnvGuard::clear("OPENCODE_MODEL");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment = claudine::invocation_context::DocumentEnvironment::default();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -500,7 +499,7 @@ fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::ProviderDefault
@@ -582,6 +581,7 @@ fn live_selected_auto_selects_regardless_of_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     let target = result.expect("should auto-select");
     assert_eq!(target.provider, Provider::Claude);
@@ -622,6 +622,7 @@ fn live_list_one_installed_auto_selects_regardless_of_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     let target = result.expect("should auto-select from list");
     assert_eq!(target.provider, Provider::Claude);
@@ -652,6 +653,7 @@ fn live_no_agent_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -682,6 +684,7 @@ fn live_single_invalid_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -712,6 +715,7 @@ fn live_single_not_installed_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -747,6 +751,7 @@ fn live_list_multiple_installed_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -781,6 +786,7 @@ fn live_zero_installed_list_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }

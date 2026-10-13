@@ -328,6 +328,16 @@ impl Fixture {
     /// Build the preflight graph for a sequence document and capture the
     /// effective state its first step composes against.
     fn build(dir: TempDir, source: &str) -> Result<Self, CompositionError> {
+        Self::build_under(dir, source, None)
+    }
+
+    /// [`Self::build`] with preflight resolving under `environment` instead
+    /// of whatever the demand-driven context captured.
+    fn build_under(
+        dir: TempDir,
+        source: &str,
+        environment: Option<&crate::invocation_context::DocumentEnvironment>,
+    ) -> Result<Self, CompositionError> {
         // Anchored on the fixture directory. The `ComposeContext` below is
         // already demand-driven for the same reason, but `resolve_composition_source`
         // walks the *process* CWD's repository topology before either of them
@@ -337,7 +347,10 @@ impl Fixture {
         // Demand-driven: no fixture references `ctx.*`, so the preflight walk is
         // handed a date/time-only context instead of probing git, the repo, the
         // OS, and the hardware once per test.
-        let context = ComposeContext::capture_for_content(&PathBuf::from("."), "");
+        let mut context = ComposeContext::capture_for_content(&PathBuf::from("."), "");
+        if let Some(environment) = environment {
+            *context.env_mut() = environment.vars().clone();
+        }
         let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone(), &crate::test_support::context_for(&resolved.resolved_path))?;
 
         let overlay = build_step_overlay(&plan, 0).as_set_overrides(None);
@@ -463,6 +476,7 @@ impl Fixture {
             // lone task under test has no enclosing scheduler to give it one.
             live: None,
             run_evidence: None,
+            document: wiring.document,
         }
         .run()
     }
@@ -481,6 +495,8 @@ struct Wiring<'a> {
     /// shape: nothing is rendered at all. Owned rather than borrowed because
     /// the executor shares the sink with per-member live streams.
     stream: Option<Arc<dyn TaskStreamSink>>,
+    /// The document view the task runs in; `None` leaves approvals unchecked.
+    document: Option<&'a crate::invocation_context::InvocationContext>,
 }
 
 impl<'a> Wiring<'a> {
@@ -494,6 +510,7 @@ impl<'a> Wiring<'a> {
             user_setters: None,
             interrupt: None,
             stream: None,
+            document: None,
         }
     }
 
@@ -5646,5 +5663,146 @@ mod byte_parity {
         // The field is boxed, so the chain carries `Box<MarkdownError>`.
         let chained = std::error::Error::source(&error).and_then(|c| c.downcast_ref::<Box<MarkdownError>>());
         assert!(chained.is_some(), "reachable through Error::source");
+    }
+}
+
+/// Option A of the per-document environment ruling: a task re-resolves each
+/// command sequence preflight approved under its own document's captured map
+/// and refuses changed text before anything runs. The maps are supplied; the
+/// process environment is never read or written.
+mod document_environment {
+    use super::*;
+    use crate::invocation_context::{DocumentEnvironment, InvocationContext};
+    use darkmatter::markdown::compose::RequestSnapshot;
+
+    const PROBE: &str = "CLAUDINE_TASK_APPROVAL_PROBE";
+    const OTHER: &str = "CLAUDINE_TASK_APPROVAL_OTHER";
+
+    fn map(probe: &str, other: &str) -> DocumentEnvironment {
+        DocumentEnvironment::from_iter([(PROBE, probe), (OTHER, other)])
+    }
+
+    /// A sequence whose one task interpolates the probe into its primary
+    /// command and its `setup:` command, approved at preflight under `launch`.
+    fn approved_under(launch: &DocumentEnvironment) -> (Fixture, InvocationContext) {
+        assert!(std::env::var_os(PROBE).is_none(), "the process must not carry {PROBE}");
+        let dir = TempDir::new().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let source = one_step_source(
+            &root,
+            json!({
+                "name": "alpha",
+                "shell": format!("echo run={{{{ env.{PROBE} }}}}"),
+                "setup": [{ "action": [{ "shell": format!("echo setup={{{{ env.{PROBE} }}}}") }] }],
+            }),
+        );
+        let invocation = InvocationContext::capture(
+            &RequestSnapshot::new(&root)
+                .with_home(Some(root.join("home")))
+                .with_env(launch.vars().clone()),
+        )
+        .unwrap();
+        (Fixture::build_under(dir, &source, Some(launch)).unwrap(), invocation)
+    }
+
+    fn run_in(
+        fixture: &Fixture,
+        document: &InvocationContext,
+    ) -> (TaskOutcome, Vec<String>, Vec<String>) {
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["ran"]);
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.document = Some(document);
+        let outcome = fixture.execute(&wiring);
+        let setup = recorder
+            .events()
+            .into_iter()
+            .filter(|event| event.contains("setup="))
+            .collect();
+        (outcome, shell.commands(), setup)
+    }
+
+    #[test]
+    fn an_unchanged_map_runs_the_approved_text() {
+        let launch = map("one", "x");
+        let (fixture, invocation) = approved_under(&launch);
+
+        let document = invocation.enter_document(map("one", "x"));
+        let (outcome, commands, setup) = run_in(&fixture, &document);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(commands, vec!["echo run=one".to_string()]);
+        assert_eq!(setup.len(), 1, "setup ran its approved command once: {setup:?}");
+    }
+
+    #[test]
+    fn a_changed_map_that_leaves_the_text_identical_runs_it() {
+        let (fixture, invocation) = approved_under(&map("one", "x"));
+
+        let document = invocation.enter_document(map("one", "changed"));
+        let (outcome, commands, setup) = run_in(&fixture, &document);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(commands, vec!["echo run=one".to_string()]);
+        assert_eq!(setup.len(), 1, "{setup:?}");
+    }
+
+    #[test]
+    fn a_changed_map_that_changes_the_text_is_refused_before_anything_runs() {
+        let (fixture, invocation) = approved_under(&map("one", "x"));
+
+        let document = invocation.enter_document(map("two", "x"));
+        let (outcome, commands, setup) = run_in(&fixture, &document);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(commands.is_empty(), "the primary command must not run: {commands:?}");
+        assert!(setup.is_empty(), "setup must not run either: {setup:?}");
+        let error = outcome.error.expect("a refusal diagnostic");
+        let message = error.message();
+        for expected in [
+            format!("echo setup={{{{ env.{PROBE} }}}}"),
+            "echo setup=one".to_string(),
+            "echo setup=two".to_string(),
+        ] {
+            assert!(message.contains(&expected), "`{expected}` missing from: {message}");
+        }
+        assert_eq!(error.stage, TaskStage::Setup, "the first command that would run is named");
+
+        // The full diagnostic names the variable whose change moved the text;
+        // the concise `err.msg` above is clamped before it.
+        let primary = fixture
+            .task()
+            .preflight_approvals
+            .iter()
+            .find(|approval| approval.stage() == TaskStage::Primary)
+            .expect("the primary command interpolates");
+        match primary.verify(document.document_environment()) {
+            Err(CompositionError::SequenceShellApprovalChanged {
+                command,
+                approved,
+                resolved,
+                changed,
+                ..
+            }) => {
+                assert_eq!(command, format!("echo run={{{{ env.{PROBE} }}}}"));
+                assert_eq!((approved.as_str(), resolved.as_str()), ("echo run=one", "echo run=two"));
+                assert_eq!(changed, format!("changed: {PROBE}"));
+            }
+            other => panic!("expected SequenceShellApprovalChanged, got {other:?}"),
+        }
+    }
+
+    /// Without a document view the task runs the approved text as before:
+    /// the check belongs to callers that enter documents.
+    #[test]
+    fn a_task_with_no_document_view_runs_the_approved_text() {
+        let (fixture, _) = approved_under(&map("one", "x"));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["ran"]);
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), vec!["echo run=one".to_string()]);
     }
 }

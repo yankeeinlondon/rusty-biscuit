@@ -68,6 +68,7 @@ mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
+mod document_environment_routes;
 mod effective_diagnostic_render;
 mod entry_point_parity;
 mod error_guards;

@@ -583,47 +583,50 @@ fn env_reference_expands_environment_variables() {
     assert_eq!(resolved, target);
 }
 
+/// An external sequence reference reads the map of the document that resolves
+/// it: the launch document under its own map, and a document entered later
+/// under the map it captured, without disturbing the first. The maps are
+/// supplied; the process environment is never read.
 #[test]
-#[serial]
-fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
+fn an_external_sequence_reference_resolves_under_each_documents_own_map() {
+    const ROOT: &str = "SEQ_DOCUMENT_ROOT";
+    assert!(std::env::var_os(ROOT).is_none(), "the process must not carry {ROOT}");
     let dir = TempDir::new().unwrap();
-    let captured = dir.path().join("captured");
-    fs::create_dir_all(&captured).unwrap();
-    fs::write(captured.join("steps.yaml"), "sequence:\n  - captured\n").unwrap();
-    let ambient = TempDir::new().unwrap();
-    let prior = std::env::var_os("SEQ_SNAPSHOT_ROOT");
-    let mut env = std::collections::HashMap::new();
-    env.insert(
-        "SEQ_SNAPSHOT_ROOT".to_string(),
-        captured.display().to_string(),
-    );
-    let snapshot = biscuit_file::FileResolutionContext::new(dir.path()).with_env(env);
-    let source = make_source(
-        &dir,
-        &[(
-            "sequence",
-            json!("{{SEQ_SNAPSHOT_ROOT}}/steps.yaml"),
-        )],
-        "Prompt",
-    );
-
-    // SAFETY: this test is serialized while mutating process-global state.
-    unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", ambient.path()) };
-    let plan = resolve_sequence_plan_with(
-        &source,
-        SequenceSourceOptions {
-            shell_runner: None,
-            file_resolution_context: &snapshot,
-        },
-    );
-    match prior {
-        Some(value) => unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", value) },
-        None => unsafe { std::env::remove_var("SEQ_SNAPSHOT_ROOT") },
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    for (name, step) in [("a", "first"), ("b", "second")] {
+        fs::create_dir_all(root.join(name)).unwrap();
+        fs::write(root.join(name).join("steps.yaml"), format!("sequence:\n  - {step}\n")).unwrap();
     }
+    let map = |name: &str| {
+        crate::invocation_context::DocumentEnvironment::from_iter([(
+            ROOT,
+            root.join(name).display().to_string(),
+        )])
+    };
+    let source = make_source(&dir, &[("sequence", json!(format!("{{{{{ROOT}}}}}/steps.yaml")))], "Prompt");
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&root)
+        .with_home(Some(root.join("home")))
+        .with_env(map("a").vars().clone());
+    let launch = crate::invocation_context::InvocationContext::capture(&snapshot).unwrap();
+    let first_step = |view: &crate::invocation_context::InvocationContext| {
+        let context = view.derive_source(&source.resolved_path).unwrap();
+        let plan = resolve_sequence_plan_with(
+            &source,
+            SequenceSourceOptions {
+                shell_runner: None,
+                file_resolution_context: context.file_resolution_context(),
+            },
+        )
+        .unwrap()
+        .expect("sequence plan");
+        plan.steps[0].name.clone()
+    };
 
-    let plan = plan.unwrap().expect("sequence plan");
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].name, "captured");
+    let later = launch.enter_document(map("b"));
+
+    assert_eq!(first_step(&launch), "first");
+    assert_eq!(first_step(&later), "second");
+    assert_eq!(first_step(&launch), "first", "the launch document keeps its own map");
 }
 
 /// A `~`-prefixed sequence reference now resolves through [`FileReference`]'s

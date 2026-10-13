@@ -284,6 +284,7 @@ fn passthrough_launch_intent_mcp_tracks_wrapper_switches() {
             &[],
             None,
             None,
+            claudine::invocation_context::DocumentEnvironment::default(),
         );
         assert_eq!(
             intent.mcp_enabled, expected,

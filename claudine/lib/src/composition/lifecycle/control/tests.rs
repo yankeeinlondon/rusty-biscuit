@@ -449,40 +449,48 @@ fn resolve_proxy_target_nested_provenance_follows_the_target_document() {
     ));
 }
 
+/// The source document's map selects the proxy target, and the target, a
+/// document of its own, resolves the same reference under the map it
+/// captured. The maps are supplied; the process environment is never read.
 #[test]
-#[serial_test::serial]
-fn lifecycle_proxy_reuses_request_snapshot_after_environment_mutation() {
+fn a_proxy_target_reference_resolves_under_the_map_of_the_document_that_authors_it() {
+    const ROOT: &str = "LIFECYCLE_DOCUMENT_ROOT";
+    assert!(std::env::var_os(ROOT).is_none(), "the process must not carry {ROOT}");
     let request = tempfile::tempdir().unwrap();
-    let source_dir = request.path().join("source");
-    let captured = request.path().join("captured");
-    std::fs::create_dir_all(&source_dir).unwrap();
-    std::fs::create_dir_all(&captured).unwrap();
-    let source = source_dir.join("run.md");
-    let target = captured.join("target.md");
+    let request_dir = biscuit_file::canonicalize_simplified(request.path()).unwrap();
+    let source = request_dir.join("source/run.md");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
     std::fs::write(&source, "---\n---\n").unwrap();
-    std::fs::write(&target, "---\n---\n").unwrap();
-    let ambient = tempfile::tempdir().unwrap();
-    let prior = std::env::var_os("LIFECYCLE_SNAPSHOT_ROOT");
-    let mut env = std::collections::HashMap::new();
-    env.insert(
-        "LIFECYCLE_SNAPSHOT_ROOT".to_string(),
-        captured.display().to_string(),
-    );
-    let snapshot = biscuit_file::FileResolutionContext::new(request.path()).with_env(env);
-
-    // SAFETY: this test is serialized while mutating process-global state.
-    unsafe { std::env::set_var("LIFECYCLE_SNAPSHOT_ROOT", ambient.path()) };
-    let resolved = super::resolve_proxy_target(
-        "{{LIFECYCLE_SNAPSHOT_ROOT}}/target.md",
-        &source,
-        &snapshot,
-    );
-    match prior {
-        Some(value) => unsafe { std::env::set_var("LIFECYCLE_SNAPSHOT_ROOT", value) },
-        None => unsafe { std::env::remove_var("LIFECYCLE_SNAPSHOT_ROOT") },
+    for dir in ["a", "b"] {
+        std::fs::create_dir_all(request_dir.join(dir)).unwrap();
+        std::fs::write(request_dir.join(dir).join("target.md"), "---\n---\n").unwrap();
     }
+    let map = |dir: &str| {
+        crate::invocation_context::DocumentEnvironment::from_iter([(
+            ROOT,
+            request_dir.join(dir).display().to_string(),
+        )])
+    };
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&request_dir)
+        .with_home(Some(request_dir.join("home")))
+        .with_env(map("a").vars().clone());
+    let launch = crate::invocation_context::InvocationContext::capture(&snapshot).unwrap();
+    let reference = format!("{{{{{ROOT}}}}}/target.md");
+    let resolve = |view: &crate::invocation_context::InvocationContext| {
+        let context = view.derive_source(&source).unwrap();
+        super::resolve_proxy_target(&reference, &source, context.file_resolution_context())
+            .unwrap()
+    };
 
-    assert_eq!(resolved.unwrap(), target);
+    let target = launch.enter_document(map("b"));
+
+    assert_eq!(resolve(&launch), request_dir.join("a/target.md"));
+    assert_eq!(resolve(&target), request_dir.join("b/target.md"));
+    assert_eq!(
+        resolve(&launch),
+        request_dir.join("a/target.md"),
+        "entering the target leaves the source's map unchanged"
+    );
 }
 
 /// A `{{VAR}}`-interpolated target with an unset variable surfaces the typed

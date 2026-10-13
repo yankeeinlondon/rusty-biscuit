@@ -1085,6 +1085,49 @@ mod shell {
         );
     }
 
+    /// The sequence-owned properties are frontmatter-root properties of each
+    /// step, so the `fm` namespace reads the same value as the bare name.
+    #[test]
+    fn sequence_owned_properties_read_the_same_under_fm() {
+        let dir = TempDir::new().unwrap();
+        let command = "echo {{ fm.state.name }}={{ state.name }} \
+                       {{ fm.state.index }}={{ state.index }} \
+                       {{ fm.sequence_id }}={{ sequence_id }} \
+                       {{ fm.previous.name || 'none' }}={{ previous.name || 'none' }} \
+                       {{ fm.next.name || 'none' }}={{ next.name || 'none' }}";
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "alpha", "shell": command },
+                    { "name": "beta", "shell": command },
+                ]),
+            )],
+            "Body.\n",
+        );
+
+        let graph = graph_for(&source).unwrap();
+        let commands: Vec<&str> =
+            graph.shell_commands.iter().map(|c| c.command.as_str()).collect();
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        let sequence_id = commands[0]
+            .split_whitespace()
+            .nth(3)
+            .and_then(|pair| pair.split_once('='))
+            .map(|(fm, _)| fm.to_string())
+            .unwrap();
+        assert_eq!(sequence_id.len(), 16, "{commands:?}");
+        assert_eq!(
+            commands,
+            vec![
+                format!("echo alpha=alpha 1=1 {sequence_id}={sequence_id} none=none beta=beta"),
+                format!("echo beta=beta 2=2 {sequence_id}={sequence_id} alpha=alpha none=none"),
+            ],
+        );
+    }
+
     /// A command list preserves declaration order, which is also the order the
     /// concatenated stdout will follow.
     #[test]
