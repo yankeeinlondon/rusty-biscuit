@@ -262,6 +262,256 @@ skills_files_updated_during_phase_7:
     - .claude/skills/biscuit-speaks/providers.md
     - .claude/skills/model-citizen/SKILL.md
     - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_8:
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/rest.rs
+    - schematic/define/src/auth.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/types.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/schema/src/shared.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/mod.rs
+docs_updated_during_phase_8:
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+    - schematic/schema/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/headers/README.md
+    - sniff/docs/dependencies.md
+docs_created_during_phase_8:
+    - schematic/runtime/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/runtime/sending-and-responses.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - schematic/skill/SKILL.md
+source_code:
+    - Cargo.toml
+    - Cargo.lock
+    - schematic/justfile
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/error.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/src/redact.rs
+    - schematic/runtime/src/response.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/compile_fail.rs
+    - schematic/runtime/tests/l1/decode_boundary.rs
+    - schematic/runtime/tests/l1/envelope.rs
+    - schematic/runtime/tests/l1/redaction.rs
+    - schematic/runtime/tests/l1/test_layout.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.stderr
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/encode.rs
+    - schematic/runtime/src/transport.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/define/src/cross_origin.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/cross_origin_policy.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/definitions/tests/api_policy.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/runtime/src/origin.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.stderr
+    - schematic/runtime/tests/l1/origin_policy.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/raw.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/definitions/src/bitbucket/types/common.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/helpers.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/shared.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/errors.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src (regenerated: every REST module, lib.rs, prelude.rs, shared.rs)
+    - schematic/openapi/elevenlabs.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/tests/common/mod.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - homelab/lib/Cargo.toml
+    - homelab/lib/src/lib.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/eversolo-integration/Cargo.toml
+    - homelab/eversolo-integration/src/dispatch.rs
+    - homelab/eversolo-integration/src/discovery.rs
+    - homelab/server/src/lib.rs
+    - homelab/server/src/error.rs
+    - homelab/server/src/handlers/eversolo.rs
+    - homelab/server/src/handlers/samsung_tv.rs
+    - homelab/cli/src/main.rs
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/tests/elevenlabs_http.rs
+    - model-citizen/lib/Cargo.toml
+    - schematic/define/src/auth.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/schema/src/shared.rs
+documentation:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/gen/README.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/request-side.md
+    - sniff/docs/repos/repo-tech-design.md
+    - sniff/docs/cli/repo_remote.md
+    - homelab/docs/eversolo-design.md
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/dependencies.md
+    - model-citizen/lib/README.md
+    - schematic/definitions/README.md
+    - schematic/schema/README.md
+    - schematic/docs/headers/README.md
+    - sniff/docs/dependencies.md
+    - schematic/runtime/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/runtime/sending-and-responses.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-runtime
     - schematic-define
@@ -508,24 +758,24 @@ This is one coordinated phase: the temporary breaking state between regeneration
 
 ### Wave 16 — Documentation Closure (parallel)
 
-- [ ] **Complete Schematic Docs**
+- [x] **Complete Schematic Docs**
   - Own runtime/Schematic READMEs, affected topic pages, generated rustdoc templates, and Schematic skills. Describe typed/raw sends, envelope/transport boundary, declared/malformed/interrupted errors, credential sources/anonymous mode, builder/SharedTransport conflicts, origin/redirect behavior, request IDs/redaction, deadlines, and JSON hooks.
   - Give compact usable examples per rule and Mermaid diagrams for response placement and redirects. State into_result metadata loss, unchanged raw evidence, provider/raw Debug limitation, valid-JSON/content-type behavior, no runtime retries, and stream extension ownership/timeouts.
   - Remove stale injected-client/free-request guidance; document later-codec support as planned without claiming codecs ship. Current docs never name/link this feature or any other feature/fix snapshot.
-- [ ] **Complete Supporting Records**
+- [x] **Complete Supporting Records**
   - Own dependency records and consumer skills not owned by the docs task. Verify root and per-area dependency docs cover runtime and test crates; update sniff/provider and other affected skill guidance from actual behavior.
   - Audit changed symbols' `///`, `//!`, and inline comments, assigning corrections to owning files before the final gate. Record drift and resolutions in notes for the coordinator to merge into the log.
   - Complete R1–R37 traceability and PD1–PD35 dispositions, design decisions, author-review items, deviations, consumer inventory, OS evidence, performance observations, and unmet criteria. No newly discovered defect is dismissed as a documentation-only issue.
 
 ### Wave 17 — Final Evidence (sequential coordinator)
 
-- [ ] **Run Final Gates**
+- [x] **Run Final Gates**
   - In `schematic/`, run `just test`, `just lint`, `just doctest`, `just test-schema`, and `just lint-schema`; run existing `just test-l2` with the no-focus harness. Follow canonical nextest recipes; no consolidated `cargo test` or formatter invocation. Inspect recipe commands if legacy recipes still violate nextest policy before using them.
   - Run required scoped L1/lint gates for sniff, biscuit-speaks, model-citizen, and all five homelab crates. Reuse qualifying unchanged passing evidence instead of duplicating it solely for chronology; rerun after any fix that invalidates evidence.
   - Obtain/identify separate macOS, Linux, native Windows, and WSL2 build/test evidence using `os` skill routes and qualifying receipts. Match source state, package, environment, tier, features, and filters. Use authorized unattended build hosts and `BatchMode=yes`; no interactive authentication. Cross-compilation proves compilation only.
   - Prioritize truncation/closed-port timing, TLS/proxy/connection reuse, deadline cancellation, and environment isolation on each OS. Investigate OS-specific failures with the skill and update it when learning a new repo-specific fact. If evidence cannot be produced, report that environment unmet and the concrete route to complete it; never fabricate a four-OS pass or trigger unauthorized pushes.
   - Confirm runtime discovery with the resolved planner, without CI changes, and verify generation determinism after final generator/document-template edits. Do not duplicate successful measurements or run another spike.
-- [ ] **Record Review Handoff**
+- [x] **Record Review Handoff**
   - Verify every active requirement has its named validation and location; R36 is withdrawn. Fill all human-review agenda entries as they occur and close the log with final commands/results, OS states, measurements, and remaining author choices.
   - Inspect changed/untracked files for scope and stray prototype artifacts, preserve user edits, and distinguish intended generated changes from drift. The working tree is expected to contain implementation changes; “clean of stray edits” does not mean discarding them.
   - Describe downstream pagination inputs (`Deadline`, completed-request accounting, page slot, InvalidArgument, check_link, redirect failures) and later codec/hook extension points. Flag updates needed for the frozen R20 surface test and any prerequisite departures.

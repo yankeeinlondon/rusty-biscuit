@@ -261,6 +261,256 @@ skills_files_updated_during_phase_7:
     - .claude/skills/biscuit-speaks/providers.md
     - .claude/skills/model-citizen/SKILL.md
     - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_8:
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/rest.rs
+    - schematic/define/src/auth.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/types.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/schema/src/shared.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/mod.rs
+docs_updated_during_phase_8:
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+    - schematic/schema/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/headers/README.md
+    - sniff/docs/dependencies.md
+docs_created_during_phase_8:
+    - schematic/runtime/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/runtime/sending-and-responses.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/homelab/SKILL.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - schematic/skill/SKILL.md
+source_code:
+    - Cargo.toml
+    - Cargo.lock
+    - schematic/justfile
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/codec.rs
+    - schematic/runtime/src/credentials.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/endpoint.rs
+    - schematic/runtime/src/error.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/src/redact.rs
+    - schematic/runtime/src/response.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/compile_fail.rs
+    - schematic/runtime/tests/l1/decode_boundary.rs
+    - schematic/runtime/tests/l1/envelope.rs
+    - schematic/runtime/tests/l1/redaction.rs
+    - schematic/runtime/tests/l1/test_layout.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.rs
+    - schematic/runtime/tests/fixtures/compile_fail/endpoint_missing_associated_types.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/no_declared_error_value.stderr
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/encode.rs
+    - schematic/runtime/src/transport.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/define/src/cross_origin.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/cross_origin_policy.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/definitions/tests/api_policy.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/runtime/src/origin.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+    - schematic/runtime/tests/fixtures/compile_fail/allow_any_needs_the_danger_name.stderr
+    - schematic/runtime/tests/l1/origin_policy.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/raw.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/mutator_typed_by_another_value.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/definitions/src/bitbucket/types/common.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/src/codegen/api_struct/auth.rs
+    - schematic/gen/src/codegen/api_struct/helpers.rs
+    - schematic/gen/src/codegen/api_struct/mod.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/shared.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/errors.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src (regenerated: every REST module, lib.rs, prelude.rs, shared.rs)
+    - schematic/openapi/elevenlabs.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/tests/common/mod.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - homelab/lib/Cargo.toml
+    - homelab/lib/src/lib.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/samsung_tv.rs
+    - homelab/eversolo-integration/Cargo.toml
+    - homelab/eversolo-integration/src/dispatch.rs
+    - homelab/eversolo-integration/src/discovery.rs
+    - homelab/server/src/lib.rs
+    - homelab/server/src/error.rs
+    - homelab/server/src/handlers/eversolo.rs
+    - homelab/server/src/handlers/samsung_tv.rs
+    - homelab/cli/src/main.rs
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/tests/elevenlabs_http.rs
+    - model-citizen/lib/Cargo.toml
+    - schematic/define/src/auth.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/schema/src/shared.rs
+documentation:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/gen/README.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/request-side.md
+    - sniff/docs/repos/repo-tech-design.md
+    - sniff/docs/cli/repo_remote.md
+    - homelab/docs/eversolo-design.md
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/dependencies.md
+    - model-citizen/lib/README.md
+    - schematic/definitions/README.md
+    - schematic/schema/README.md
+    - schematic/docs/headers/README.md
+    - sniff/docs/dependencies.md
+    - schematic/runtime/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/runtime/sending-and-responses.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-runtime
     - schematic-define
@@ -2941,3 +3191,759 @@ endpoint-count doctests; and `rustfmt --check` diffs in untouched files
    - `schematic/README.md`'s usage guide;
    - `schematic/docs/headers/README.md`;
    - `.claude/skills/schematic-define/schematic/headers.md`.
+
+## Phase 8
+
+Started 2026-10-12 on macOS. I did the boxing fix and Wave 17 myself.
+Wave 16 ran as three foreground subagents with disjoint write sets: the
+Schematic docs and skills; the dependency records, consumer skills, and
+comment audit; and the requirement traceability and review agenda below.
+
+### Boxing the send futures (Phase 7 review item 1, resolved in code)
+
+The Phase 7 handoff offered two options: box inside the runtime, or document
+the size and let each consumer box. I boxed inside the runtime. The plan says
+no newly found defect is treated as documentation only, and every consumer
+that joins sends would otherwise have to rediscover the 2 MiB stack overflow
+that homelab hit.
+
+- **Test first.** `schematic-runtime` `send::send_futures_stay_small_enough_to_join_many`
+  measures `size_of_val` of an unstarted `send` and `send_raw` future. It
+  failed at **3 704 bytes** for `send`. Boxing only `execute` and
+  `classify_reply` inside the async body still left **1 616 bytes**, because
+  the outer future also holds the request and the metadata kept across awaits.
+- **Fix.** `Client::send` and `Client::send_raw` are now plain `fn`s that
+  return `impl Future` wrapping `Box::pin` of the former async bodies
+  (`send_unboxed`, `send_raw_unboxed`, private). The caller's future is one
+  heap pointer, and the test bound is 64 bytes. Callers still write
+  `.send(..).await`, and `Send` is inferred as before: sniff, all homelab
+  crates, biscuit-speaks, and the schema tests compile unchanged. `ABI` is not
+  bumped, because generated code cannot observe the change.
+- **Fixture.** `request_of_another_api.stderr` was re-blessed. The only lines
+  that changed are the quoted signatures, and the E0271 diagnostic is the
+  same.
+- **Consumer cleanup.** `homelab/lib/src/rest.rs` dropped its `Box::pin` and
+  the comment that justified it, which had become false. `homelab/` `just test`
+  passes 243 / 0, including the eversolo-integration `asleep_device_tests`
+  that used to overflow.
+
+### Requirement traceability (R1–R37)
+
+Status uses three values. **Met** means the named validation exists and
+passed on the final tree of the phase that added it. **Proposed gap** means a
+part has no validation; the author rules on it at review 1. **Withdrawn**
+means the author withdrew the requirement. Test names were checked against the
+source on 2026-10-12. Unless a path says otherwise, runtime tests are in
+`schematic/runtime/tests/l1/` (`schematic-runtime::l1`).
+
+| Req | Status | Validation | Location |
+|---|---|---|---|
+| R1 runtime package owns the shared runtime | Met | `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` (no REST file defines any of 34 runtime or removed items); `http_client::{module_has_no_send_path_of_its_own, shared_module_holds_no_transport_or_auth_resolution}`; `cargo_gen::tests::generated_crate_sends_through_the_runtime_not_its_own_http_client`; the runtime's own L1 suite; `sniff repo packages` lists `schematic-runtime` (Phase 2) | `schematic/runtime/`; `schematic/gen/tests/l1/{fresh_output_compile,http_client}.rs`; `schematic/gen/src/cargo_gen.rs` |
+| R2 typed send; no free `request<T>` | Met | Runtime trybuild (`compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic`): `endpoint_missing_associated_types` (E0046) and `request_of_another_api` (E0271). Generated-crate misuse test `fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time`: wrong success type (E0308), missing `Decoder` (E0046), other-API request through `send`, `send_raw`, and `mutate_response` (E0271), removed `request` (E0599), removed request enum (E0433). Positive check `schema/tests/github_client.rs::generated_requests_belong_to_their_own_api`. The runtime source has no `fn request`. **Location note:** the wrong-success-type and `request<T>`-absence cases live in the generated-crate test, not the runtime's trybuild set. The generated crate is the "isolated generated crate" the requirement allows. **Frozen-surface note:** see R20 | `schematic/runtime/tests/fixtures/compile_fail/`; `schematic/gen/tests/l1/fresh_output_compile.rs`; `schematic/schema/tests/github_client.rs` |
+| R3 envelope shape | Met | `envelope::{a_success_exposes_its_value_through_every_accessor, a_failure_exposes_its_error_and_keeps_metadata_through_into_parts}`; over the wire, `send::{a_success_reaches_the_caller_with_its_metadata, a_declared_error_is_decoded_on_arrival_and_keeps_its_body}` | `runtime/src/response.rs`; `tests/l1/{envelope,send}.rs` |
+| R4 metadata fields | Met | `envelope::metadata_records_every_field_on_success_and_failure`; `redaction::the_request_id_comes_from_the_named_header_only`; `send::{a_success_reaches_the_caller_with_its_metadata, the_request_id_is_none_without_the_header_or_the_definition_field}`. End to end in the schema: `github_client::{success_metadata_carries_request_id_status_and_headers, failure_metadata_carries_request_id_status_and_headers}`. `page` is always `None` (a slot only; see "Downstream inputs") | `runtime/src/meta.rs`; `schematic/schema/tests/github_client.rs` |
+| R5 redaction in stored metadata and `Display` | Met | `redaction::{the_builtin_names_are_exactly_the_documented_lists, every_builtin_secret_header_is_redacted_in_request_and_response_metadata, every_builtin_secret_query_name_is_redacted_in_the_url_and_query_fields, api_and_authentication_names_join_the_builtin_names, …}` (table over every built-in name); `envelope::stored_metadata_and_display_never_contain_a_secret_or_a_body`; `send::no_stored_field_or_display_text_holds_a_secret_in_any_outcome` (success, declared failure, undecodable success, transport) | `runtime/src/redact.rs`; `tests/l1/{redaction,envelope,send}.rs` |
+| R6 `Debug` limitation documented | Met (runtime half); docs half confirmed by the coordinator | `send::a_provider_echo_stays_in_the_raw_body_and_out_of_metadata_and_display` (401 echo kept in the raw body, absent from metadata and `Display`, no `Debug` assertion); `envelope::the_debug_limitation_is_documented_on_the_error_types` (reads `src/response.rs` with `include_str!`). The topic-page text is in the Phase 8 docs (`schematic/runtime/README.md`, `schematic/docs/runtime/`), which the coordinator confirms. No test reads the topic page | `runtime/src/response.rs`; Phase 8 docs |
+| R7 network-error text keeps a redacted URL | Met | (a) `send::a_refused_connection_is_a_transport_error_with_request_metadata`; (b) `timing::a_stalled_head_is_a_timeout_whose_text_redacts_the_query`; text inputs: `envelope::transport_error_text_shows_the_redacted_url_and_no_secret` | `runtime/src/{error,transport}.rs` |
+| R8 governing rule | Met | Refused connection (R7 a); 500 with an empty body: `send::statuses_outside_the_declared_range_and_endpoints_without_a_declared_error_are_undeclared`; undecodable 200: `send::html_on_a_json_endpoint_is_a_malformed_success_with_its_evidence`; cut-off body: `timing::a_body_cut_off_after_the_head_is_interrupted_inside_the_envelope_with_its_bytes` | `runtime/src/client.rs` |
+| R9 pre-send failures are `TransportError` | Met | `InvalidArgument`: `send::an_invalid_argument_is_refused_before_any_request`, `credential_resolution::a_per_call_credential_no_placement_accepts_is_refused_before_any_request`, `credential_resolution::a_request_already_carrying_the_credentials_slot_is_refused_and_sent_unchanged_without_one`. `CrossOriginRejected`: `redirects::{an_absolute_request_url_is_checked_before_it_is_sent, check_link_applies_the_policy_with_no_request}`. `DeadlineExceeded`: `timing::an_exhausted_deadline_sends_nothing`. Raw path: `raw::refusals_before_any_head_are_transport_errors_with_no_request` | `runtime/src/{client,error}.rs` |
+| R10 `MalformedSuccess`, `is_decode_failure()` | Met | `send::html_on_a_json_endpoint_is_a_malformed_success_with_its_evidence`; `envelope::decode_and_interruption_helpers_are_true_only_for_their_own_kind` | `runtime/src/response.rs` |
+| R11 `BodyInterrupted`, `is_interrupted()` | Met | `timing::a_body_cut_off_after_the_head_is_interrupted_inside_the_envelope_with_its_bytes` (raw `TcpListener`, 2xx and non-2xx); `decode_boundary::an_interrupted_body_keeps_the_bytes_that_arrived`; the helpers test above. Passed on native Windows (runtime cross-checks, Phases 3–6) | `runtime/src/{codec,client}.rs` |
+| R12 `Undeclared` and the uninhabited placeholder | Met | trybuild `no_declared_error_value` (E0599); `envelope::an_endpoint_without_a_declared_error_reports_undeclared_failures`; `send::statuses_outside_the_declared_range_and_endpoints_without_a_declared_error_are_undeclared` | `runtime/src/response.rs` (`NoDeclaredError`) |
+| R13 declared failures decode on arrival | Met | `send::{a_declared_error_is_decoded_on_arrival_and_keeps_its_body, an_undecodable_declared_error_is_malformed_with_its_body}` | `runtime/src/{endpoint,client}.rs` |
+| R14 credential precedence; anonymous send | Met | `credential_resolution::{per_call_beats_client_beats_environment_beats_anonymous_with_one_credential_each, nothing_resolving_sends_once_anonymously_and_a_401_is_an_envelope_failure}`. Through a generated client: `github_client::{credential_precedence_per_call_client_env_anonymous, no_credential_sends_anonymously_and_returns_the_401, anonymous_call_options_send_no_credential_despite_client_and_env}` and `artificial_analysis_client::missing_credential_sends_anonymously_and_returns_the_401` | `runtime/src/credentials.rs`; `schematic/schema/tests/` |
+| R15 environment scan | Met | `credential_resolution::{the_first_non_empty_variable_wins_and_a_client_order_replaces_the_definitions, each_send_reads_the_environment_again}` (`EnvGuard` + `#[serial]`); consumer: sniff `gitea::tests::codeberg_credentials::*` | `runtime/src/credentials.rs`; `sniff/lib/src/remote/gitea.rs` |
+| R16 resolved once; single attempt; reporting | Met | `credential_resolution::an_environment_change_after_the_request_left_does_not_change_the_reported_source`, plus the R14 tests (one request on 401; the four `AuthMethod` values; sentinel absent) | `runtime/src/{credentials,meta}.rs` |
+| R17 no injected client | Met | Generated-crate misuse case `with_client_and_base_url` (E0599) in `slow_generated_types_reject_misuse_at_compile_time`; the R1 scan rejects `fn with_client`; the runtime never accepts a `reqwest::Client` (Phase 3) | `schematic/gen/tests/l1/fresh_output_compile.rs` |
+| R18 builder surface | **Proposed gap** (two parts) | Met parts: `builder::*` (18 tests: base URL, timeout default and effect, user agent and default headers, standalone and shared proxy, PEM and DER roots, missing root → `Tls`, accept-invalid versus default, `clients_on_one_shared_transport_reuse_a_single_connection` against `standalone_clients_each_open_their_own_connection`, `a_client_attached_to_a_shared_transport_refuses_every_connection_option`, invalid proxy and certificate). **Gap 1:** the connect timeout's *effect* is not observed by a mock. A hung connect cannot be produced portably on loopback, so only its ownership and its delivery to the HTTP client are tested (Phase 3 › Deviations). **Gap 2:** the four TLS tests are `ignore`d on native Windows because of the reqwest/rustls `0xc0000409` abort (Phase 3 › Windows TLS abort); they run on macOS, Linux, and WSL2. Consumer timeouts: homelab `rest::tests::{device_builder_sets_the_request_timeout, device_builder_sets_a_connect_timeout}` | `runtime/src/{client,transport}.rs`; `runtime/tests/l1/builder.rs:418,435,449,463` |
+| R19 no self-following client | Met | `redirects::no_constructor_lets_the_http_library_follow_a_redirect` (four constructors × {refused with zero requests at B, followed once by the runtime}). **Rename:** this replaces Phase 3's `builder::a_redirect_is_returned_to_the_caller_and_never_followed`, which no longer exists | `runtime/tests/l1/redirects.rs` |
+| R20 API-level `cross_origin` on all 18 definitions | Met | `definitions/tests/api_policy.rs::every_shipped_api_declares_the_expected_policy_fields`; `define/tests/cross_origin_policy.rs::{default_is_same_origin, each_constructor_yields_its_variant_and_name, allow_origins_keeps_order_and_exact_strings}`; `definition_gen::tests::{emits_api_level_policy_fields, emits_same_origin_for_the_default_policy}`; generator: `api_struct::tests::every_cross_origin_policy_and_the_redaction_settings_reach_the_definition` and child test `request_id_secret_names_and_cross_origin_policy_come_from_the_definition`. **Frozen surface test:** `define/tests/cross_origin_policy.rs::endpoints_have_no_cross_origin_override_and_no_graphql_export` asserts that no `graphql` export exists and that the endpoint source has no `fn cross_origin`. It is frozen to today's API. Spec 4a (endpoint-level override) and spec 5 (GraphQL primitive) must update or retire it | `schematic/define/src/cross_origin.rs`; `schematic/define/tests/cross_origin_policy.rs`; `schematic/definitions/tests/api_policy.rs` |
+| R21 allowed-origin rules | Met | `origin::tests::{r21_table_holds_for_every_policy_and_target, loopback_ports_are_distinct_origins, http_default_port_is_implicit, default_port_entry_matches_implicit_port_target, …}` | `runtime/src/origin.rs` |
+| R22 redirect matrix | Met | `redirects::{a_definition_that_sets_nothing_behaves_as_same_origin, same_origin_follows_only_redirects_to_the_base_origin, allow_origins_follows_listed_origins_with_the_credential_and_refuses_the_rest, allow_without_credentials_follows_anywhere_and_sends_the_credential_only_to_the_base, danger_allow_any_follows_anywhere_with_the_credential, deny_follows_no_redirect_at_all, a_chain_is_checked_again_at_every_hop_and_reports_the_refused_hop, …}`; trybuild `allow_any_needs_the_danger_name`; schema `github_client::redirects_follow_the_same_origin_policy` | `runtime/src/{client,origin}.rs`; `runtime/tests/l1/redirects.rs` |
+| R23 link check | Met (signature departs from PD30) | `redirects::{check_link_applies_the_policy_with_no_request, an_absolute_request_url_is_checked_before_it_is_sent}`; generated client: `github_client::check_link_accepts_same_origin_and_rejects_a_foreign_origin`. Signature is `check_link::<R>(&Url)` (Phase 4 › Design choices 1) | `runtime/src/client.rs:734` |
+| R24 redirect mechanics | Met | `redirects::{each_redirect_status_rewrites_or_replays_the_request, a_redirect_without_a_usable_location_is_refused_with_its_evidence, a_relative_location_resolves_against_the_hop_without_its_credential_or_fragment, ten_redirects_are_followed_and_the_eleventh_is_refused, a_followed_redirect_whose_target_refuses_the_connection_keeps_the_redirect, a_redirect_whose_body_is_cut_off_is_an_interrupted_body}` (acceptance criterion 10: `RedirectFailed` versus `RedirectRefused` on the same 302) | `runtime/src/client.rs` |
+| R25 tighten-only override | Met | `origin::tests::{tighten_only_table_holds_for_every_pair, subset_compares_parsed_origins, same_origin_over_deny_error_names_both_policies, accepted_overrides_take_effect}`; `redirects::a_cross_origin_override_can_only_tighten_the_definition` | `runtime/src/origin.rs` |
+| R26 shared deadline | Met | `timing::{an_exhausted_deadline_sends_nothing, a_per_request_timeout_under_a_longer_deadline_leaves_the_rest_of_the_budget, a_deadline_shorter_than_the_timeout_bounds_the_request, a_deadline_stops_an_operation_of_several_sends_and_sends_nothing_after_it_expires, only_sends_that_received_a_head_count_as_completed, an_expiration_after_the_head_is_a_body_interruption_with_the_partial_bytes, dropping_a_send_closes_its_connection_and_does_not_count_it, a_dropped_send_leaves_no_task_alive_and_the_runtime_shuts_down_promptly}`; `redirects::{redirect_hops_share_one_expiration_and_never_restart_it, a_shared_deadline_expiring_between_hops_is_a_failed_redirect_counted_once}`; unit `deadline::tests::the_earlier_bound_limits_a_send`. The monotonic clock was checked by inspection: `tokio::time::Instant` only (Phase 2 › Design choices 11). The stream bound is covered by the R30 tests | `runtime/src/deadline.rs` |
+| R27 `send_raw` | Met | `raw::{a_complete_reply_exposes_status_headers_and_body_from_one_record, http_error_statuses_are_complete_raw_responses_with_no_classification, a_cut_off_body_is_interrupted_and_json_refuses_it_even_when_the_bytes_parse, a_cross_origin_redirect_is_refused_with_the_redirects_evidence_and_never_reaches_the_target, a_failed_hop_after_a_followed_redirect_keeps_the_redirect_and_names_the_target, credentials_follow_the_same_precedence_and_never_reach_stored_metadata, a_deadline_shorter_than_the_reply_ends_the_raw_send_before_the_head, typed_and_raw_sends_report_the_same_evidence_for_every_ending}`; schema `non_json_endpoints::send_raw_returns_status_headers_and_body_unchanged` | `runtime/src/raw.rs` |
+| R28 `ResponseKind` guard removed | Met | Replacement tests: `send::{html_on_a_json_endpoint_is_a_malformed_success_with_its_evidence, codecs_judge_the_body_not_the_content_type}`, `hooks::a_body_that_is_not_json_is_malformed_and_the_global_hook_never_sees_it`; schema `github_client::undecodable_success_body_is_malformed_success_with_raw_bytes`, `non_json_endpoints::*`; the R1 scan (`enum ResponseKind`). Searches in the runtime (Phase 5 › Wave 10) and in the consumers (Phase 7 › Wave 15) find no guard | `runtime/src/codec.rs` |
+| R29 existing hooks preserved | Met | `hooks::{a_json_success_runs_parse_then_global_hook_then_decode_then_mutator, non_2xx_replies_non_json_endpoints_and_raw_sends_run_neither_hook, a_refusing_hook_is_a_hook_failure_with_the_original_bytes_and_no_hook_text, …}`; trybuild `mutator_on_a_non_json_endpoint`, `mutator_typed_by_another_value`; schema `huggingface_client::{pre_response_json_reshapes_body_before_decode, mutate_response_runs_only_for_its_endpoint, refusing_hook_yields_hook_failure_with_original_body, pre_response_json_skips_error_replies_and_text_endpoints}`. The old schema hand tests had no hook tests to migrate (Phase 7) | `runtime/src/hooks.rs` |
+| R30 `Decode` allows later codecs | Met | `decode_boundary::{a_streaming_decoder_delivers_its_first_item_before_the_body_ends, a_two_shape_decoder_returns_either_shape_or_keeps_the_original_bytes}`; `timing::{a_streaming_decoder_yields_its_first_line_before_the_body_ends, a_stream_outlives_the_send_expiration_while_it_keeps_delivering_then_times_out_when_idle, the_shared_deadline_bounds_a_stream_that_never_goes_idle}` | `runtime/src/codec.rs` |
+| R31 thin generated clients | Met | The R1 scan (`fn request_*`); `e2e_generation::*_declares_*_decoder`; `slow_fixture_apis_compile_and_send_offline`, `slow_real_apis_compile_offline` | `schematic/gen/src/codegen/` |
+| R32 runtime/generator ABI check | Met | `slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message`; `partial_generation::{abi_marker_control_unedited_output_allows_a_partial_run, refuses_differing_abi_marker, refuses_missing_legacy_abi_marker, refuses_abi_marker_that_is_not_an_integer_literal, refuses_abi_marker_of_the_wrong_type, refuses_conflicting_abi_marker_declarations, matching_abi_marker_does_not_bypass_the_export_check, missing_abi_marker_is_irrelevant_when_nothing_is_retained}` (the `refuses_*` cases are generated by a `macro_rules!` table); `inventory::tests::{an_abi_marker_other_than_the_generators_requires_full_generation, the_abi_marker_is_read_only_from_its_exact_form}`; `runtime_abi_tests::the_generator_emits_the_abi_of_the_workspace_runtime` | `schematic/gen/src/output/inventory.rs`; `schematic/gen/tests/l1/partial_generation.rs` |
+| R33 dependents migrate and pass | Met | Phase 7 gates: `just test` / `just lint` pass in `sniff/`, `homelab/` (all 7 crates, including the three WebSocket-only crates), `biscuit-speaks/`, and `model-citizen/`; the search for removed names (Phase 7 › Wave 15); the per-consumer tests in Phase 7 › Requirement-to-test mapping. Phase 8 (boxing) re-ran `homelab/` `just test` at 243 / 0 | `sniff/lib/src/remote/`; `homelab/lib/src/{rest,eversolo,samsung_tv}.rs`; `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs`; `model-citizen/lib/Cargo.toml` |
+| R34 sentinel never leaks in consumer logs | Met (as far as it can be tested) | sniff `secret_redaction_tests::{a_sent_token_never_appears_in_a_classified_error, a_sent_token_never_appears_in_a_transport_error}`; biscuit-speaks `elevenlabs_http::api_key_never_appears_in_error_display_or_debug`; the safe-log review in Phase 7 › Wave 15. The requirement itself says it is not mechanically testable beyond these. Residual: consumer error text still embeds provider bodies, as at baseline (Phase 7 review item 4) | `sniff/lib/tests/l1/remote_providers.rs`; `biscuit-speaks/lib/tests/elevenlabs_http.rs` |
+| R35 WebSocket modules compile | Met | `slow_real_apis_compile_offline` (asserts the six WebSocket files are compiled); `schema/tests/ws_runtime.rs` (4) under `just test-schema`; `just lint-schema` | `schematic/schema/src/*_ws.rs`, `ws_shared.rs` (byte-identical after regeneration) |
+| R36 | Withdrawn (D56) | Anonymous sends are verified under R14 and R16 | — |
+| R37 area justfile and gates | Met | `schematic/justfile` includes `schematic-runtime` in `build`, `sanity`, `test`, `test-real`, `coverage`, `doctest`, and `lint`, and adds `test-compile-fail`. `test-schema` is the gate for generated-crate mock tests (37 / 37 in Phase 7). `sniff repo packages` lists the package. `just ci-local --plan` places it in area `schematic` with no CI change (Phase 2 › Wave 3) | `schematic/justfile` |
+
+### PD dispositions (PD1–PD35)
+
+These rows are consolidated from Phase 1 › Planned PD1–PD35 dispositions and
+each phase's "PD dispositions touched in this phase". Every PD has a recorded
+disposition, and none is missing from the log.
+
+| PD | Default adopted? | Matched exactly / deviated (how) | Phase |
+|---|---|---|---|
+| PD1 tighten-only | Ruled (D56, D57 item 6) | Matched. `deny` over anything; `same_origin` over anything but `deny`; an `allow_origins` subset. Everything else is `BuildError::OriginPolicyNotPermitted`, which names both policies | 4 |
+| PD2 `deny` and same-origin links | Yes | Matched. `check_link` passes same-origin under `deny`; `deny` refuses every redirect, same-origin ones included | 4 |
+| PD3 hop limit | Yes | Matched. `MAX_REDIRECTS = 10` (public); the 11th is `RedirectRefused { HopLimit }` | 4 |
+| PD4 method and body rules | Yes | Matched for 301/302/303/307/308. The non-replayable-body refusal is moot because every typed body is owned bytes. The `RedirectRefusal::BodyNotReplayable` variant that Phase 2 added was removed | 2, 4 |
+| PD5 refusal at a later hop | Yes | Matched. The envelope shows the refused 3xx; `meta.url` is the URL of the request that received it; there is no `redirects` field. Whether callers need the chain is left for review | 4 |
+| PD6 cross-origin naming | Yes | Matched names. Deviation: `CrossOrigin` is deliberately **not** `#[non_exhaustive]` (Phase 4 › Design choices 5) | 4 |
+| PD7 `TransportError` kinds | Yes | Deviated: `Other` carries no `String`. The sanitization rule (no library text) wins over PD7's `Other(String)`. Every kind is produced by sends (Phases 3–4). Related: `TransportError.request` is `Box<RequestMeta>` (Phase 3 › Design choices 2) | 2, 3, 4 |
+| PD8 builder surface and names | Yes, with a proposed connect-timeout placement | Deviated in three ways. (a) The `SharedTransport` builder also owns `connect_timeout`, and an attached client that sets any of the four transport options is refused whatever the value (Phase 1 decision; Phase 3). (b) The generated `Client::builder()`/`Client::new()` became `{Api}::builder()`/`{Api}::new()` on an uninhabited marker with a `{Api}Client` alias, and `new()` returns `Result` (Phase 6 › Design choices 1). (c) An API-level `Cookie` header is folded into endpoint headers, not sent as a default header (Phase 6 › Design choices 2) | 1, 3, 6 |
+| PD9 accept-invalid form | Yes | Matched. Only Samsung's HTTPS path calls it (Phase 7) | 3, 7 |
+| PD10 hooks mechanism | Yes (Proposed) | Matched. The marker is named `SupportsHooks`; delivery is through a provided `Decode::decode_hooked` (Phase 5 › Design choices 1) | 5 |
+| PD11 package and ABI | Yes (Proposed) | Matched, with two departures. The marker is the generated constant `SCHEMATIC_RUNTIME_ABI`. Partial generation keeps the `shared.rs`/`ws_shared.rs` byte comparison **beside** the ABI check instead of replacing it (Phase 6 › Design choices 4). The generator checks equality by reading `runtime/src/lib.rs` with `syn`, not through a dependency (Phase 6 › Design choices 5) | 2, 6 |
+| PD12 runtime versus generated | Yes | Matched | 3, 5, 6 |
+| PD13 erasing request enum | Yes | Deleted; nothing needed it. A compile-fail case proves it is gone | 6 |
+| PD14 `send_raw` signature | Yes (Proposed) | Matched as proposed: `RawResponse { meta, body, completion }` with the four-way `RawCompletion`. Additions: the new public `RawJsonError { Incomplete, Malformed }`; `headers()` is the redacted metadata record (Phase 5 › Design choices 3, 5) | 5 |
+| PD15 client-global hook scope | Ruled (D57 item 9) | Matched | 5 |
+| PD16 stream `Clone`/`Sync` | Yes | Matched; documented on `Decode` | 2 |
+| PD17 `ErrorKind` shape | Yes | Matched. `#[non_exhaustive]`, no `UnexpectedContentType`. The kind `RedirectRefused { reason }` carries a `RedirectRefusal` (Phase 2 › Design choices 6) | 2 |
+| PD18 `into_result` / `into_parts` | Yes | Matched | 2 |
+| PD19 `elapsed` for streams | Yes | Matched: elapsed is measured to the head; documented on `Decode` | 2, 3 |
+| PD20 value-only convenience | Yes | Matched (none added) | 2 |
+| PD21 response-header redaction | Yes | Matched: one `SecretNames` set for both directions. Additions: fragments are redacted like queries, and `Content-Location` is sanitized like `Location` (Phase 2 › Design choices 4–5) | 2 |
+| PD22 placeholder name | Yes | Matched: `NoDeclaredError` | 2, 6 |
+| PD23 deadline arithmetic | Ruled (D56) | Matched: one `Expiration`, `min(remaining, timeout)` | 3 |
+| PD24 HTTP/2 cancel wording | Yes | Matched. Proved on HTTP/1.1; HTTP/2 is untested (the `http2` feature is off) | 3 |
+| PD25 request-id and secret markers | Yes | Matched. `request_id_header` is set for GitHub (`x-github-request-id`) and OpenAI (`x-request-id`); `same_origin` and empty `secret_names` for all 18. Addition: `schematic-gen import --request-id-header`, so the OpenAI value survives re-import (Phase 4) | 4, 6 |
+| PD26 guard removal | Ruled (D56) | Matched; replacement tests listed under R28 | 5, 6 |
+| PD27 status classification | Yes | Matched. 301/302/303/307/308 are followed; 300/304/305 are final failures (`Undeclared`) | 3, 4 |
+| PD28 programmatic credential | Yes (Proposed) | Matched. Deviation in the surrounding behavior: a credential whose slot is already in the request is **refused** (`InvalidArgument`) on the first hop and replaced on later hops. Generated code used to replace it (Phase 3 › Design choices 5; Phase 4 › Design choices 3) | 2, 3 |
+| PD29 policy type location | Yes | Matched | 4, 6 |
+| PD30 link-check primitive | Yes (Proposed) | **Deviated:** `Client::check_link::<R>(&Url)` is generic over the endpoint, so the error carries real request metadata. Absolute `http(s)://` request paths are also sent as-is after the origin check (Phase 4 › Design choices 1–2) | 4 |
+| PD31 call-site migration | Yes | Matched, with these recorded behavior changes. The `list_pull_requests` anonymous-retry branches were deleted because they have no trigger under D56. GitHub `list_workflow_runs` keeps one explicit `CallOptions::anonymous()` retry, only after a credentialed 401/403. `Retry-After` delta-seconds is now parsed. A 403 with `x-ratelimit-remaining: 0` is `RateLimited` (Phase 7 › Wave 14) | 7 |
+| PD32 | Withdrawn | — | — |
+| PD33 test infrastructure | Yes | Matched: `trybuild` (Phase 2), `rcgen` and `tokio-rustls` (Phase 3), all offline from the existing lock, plus a hand-rolled proxy mock | 2, 3 |
+| PD34 no auth label | Yes | Matched | 2, 3 |
+| PD35 | Withdrawn (D56) | — | — |
+
+### Human review agenda (consolidated for review 1)
+
+#### 1. Defaults adopted (PD1–PD35)
+
+- See "PD dispositions (PD1–PD35)" above. Every PD has a recorded disposition.
+- Departures from a PD's text: PD7 (`Other` has no string), PD8 (connect
+  timeout on `SharedTransport`; marker plus alias instead of
+  `Client::builder()`; API cookie folding), PD11 (byte comparison kept beside
+  the ABI marker), PD28 (collision refusal), and PD30 (`check_link::<R>`).
+
+#### 2. Design choices not dictated by the spec
+
+- Phase 2 › Design choices 1–13: `ResponseMeta`/`RequestMeta` layout with the
+  `page` slot on `RequestMeta`, public redacting `capture` constructors,
+  `RedactedUrl` as a string newtype, fragment redaction, `Link` left
+  unsanitized, `RedirectRefusal` reason, type-level `Decode` over `LiveBody`,
+  `ErrorBody`, `into_parts → InvalidArgument`, `RequestParts` struct,
+  `tokio::time::Instant`, `CallOptions`, opaque `Credential`.
+- Phase 2 › Compile-fail evidence: trybuild instead of doctests; the runtime
+  cases run locally only.
+- Phase 3 › Design choices 1–6: `EndpointSpec::METHOD`,
+  `Box<RequestMeta>`, `Client<A>` generic over the API marker, no default
+  user agent with a 30 s timeout, collision refusal, and the environment
+  proxy honored.
+- Phase 4 › Design choices 1–7: `check_link::<R>`, absolute-URL paths,
+  credential slot replaced on later hops, server-supplied secret query values
+  dropped on hops without the credential, `CrossOrigin` exhaustive, the
+  `--request-id-header` import flag, and Eversolo `key` redaction.
+- Phase 5 › Design choices 1–5: `decode_hooked`, hooks receive the redacted
+  `&ResponseMeta`, redacted `RawResponse::headers()`, unit `HookError` with
+  lookup by `TypeId`, and `RawJsonError`.
+- Phase 6 › Design choices 1–7: marker plus `{Api}Client` alias, API cookie
+  folding, percent-encoded queries (`%20`), byte comparison kept, ABI read
+  with `syn`, prelude re-exports, and a single `into_parts`.
+- Phase 8 › Boxing the send futures: `send`/`send_raw` return a boxed
+  future. `ABI` was not bumped, because generated code cannot observe the
+  change.
+
+#### 3. Deviations from a requirement or Decided item
+
+- Phase 2 › Deviations: module boundaries; the sketch's `Expiration` type was
+  not introduced; no runtime doctests.
+- Phase 3 › Deviations: the connect-timeout effect is not observed (R18), and
+  four TLS tests are ignored on native Windows (R18).
+- Phase 4 › Deviations: the `check_link` signature, absolute-URL paths, and
+  the import flag. The pre-existing `schematic-definitions` doctest failures
+  were left alone.
+- Phase 6 › Deviations:
+  - transitional "matches committed output" checks, removed in Phase 7;
+  - one changed wire-baseline line (`base-url-with-query` now continues with
+    `&page=1`);
+  - the Bitbucket `PaginatedResponse<T>` serde bound;
+  - collision refusals replace replacement;
+  - obsolete generator modules not deleted.
+- Phase 7 › Deviations: the ElevenLabs `ListVoices` definition gained
+  `page_size`/`page_token`; `rustfmt` was applied to two homelab files and to
+  the schema test files; the obsolete modules are still not deleted.
+- R2 location: the wrong-success-type and `request<T>` cases are in the
+  generated-crate misuse test, not the runtime's trybuild set (see R2 above).
+
+#### 4. Open questions found
+
+- Phase 1 › Open questions:
+  - 1, `list_voices_raw`: resolved in Phase 7 by the `ListVoices` definition
+    change and a typed paginated send.
+  - 2, the unreachable anonymous retry: resolved in Phase 7 (branches
+    deleted).
+  - 3, sniff 401 → `MissingCredentials` versus `AuthMethod`: open as an
+    improvement, out of scope.
+  - 4, stale dependent docs: fixed in Phase 7.
+  - 5, test gaps: closed in Phase 7, except biscuit-speaks
+    `generate_to_cache`.
+- Spec 1 outcomes matched every assumption in Dependencies (Phase 1 › Verify
+  Prerequisite). No parent contradiction was found beyond item 10 below.
+- Middleware: no dependent needed hooks or middleware (Phase 5 › Hook
+  consumers today; Phase 7).
+
+#### 5. Call-site inventory and migration notes
+
+- Baseline counts (Phase 1 › Inventory §2, generated REST sites):
+  - sniff: 32 `request` sends, 4 non-JSON sends, 10 constructors, 5
+    variant/auth overrides, 4 `map_schematic_error`.
+  - biscuit-speaks: 1 JSON send, 3 binary sends, 2 constructors, 1
+    accessor-based hand-rolled GET.
+  - homelab: 26 JSON sends (Eversolo 24, Samsung 2), 5 Samsung text/empty
+    sends, 2 `with_client_and_base_url`.
+  - eversolo-integration: indirect only (about 40 calls through `homelab`).
+  - model-citizen: manifest-only.
+  - arcam, sony, and unfolded-helper: WebSocket only.
+- Closure: Phase 7 › Wave 15 matches every row. The search for removed names
+  finds no legacy REST use.
+- sniff (more than mechanical):
+  - one shared classifier, `remote/envelope.rs`, replaces four
+    `map_schematic_error`;
+  - the status policy (401 per provider, 403/429 rate limit, 404) is
+    preserved;
+  - `list_pull_requests` anonymous retries are deleted (no trigger under
+    D56); `list_workflow_runs` keeps one explicit anonymous retry after a
+    credentialed 401/403;
+  - behavior changes: `Retry-After` parsed, `x-ratelimit-remaining: 0` →
+    `RateLimited`, distinct malformed and interrupted text, redacted
+    transport text;
+  - a real defect was fixed: GitLab double encoding (review item 3 of
+    Phase 7).
+- homelab (more than mechanical):
+  - new `rest.rs` helper and `RestError`;
+  - constructors now return `Result`;
+  - the Samsung invalid-certificate opt-in applies only over HTTPS;
+  - Eversolo failures stay `Err`, so the asleep → WoL path is preserved;
+  - `homey samsung discover` now validates `--host` early;
+  - the `Box::pin` in `rest::send` was removed in Phase 8 after the runtime
+    boxed its futures.
+- biscuit-speaks (more than mechanical):
+  - an explicit credential replaces the env fallback;
+  - `list_voices_raw` is a typed paginated send;
+  - `MissingApiKey` is raised only at construction;
+  - a voices page with `has_more` and no token now ends the loop (it used to
+    loop forever);
+  - the status text dropped its reason phrase.
+- model-citizen: the `schematic-schema` dependency was removed.
+
+#### 6. Evidence by OS
+
+- macOS: every gate, every phase (this host).
+- Linux, native Windows, and WSL2, through `just cross-check`:
+  - Phase 2, runtime: 37 / 37 on each.
+  - Phase 3, runtime: Linux 99, WSL2 99, Windows 95 (four TLS tests ignored).
+  - Phase 4, runtime: Linux 137, WSL2 137, Windows 133.
+  - Phase 5, runtime: Linux 157, WSL2 157, Windows 153.
+  - Phase 6: gen Linux 553 / Windows 551; runtime Linux 157 / Windows 153;
+    definitions Linux 568. WSL2 not run.
+  - Phase 7, Windows: biscuit-speaks 386, sniff 2335, homelab 48,
+    eversolo-integration 32.
+  - Phase 7, Linux: biscuit-speaks 387, homelab 48, eversolo-integration 32,
+    homelab-server 70, sniff 2379. WSL2 not run (nightly schedule).
+- Left to CI: the `slow_` fresh-output tests (macOS locally; CI's Linux build
+  job runs them). The runtime trybuild cases (macOS only; no CI leg runs
+  them). WSL2 for Phases 6–7.
+- Platform-sensitive tests:
+  - closed-port refusal takes about 2 s on Windows; tests use
+    accept-then-close listeners or wide margins (Phase 5 › Deviations; Phase
+    7 › Gates);
+  - abrupt close after a partial body (R11);
+  - drop cancellation (R26);
+  - the native-Windows TLS abort (Phase 3);
+  - `Date` headers straddling a second in the parity test (Phase 5).
+- Phase 8 final OS evidence: see Wave 17 below.
+
+#### 7. Measurements
+
+- `schematic-schema` compile, `dev --lib`, same host and toolchain,
+  `RUSTC_WRAPPER=` (single samples): **14.63 s → 5.85 s** (Phase 1 › Capture
+  Baseline; Phase 7 › Regenerate Schema). This sets no threshold.
+- Generated source: about 75 k → 41.6 k lines. LM Studio module: 1299 → 419
+  lines (Phase 6).
+- Future sizes: homelab `execute_operation` was 59 KB inline and 5.1 KB
+  boxed (Phase 7). The runtime `send` future was 3 704 bytes; boxing only the
+  internals left 1 616 bytes; the boxed public future has a 64-byte test
+  bound (Phase 8).
+- Fresh-output misuse run: 117 s → 5.9 s with `--keep-going` (Phase 6).
+- Binary size: no observation was recorded for any dependent.
+
+#### 8. Departures from docs
+
+- Drift resolved toward the code:
+  - the `RestApi::env_auth` doc no longer promises `MissingCredential`
+    (Phase 4);
+  - the generated module-docs auth section no longer claims an empty env
+    mapping is read (Phase 6);
+  - sniff `repo-tech-design.md` and `repo_remote.md` (two false statements),
+    homelab `eversolo-design.md`, the biscuit-speaks README variable
+    precedence and `## Errors` sections, and the model-citizen README line
+    (Phase 7).
+- Phase 8 docs (`schematic/runtime/README.md`, `schematic/docs/runtime/`,
+  `schematic/README.md`, `docs/headers/README.md`, skills): the coordinator
+  records them.
+- Found while compiling this section and not fixed (read-only here): the
+  generated `shared::Paginated` doc example
+  (`schematic/schema/src/shared.rs:155-173`, a `text` fence, so it is not
+  compiled) still uses `R::Response`. `EndpointSpec` now calls it `Success`.
+  The text comes from the generator template, so a fix belongs there plus a
+  regeneration.
+
+#### 9. Requirements not met and proposed gaps
+
+- **R18, proposed gap:** (1) the connect-timeout effect is not observed by a
+  mock; (2) four TLS builder tests are ignored on native Windows.
+- R6 docs half: met if the coordinator confirms the Phase 8 topic page.
+  Nothing tests the page.
+- Every other active requirement is Met. R36 is Withdrawn.
+
+#### 10. Parent contradictions or gaps noticed
+
+- PD7's `Other(String)` conflicts with D23's no-library-text rule; the rule
+  wins (Phase 2).
+- PD30's `check_link(&Url)` cannot fill R9's request metadata without an
+  endpoint (Phase 4).
+- PD8's `Client::builder()` does not fit a thin generated surface without
+  forwarding; R31/D53 win (Phase 6).
+- The spec's "replace the byte comparison" conflicts with retained modules
+  that still call `shared.rs` helpers (Phase 6).
+- PD34 (D7 label versus D48) was already known; D48 is followed.
+- The spike sketch's `RedirectFailed` meaning was corrected to R24's (Phase 1
+  › Prove Decoder Boundary).
+- Only `Location`/`Content-Location` are sanitized; `Link` URLs are not
+  (Phase 2 review item 2; for spec 3).
+
+#### 11. Items for the author's ruling at review 1
+
+From the spec's agenda:
+
+- PD14: the `send_raw` signature, `RawCompletion` (the interrupted-body
+  result), plus `RawJsonError` and redacted raw headers.
+- PD8: the `SharedTransport` builder names (`proxy`,
+  `add_root_certificate`, `danger_accept_invalid_certificates`,
+  `connect_timeout`), and connect timeout owned by the shared transport,
+  with any attached-client transport option refused.
+- R29/PD10: the hook mechanism `SupportsHooks` (marker implemented by `Json`
+  only), delivered through `Decode::decode_hooked`.
+- Proposed items:
+  - the hook types (`HookError`, `HookStage`, closures over `&ResponseMeta`);
+  - `ErrorKind::Hook`;
+  - R29's compile error;
+  - the ABI constant (`ABI = 1`, `SCHEMATIC_RUNTIME_ABI`);
+  - `check_link::<R>`;
+  - the `Decode` trait detail (type-level, `LiveBody`, `into_streaming`);
+  - `DECLARED_ERROR_STATUSES = 400..=599`.
+- R20 frozen surface test
+  (`endpoints_have_no_cross_origin_override_and_no_graphql_export`): specs 4a
+  and 5 must update or retire it.
+
+Open review items from the phases:
+
+- Phase 2:
+  - item 1, runtime compile-fail cases are local-only (accept, or a CI
+    change);
+  - item 2, `Link` redaction (spec 3);
+  - item 3, `RequestParts` derives `Debug`.
+- Phase 3:
+  - item 1, the Windows TLS abort and four ignored tests;
+  - item 2, `EndpointSpec::METHOD` and `Box<RequestMeta>`;
+  - item 3, collision refusal versus replacement (no dependent used the
+    replacing setters; Phase 1 §7);
+  - item 4, the connect-timeout effect is not observed;
+  - item 5, the cookie credential keeps `%` unescaped.
+- Phase 4:
+  - item 1, `check_link::<R>` and absolute-URL paths;
+  - item 2, dropping server-supplied secret query values;
+  - item 3, `CrossOrigin` exhaustive;
+  - item 4, Eversolo `key` redaction;
+  - item 5, the four stale `schematic-definitions` endpoint-count doctests
+    (pre-existing; still failing at Phase 7's gates);
+  - item 6, the trybuild `.stderr` quotes constructor signatures.
+- Phase 5:
+  - item 1, design choices (redacted `ResponseMeta` for hooks; redacted raw
+    headers);
+  - item 2, the `.stderr` fixtures quote runtime source lines.
+- Phase 6:
+  - item 1, the marker/alias, cookie folding, and percent-encoding;
+  - item 2, the obsolete generator modules await deletion by a human;
+  - item 3, no generator validation for credential-bearing API-level headers
+    other than `Cookie`;
+  - items 4–5, consumer docs and the runtime README (Phase 8 docs).
+- Phase 7:
+  - **item 1, the large `send` future: RESOLVED in Phase 8.** The runtime
+    boxes `send` and `send_raw`, and homelab's box was removed;
+  - item 2, obsolete modules (as Phase 6 item 2);
+  - item 3, the GitLab double-encoding fix changes wire behavior;
+  - item 4, consumer error text embeds provider bodies;
+  - item 5, sniff's stale GitLab `GetProject` comment, and the Gitea 401
+    message naming `GITEA_TOKEN` for Codeberg;
+  - item 6, Phase 8 docs.
+- Also for ruling:
+  - PD5, whether callers need the redirect chain;
+  - the Phase 6 wire-baseline change for a base URL that carries a query;
+  - pre-existing `cargo doc -D warnings` failures in `schematic-gen` and
+    `schematic-definitions`, and `rustfmt --check` diffs in untouched files
+    (Phase 7 › Gates);
+  - the stale `Paginated` doc example (item 8 above).
+
+### Downstream inputs for pagination and later codecs
+
+Each item was checked against `schematic/runtime/src/` on 2026-10-12.
+
+**Pagination (spec 3).**
+
+- **`Deadline`** (`deadline.rs`).
+  - Created with `Deadline::after(Duration)` and passed with
+    `CallOptions::new().deadline(&d)`. Clones share one monotonic expiry and
+    one completed-send counter.
+  - Accessors: `expires_at`, `remaining`, `is_expired`, `elapsed`, and
+    `completed_requests`.
+  - `completed_requests` counts each classified logical send, HTTP error
+    statuses included. Redirect hops, pre-head failures, and dropped sends do
+    not count.
+  - Each send gets `min(remaining, per-request timeout)`. An expired
+    deadline sends nothing.
+  - Expiry before a head is `TransportErrorKind::DeadlineExceeded {
+    completed_requests, deadline_elapsed }`. After the head it is
+    `BodyInterrupted`; between hops it is `RedirectFailed { category:
+    DeadlineExceeded }`.
+  - The session-close grace after expiry belongs to spec 3.
+- **Page slot.**
+  - `RequestMeta::page: Option<u32>` (`meta.rs`) exists and is always `None`.
+    `RequestMeta::capture` sets `None`, and no send path or `CallOptions`
+    method sets it.
+  - The field is public on a `#[non_exhaustive]` struct, so a pager can
+    assign it after a send. Marking a send as paginated at send time needs a
+    new runtime input, which is spec 3's to add (and an `ABI` question if
+    generated code observes it).
+  - Generated code: `schematic_schema::shared::Paginated` is an empty marker
+    trait (`schema/src/shared.rs:173`), implemented by 35 request types in
+    `github`, `gitlab`, `gitea`, and `bitbucket`. It carries no page
+    parameter, and its doc example is stale (agenda item 8).
+- **`InvalidArgument`** (`error.rs`).
+  - `InvalidArgument::new(reason)` is public, and
+    `EndpointSpec::into_parts` returns `Result<RequestParts,
+    InvalidArgument>`.
+  - The runtime reports it as `TransportErrorKind::InvalidArgument` with
+    request metadata built from `EndpointSpec::METHOD` and the base URL, and
+    with zero requests (R9). This is the page-size-above-maximum path.
+  - The reason must not quote the value.
+- **`Client::check_link::<R>(&Url) -> Result<(), TransportError>`**
+  (`client.rs:734`).
+  - It does no network work. A same-origin URL passes under every policy,
+    `deny` included.
+  - A refusal is `CrossOriginRejected { target }` with a redacted target,
+    `AuthMethod::Anonymous`, and zero elapsed time.
+  - Related: a `RequestParts::path` that begins with `http(s)://` is sent
+    to that URL after the same check. The credential is attached only where
+    the policy allows. This is how a next-page link can be followed through
+    a typed request (Phase 4 › Design choices 2).
+- **Redirect failures** (`response.rs`, `raw.rs`).
+  - `ErrorKind::RedirectRefused { reason: RedirectRefusal }`, where the
+    reason is `CrossOrigin`, `HopLimit`, `MissingLocation`,
+    `InvalidLocation`, or `UnsafeLocation`.
+  - `ErrorKind::RedirectFailed { target: RedactedUrl, category:
+    FailureCategory }`, where the category is `Connect`, `Tls`, `Timeout`,
+    `DeadlineExceeded`, or `Other`.
+  - The same cases appear on `RawCompletion`. Spec 3 maps `RedirectFailed`
+    as it maps `TransportError` (D57 item 7).
+- **`Link` headers are not sanitized**, while `Location` and
+  `Content-Location` are. Spec 3 decides (Phase 2 review item 2).
+
+**Later codecs (spec 5).**
+
+- **`Decode`** (`codec.rs`): `trait Decode: 'static { type Output: Send +
+  'static; fn decode(body: LiveBody) -> impl Future<Output =
+  Result<Self::Output, DecodeFailure>> + Send; fn decode_hooked(body,
+  HookStage<'_>) … }`.
+  - It is type-level (no `self`); `decode_hooked` is provided.
+  - `DecodeFailure { kind: Interrupted | Malformed | Hook, retained: Bytes }`
+    (`#[non_exhaustive]` kind).
+  - The `Output` may own the body (streams). It is not required to be
+    `Clone` or `Sync`, and `elapsed` measures the time to the head
+    (PD16/PD19).
+- **`LiveBody`**: `new(status, headers, stream, read_until)`, `status()`,
+  `headers()`, `chunk()`, `collect()`, and `into_streaming()`.
+  - `into_streaming()` switches to an idle bound equal to the per-request
+    timeout between reads, with the shared deadline over the whole stream
+    (D57 item 14).
+  - It wraps a byte stream, not a `reqwest::Response`.
+- **`ErrorKind`** is `#[non_exhaustive]`, so `UnexpectedContentType` can be
+  added without a breaking change.
+- **Codecs:** `Json<T>`, `Text`, `Binary`, and `Empty`. No SSE, NDJSON, or
+  GraphQL codec ships.
+- **Hooks:** `SupportsHooks: Decode` (marker; only `Json<T>` implements it
+  today; spec 5 extends it to the stream and GraphQL codecs). A codec that
+  implements it overrides `decode_hooked` and reports a refusal as
+  `DecodeFailureKind::Hook` with the original bytes.
+  - `HookStage<'_>` provides `is_empty`, `has_pre_response_json`,
+    `pre_response_json(Value)`, and `mutate::<T>(&mut T)`.
+  - `HookError` is a text-free unit struct.
+  - The client-global hook runs on 2xx bodies of hook-supporting codecs
+    only (D57 item 9).
+
+**Constraints the later specs inherit.**
+
+- R20 frozen surface test:
+  `schematic/define/tests/cross_origin_policy.rs::endpoints_have_no_cross_origin_override_and_no_graphql_export`
+  fails by design once spec 4a adds the per-endpoint override or spec 5
+  exports a GraphQL primitive. Update or retire it in that change.
+- `CrossOrigin` is exhaustive. A new variant from spec 4a is a compile error
+  in the generator's `CrossOrigin → OriginPolicy` translation, by design.
+- Per-parameter `.secret()` is spec 4a's. Today the only definition-level
+  marker is `RestApi::secret_names`.
+- `schematic_runtime::ABI` (1) must be incremented for any change that
+  generated code can observe. The Phase 8 boxing was not such a change.
+- Prerequisite departures recorded here, which later specs build on:
+  - query values are percent-encoded (`%20`, never `+`); one wire-baseline
+    line changed for a base URL that carries its own query (Phase 6);
+  - a credential whose slot is already in the request is refused rather than
+    replaced (Phases 3 and 6);
+  - partial generation keeps the `shared.rs` byte comparison beside the ABI
+    marker (Phase 6);
+  - the GitHub `recursive=true` tree and Bitbucket binary `GetSource`
+    baselines are preserved, and `snapshot_reuse_tests` now asserts
+    `recursive=true` on continuations (Phase 7).
+
+### Wave 16 — Documentation Closure
+
+**Schematic docs (created).**
+
+- `schematic/runtime/README.md`: the crate README. It has a quick start, the
+  `Ok`/`Err` rule, the module layout, the `ABI` marker, and testing.
+- `schematic/docs/runtime/` has an index and seven topic pages:
+  - `README.md`: the index, a first send, the three core rules, and the
+    **planned** items (pagers, SSE/NDJSON/GraphQL codecs);
+  - `sending-and-responses.md`: the placement diagram (Mermaid), the error
+    kind tables, codecs judging the body not the Content-Type, `send_raw`,
+    the boxed future, what is safe to log, and the `Debug` limitation;
+  - `building-clients.md`: builder options, `SharedTransport` conflicts,
+    every `BuildError`, and the tighten-only origin override;
+  - `credentials.md`: the precedence diagram, env fallback, anonymous
+    sends, and no retries;
+  - `origins-and-redirects.md`: the redirect-flow diagram (Mermaid), per-hop
+    credentials, `MAX_REDIRECTS`, and `check_link`;
+  - `deadlines-and-timeouts.md`: the shared `Deadline`, completed-request
+    accounting, and streamed bodies (marked **planned**);
+  - `hooks.md`;
+  - `metadata-and-redaction.md`.
+
+**Schematic docs (updated).**
+
+- `schematic/README.md`: the usage guide is rewritten for the builder,
+  `send`, and the envelope. The WebSocket sections were already accurate.
+- `schematic/docs/headers/README.md`: `Headers` now serves WebSocket clients
+  only, and REST credentials go through the runtime.
+- `schematic/docs/generation/request-side.md`: one pointer.
+- These three were found stale by the docs agent and fixed by a fourth,
+  foreground agent:
+  - `schematic/schema/README.md`: the Quick Start, and three modules that
+    were missing from the list;
+  - `schematic/define/README.md`: the credential precedence,
+    `variant()`/`headers_builder`, and `UpdateStrategy`, which is now
+    described as exported but unread;
+  - `schematic/definitions/README.md`: the response-type table now shows
+    codecs, the checklist is fixed, and the OpenAI `env_auth` assertion was
+    wrong (the definition has no env fallback).
+
+**Skills.**
+
+- `schematic/skill/SKILL.md` and `.claude/skills/schematic-define/{SKILL.md, schematic/SKILL.md, headers.md, define.md, definitions.md, gen.md}`.
+  - The `RestApi` literal in the skill had a nonexistent `params` field and
+    was missing five fields.
+  - The env-variable and endpoint counts were corrected against the
+    generated code.
+  - The gen.md note about obsolete uncompiled generator files is kept: it is
+    still true.
+- `.claude/skills/homelab/SKILL.md` gained the REST client and
+  `schematic-schema` notes. The sniff, biscuit-speaks, and model-citizen
+  skills were checked and were already accurate (Phase 7 updated them).
+
+**Dependency records.**
+
+- `schematic/docs/dependencies.md`: in the schema section, `schematic-define`
+  is now described as used by the WebSocket modules only, and the
+  `thiserror` and `urlencoding` uses were corrected.
+- `sniff/docs/dependencies.md`: removed a false "no HTTP stack" claim and
+  added a "Generated REST Clients" section.
+- Root `docs/dependencies.md` and `biscuit-speaks/docs/dependencies.md`
+  already covered the runtime, its dev crates, and the removals.
+
+**Generated rustdoc templates.**
+
+- `module_docs.rs` and the `lib.rs`/`prelude.rs` assembly already described
+  the new surface.
+- One template was stale: `gen/src/codegen/traits.rs`, where the `Paginated`
+  example used `R::Response`, which is now `R::Success`. I fixed it and
+  regenerated. The only change was one line of `schema/src/shared.rs`.
+
+#### Comment and doc drift found and resolved (code taken as correct)
+
+| Location | Said | Code does | Resolution |
+|---|---|---|---|
+| `runtime/src/endpoint.rs` (`Api::NAME`) | used "to key hooks" | hooks are keyed by `(TypeId of Api, ENDPOINT_ID)` | removed the claim |
+| `runtime/src/meta.rs` (`RequestMeta`) | the request "as the application assembled it" | captured from the authenticated hop, so it includes the redacted runtime credential | reworded |
+| `runtime/src/meta.rs` (`page`) | page number of a paginated operation | always `None` | marked reserved for pagers, which are **planned** |
+| `runtime/src/credentials.rs:177` | "The names" | returns one name | fixed |
+| `define/src/types.rs` (`RestApi::name`) | generates `struct OpenAI` and `enum OpenAIRequest` | `enum OpenAI {}` and `type OpenAIClient = Client<OpenAI>` | fixed |
+| `define/src/types.rs` (`env_auth`, `legacy_env_mapping_for`) | "first set" variable; an interim scan by the generated client | first **non-empty** variable, read by the runtime `EnvFallback` | fixed |
+| `define/src/{auth,lib}.rs` (`UpdateStrategy`) | used by the generated `variant()` | nothing reads it | documented as unused |
+| `gen/src/codegen/request_structs/{mod,shared,named_params}.rs` | generated `append_query_pairs`; a manual `Default` for bodies; section markers | the runtime encodes queries; `Default` is always derived | fixed or deleted |
+| `gen/src/output/{mod.rs,assemble/*}`, `validation.rs`, `test_utils.rs` | `openai.rs` given as a single file; request-enum variants; `## Arguments`/`## Returns` that duplicate types | openai is split; there are no request enums | fixed or deleted |
+| `gen/src/codegen/traits.rs` (`Paginated` template) | `R::Response` | `R::Success` | fixed, then regenerated |
+| `definitions/src/{lib,prelude}.rs` crate doctests | GitHub has 17 endpoints, Bitbucket 16 | 16 and 15, after the deliberate endpoint merges in the generation-integrity work | fixed. These were the four "pre-existing" `just doctest` failures in Phases 6–7, and `just doctest` is now green |
+| `sniff/lib/src/remote/{gitlab,github,gitea,bitbucket}.rs` | `GetProject`, `ListOrgRepos`, `ListGroupProjects`, and `ListWorkspaceRepos` "not implemented in schematic-definitions"; a nonexistent `phase0-audit.md` | the generated requests exist; the providers do not call them | each comment now says the request exists and is not sent |
+| `sniff/lib/src/remote/mod.rs` | `schematic-schema` clients serve "all HTTP operations" | `FocusedProviderClient` uses reqwest directly | scoped |
+| `sniff/lib/src/remote/bitbucket.rs:218` | lossy UTF-8 matches "the former text response" | matches the runtime's text codec | reworded |
+| `biscuit-speaks/.../elevenlabs.rs` (`list_voices_raw`) | results are cached | not cached; it stops at `has_more = false` or no token | fixed; narration deleted |
+| `homelab/lib/src/rest.rs` | the send future is several KB, so it is boxed | the runtime boxes it now | removed (see "Boxing the send futures") |
+| this log, Phase 7 "Migration-ready examples" | `pre_response_json(\|value: &mut Value\| ..)`, `mutate_response(\|user: &mut T\| ..)` | `(&ResponseMeta, Value) -> Result<Value, HookError>` and `(&ResponseMeta, &mut R::Success)` | the docs use the code's signatures; the Phase 7 block is left as written |
+| skills: OpenAI env variable, Gitea endpoint count | `OPENAI_API_KEY`; 14 | the imported OpenAI definition has no env fallback; 16 | corrected |
+
+Every `.rs` edit by the Wave 16 agents is comment-only. I checked
+`git diff -U0` for non-comment lines. The only behavior changes in Phase 8
+are the boxing (runtime and homelab) and the regenerated `shared.rs` doc line.
+
+### Wave 17 — Final Evidence
+
+All results are on the final tree.
+
+| Gate | Result |
+|---|---|
+| `just test` (`schematic/`) | PASS: L1 1865 / 0 / 12 skipped (+1, the new future-size test); fresh-output 6 / 0 (104 s); compile-fail 1 / 0 |
+| `just lint` (`schematic/`) | PASS |
+| `just doctest` (`schematic/`) | PASS. define 168, definitions 63 (2 ignored), gen 18, oauth 3, runtime 0. Green for the first time on this branch |
+| `just test-schema` | PASS 37 / 37 |
+| `just lint-schema` | PASS |
+| `just test-l2` (`schematic/`) | PASS 3 / 3 (`schematic-gen` terminal-capture, through the no-focus harness) |
+| `just test` / `just lint` (`sniff/`) | PASS 3374 / 0 / 33 skipped; lint PASS |
+| `just test` / `just lint` (`biscuit-speaks/`) | PASS 505 / 0 / 19 skipped; lint PASS |
+| `just test` / `just lint` (`homelab/`, all 7 crates incl. eversolo-integration, arcam, sony, unfolded-helper) | PASS Rust 243 / 0 / 8 skipped; vitest 22 / 22; lint PASS |
+| `just test` / `just lint` (`model-citizen/`) | PASS 170 / 0; lint PASS |
+| Generation determinism | Two consecutive regenerations gave the same content hash over `schema/src`, `schema/Cargo.toml`, `openapi/`, and `postman/` (`33dd6fe0…`) |
+| Runtime discovery | `just ci-local --plan` schedules `schematic-runtime` lint on `ubuntu-latest` and L1 on `ubuntu-latest`, `macos-latest`, `windows-latest`, and `wsl2-ubuntu`. No CI files were changed |
+
+No `cargo test` (except `just doctest`'s own `--doc` runs) and no formatter
+were run. Every recipe used goes through nextest.
+
+#### OS evidence (agenda item 6, Phase 8 share)
+
+| OS | `schematic-runtime` L1 on the final tree | How |
+|---|---|---|
+| macOS | 158 / 0 / 1 skipped inside `just test` (the skipped compile-fail case runs in `test-compile-fail`, 1 / 0) | local |
+| Linux | 158 / 0 / 1 skipped | `just cross-check schematic-runtime --os linux` |
+| native Windows | 154 / 0 / 5 skipped | `just cross-check … --os windows`. The 4 extra skips are the TLS builder tests ignored on native Windows (the rustls loopback abort `0xc0000409`, Phase 3 review item) |
+| WSL2 | 158 / 0 / 1 skipped | `just cross-check … --os wsl` (CI-faithful nextest archive) |
+
+- **Receipts.** None were published, because the tree is uncommitted. The
+  WSL leg says so explicitly. These runs are evidence for this tree's
+  content, not CI receipts for a head.
+- **Platform-sensitive areas.** The runtime suite covers the closed-port and
+  early-close timing (`send::a_refused_connection_*`, `timing::*`), deadline
+  cancellation, TLS, proxy, and connection reuse (`builder::*`; TLS is
+  skipped on native Windows as above), and env isolation (`#[serial]` env
+  guards). All of these passed on the three remote OSes.
+- **Dependents.** The Phase 7 Windows and Linux cross-checks of sniff,
+  homelab, eversolo-integration, homelab-server, and biscuit-speaks were run
+  on the pre-boxing tree. Phase 8 changed only how the send future is
+  allocated, which is OS-agnostic, plus comments. I did not repeat those
+  runs, so CI's `windows-latest` (push to `main`) and `wsl2-ubuntu`
+  (nightly) legs are the authoritative final proof for the dependents.
+- No test was red on exactly one OS.
+
+### Requirement-to-test mapping (Phase 8 share)
+
+**Boundary.** The boxing fix sits at the runtime's public `Client` API, which
+consumers call across the crate boundary.
+
+- **F1, L1:** `send::send_futures_stay_small_enough_to_join_many` (runtime).
+  It failed at 3 704 bytes before the fix, and the bound is now 64 bytes.
+- **F2, L1, downstream:** eversolo-integration's `asleep_device_tests::*`,
+  which join eight sends and overflowed before homelab added its own box.
+  They pass with that box removed.
+
+The input-robustness matrix does not apply: Phase 8 adds no reader of a file
+format or configuration.
+
+| Requirement (part) | Validation |
+|---|---|
+| Phase 7 review item 1 (large send future) | `send::send_futures_stay_small_enough_to_join_many`; homelab `just test` with the box removed |
+| R1, R37 (runtime discovery and gates) | `just ci-local --plan` rows above; the area recipes above |
+| R3–R8 and acceptance criterion 6 (docs) | `schematic/runtime/README.md`, `schematic/docs/runtime/*.md` (placement and redirect Mermaid diagrams, Debug limitation, `into_result` metadata loss, Content-Type rule, no retries, planned codecs and stream bounds). I confirmed the R6 docs half against the topic pages |
+| R26 (OS evidence) | the OS table above |
+| R31–R32 (determinism after the final template edit) | the hash comparison above |
+| R35 | `just test-schema` 37 / 37 and `just lint-schema` |
+
+### Deviations from the plan (Phase 8)
+
+- **A code change in a documentation phase.** The boxing of
+  `send`/`send_raw` changes the public signature from `async fn` to
+  `fn … -> impl Future`. Call sites are unchanged.
+- **Regeneration in Phase 8.** It was caused by the `Paginated` template fix.
+- **Doctest counts.** The definitions crate-doc endpoint counts were fixed
+  here, although earlier phases recorded them as pre-existing.
+- **Wave 16 agents ran in the background**, not the foreground as the
+  orchestration rules ask. I stayed in the turn and collected all three
+  reports before continuing, so no work was abandoned. The follow-up README
+  agent ran in the foreground.
+
+### Remaining items for the author (Phase 8 additions)
+
+These are added to the consolidated agenda item 11 above. None blocks review.
+
+1. **Follow-up code defects found during the audit** (not fixed, out of scope):
+   - sniff's `schematic-schema` dependency is unconditional, so
+     `rendezvous-core` (`sniff` with `default-features = false`) links
+     reqwest and tokio. This was already true on main. The fix is
+     `optional = true` under the `network` feature.
+   - The sniff `list_org_repos` providers always return empty, although the
+     generated listing requests now exist. GitLab metadata is still a stub
+     although `GetProjectRequest` exists.
+   - The imported OpenAI definition has no env fallback, so
+     `OPENAI_API_KEY` is ignored.
+   - Generated WebSocket clients carry an `EnvMapping` but never call
+     `from_env`.
+   - `UpdateStrategy` is exported and unread. A string literal in
+     `gen/src/cargo_gen.rs:347` still names it.
+   - Generated request-struct doc examples have a stray `///;` line.
+   - The generated module-doc example always uses `{Request}::default()`,
+     even for endpoints with required path parameters.
+2. **Pre-existing doc drift not fixed:**
+   - The `schematic/define/README.md` `AuthStrategy::ApiKey` examples omit
+     `value_prefix`, so one match arm there would not compile.
+   - The `schematic-define` section of `schematic/docs/dependencies.md`
+     lists `strum` 0.26 (the manifest has 0.28) and omits `base64`, the
+     `openapi` crates, and the dev dependencies.
+   - `schematic/skill/sections/*.md` are empty files, yet `SKILL.md` links
+     `sections/definitions.md`.
+3. **Obsolete uncompiled generator files** are still on disk and need a human
+   to delete them (list in Phase 6; `codegen/client/shared_auth.rs` was added
+   on this branch).
+4. **R18 is a proposed gap.** No mock observes the connect timeout's effect,
+   and the four TLS builder tests do not run on native Windows. This needs
+   an author ruling.
+5. **`RequestMeta::page` is never set.** The pagination spec must add its
+   input.
+
+### Completion state
+
+All Phase 8 tasks are done. Every required local gate is green. macOS,
+Linux, native Windows, and WSL2 evidence for `schematic-runtime` is recorded
+above. CI is the final proof for the dependents on Windows and WSL2.
+**Implementation complete, ready for review.** R18 remains a proposed gap
+for the author's ruling. Nothing was committed or pushed, `just complete` was
+not run, and the feature directory was not moved.
