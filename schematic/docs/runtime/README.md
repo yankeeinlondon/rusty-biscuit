@@ -2,9 +2,9 @@
 
 Every REST client in `schematic-schema` is a
 [`schematic-runtime`](../../runtime/README.md) client. Generated code only
-describes an API: a marker type such as `GitHub`, a `GitHubClient` alias, and
-one request struct per endpoint. The hand-written runtime does everything
-else: it builds the client, resolves credentials, sends the request, follows
+describes an API: a client struct such as `GitHub`, the only name a caller
+writes, and one request struct per endpoint. The hand-written runtime does
+everything else: it validates the client's settings, resolves credentials, sends the request, follows
 redirects, enforces timeouts, decodes the reply, and reports the result.
 
 These pages describe that runtime from the caller's side. You can:
@@ -33,7 +33,7 @@ use schematic_schema::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Reads GITHUB_TOKEN or GH_TOKEN at send time; sends anonymously if neither is set.
-    let client = GitHub::new()?;
+    let client = GitHub::new();
 
     let response = client
         .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
@@ -53,11 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Page | Read it to learn |
 | --- | --- |
 | [Sending and responses](./sending-and-responses.md) | `send` and `send_raw`, the `Response` envelope, every `ErrorKind`, `TransportError`, codecs, and what is safe to log |
-| [Building clients](./building-clients.md) | `{Api}::builder()`, timeouts, proxies and TLS, `SharedTransport`, and every `BuildError` |
+| [Building clients](./building-clients.md) | `{Api}::new()` and its chained settings, when settings are validated, timeouts, proxies and TLS, `SharedTransport`, and every `BuildError` |
 | [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), `CallOptions::anonymous()`, and why the runtime never retries |
 | [Origins and redirects](./origins-and-redirects.md) | the cross-origin policies, how a redirect is followed hop by hop, and `check_link` |
 | [Deadlines and timeouts](./deadlines-and-timeouts.md) | the per-request timeout, a `Deadline` shared across sends, and stream bounds |
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |
+| [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, and what a codec that runs hooks must do |
 | [Metadata and redaction](./metadata-and-redaction.md) | `RequestMeta`, `ResponseMeta`, request ids, and which values are redacted |
 
 How a request struct's fields become a URL, headers, and body is covered by
@@ -80,12 +81,12 @@ How a request struct's fields become a URL, headers, and body is covered by
 
 ## Planned
 
-- **Pagination.** Pagers that follow next-page links through
-  `Client::check_link` and count pages against a shared `Deadline` are
-  **planned**. `RequestMeta::page` exists for them and is always `None`
+- **Pagination.** Pagers that check next-page links with
+  `Client::check_link::<R>`, their listing request as `R`, and count pages
+  against a shared `Deadline` are **planned**. `RequestMeta::page` exists for them and is always `None`
   today.
 - **More codecs.** Server-sent events, NDJSON, and GraphQL codecs, built on
-  the same `Decode` trait as the four built-in codecs, are **planned**. Until
+  the same [`Decode` trait](./codecs.md) as the four built-in codecs, are **planned**. Until
   then a streaming endpoint is modeled as binary and framed by the caller.
 - **Declared error bodies in definitions.** The runtime can decode an
   endpoint's declared error body on arrival, but API definitions cannot

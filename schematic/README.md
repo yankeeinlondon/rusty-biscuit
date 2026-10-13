@@ -69,8 +69,9 @@ schematic/
                               └─────────────────────────────┘
 ```
 
-Generated REST code only describes an API: a marker type such as `OpenAI`,
-an `OpenAIClient` alias, and one request struct per endpoint. Sending,
+Generated REST code only describes an API: a client struct such as
+`OpenAI`, the only name a caller writes, and one request struct per
+endpoint. Client settings, sending,
 credentials, redirects, timeouts, and the response envelope live once in
 `schematic-runtime`.
 
@@ -82,9 +83,7 @@ use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAI::builder()
-        .credentials(Credential::access_token(std::env::var("OPENAI_API_KEY")?))
-        .build()?;
+    let client = OpenAI::new().api_key(std::env::var("OPENAI_API_KEY")?);
 
     // List all models (no required params - use Default)
     let models = client
@@ -211,9 +210,10 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 
 ## Using a Generated Client
 
-Every REST API module exposes `{Api}::new()` for a client with every
-default and `{Api}::builder()` for one you adjust. Both return
-`Result<{Api}Client, BuildError>`.
+Every REST API module exposes one client struct, `{Api}`. `{Api}::new()`
+returns a usable client and never fails; settings are chained onto it. An
+invalid setting is reported by the first call, or earlier by the optional
+`build()?`, which returns the same `{Api}`.
 
 ```rust
 use std::time::Duration;
@@ -221,10 +221,10 @@ use std::time::Duration;
 use schematic_schema::openai::ListModelsRequest;
 use schematic_schema::prelude::*;
 
-let client = OpenAI::builder()
+let client = OpenAI::new()
     .base_url("https://staging.api.com/v1")
     .timeout(Duration::from_secs(10))
-    .credentials(Credential::access_token(token)) // used when a call supplies none
+    .api_key(token) // used when a call supplies none
     // Unwrap { "data": { ... } } before decoding, for every JSON reply
     .pre_response_json(|_meta, json| Ok(json.get("data").cloned().unwrap_or(json)))
     // Adjust one endpoint's decoded value
@@ -232,7 +232,7 @@ let client = OpenAI::builder()
         models.data.retain(|model| !model.id.contains("deprecated"));
         Ok(())
     })
-    .build()?;
+    .build()?; // optional: report a bad setting here instead of on the first call
 
 // A different credential for one call, or none at all
 let options = CallOptions::new().credential(Credential::access_token(user_token));
@@ -247,7 +247,7 @@ use schematic_oauth::{MemoryTokenStore, OAuth2Manager};
 
 let manager = OAuth2Manager::new(runtime_config, Box::new(MemoryTokenStore::new()))?;
 let token = manager.get_valid_token().await?; // refreshes when expired
-let client = GitHub::builder().credentials(Credential::access_token(token)).build()?;
+let client = GitHub::new().credentials(Credential::access_token(token));
 ```
 
 The runtime never retries; a second attempt is an explicit second call. The

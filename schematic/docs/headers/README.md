@@ -14,9 +14,10 @@ supplies one wins:
 
 1. `CallOptions::anonymous()`, which sends no credential from any source
 2. a per-call credential, `CallOptions::new().credential(..)`
-3. the client credential, `builder().credentials(..)`
+3. the client credential, set with `api_key(..)`, `basic_auth(..)`, or
+   `credentials(..)`
 4. the first set, non-empty variable of the API's environment fallback
-   (`builder().env_order([..])` replaces the list)
+   (`env_order([..])` replaces the list)
 5. otherwise the request is sent anonymously
 
 There is no missing-credential error: a server that needs a credential
@@ -26,9 +27,7 @@ metadata records `AuthMethod::Anonymous`.
 ```rust
 use schematic_schema::prelude::*;
 
-let client = GitHub::builder()
-    .credentials(Credential::access_token(token))
-    .build()?;
+let client = GitHub::new().api_key(token);
 ```
 
 [Credentials](../runtime/credentials.md) covers each source, the refusal

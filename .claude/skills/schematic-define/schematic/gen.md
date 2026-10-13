@@ -52,7 +52,7 @@ schematic-gen import --input api.yaml --output generated/src --strict
 
 ### What Gets Generated
 
-- `{api_name}.rs` - API marker type, client alias, and request structs implementing `EndpointSpec`
+- `{api_name}.rs` - API client struct, tag type, and request structs implementing `EndpointSpec`
 - `types.rs` - Model structs/enums from OpenAPI schemas
 - Proper Rust types from JSON Schema mappings
 - Serde derives for serialization
@@ -96,13 +96,13 @@ API Definition (RestApi)
 ```
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI + compile-time check, `pub use schematic_runtime`
-├── prelude.rs       # Each API's marker and client alias, plus runtime CallOptions, Credential, Response, ...
+├── prelude.rs       # Each API's client struct, plus runtime CallOptions, Credential, Response, ...
 ├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, Paginated
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 lines stays one file
 ├── lmstudio.rs
 ├── openai/          # A larger module is split into a directory:
-│   ├── mod.rs       #   module docs, re-exports, API markers, client aliases, constructors
+│   ├── mod.rs       #   module docs, re-exports, each API's client struct and tag
 │   ├── requests.rs  #   per-endpoint request structs and their EndpointSpec impls
 │   └── responses.rs #   (when the module has response types)
 ├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
@@ -112,8 +112,8 @@ schema/src/
 ```
 
 APIs that share a `module_path` (e.g., Ollama Native + OpenAI, EMQX Basic + Bearer)
-are combined into a single module file. Each API gets its own marker type, client
-alias, and request suffix to avoid naming collisions. Stale `.rs` files from previous
+are combined into a single module file. Each API gets its own client struct, tag
+type, and request suffix to avoid naming collisions. Stale `.rs` files from previous
 generations are automatically cleaned up.
 
 ## Generated Code Components
@@ -181,15 +181,19 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 }
 ```
 
-### API Marker Type
+### API Client Struct
 
 ```rust
-pub enum MyApi {}                                          // never constructed
-pub type MyApiClient = schematic_runtime::Client<MyApi>;
+#[derive(Clone, Debug)]
+pub struct MyApi(schematic_runtime::Client<MyApiApi>);    // the one name callers write
+pub enum MyApiApi {}                                       // tag named by request types
 
-impl schematic_runtime::Api for MyApi {
+impl schematic_runtime::Api for MyApiApi {
     const NAME: &'static str = "MyApi";
 }
+
+// Every client-wide setting, build, send, send_raw, and check_link
+schematic_runtime::api_client!(MyApi, MyApiApi);
 
 impl MyApi {
     pub const BASE_URL: &'static str = "https://api.example.com/v1";
@@ -198,15 +202,19 @@ impl MyApi {
     // Base URL, AuthConfig (credential placements + env fallback),
     // cross-origin policy, secret names, request-id header
     pub fn definition() -> schematic_runtime::ApiDefinition;
-    // Seeded from definition() and the API's static headers (other than Cookie)
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self>;
-    pub fn new() -> Result<MyApiClient, schematic_runtime::BuildError>;
+    // Seeded from definition() and the API's static headers (other than
+    // Cookie); never fails
+    pub fn new() -> Self;
+    // Only when the API accepts HTTP Basic
+    pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self;
 }
 ```
 
 Sending is `client.send(request, &CallOptions::new())` (or `send_raw`);
-credentials, base URL, timeout, env order, and response hooks are set on
-`builder()`. See `schematic/gen/README.md` and the runtime topic pages
+credentials (`api_key`, `basic_auth`, `credentials`), base URL, timeout, env
+order, and response hooks are chained onto the client. They are validated by
+the optional `build()?` (same type back) or on the first call
+(`TransportErrorKind::InvalidClient`). See `schematic/gen/README.md` and the runtime topic pages
 (`schematic/docs/runtime/`).
 
 ## Validation
@@ -235,7 +243,7 @@ $ schematic-gen validate --api gitea
 
 | Module | Function | Purpose |
 |--------|----------|---------|
-| `codegen/api_struct/` | `generate_api_struct()` | API marker type, `{Api}Client` alias, `Api` impl, constants, `definition()`, `builder()`, `new()`; `auth.rs` translates the effective auth policy into `AuthConfig`, `helpers.rs` builds the rest of `definition()` |
+| `codegen/api_struct/` | `generate_api_struct()` | API client struct, `{Api}Api` tag and its `Api` impl, the `api_client!` invocation, constants, `definition()`, `new()`, `basic_auth()` for Basic APIs; `auth.rs` translates the effective auth policy into `AuthConfig`, `helpers.rs` builds the rest of `definition()` |
 | `codegen/request_structs/` | `generate_request_struct()` | Per-endpoint structs; `endpoint_spec.rs` emits the `EndpointSpec` impl, `into_parts.rs` its `into_parts` body, `named_params.rs` header/cookie parameter fields, `form.rs` form structs |
 | `codegen/shared.rs` | `generate_request_helpers()` | Request helpers of the generated `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
 | `codegen/traits.rs` | `generate_paginated_trait()`, `generate_paginated_impl()` | `Paginated` marker trait and its impls |

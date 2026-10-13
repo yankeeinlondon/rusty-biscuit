@@ -18,7 +18,7 @@ use schematic_schema::github::GetRepositoryRequest;
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{ErrorKind, Outcome};
 
-let client = GitHub::new()?;
+let client = GitHub::new();
 let response = client
     .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
     .await?; // TransportError: no response head arrived
@@ -170,7 +170,8 @@ served as `text/plain` decodes; an HTML error page served with status 200 on
 a JSON endpoint is `MalformedSuccess`, and `error.body` holds the HTML.
 
 Codecs implement the `Decode` trait, which reads the body as it arrives
-rather than a pre-buffered copy. Server-sent events, NDJSON, and GraphQL
+rather than a pre-buffered copy; [Codecs and decoding](./codecs.md)
+describes that contract and how to write a codec. Server-sent events, NDJSON, and GraphQL
 codecs built on it are **planned**; none ships today.
 
 ## The raw send
@@ -221,7 +222,7 @@ let (repo, pulls) = tokio::join!(
 );
 ```
 
-`Client` is cheap to clone: clones share the connection pool and
+A client is cheap to clone: clones share the connection pool and
 configuration.
 
 ## What is safe to log

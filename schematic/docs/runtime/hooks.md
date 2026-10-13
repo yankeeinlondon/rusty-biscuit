@@ -3,7 +3,7 @@
 Some providers wrap their payload, rename a field between versions, or
 return values you always want filtered. Response hooks let a client adjust a
 successful JSON reply before your code sees it, without a hand-written
-decoder. There are two, both registered on the builder:
+decoder. There are two, both registered on the client:
 
 | Hook | Scope | Sees | Registered with |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ use schematic_schema::github::{GetRepositoryRequest, RepositoryInfo};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{HookError, ResponseMeta};
 
-let client = GitHub::builder()
+let client = GitHub::new()
     // Unwrap { "data": { … } } into { … } for every JSON reply.
     .pre_response_json(|_meta: &ResponseMeta, json: serde_json::Value| {
         Ok(json.get("data").cloned().unwrap_or(json))
@@ -24,8 +24,7 @@ let client = GitHub::builder()
     .mutate_response::<GetRepositoryRequest, _>(|_meta, repo: &mut RepositoryInfo| {
         repo.full_name.make_ascii_lowercase();
         Ok(())
-    })
-    .build()?;
+    });
 ```
 
 Both hooks receive the reply's [`ResponseMeta`](./metadata-and-redaction.md)
@@ -53,10 +52,11 @@ therefore only ever sees a body that parsed as JSON.
 ## Misuse does not compile
 
 A mutator is typed by its endpoint's success type and requires the
-endpoint's codec to support hooks, which only `Json` does. Registering a
-mutator for a text, binary, or empty endpoint, for another API's request, or
-with a closure over the wrong value type is a compile error, not a runtime
-surprise.
+endpoint's codec to support hooks, which only `Json` does (see
+[Codecs and decoding](./codecs.md#hooks-decode_hooked-and-supportshooks)).
+Registering a mutator for a text, binary, or empty endpoint, for another
+API's request, or with a closure over the wrong value type is a compile
+error, not a runtime surprise.
 
 ## Refusing a reply
 

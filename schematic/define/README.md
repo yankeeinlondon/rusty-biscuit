@@ -118,7 +118,7 @@ Authentication can be modeled in two ways:
 The definition only says *where* a credential goes and which environment variables can supply one. The generator translates it into the API's runtime `ApiDefinition`: each accepted method becomes a credential placement (an OAuth2 method is accepted as a bearer access token), and the environment mapping becomes the API's environment fallback. At send time [`schematic-runtime`](../runtime/README.md) resolves one credential per request, first match wins:
 
 1. A per-call credential (`CallOptions::credential(...)`)
-2. A client credential (`{Api}::builder().credentials(...)`)
+2. A client credential (`{Api}::new().api_key(...)`, `.basic_auth(...)`, or `.credentials(...)`)
 3. The first set, non-empty variable of the environment fallback
 4. None: the request is sent anonymously, and the server's reply (typically a 401) arrives in the response envelope
 
@@ -320,9 +320,7 @@ use schematic_schema::prelude::*;
 let token = get_token_from_somewhere();
 
 // Every send of this client carries the token
-let client = OpenAI::builder()
-    .credentials(Credential::access_token(token))
-    .build()?;
+let client = OpenAI::new().credentials(Credential::access_token(token));
 
 // Or one send only, overriding the client credential
 let options = CallOptions::new().credential(Credential::basic("user", "pass"));
@@ -339,7 +337,7 @@ This is useful for:
 
 ### UpdateStrategy
 
-`UpdateStrategy` (`NoChange` or `ChangeTo(AuthStrategy)`) is still exported, but no generated code reads it: the generated `variant()` method it served no longer exists. Reconfigure a client through its `{Api}::builder()` instead.
+`UpdateStrategy` (`NoChange` or `ChangeTo(AuthStrategy)`) is still exported, but no generated code reads it: the generated `variant()` method it served no longer exists. Reconfigure a client through its chained settings (`{Api}::new().base_url(..)`, `.api_key(..)`, …) instead.
 
 ## Headers Builder
 

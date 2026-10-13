@@ -5,13 +5,16 @@ The hand-written request runtime shared by every REST client that
 
 ## Overview
 
-Generated code stays thin: per API it declares a marker type and an
-`ApiDefinition`, and per endpoint a request struct implementing
+Generated code stays thin: per API it declares a client struct, a tag type,
+and an `ApiDefinition`, and per endpoint a request struct implementing
 `EndpointSpec`. Everything that executes a request lives here, written once
 and tested once instead of being regenerated into every API module:
 
-- a managed `Client<A>`, built through `ClientBuilder`, that sends only the
-  requests of its own API
+- a managed `Client<A>`, created infallibly and configured by chained
+  settings that are validated on its first call or by an optional
+  `build()`, that sends only the requests of its own API
+- the `api_client!` macro, which gives each generated API struct those
+  settings and sends as inherent methods, written once here
 - a typed `send` that returns one `Response` envelope for every reply that
   arrived, and a `send_raw` that returns the bytes undecoded
 - credential resolution: per call, per client, from environment variables,
@@ -37,9 +40,9 @@ use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = GitHub::builder()
-        .credentials(Credential::access_token(std::env::var("MY_TOKEN")?))
-        .build()?; // BuildError
+    let client = GitHub::new()
+        .api_key(std::env::var("MY_TOKEN")?)
+        .build()?; // optional: BuildError now instead of on the first send
 
     let response = client
         .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
@@ -89,11 +92,12 @@ explain each behavior with examples:
 | Topic | Page |
 | --- | --- |
 | `send`, `send_raw`, the envelope, error kinds, codecs | [Sending and responses](../docs/runtime/sending-and-responses.md) |
-| builder options, `SharedTransport`, `BuildError` | [Building clients](../docs/runtime/building-clients.md) |
+| client settings and when they are validated, `SharedTransport`, `BuildError` | [Building clients](../docs/runtime/building-clients.md) |
 | credential precedence and anonymous calls | [Credentials](../docs/runtime/credentials.md) |
 | cross-origin policies, redirects, `check_link` | [Origins and redirects](../docs/runtime/origins-and-redirects.md) |
 | timeouts and shared deadlines | [Deadlines and timeouts](../docs/runtime/deadlines-and-timeouts.md) |
 | `pre_response_json` and `mutate_response` | [Response hooks](../docs/runtime/hooks.md) |
+| the `Decode` and `ErrorBody` traits, `LiveBody`, writing a codec | [Codecs and decoding](../docs/runtime/codecs.md) |
 | `RequestMeta`, `ResponseMeta`, request ids, redaction | [Metadata and redaction](../docs/runtime/metadata-and-redaction.md) |
 
 The crate-level rustdoc (`cargo doc -p schematic-runtime --open`) documents
@@ -103,7 +107,7 @@ every type.
 
 | Module | Contents |
 | --- | --- |
-| `client` | `Client`, `ClientBuilder`, `ApiDefinition`, `send`, `send_raw`, `check_link`, `DEFAULT_TIMEOUT`, `MAX_REDIRECTS` |
+| `client` | `Client` and its settings, `ApiDefinition`, `build`, `send`, `send_raw`, `check_link`, `DEFAULT_TIMEOUT`, `MAX_REDIRECTS` |
 | `response` | `Response`, `Outcome`, `ApiError`, `ErrorKind`, `RedirectRefusal`, `FailureCategory`, `NoDeclaredError` |
 | `error` | `TransportError`, `TransportErrorKind`, `InvalidArgument`, `BuildError` |
 | `raw` | `RawResponse`, `RawCompletion`, `RawJsonError` |

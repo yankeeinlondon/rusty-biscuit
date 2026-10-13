@@ -6,7 +6,7 @@ Code generator that transforms REST and WebSocket API definitions into strongly-
 
 `schematic-gen` takes API definitions created with `schematic-define` and generates strongly-typed Rust HTTP and WebSocket client code. Generated REST clients are thin: they describe each API and each endpoint, and the hand-written [`schematic-runtime`](../runtime/) crate sends the requests. The generated code includes:
 
-- Per API, an uninhabited marker type named after the API (`OpenAI`), a client alias (`OpenAIClient = schematic_runtime::Client<OpenAI>`), and constructors that hand the runtime the API's base URL, credential placements, and policies
+- Per API, one client struct named after the API (`OpenAI`), the only name a caller writes, wrapping `schematic_runtime::Client<OpenAIApi>`; an infallible `new()` that hands the runtime the API's base URL, credential placements, and policies; and a tag type (`OpenAIApi`) that the API's requests name, so the client sends only its own API's requests. The runtime's `api_client!` macro gives the struct every client-wide setting and send
 - Per endpoint, a request struct (with path, query, header, and cookie parameters as fields) implementing `schematic_runtime::EndpointSpec`, which names its API, its success type, and the codec that decodes the response
 - A compile-time check that the generated crate and the runtime it builds against agree on the runtime ABI
 
@@ -99,7 +99,7 @@ Before writing, each output checks the paths it would change: it never
 overwrites or deletes a file the generator did not write, and a partial run
 refuses an existing crate it cannot account for (a corrupt or hand-edited
 `lib.rs`, a missing or unknown module, exports that no longer match the
-definitions, a changed `shared.rs`, or a `lib.rs` whose recorded
+definitions, a changed `shared.rs` or `ws_shared.rs`, or a `lib.rs` whose recorded
 `SCHEMATIC_RUNTIME_ABI` is missing or differs from the generator's) without
 changing anything. If a write
 fails midway, the error lists completed and pending writes and deletions.
@@ -180,16 +180,16 @@ use schematic_gen::codegen::{
 };
 use schematic_gen::output::{validate_code, format_code, assemble_api_code};
 
-// Generate just the API marker type, client alias, and constructors
+// Generate just the API's client struct, tag type, and constructor
 let api_tokens = generate_api_struct(&api);
 
 // Generate a single request struct; its `EndpointSpec::Api` names the
 // placeholder marker `Api` (`PLACEHOLDER_API_MARKER`)
 let request_tokens = generate_request_struct(&endpoint);
 
-// The same, scoped to a real API marker, as generated modules do
+// The same, scoped to a real API's tag type, as generated modules do
 let request_tokens =
-    generate_request_struct_with_options(&endpoint, "Request", Some("openai"), "OpenAI");
+    generate_request_struct_with_options(&endpoint, "Request", Some("openai"), "OpenAIApi");
 
 // Assemble everything and validate
 let tokens = assemble_api_code(&api);
@@ -211,8 +211,8 @@ The generator follows a multi-phase pipeline:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Phase 1: Code Generation                      │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ Request       │ │ EndpointSpec  │ │ API Marker, Client    │  │
-│  │ Structs       │ │ Impls         │ │ Alias, Constructors   │  │
+│  │ Request       │ │ EndpointSpec  │ │ API Client Struct,    │  │
+│  │ Structs       │ │ Impls         │ │ Tag, Constructor      │  │
 │  └───────────────┘ └───────────────┘ └───────────────────────┘  │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
 │  │ Shared Request│ │ Paginated     │ │ Module Docs           │  │
@@ -261,13 +261,13 @@ The generator produces per-API module files:
 ```
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI and its compile-time check, `pub use schematic_runtime`
-├── prelude.rs       # Each API's marker and client alias, plus the runtime's CallOptions, Credential, Response, ...
+├── prelude.rs       # Each API's client struct, plus the runtime's CallOptions, Credential, Response, ...
 ├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, the Paginated marker trait
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 formatted lines stays one file
 ├── lmstudio.rs
 ├── openai/          # A larger module is split into a directory:
-│   ├── mod.rs       #   module docs, submodules, re-exports, API markers, client aliases, constructors
+│   ├── mod.rs       #   module docs, submodules, re-exports, each API's client struct and tag
 │   ├── requests.rs  #   per-endpoint request structs and their EndpointSpec impls
 │   └── responses.rs #   (when the module has response types)
 ├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
@@ -277,7 +277,7 @@ schema/src/
 ```
 
 APIs sharing a `module_path` are automatically combined into a single output file.
-Each API in the combined file gets its own marker type, client alias, and request
+Each API in the combined file gets its own client struct, tag type, and request
 suffix to avoid naming collisions. Full generation deletes generated modules
 that no API produces any more; files without the generated header are never
 deleted or overwritten.
@@ -390,22 +390,23 @@ For an API named "OpenAI", the generator produces (abridged):
 //! This code was automatically generated by schematic-gen. Do not edit manually.
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// API marker, client alias, and constructors (one per API)
+// API client struct and tag type (one per API)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// The OpenAI API: ...
-///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum OpenAI {}
+#[derive(Clone, Debug)]
+pub struct OpenAI(schematic_runtime::Client<OpenAIApi>);
 
-/// A client for the [`OpenAI`] API.
-pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
+/// The tag of the [`OpenAI`] API: ... Callers never write it.
+pub enum OpenAIApi {}
 
-impl schematic_runtime::Api for OpenAI {
+impl schematic_runtime::Api for OpenAIApi {
     const NAME: &'static str = "OpenAI";
 }
+
+// Every client-wide setting (`base_url`, `api_key`, `timeout`, …), `build`,
+// `send`, `send_raw`, and `check_link`, as one-line forwards.
+schematic_runtime::api_client!(OpenAI, OpenAIApi);
 
 impl OpenAI {
     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
@@ -423,16 +424,16 @@ impl OpenAI {
             .request_id_header("x-request-id")
     }
 
-    /// A client builder seeded from `definition()` and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers; never fails.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
 
-    /// A client with every default.
-    pub fn new() -> Result<OpenAIClient, schematic_runtime::BuildError> {
-        Self::builder().build()
-    }
+    // Only on an API that accepts HTTP Basic:
+    // pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self
 }
+
+impl Default for OpenAI { ... }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Request structs (one per endpoint)
@@ -457,7 +458,7 @@ impl From<&str> for RetrieveModelRequest { ... }
 impl From<String> for RetrieveModelRequest { ... }
 
 impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Model;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Model>;
@@ -482,9 +483,9 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
 
 What each part of the `EndpointSpec` impl means:
 
-- **`type Api`** scopes the request to its API. An `OpenAIClient` accepts only
-  requests whose `Api` is `OpenAI`, so passing another API's request to
-  `send`, `send_raw`, or `mutate_response` does not compile.
+- **`type Api`** scopes the request to its API. An `OpenAI` client accepts
+  only requests whose `Api` is `OpenAIApi`, so passing another API's request
+  to `send`, `send_raw`, `check_link`, or `mutate_response` does not compile.
 - **`type Success` and `type Decoder`** come from the endpoint's
   `ApiResponse`. The codec, not the response's `Content-Type`, judges the
   body: a JSON endpoint that receives HTML reports a `MalformedSuccess` error
@@ -510,7 +511,7 @@ What each part of the `EndpointSpec` impl means:
 `same_origin` cross-origin policy, no extra secret names, no request-id
 header. A definition's `CrossOrigin` value maps onto the `OriginPolicy`
 constructor of the same name. The API's static headers other than `Cookie`
-become `.default_header(..)` calls in `builder()`; an API-level `Cookie` is
+become `.default_header(..)` calls in `new()`; an API-level `Cookie` is
 folded into every endpoint's static headers instead, because the runtime
 refuses a default header that can carry a credential.
 
@@ -522,7 +523,7 @@ use schematic_schema::openai::{ListModelsRequest, RetrieveModelRequest};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAI::new()?;
+    let client = OpenAI::new();
     let options = CallOptions::new();
 
     // `send` returns Ok(Response) whenever an HTTP response head arrived,
@@ -534,11 +535,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = client.send(RetrieveModelRequest::new("gpt-4"), &options).await?;
     let model = client.send(RetrieveModelRequest::from("gpt-4"), &options).await?;
 
-    // Configure the client through the runtime's builder
-    let test_client = OpenAI::builder()
+    // Chain settings onto the client; `build()?` reports a bad one now
+    // instead of on the first send, and returns the same `OpenAI`
+    let test_client = OpenAI::new()
         .base_url("http://localhost:8080/v1")
         .timeout(std::time::Duration::from_secs(10))
-        .credentials(Credential::access_token("sk-..."))
+        .api_key("sk-...")
         .build()?;
 
     Ok(())
@@ -578,8 +580,8 @@ never read.
 Runtime precedence, for every placement:
 
 1. a per-call credential (`CallOptions::new().credential(..)`)
-2. the client credential (`ClientBuilder::credentials(..)`)
-3. the first non-empty configured environment variable (`ClientBuilder::env_order([..])` replaces the definition's order)
+2. the client credential (`api_key(..)`, `basic_auth(..)`, or `credentials(..)` on the client)
+3. the first non-empty configured environment variable (the client's `env_order([..])` replaces the definition's order)
 4. none: the request is sent anonymously and its metadata records `AuthMethod::Anonymous`
 
 There is no missing-credential error; a server that requires one answers
@@ -596,10 +598,10 @@ use schematic_schema::prelude::*;
 let options = CallOptions::new().credential(Credential::api_key("key"));
 
 // Per client
-let client = GitLab::builder().credentials(Credential::access_token("token")).build()?;
+let client = GitLab::new().api_key("token");
 
 // Environment, in a custom order
-let client = GitLab::builder().env_order(["MY_GITLAB_TOKEN", "GITLAB_TOKEN"]).build()?;
+let client = GitLab::new().env_order(["MY_GITLAB_TOKEN", "GITLAB_TOKEN"]);
 ```
 
 ### Bearer Token
@@ -690,7 +692,7 @@ The client accepts a bearer access token. Obtain it with `schematic-oauth`
 and supply it per client or per call:
 
 ```rust
-let client = Api::builder().credentials(Credential::access_token(token)).build()?;
+let client = Api::new().api_key(token);
 ```
 
 ### Multi-Method Auth
@@ -909,10 +911,10 @@ Code generation for individual components:
 
 | Generator | Description |
 |-----------|-------------|
-| `generate_api_struct(&api)` | Creates an API's marker type, `{Api}Client` alias, `Api` impl, constants, `definition()`, `builder()`, and `new()` |
+| `generate_api_struct(&api)` | Creates an API's client struct, its `{Api}Api` tag type and `Api` impl, the `api_client!` invocation, constants, `definition()`, `new()`, and `basic_auth()` when the API accepts Basic |
 | `generate_request_struct(&endpoint)` | Creates the request struct and its `EndpointSpec` impl for an endpoint, naming the placeholder API marker |
 | `generate_request_struct_with_suffix(&endpoint, suffix)` | The same, with a custom struct-name suffix |
-| `generate_request_struct_with_options(&endpoint, suffix, module_path, api_marker)` | The same, with the module path used in doc examples and the API marker `EndpointSpec::Api` names; generated modules use this form |
+| `generate_request_struct_with_options(&endpoint, suffix, module_path, api_marker)` | The same, with the module path used in doc examples and the type `EndpointSpec::Api` names; generated modules pass the API's tag (`{Api}Api`) |
 | `PLACEHOLDER_API_MARKER` | The marker (`Api`) named by request structs generated without an API |
 | `generate_request_helpers()` | Creates the request helpers of `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
 | `generate_paginated_trait()` | Creates `Paginated` marker trait |
@@ -1020,8 +1022,9 @@ any module; see
 Generated code defines no error type of its own. Sends report
 `schematic_runtime::TransportError` when no response head arrived, and
 everything else (any status, decode failures, hook failures) inside the
-`schematic_runtime::Response` envelope; constructors report
-`schematic_runtime::BuildError`.
+`schematic_runtime::Response` envelope. An invalid client setting is a
+`schematic_runtime::BuildError`, returned by the optional `build()` or
+carried by `TransportErrorKind::InvalidClient` on the first send.
 
 ## Ergonomic Conversions
 
@@ -1063,9 +1066,9 @@ use schematic_schema::schematic_runtime::EndpointSpec;
 use schematic_schema::shared::Paginated;
 
 // Generic pagination helper over any paginated endpoint of OpenAI
-async fn fetch_all_pages<R>(client: &OpenAIClient, first: R) -> Vec<R::Success>
+async fn fetch_all_pages<R>(client: &OpenAI, first: R) -> Vec<R::Success>
 where
-    R: Paginated + EndpointSpec<Api = OpenAI>,
+    R: Paginated + EndpointSpec<Api = OpenAIApi>,
 {
     // Implementation that handles pagination
 }
@@ -1080,13 +1083,13 @@ where
 
 ## Response Hooks
 
-Hooks are configured on the runtime's client builder, not on generated code:
+Hooks are client settings, implemented once in the runtime:
 
 ```rust
 use schematic_schema::prelude::*;
 use schematic_schema::openai::ListModelsRequest;
 
-let client = OpenAI::builder()
+let client = OpenAI::new()
     .base_url("https://staging.example.com/v1")
     .pre_response_json(|meta, json| {
         // Reshape a successful JSON body before it is decoded
@@ -1095,8 +1098,7 @@ let client = OpenAI::builder()
     .mutate_response::<ListModelsRequest, _>(|meta, models| {
         // Adjust the decoded success value of this one endpoint
         Ok(())
-    })
-    .build()?;
+    });
 ```
 
 Both run only for a 2xx reply to a JSON endpoint. `mutate_response` accepts

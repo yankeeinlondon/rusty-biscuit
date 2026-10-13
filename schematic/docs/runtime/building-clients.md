@@ -1,30 +1,58 @@
 # Building Clients
 
-Each generated API has two ways to get a client:
-
-- **`{Api}::new()`** builds one with every default.
-- **`{Api}::builder()`** returns a runtime `ClientBuilder` already seeded
-  with the API's definition (base URL, accepted credentials, environment
-  fallback, cross-origin policy, secret names, request-id header) and its
-  static default headers. Adjust it, then call `build()`.
-
-Both return `Result<{Api}Client, BuildError>`; `{Api}Client` is an alias for
-`schematic_runtime::Client<{Api}>`.
+Each generated API is one struct named after the API (`GitHub`, `OpenAI`,
+…), and that struct is the client. `{Api}::new()` returns a usable client
+and never fails; settings are chained onto it by value:
 
 ```rust
 use std::time::Duration;
 
 use schematic_schema::prelude::*;
 
-let client: GitHubClient = GitHub::builder()
+let client = GitHub::new()
     .base_url("http://127.0.0.1:8080")             // e.g. a local mock
     .connect_timeout(Duration::from_secs(5))
     .timeout(Duration::from_secs(10))
-    .credentials(Credential::access_token(token))
-    .build()?;
+    .api_key(token);
 ```
 
-## Builder options
+`new()` seeds the client with the API's definition (base URL, accepted
+credentials, environment fallback, cross-origin policy, secret names,
+request-id header) and its static default headers. Every setting and every
+send (`send`, `send_raw`, `check_link`) is an inherent method of the struct,
+so no trait import is needed.
+
+## When settings are checked
+
+Settings are validated together, once. Nothing invalid is replaced by a
+default: a bad setting is always reported.
+
+- **On the first call.** A client that was never validated validates itself
+  on its first `send`, `send_raw`, or `check_link`. An invalid setting fails
+  that call with `TransportErrorKind::InvalidClient(BuildError)`, before any
+  network work.
+- **Earlier, if you ask.** `build()` validates now and returns the same
+  client type, so bad configuration surfaces where the client is made:
+
+```rust
+let client: GitHub = GitHub::new().base_url(url).build()?; // Err(BuildError)
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unvalidated: new()
+    Unvalidated --> Unvalidated: setter
+    Unvalidated --> Validated: build() Ok, or first call
+    Unvalidated --> Refused: build() Err, or first call fails with InvalidClient
+    Validated --> Unvalidated: setter (this value only)
+```
+
+The validated result, including its connection pool, is cached and shared by
+every clone of the client, whichever clone validated first. A setter applied
+afterward discards the cached result for that value only; the value
+validates again on its next use, and clones made earlier keep theirs.
+
+## Settings
 
 | Method | Effect |
 | --- | --- |
@@ -36,11 +64,14 @@ let client: GitHubClient = GitHub::builder()
 | `danger_accept_invalid_certificates()` | accept any server certificate, including self-signed and expired ones; only for devices that cannot present a valid one |
 | `user_agent(value)` | the `User-Agent` of every request |
 | `default_header(name, value)` | a header sent with every request unless the request sets the same header |
-| `credentials(credential)` | the client [credential](./credentials.md) |
+| `api_key(secret)` | the client [credential](./credentials.md#setting-a-client-credential), placed wherever the API takes a single secret |
+| `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs that accept Basic |
+| `credentials(credential)` | the client credential in its general form |
 | `env_order([..])` | replace the order of the environment variables the fallback reads |
 | `cross_origin(policy)` | tighten the API's [cross-origin policy](./origins-and-redirects.md) |
 | `transport(&shared)` | take connections from a `SharedTransport` |
 | `pre_response_json(hook)`, `mutate_response::<R, _>(hook)` | register [response hooks](./hooks.md) |
+| `build()` | validate now; returns the same client or the `BuildError` |
 
 There is no option to inject your own HTTP client, and no client follows
 redirects on its own: the runtime builds every HTTP client itself with
@@ -64,58 +95,100 @@ let transport = SharedTransport::builder()
     .connect_timeout(Duration::from_secs(5))
     .build()?;
 
-let github = GitHub::builder().transport(&transport).build()?;
-let gitlab = GitLab::builder().transport(&transport).build()?;
+let github = GitHub::new().transport(&transport);
+let gitlab = GitLab::new().transport(&transport);
 ```
 
-The settings that belong to a pool, `proxy`, `add_root_certificate`,
-`danger_accept_invalid_certificates`, and `connect_timeout`, are set on the
-transport. A client attached to a transport that also sets one of them fails
-to build with `BuildError::TransportOptionConflict`, naming the option:
+The transport is built eagerly, through its own `builder().build()?`: it is
+one pool shared by many clients, so there is no single client whose first
+call could report its errors.
+
+Settings are split by owner:
+
+| Owner | Settings |
+| --- | --- |
+| the transport | `proxy`, `add_root_certificate`, `danger_accept_invalid_certificates`, `connect_timeout` |
+| each client | `base_url`, `timeout`, credentials, default headers, user agent, the origin policy, and hooks |
+
+A client attached to a transport that also sets a transport-owned setting is
+refused with `BuildError::TransportOptionConflict`, naming the setting, even
+when its value matches the transport's. The refusal surfaces at `build()`
+or, without one, on the client's first call:
 
 ```rust
-let refused = GitHub::builder()
+let refused = GitHub::new()
     .transport(&transport)
     .proxy("http://other:3128") // owned by the transport
     .build();
 assert!(refused.is_err());
 ```
 
-`timeout`, credentials, headers, the origin policy, and hooks stay per
-client.
+The HTTP library fixes these settings when it creates the connection pool,
+so one pool cannot apply two values. Refusing every transport-owned setting
+on an attached client, rather than accepting a matching one, means no
+setting is silently ignored and no certificate has to be compared for
+equality.
+
+Clients that need different connection settings use separate transports;
+connections are then not shared between the two groups:
+
+```rust
+let fast = SharedTransport::builder()
+    .connect_timeout(Duration::from_secs(2))
+    .build()?;
+let patient = SharedTransport::builder()
+    .connect_timeout(Duration::from_secs(30))
+    .build()?;
+
+let github = GitHub::new().transport(&fast);
+let gitlab = GitLab::new().transport(&fast);     // shares connections with `github`
+let device = Eversolo::new().transport(&patient); // its own pool
+```
+
+A client that needs its own connection settings and nothing shared can also
+skip the transport and set them on the client, which then builds a private
+pool.
 
 ## Build errors
 
-`build()` validates everything up front, so a misconfigured client never
-reaches the network. `BuildError` is `#[non_exhaustive]`:
+`BuildError` is `#[non_exhaustive]`. It is returned by `build()`, and is
+carried by `TransportErrorKind::InvalidClient` when the first call finds it:
 
 | `BuildError` | Cause |
 | --- | --- |
 | `InvalidBaseUrl { reason }` | the base URL is not absolute, not HTTP(S), has no host, or carries user information |
 | `InvalidAllowedOrigin { reason }` | an `allow_origins` entry is not a bare HTTP(S) origin (it has a path, query, fragment, or user information) |
 | `OriginPolicyNotPermitted { definition, requested }` | `cross_origin(..)` would loosen the API's policy |
-| `TransportOptionConflict { option }` | a pool option was set on a client attached to a `SharedTransport` |
-| `AuthBearingDefaultHeader { name }` | a default header would carry a credential (for example `Authorization`, `Cookie`, or the API's key header); use `credentials(..)` instead |
+| `TransportOptionConflict { option }` | a transport-owned setting was set on a client attached to a `SharedTransport` |
+| `AuthBearingDefaultHeader { name }` | a default header would carry a credential (for example `Authorization`, `Cookie`, or the API's key header); set a credential instead |
 | `InvalidHeader { name }` | a default header name or value is not valid HTTP |
-| `IncompatibleCredential { supplied }` | the client credential is of a kind the API does not accept |
+| `IncompatibleCredential { supplied }` | the client credential is of a kind the API does not accept, including `api_key` on an API that takes no single-secret credential |
 | `InvalidProxy` | the proxy URL is not valid |
 | `InvalidCertificate` | a root certificate could not be parsed |
 | `Transport` | the HTTP client could not be initialized |
 
+Neither a `BuildError` nor an `InvalidClient` transport error displays a
+credential or a header value.
+
 For example, an API defined as `deny` cannot be loosened to `same_origin`:
 
 ```rust
-let client = SomeDenyApi::builder()
+let client = SomeDenyApi::new()
     .cross_origin(OriginPolicy::same_origin())
     .build(); // Err(OriginPolicyNotPermitted { definition: "deny", requested: "same_origin" })
 ```
 
 ## Building a client by hand
 
-Generated code calls `Client::builder(definition)` with an `ApiDefinition`
-built from the API definition. Tests and hand-written integrations can do
-the same with any type that implements the `Api` marker trait, and with
-request types that implement `EndpointSpec`:
+A generated API struct wraps a runtime `Client<{Api}Api>`, where the tag
+type `{Api}Api` implements the `Api` trait and is the `EndpointSpec::Api` of
+every request of that API, so the client sends only that API's requests.
+The `schematic_runtime::api_client!` macro gives the struct its settings and
+sends as one-line forwards.
+
+Tests and hand-written integrations can use the runtime `Client` directly,
+with any tag that implements `Api` and request types that implement
+`EndpointSpec`. `Client::new(definition)` takes the same chained settings:
 
 ```rust
 use schematic_runtime::{ApiDefinition, AuthConfig, Client, CredentialPlacement, EnvFallback};
@@ -132,7 +205,7 @@ let definition = ApiDefinition::new("https://api.example.com")
     .request_id_header("x-request-id")
     .secret_names(["X-Session"]);
 
-let client = Client::<Example>::builder(definition).build()?;
+let client = Client::<ExampleApi>::new(definition).build()?;
 ```
 
 `ApiDefinition::cross_origin(policy)` sets the API's own policy (default

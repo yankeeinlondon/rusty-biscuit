@@ -2,7 +2,7 @@
 
 Two bounds limit how long a send can take:
 
-- the client's **per-request timeout**, set with `builder().timeout(..)`
+- the client's **per-request timeout**, set with `timeout(..)`
   (default `DEFAULT_TIMEOUT`, 30 s), which applies to every send; and
 - an optional **shared `Deadline`**, passed through `CallOptions`, which
   bounds a whole operation made of several sends.
@@ -74,8 +74,9 @@ bounds change once it switches to streaming:
   (an idle bound), so a long stream that keeps delivering is not cut off;
 - the shared deadline, when the send has one, still bounds the whole
   stream;
-- the envelope's `elapsed` measures the time to the response head, not to
-  the end of the body.
+- the envelope's `elapsed` stops when the codec returns the value, about
+  the time to the response head, not the end of the body. Every buffered
+  reply's `elapsed` includes its body read.
 
 The four built-in codecs all buffer the body, so these rules apply to
 streaming codecs, which are **planned**.

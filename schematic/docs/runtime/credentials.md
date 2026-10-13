@@ -27,7 +27,7 @@ flowchart TD
     B -->|yes| N["No credential<br/>AuthMethod::Anonymous"]
     B -->|no| C{"Per-call credential?<br/>CallOptions::credential"}
     C -->|yes| P["AuthMethod::PerCall"]
-    C -->|no| D{"Client credential?<br/>builder().credentials"}
+    C -->|no| D{"Client credential?<br/>api_key / basic_auth / credentials"}
     D -->|yes| L["AuthMethod::ClientLevel"]
     D -->|no| E{"First non-empty variable<br/>of the env fallback?"}
     E -->|found| V["AuthMethod::EnvVar(name)"]
@@ -43,16 +43,13 @@ let options = CallOptions::new().credential(Credential::access_token(user_token)
 client.send(GetRepositoryRequest::new("o", "r"), &options).await?;
 
 // 2. Per client: used whenever a call supplies none.
-let client = GitHub::builder()
-    .credentials(Credential::access_token(service_token))
-    .build()?;
+let client = GitHub::new().api_key(service_token);
 
 // 3. Environment: GitHub reads GITHUB_TOKEN, then GH_TOKEN, at send time.
 //    env_order replaces that list for this client.
-let codeberg = Gitea::builder()
+let codeberg = Gitea::new()
     .base_url("https://codeberg.org/api/v1")
-    .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"])
-    .build()?;
+    .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]);
 
 // 4. Explicitly anonymous: no credential from any source.
 client.send(GetRepositoryRequest::new("o", "r"), &CallOptions::anonymous()).await?;
@@ -61,6 +58,34 @@ client.send(GetRepositoryRequest::new("o", "r"), &CallOptions::anonymous()).awai
 The metadata of every reply records which source was used, as
 `response.meta.request.auth` (an `AuthMethod`), naming a variable but never
 its value.
+
+## Setting a client credential
+
+A client holds at most one credential; each of these setters replaces the
+one set before:
+
+- **`api_key(secret)`** takes the API's single secret, whatever the API
+  calls it, and places it where the definition says: in the **first**
+  placement of the definition's accepted list that carries a single secret,
+  a bearer token or an API key in a header, query parameter, or cookie. For
+  GitHub that is `Authorization: Bearer <secret>`; for Gitea it is
+  `Authorization: token <secret>`; for an API keyed by a query parameter it
+  is that parameter. An API that accepts more than one such placement gets
+  the one its definition lists first.
+- **`basic_auth(user, password)`** exists only on APIs whose definition
+  accepts HTTP Basic, so calling it on another API does not compile.
+- **`credentials(Credential::…)`** is the general form, for a credential of
+  an explicit kind.
+
+An API that accepts only Basic credentials, or none, has nowhere to put a
+single secret: `api_key` on it is refused with
+`BuildError::IncompatibleCredential` at `build()` or on the first call,
+never dropped.
+
+```rust
+let gitea = Gitea::new().api_key(token);                // Authorization: token …
+let emqx = EmqxBasic::new().basic_auth("app", secret);  // Authorization: Basic …
+```
 
 ### The environment fallback
 
@@ -116,10 +141,10 @@ let reply = if matches!(first.meta.status.as_u16(), 401 | 403)
 
 | Situation | Result |
 | --- | --- |
-| a client credential of a kind the API does not accept (for example `Credential::basic` for a bearer API) | `build()` fails with `BuildError::IncompatibleCredential` |
+| a client credential of a kind the API does not accept (for example `Credential::basic` for a bearer API, or `api_key` for a Basic-only API) | `build()`, or else the first call, reports `BuildError::IncompatibleCredential` |
 | a per-call credential of a kind the API does not accept | the send fails with `TransportErrorKind::InvalidArgument`; nothing is sent |
 | the request already sets the header, query parameter, or cookie the credential goes in | the send fails with `TransportErrorKind::InvalidArgument`; a credential never overwrites a value the request set itself |
-| a default header that would carry a credential | `build()` fails with `BuildError::AuthBearingDefaultHeader` |
+| a default header that would carry a credential | `build()`, or else the first call, reports `BuildError::AuthBearingDefaultHeader` |
 
 Each placement accepts one kind: a bearer (or OAuth) placement takes
 `Credential::access_token`, a key header, query parameter, or cookie takes

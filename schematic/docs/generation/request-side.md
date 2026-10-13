@@ -140,7 +140,7 @@ after it with `&`:
 The path is appended to the base URL's text, so it follows the base URL's
 query rather than merging with it, and declared pairs are then appended
 with `&`. A client built with
-`Gitea::builder().base_url("https://host/api/v1?tenant=a b")` sends
+`Gitea::new().base_url("https://host/api/v1?tenant=a b")` sends
 
 ```text
 GET /api/v1?tenant=a%20b/repos/o/r/pulls&page=1
@@ -199,8 +199,8 @@ its exact declared name. `required` is not enforced yet.
 Headers merge in this order, with names compared case-insensitively:
 
 1. the API's static headers (`RestApi.headers`) other than `Cookie`, which
-   the generated `builder()` sets as client default headers, plus any
-   `default_header` you add to the builder
+   the generated `new()` sets as client default headers, plus any
+   `default_header` you add to the client
 2. the endpoint's static headers (`Endpoint.headers`), which replace default
    headers of the same name
 3. set header parameters, which replace endpoint headers of the same name;
@@ -282,7 +282,7 @@ flowchart TD
     B -->|yes| N["Send without a credential<br/>(AuthMethod::Anonymous)"]
     B -->|no| C{"Per-call credential?<br/>CallOptions::credential"}
     C -->|yes| U[Use it]
-    C -->|no| D{"Client credential?<br/>ClientBuilder::credentials"}
+    C -->|no| D{"Client credential?<br/>api_key / credentials"}
     D -->|yes| U
     D -->|no| E{"Definition has an<br/>env fallback?"}
     E -->|no| N
@@ -298,21 +298,19 @@ flowchart TD
 use schematic_schema::example::{Example, ListThingsRequest};
 use schematic_schema::prelude::*;
 
-let client = Example::new()?;
+let client = Example::new();
 
 // Per call: wins over the client credential and the environment.
 let keyed = CallOptions::new().credential(Credential::api_key("my key"));
 client.send(ListThingsRequest::default(), &keyed).await?;
 
 // Per client: used whenever a call supplies none.
-let client = Example::builder().credentials(Credential::api_key("my key")).build()?;
+let client = Example::new().api_key("my key");
 
 // From the environment: the variables `env_auth` names are read in order
 // and the first non-empty one wins. `env_order` replaces that list, e.g.
 // EXAMPLE_KEY="" then EXAMPLE_KEY_2="k" sends `k`.
-let client = Example::builder()
-    .env_order(["EXAMPLE_KEY", "EXAMPLE_KEY_2"])
-    .build()?;
+let client = Example::new().env_order(["EXAMPLE_KEY", "EXAMPLE_KEY_2"]);
 
 // Explicitly anonymous: no per-call, client, or environment credential.
 client.send(ListThingsRequest::default(), &CallOptions::anonymous()).await?;
@@ -339,16 +337,17 @@ client.send(ListThingsRequest::default(), &CallOptions::anonymous()).await?;
 - **Wrong kind.** A per-call credential of a kind the API does not accept
   (for example `Credential::basic` for a key-in-query API) fails with
   `TransportErrorKind::InvalidArgument`; a client credential of such a kind
-  fails `build()`.
+  is refused with `BuildError::IncompatibleCredential` at `build()`, or else
+  on the first call as `TransportErrorKind::InvalidClient`.
 
 ## Debug output never shows a credential
 
-A generated client is a `schematic_runtime::Client`, whose `Debug` output
-prints only the API name, the base URL (with any user information
-redacted), and the timeout:
+A generated client wraps a `schematic_runtime::Client`, whose `Debug`
+output prints only the API name, the base URL (with any user information
+redacted), the timeout, and the kind of the client credential:
 
 ```text
-Client { api: "Example", base_url: "https://api.example.com/", timeout: 30s, .. }
+Example(Client { api: "Example", base_url: "https://api.example.com", timeout: 30s, credential: Some(Key(Credential(ApiKey, [redacted]))), .. })
 ```
 
 Explicit bearer tokens, header API keys, basic-auth passwords, and

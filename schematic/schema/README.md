@@ -42,7 +42,7 @@ Generated API outputs produced by `schematic-gen`.
 
 ## Quick Start
 
-Each REST API has a marker type (for example `OpenAI`) whose `builder()` returns an `OpenAIClient`. Every endpoint is a request struct, and every request goes through the same `send`:
+Each REST API is one client struct (for example `OpenAI`): `OpenAI::new()` returns a usable client, and settings are chained onto it. Every endpoint is a request struct, and every request goes through the same `send`:
 
 ```rust
 use schematic_schema::openai::ListModelsRequest;
@@ -50,9 +50,7 @@ use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAI::builder()
-        .credentials(Credential::access_token(std::env::var("OPENAI_API_KEY")?))
-        .build()?; // BuildError
+    let client = OpenAI::new().api_key(std::env::var("OPENAI_API_KEY")?);
 
     let models = client
         .send(ListModelsRequest::default(), &CallOptions::new())

@@ -14,7 +14,7 @@ a secret and can be logged, attached to an error report, or shown to a user.
 | `status` | the response status |
 | `headers` | response headers, secret values redacted; repeated headers stay repeated |
 | `request_id` | the provider's request id, when the API names a request-id header and the reply carries it |
-| `elapsed` | time from the start of the send to this record, including every redirect hop |
+| `elapsed` | time from the start of the send until its outcome was produced: every redirect hop, the body read, decoding, and response hooks; for a streaming output, until the codec returned it |
 
 `RequestMeta` (also in `TransportError::request`):
 
@@ -95,5 +95,6 @@ for decoding only and are never stored.
 ## Client and credential output
 
 A client's `Debug` output shows the API name, the base URL (user information
-redacted), and the timeout. A `Credential` prints its kind only. Neither
+redacted), the timeout, and the kind of its client credential. A
+`Credential` prints its kind only. Neither
 ever shows a token, key, or password, however it was supplied.

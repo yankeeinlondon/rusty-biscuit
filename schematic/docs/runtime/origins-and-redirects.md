@@ -42,16 +42,16 @@ Each API definition sets one policy (`CrossOrigin` in `schematic-define`,
   information, is refused under every policy.
 
 A caller can only **tighten** the policy, with
-`builder().cross_origin(..)`: `deny` over anything, `same_origin` over
-anything but `deny`, and an `allow_origins` list that is a subset of the
-API's own list. Anything else fails `build()` with
-`BuildError::OriginPolicyNotPermitted`:
+`cross_origin(..)`: `deny` over anything, `same_origin` over anything but
+`deny`, and an `allow_origins` list that is a subset of the API's own list.
+Anything else is refused with `BuildError::OriginPolicyNotPermitted`, at
+`build()` or else on the client's first call:
 
 ```rust
 use schematic_schema::prelude::*;
 
 // Never follow a redirect from this client, even though GitHub allows same-origin ones.
-let strict = GitHub::builder().cross_origin(OriginPolicy::deny()).build()?;
+let strict = GitHub::new().cross_origin(OriginPolicy::deny());
 ```
 
 ## How a redirect is followed
@@ -106,10 +106,13 @@ redirects, and the eleventh is refused with `RedirectRefusal::HopLimit`.
 
 ## Checking a link before you request it
 
-An endpoint's path can be an absolute URL, as when you follow a next-page
-link a provider returned. The runtime checks such a URL against the same
-policy before sending, and refuses it as
-`TransportErrorKind::CrossOriginRejected` without any network work.
+An endpoint's path can be an absolute `http://` or `https://` URL, as when
+you follow a next-page link a provider returned. The request is then sent to
+that URL instead of one joined onto the base URL, after the same policy
+check as any link: a refused URL fails as
+`TransportErrorKind::CrossOriginRejected` without any network work, and an
+allowed one carries the credential only where the table above says so.
+Declared query parameters are appended to the URL's own query.
 
 `client.check_link::<R>(&url)` runs that check on its own, so you can reject
 a link before building a request from it:
@@ -122,5 +125,17 @@ let next = Url::parse(next_page_link)?;
 client.check_link::<ListPullRequestsRequest>(&next)?; // Err: CrossOriginRejected
 ```
 
+The type argument `R` is the endpoint the link will be requested through,
+even though nothing has been sent yet:
+
+- a refusal's `TransportError` reports that endpoint's id and HTTP method,
+  rather than an invented one; and
+- the answer can depend on the endpoint once API definitions can set an
+  origin policy per endpoint (**planned**); today every endpoint of an API
+  shares the API's policy.
+
 A same-origin URL passes under every policy, including `deny`. Pagers that
-call `check_link` for every next-page link are **planned**.
+call `check_link` with their listing request's type for every next-page
+link, and then send it through the absolute-URL path above, are
+**planned**; once they exist, ordinary callers are not expected to call
+`check_link` directly.

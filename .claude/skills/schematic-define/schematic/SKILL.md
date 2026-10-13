@@ -14,8 +14,8 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 | `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `ApiResponse` |
 | `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
-| `schematic-runtime` | Hand-written runtime every generated REST client is a `Client<Api>` of: builder (`SharedTransport`, tighten-only `OriginPolicy`), typed `send` → `Response` envelope (`Ok` iff a response head arrived, else `TransportError`), `send_raw` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; `send` futures are boxed. Docs: `schematic/docs/runtime/` |
-| `schematic-schema` | Generated clients (auto-generated, do not edit): per API a marker type, `{Api}Client` alias, and per endpoint a request struct implementing `EndpointSpec` |
+| `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, typed `send` → `Response` envelope (`Ok` iff a response head arrived, else `TransportError`), `send_raw` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; `send` futures are boxed. Docs: `schematic/docs/runtime/` |
+| `schematic-schema` | Generated clients (auto-generated, do not edit): per API one client struct `{Api}` and its tag `{Api}Api`, and per endpoint a request struct implementing `EndpointSpec` |
 
 ## CLI Commands
 
@@ -91,11 +91,12 @@ pub struct GenerateBody { ... }  // Generated: struct GenerateRequest { body: Ge
 
 ## Generated Client Features
 
-Each API is an uninhabited marker (`pub enum OpenAI {}`) with `BASE_URL`,
-`DOCS_URL`, `definition()`, `builder()`, and `new()`; the client is
-`OpenAIClient = schematic_runtime::Client<OpenAI>`. Each request struct
-implements `schematic_runtime::EndpointSpec`, so a client accepts only its
-own API's requests.
+Each API is one client struct, `pub struct OpenAI(schematic_runtime::Client<OpenAIApi>)`,
+with `BASE_URL`, `DOCS_URL`, `definition()`, an infallible `new()`, and
+`basic_auth()` only when the API accepts Basic; `schematic_runtime::api_client!`
+gives it every client-wide setting and send. Each request struct implements
+`schematic_runtime::EndpointSpec` with `type Api = OpenAIApi` (a tag callers
+never write), so a client accepts only its own API's requests.
 
 ### Constructing and Sending
 
@@ -103,11 +104,11 @@ own API's requests.
 use schematic_schema::prelude::*;
 use schematic_schema::openai::ListModelsRequest;
 
-let client = OpenAI::new()?;                       // Result<OpenAIClient, BuildError>
-let staging = OpenAI::builder()                    // runtime ClientBuilder
+let client = OpenAI::new();                        // never fails
+let staging = OpenAI::new()
     .base_url("https://staging.api.com/v1")
     .timeout(std::time::Duration::from_secs(10))
-    .build()?;
+    .build()?; // optional: BuildError now; otherwise the first send reports it
 
 // Ok(Response) whenever a response head arrived (any status);
 // Err(TransportError) only when none did. `send_raw` skips decoding.
@@ -124,8 +125,8 @@ inside the envelope.
 
 ```rust
 let options = CallOptions::new().credential(Credential::access_token(token)); // per call
-let client = OpenAI::builder().credentials(Credential::access_token(token)).build()?; // per client
-let client = OpenAI::builder().env_order(["STAGING_API_KEY"]).build()?; // replaces env_auth order
+let client = OpenAI::new().api_key(token); // per client, wherever the API takes its key
+let client = OpenAI::new().env_order(["STAGING_API_KEY"]); // replaces env_auth order
 client.send(request, &CallOptions::anonymous()).await?; // no credential at all
 ```
 
@@ -135,8 +136,8 @@ sent.
 
 ### Response Hooks
 
-`builder().pre_response_json(..)` (client-global) and
-`builder().mutate_response::<Request, _>(..)` run on 2xx replies to JSON
+`pre_response_json(..)` (client-global) and
+`mutate_response::<Request, _>(..)` run on 2xx replies to JSON
 endpoints of the same API only; naming a text, binary, or empty endpoint, or
 another API's request, does not compile.
 

@@ -443,36 +443,46 @@ at the end of every `just install`.
   reports no output device, and playa reports that error directly instead
   of falling back to host players.
 
-## reqwest's rustls client aborting against a loopback TLS server
+## aws-lc aborting the process on its first random bytes under load
 
-Found 2026-10-12 on `build-win-native` while adding `schematic-runtime`'s
-local TLS tests. Not yet root-caused; the evidence below narrows it.
+Found 2026-10-12 on `build-win-native` by `schematic-runtime`'s loopback TLS
+tests; root-caused the same day. Tracked by fix
+`2026-10-12-windows-aws-lc-entropy-abort`.
 
-- **Symptom.** A test that runs a `tokio-rustls` server on `127.0.0.1` and
-  sends to it through reqwest 0.13's built-in rustls client (aws-lc-rs
-  provider, `rustls-platform-verifier`) sometimes dies with `0xc0000409`
-  (`STATUS_STACK_BUFFER_OVERRUN`, a native fast-fail). Stdout shows only
-  `running 1 test`, stderr is empty, and an `eprintln!` placed after the send
-  never prints, so the abort happens inside the handshake or send and not at
-  runtime drop or thread exit. Under a full parallel suite, 3 of 5 runs had
-  one abort; alone under `--stress-count 15` there were none; 18 builder tests
-  launched as parallel processes outside nextest gave 1 in 270. Aborts
-  cluster: several processes die in the same stress iteration.
-- **What it is not.** It is not stack size (`RUST_MIN_STACK=8388608` made no
-  difference, and Rust's stack-overflow handler would print to stderr). It is
-  not the server's crypto provider (it also aborts with a `ring` server). It
-  is not the platform verifier alone (`tls_danger_accept_invalid_certs`
-  clients also aborted), and not the runtime's code (plain reqwest with no
-  runtime code aborted too, 2 in 160). It never aborted in 160 runs where
-  reqwest was handed a preconfigured rustls `ClientConfig`
-  (`tls_backend_preconfigured`) with either provider. That count is too small
-  to prove the preconfigured path is immune.
+- **Symptom.** A test process dies with `0xc0000409` and empty stdout and
+  stderr (nextest prints `ABORT`), only on native Windows and only under
+  parallel load. Under a debugger it is `Subcode: 0x7
+  FAST_FAIL_FATAL_APP_EXIT`, which is the C runtime's `abort()`, not a buffer
+  overrun.
+- **Cause.** aws-lc (`aws-lc-sys` 0.40, behind reqwest's `rustls` feature,
+  `tokio-rustls`'s `aws_lc_rs`, and rustls's default provider) seeds its RNG
+  from CPU timing jitter. The first random bytes a process asks for run a
+  once-per-process jitter setup that calls `abort()` when its health tests
+  fail, which they do when the CPU is saturated. A TLS client asks first for
+  its ClientHello session ID, so the abort looks like a TLS failure. Any
+  aws-lc user is exposed, not only TLS; non-crypto tests never abort.
+- **Numbers** (runtime L1 suite minus `compile_fail`, nextest
+  `--stress-count`, 12-way parallel): 25 aborts in 100 runs of the four TLS
+  tests; 3 in 8 after the runtime handed reqwest its own rustls
+  `ClientConfig`; 0 in 1,000 with aws-lc built with
+  `AWS_LC_SYS_NO_JITTER_ENTROPY=1`, which seeds from the OS generator. That
+  build variable changes aws-lc's build fingerprint, so setting it for one
+  probe rebuilds aws-lc there and again on the next normal build.
+- **Earlier wrong turns, so they are not retried.** It is not reqwest's
+  built-in rustls path (a preconfigured `ClientConfig` aborts too; an earlier
+  0 in 160 was luck), not the platform verifier, not stack size, and not the
+  server's provider. A test that "accepts invalid certificates" still sends
+  with a default client first, which confounded one probe.
+- **Capturing such a stack.** Run the test binary under
+  `cdbX64.exe -cf cmds.txt <test.exe> <test name> --exact`, with `sxe -c
+  ".lastevent;.reload;kc 80;~*kc 40;q" -c2 "<same>" c0000409` and `g` in
+  `cmds.txt`, in 12 parallel loops (each loop in its own `pwsh -File`
+  process), stopping at the first log containing `Security check failure`.
+  Do not match on a marker you `.echo` from the `sxe` command: cdb echoes
+  the command file, so every log matches. Static functions show as the
+  nearest exported symbol (`…_FOR_TESTING`); trust the exported frames.
+  `cdb.exe` children can outlive a killed loop; stop them with
+  `Get-Process cdb, <test exe name> | Stop-Process`.
 - **What was done.** The four loopback-TLS tests in
-  `schematic/runtime/tests/l1/builder.rs` carry
-  `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.
-  Generated clients before the runtime used the same reqwest configuration,
-  so production HTTPS on Windows has the same exposure; it has not been seen
-  outside this loopback fixture.
-- **Next step for whoever picks it up.** Capture the faulting stack with
-  `cdbX64.exe` (see "COM lifetime and cpal" above for how to drive it) while
-  running the four tests as parallel processes in a loop.
+  `schematic/runtime/tests/l1/builder.rs` carry `#[cfg_attr(windows, ignore =
+  "…")]` naming the fix; macOS, Linux, and WSL2 run them.

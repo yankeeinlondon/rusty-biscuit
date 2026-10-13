@@ -209,9 +209,7 @@ error):
 use schematic_schema::prelude::*;
 
 let token = get_token_from_somewhere(); // Vault, OAuth, config file, ...
-let client = OpenAI::builder()
-    .credentials(Credential::access_token(token))
-    .build()?;
+let client = OpenAI::new().credentials(Credential::access_token(token));
 let options = CallOptions::new().credential(Credential::access_token(other_token));
 ```
 

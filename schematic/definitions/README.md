@@ -362,7 +362,7 @@ assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
 assert!(api.env_auth.is_empty());
 ```
 
-Pass the key to the generated client with `OpenAI::builder().credentials(Credential::access_token(key))`; see [Credentials](../docs/runtime/credentials.md).
+Pass the key to the generated client with `OpenAI::new().api_key(key)`; see [Credentials](../docs/runtime/credentials.md).
 
 ## Critical Configuration Requirements
 

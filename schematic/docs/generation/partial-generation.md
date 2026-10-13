@@ -116,7 +116,7 @@ Move or remove the listed paths, or generate into an isolated output directory.
 A module whose size crosses the split threshold (2000 formatted lines)
 changes layout between `<module>.rs` and a `<module>/` directory holding
 `mod.rs` (module docs, submodule declarations, re-exports, and each API's
-marker type, client alias, and constructors), `requests.rs`, and
+client struct and tag type), `requests.rs`, and
 `responses.rs`. The new layout is written first;
 the old one is deleted only if it is provably generated. If the old layout
 holds hand-written content, the run refuses and leaves it intact.
@@ -144,7 +144,7 @@ directory*:
 | a generated module is not declared in `lib.rs` | ``generated module `delta` is not declared in lib.rs`` |
 | `lib.rs` declares a module no current definition produces | ``lib.rs declares module `delta`, which no current definition generates`` |
 | a kept module exists as both `x.rs` and `x/` | ``module `beta` exists both as beta.rs and as beta/`` |
-| the prelude exports for a kept module differ from what the current definitions export (an API was added, removed, or renamed); each API exports its marker `{Api}` and its client alias `{Api}Client` | ``prelude.rs exports ["Gamma"] from `gamma`, but the current definitions export ["Gamma", "GammaClient"]`` |
+| the prelude exports for a kept module differ from what the current definitions export (an API was added, removed, or renamed); each API exports its client struct `{Api}` | ``prelude.rs exports ["Gamma", "GammaExtra"] from `gamma`, but the current definitions export ["Gamma"]`` |
 
 The inventory is checked against the module and type *names*; a kept module
 whose endpoints changed in the definitions is still kept as it is. Regenerate
@@ -152,15 +152,29 @@ it, or run full generation, to bring it up to date.
 
 ### Shared runtime compatibility
 
-Kept modules were generated against a particular `schematic-runtime` and
-against the `shared.rs` and `ws_shared.rs` already on disk. Generated
-`lib.rs` records the runtime's ABI version and checks it at compile time:
+Kept modules call code they were not generated with, from two places: the
+hand-written `schematic-runtime` crate, and the generated helper files
+`shared.rs` (cookie encoding, `FormFile`, the `Paginated` marker) and
+`ws_shared.rs` (the WebSocket error, options, reconnect, and codec types),
+which every run rewrites. A partial run therefore answers two separate
+questions before it keeps anything:
+
+| Question | Answered by | Why the other check cannot answer it |
+| --- | --- | --- |
+| Do the kept modules match the hand-written runtime? | the `schematic-runtime` ABI marker in `lib.rs` | the shared files are generated, not part of the runtime, so they say nothing about it |
+| Do the kept modules match the generated shared helpers? | a byte comparison of the new `shared.rs` and `ws_shared.rs` with the files on disk | the ABI number changes only with the runtime; a shared helper can change while it stays the same |
+
+Both must pass. Passing one never excuses the other, so a harmless edit to
+a shared helper still requires full generation.
+
+Generated `lib.rs` records the runtime's ABI version and checks it at
+compile time:
 
 ```rust
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 2;
 const _: () = assert!(
     schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
-    "schematic-schema was generated for schematic-runtime ABI 1, but ...; regenerate the crate ..."
+    "schematic-schema was generated for schematic-runtime ABI 2, but the schematic-runtime it is built against has another ABI; ..."
 );
 ```
 
@@ -188,12 +202,18 @@ generation (`generate --api all`) instead
 ```
 
 A missing marker is reported as
-`lib.rs records no schematic-runtime ABI, this generator emits ABI 1`, a
+`lib.rs records no schematic-runtime ABI, this generator emits ABI 2`, a
 malformed one as, for example,
 `lib.rs's SCHEMATIC_RUNTIME_ABI is not an integer literal`, and a changed
 shared file by its name (`shared.rs`). A matching marker never bypasses the
 inventory checks above. With nothing retained (every group selected, or an
 empty output directory) the marker and the shared files do not matter.
+
+**Planned: one mechanism.** Shared helpers are to move from the generated
+shared files into `schematic-runtime`, where the ABI marker covers them,
+typically as part of other work that touches the same code. The byte
+comparison is removed once no generated shared helper file remains; until
+then both checks stay.
 
 ## Failures during publication
 

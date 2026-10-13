@@ -72,9 +72,12 @@ parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
 The generated `definition()` translates the effective auth policy into the
 runtime's `AuthConfig` (`ApiKeyParam` becomes `CredentialPlacement::ApiKeyQuery`
 or `ApiKeyCookie`). The runtime resolves one credential per send, for every
-placement: per call (`CallOptions::credential`) → client
-(`builder().credentials(..)`) → first non-empty env var of the definition's
-mapping (`builder().env_order([..])` replaces the order) → anonymous. There is
+placement: per call (`CallOptions::credential`) → client (`api_key(..)`,
+`basic_auth(..)`, or `credentials(..)`) → first non-empty env var of the
+definition's mapping (`env_order([..])` replaces the order) → anonymous.
+`api_key(secret)` goes to the first accepted single-secret placement (bearer,
+key header, query, or cookie) in definition order; on a Basic-only or no-auth
+API it is refused as `BuildError::IncompatibleCredential`. There is
 no missing-credential error, `CallOptions::anonymous()` sends without one, and
 a credential never overrides a same-named request query/cookie/header value
 (that send fails as `InvalidArgument`). A client's `Debug` prints no
@@ -128,19 +131,28 @@ definition must add its row there.
 
 When updating docs or examples that touch generated clients:
 
-- `OpenAI` is an uninhabited marker (`pub enum OpenAI {}`) with `BASE_URL`,
-  `DOCS_URL`, `definition()`, `builder()`, and
-  `new() -> Result<OpenAIClient, BuildError>`;
-  `OpenAIClient = schematic_runtime::Client<OpenAI>`
+- `OpenAI` is the one client struct callers write,
+  `pub struct OpenAI(schematic_runtime::Client<OpenAIApi>)`, with `BASE_URL`,
+  `DOCS_URL`, `definition()`, an infallible `new() -> Self`, and
+  `basic_auth(user, password)` only when the API accepts Basic. There is no
+  `OpenAIClient` alias and no `builder()`
+- `OpenAIApi` is the tag (`pub enum OpenAIApi {}`, implements
+  `schematic_runtime::Api`) that request types name; callers never write it
+- `schematic_runtime::api_client!(OpenAI, OpenAIApi);` gives the struct every
+  client-wide setting, `build`, `send`, `send_raw`, and `check_link` as
+  inherent methods (no trait import)
 - Each request struct implements `schematic_runtime::EndpointSpec` (`type Api`,
   `Success`, `Failure = NoDeclaredError`, `Decoder`; `ENDPOINT_ID`, `METHOD`,
   `into_parts()`); a client accepts only its own API's requests
 - `client.send(request, &CallOptions::new())` returns `Ok(Response)` whenever a
   response head arrived (any status), `Err(TransportError)` only otherwise;
   `send_raw` skips decoding
-- Base URL, timeout, credentials, env order, and response hooks
-  (`pre_response_json`, `mutate_response::<Request, _>` for JSON endpoints of
-  the same API) are set on `builder()`
+- Base URL, timeout, credentials (`api_key`, `basic_auth`, `credentials`),
+  env order, and response hooks (`pre_response_json`,
+  `mutate_response::<Request, _>` for JSON endpoints of the same API) are
+  chained onto the client. They are validated by the optional `build()?`,
+  which returns the same type, or on the first call, which reports an invalid
+  setting as `TransportErrorKind::InvalidClient(BuildError)`
 
 Canonical pattern:
 
@@ -148,9 +160,7 @@ Canonical pattern:
 use schematic_schema::prelude::*;
 use schematic_schema::openai::ListModelsRequest;
 
-let client = OpenAI::builder()
-    .credentials(Credential::access_token("token"))
-    .build()?;
+let client = OpenAI::new().api_key("token");
 
 let response = client
     .send(ListModelsRequest::default(), &CallOptions::new())
@@ -276,7 +286,7 @@ Read these as needed:
 - `schematic/define/README.md` (authoritative type-level behavior)
 - `schematic/docs/headers/README.md` (credential precedence: REST runtime vs WebSocket `Headers`)
 - `schematic/docs/io/openapi-extensions.md` (extension schema and examples)
-- `schematic/gen/README.md` (generated marker types and `EndpointSpec` contracts)
+- `schematic/gen/README.md` (generated client structs, tag types, and `EndpointSpec` contracts)
 - `schematic/docs/generation/request-side.md` (query, header, cookie, body, and credential placement)
 - `schematic/docs/runtime/README.md` (sending, response envelope, credentials, redirects, deadlines, hooks, redaction)
 - `schematic/schema/README.md` (generated crate)

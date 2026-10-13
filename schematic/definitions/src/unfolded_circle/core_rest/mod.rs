@@ -6,22 +6,17 @@
 //!
 //! ## Authentication Notes
 //!
-//! When a deployment requires Basic auth, override headers programmatically
-//! with `Headers::use_basic_auth()` and keep `AuthStrategy::BearerToken` as
-//! the default constructor path.
+//! The generated client accepts only a bearer token, so it has no
+//! `basic_auth(..)`, and a `Credential::basic` set on it is refused as an
+//! incompatible credential. A deployment that requires Basic auth needs the
+//! definition to accept `AuthMethod::Basic`.
 //!
 //! ```text
-//! use schematic_define::Headers;
 //! use schematic_schema::unfolded_circle_core_rest::UnfoldedCircleCoreRest;
 //!
-//! let client = UnfoldedCircleCoreRest::new()?
-//!     .variant()
-//!     .headers_builder(
-//!         Headers::default()
-//!             .use_basic_auth("admin", "secret-pin"),
-//!     )
-//!     .build();
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! let client = UnfoldedCircleCoreRest::new()
+//!     .base_url("http://remote.local/api")
+//!     .api_key(token); // sent as `Authorization: Bearer <token>`
 //! ```
 
 mod types;
