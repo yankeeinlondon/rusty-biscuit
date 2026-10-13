@@ -3,10 +3,11 @@
 //! Generated REST API clients and WebSocket API definition helpers.
 //!
 //! Each REST API module holds the API's client struct, named after the
-//! API and wrapping a [`schematic_runtime::Client`], its request types,
-//! and its response types re-exported from the definitions. Sending, credentials,
-//! redirects, deadlines, and the response envelope belong to
-//! [`schematic_runtime`].
+//! API and wrapping a [`schematic_runtime::Client`], with one method per
+//! endpoint; the call type each method returns; its request types; and
+//! its response types re-exported from the definitions. Sending,
+//! credentials, redirects, deadlines, and the response envelope belong
+//! to [`schematic_runtime`].
 //!
 //! ## Available REST APIs
 //!
@@ -45,29 +46,29 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::anthropic::ListModelsRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Anthropic::new();
-//!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
-//!     println!("{}", response.meta);
-//!     let data = response.into_result()?;
+//!     let data = client.list_models().await?;
 //!     Ok(())
 //! }
 //! ```
 //!
 //! ## Results
 //!
-//! A send returns `Ok` with a [`schematic_runtime::Response`] whenever
-//! the server answered, whatever the status, and
+//! Awaiting an endpoint call returns `Ok` with the endpoint's data for a
+//! 2xx reply that decoded, and otherwise a
+//! [`schematic_runtime::CallError`]. After `.full()`, it returns `Ok`
+//! with a [`schematic_runtime::Response`] whenever the server answered,
+//! whatever the status, and
 //! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
 //! arrived.
 /// The `schematic-runtime` ABI this crate was generated against.
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 2;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;
 const _: () = assert!(
     schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
-    "schematic-schema was generated for schematic-runtime ABI 2, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
+    "schematic-schema was generated for schematic-runtime ABI 3, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
 );
 /// The runtime that sends this crate's requests.
 pub use schematic_runtime;

@@ -285,12 +285,14 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::openai::ListVoiceConsentsRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = OpenAI::new();
-//!     let response = client.send(ListVoiceConsentsRequest::default(), &CallOptions::new()).await?;
+//!     let data = client.list_voice_consents().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.list_voice_consents().full().await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
 //! }

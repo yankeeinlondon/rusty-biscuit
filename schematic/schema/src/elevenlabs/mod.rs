@@ -64,12 +64,14 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::elevenlabs::ListVoicesRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = ElevenLabs::new();
-//!     let response = client.send(ListVoicesRequest::default(), &CallOptions::new()).await?;
+//!     let data = client.list_voices().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.list_voices().full().await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
 //! }

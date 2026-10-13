@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::{EmqxBasicApi, EmqxBearerApi};
+use super::{EmqxBasic, EmqxBasicApi, EmqxBearer, EmqxBearerApi};
 /// Request for `ListNodes` endpoint.
 ///
 /// ## Example
@@ -1687,6 +1687,2162 @@ impl schematic_runtime::EndpointSpec for DeleteBanBasicRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `ListNodes` endpoint, returned by [`EmqxBasic::list_nodes`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListNodesBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListNodesBasicRequest>,
+);
+impl<'a> ListNodesBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListNodesBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListNodesBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListNodesBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetNode` endpoint, returned by [`EmqxBasic::get_node`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetNodeBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetNodeBasicRequest>,
+);
+impl<'a> GetNodeBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetNodeBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetNodeBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetNodeBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetCluster` endpoint, returned by [`EmqxBasic::get_cluster`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetClusterBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetClusterBasicRequest>,
+);
+impl<'a> GetClusterBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetClusterBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetClusterBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetClusterBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListListeners` endpoint, returned by [`EmqxBasic::list_listeners`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListListenersBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListListenersBasicRequest>,
+);
+impl<'a> ListListenersBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListListenersBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListListenersBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListListenersBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetListener` endpoint, returned by [`EmqxBasic::get_listener`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetListenerBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetListenerBasicRequest>,
+);
+impl<'a> GetListenerBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetListenerBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetListenerBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetListenerBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListMetrics` endpoint, returned by [`EmqxBasic::list_metrics`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListMetricsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListMetricsBasicRequest>,
+);
+impl<'a> ListMetricsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListMetricsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListMetricsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListMetricsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListStats` endpoint, returned by [`EmqxBasic::list_stats`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListStatsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListStatsBasicRequest>,
+);
+impl<'a> ListStatsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListStatsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListStatsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListStatsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetPrometheus` endpoint, returned by [`EmqxBasic::get_prometheus`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetPrometheusBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetPrometheusBasicRequest>,
+);
+impl<'a> GetPrometheusBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetPrometheusBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetPrometheusBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetPrometheusBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAlarms` endpoint, returned by [`EmqxBasic::list_alarms`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAlarmsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListAlarmsBasicRequest>,
+);
+impl<'a> ListAlarmsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListAlarmsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAlarmsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListAlarmsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListClients` endpoint, returned by [`EmqxBasic::list_clients`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListClientsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListClientsBasicRequest>,
+);
+impl<'a> ListClientsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListClientsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListClientsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListClientsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetClient` endpoint, returned by [`EmqxBasic::get_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetClientBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetClientBasicRequest>,
+);
+impl<'a> GetClientBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetClientBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetClientBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetClientBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DisconnectClient` endpoint, returned by [`EmqxBasic::disconnect_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DisconnectClientBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, DisconnectClientBasicRequest>,
+);
+impl<'a> DisconnectClientBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, DisconnectClientBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DisconnectClientBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        DisconnectClientBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `SubscribeClient` endpoint, returned by [`EmqxBasic::subscribe_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct SubscribeClientBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, SubscribeClientBasicRequest>,
+);
+impl<'a> SubscribeClientBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, SubscribeClientBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for SubscribeClientBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        SubscribeClientBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnsubscribeClient` endpoint, returned by [`EmqxBasic::unsubscribe_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnsubscribeClientBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, UnsubscribeClientBasicRequest>,
+);
+impl<'a> UnsubscribeClientBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, UnsubscribeClientBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnsubscribeClientBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        UnsubscribeClientBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListSubscriptions` endpoint, returned by [`EmqxBasic::list_subscriptions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListSubscriptionsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListSubscriptionsBasicRequest>,
+);
+impl<'a> ListSubscriptionsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListSubscriptionsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListSubscriptionsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListSubscriptionsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Publish` endpoint, returned by [`EmqxBasic::publish`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PublishBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, PublishBasicRequest>,
+);
+impl<'a> PublishBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, PublishBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PublishBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        PublishBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `PublishBulk` endpoint, returned by [`EmqxBasic::publish_bulk`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PublishBulkBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, PublishBulkBasicRequest>,
+);
+impl<'a> PublishBulkBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, PublishBulkBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PublishBulkBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        PublishBulkBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListTopics` endpoint, returned by [`EmqxBasic::list_topics`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListTopicsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListTopicsBasicRequest>,
+);
+impl<'a> ListTopicsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListTopicsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListTopicsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListTopicsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRetained` endpoint, returned by [`EmqxBasic::list_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRetainedBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListRetainedBasicRequest>,
+);
+impl<'a> ListRetainedBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListRetainedBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRetainedBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListRetainedBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetRetained` endpoint, returned by [`EmqxBasic::get_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetRetainedBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetRetainedBasicRequest>,
+);
+impl<'a> GetRetainedBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetRetainedBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetRetainedBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetRetainedBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteRetained` endpoint, returned by [`EmqxBasic::delete_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteRetainedBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, DeleteRetainedBasicRequest>,
+);
+impl<'a> DeleteRetainedBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, DeleteRetainedBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteRetainedBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        DeleteRetainedBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRules` endpoint, returned by [`EmqxBasic::list_rules`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRulesBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListRulesBasicRequest>,
+);
+impl<'a> ListRulesBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListRulesBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRulesBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListRulesBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRule` endpoint, returned by [`EmqxBasic::create_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRuleBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, CreateRuleBasicRequest>,
+);
+impl<'a> CreateRuleBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, CreateRuleBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRuleBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        CreateRuleBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetRule` endpoint, returned by [`EmqxBasic::get_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetRuleBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetRuleBasicRequest>,
+);
+impl<'a> GetRuleBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetRuleBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetRuleBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetRuleBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateRule` endpoint, returned by [`EmqxBasic::update_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateRuleBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, UpdateRuleBasicRequest>,
+);
+impl<'a> UpdateRuleBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, UpdateRuleBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateRuleBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        UpdateRuleBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteRule` endpoint, returned by [`EmqxBasic::delete_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteRuleBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, DeleteRuleBasicRequest>,
+);
+impl<'a> DeleteRuleBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, DeleteRuleBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteRuleBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        DeleteRuleBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `TestRule` endpoint, returned by [`EmqxBasic::test_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct TestRuleBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, TestRuleBasicRequest>,
+);
+impl<'a> TestRuleBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, TestRuleBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for TestRuleBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        TestRuleBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthenticators` endpoint, returned by [`EmqxBasic::list_authenticators`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthenticatorsBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListAuthenticatorsBasicRequest>,
+);
+impl<'a> ListAuthenticatorsBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListAuthenticatorsBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthenticatorsBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListAuthenticatorsBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetAuthenticator` endpoint, returned by [`EmqxBasic::get_authenticator`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetAuthenticatorBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, GetAuthenticatorBasicRequest>,
+);
+impl<'a> GetAuthenticatorBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, GetAuthenticatorBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetAuthenticatorBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        GetAuthenticatorBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthUsers` endpoint, returned by [`EmqxBasic::list_auth_users`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthUsersBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListAuthUsersBasicRequest>,
+);
+impl<'a> ListAuthUsersBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListAuthUsersBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthUsersBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListAuthUsersBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateAuthUser` endpoint, returned by [`EmqxBasic::create_auth_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateAuthUserBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, CreateAuthUserBasicRequest>,
+);
+impl<'a> CreateAuthUserBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, CreateAuthUserBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateAuthUserBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        CreateAuthUserBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteAuthUser` endpoint, returned by [`EmqxBasic::delete_auth_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteAuthUserBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, DeleteAuthUserBasicRequest>,
+);
+impl<'a> DeleteAuthUserBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, DeleteAuthUserBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteAuthUserBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        DeleteAuthUserBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthzSources` endpoint, returned by [`EmqxBasic::list_authz_sources`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthzSourcesBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListAuthzSourcesBasicRequest>,
+);
+impl<'a> ListAuthzSourcesBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListAuthzSourcesBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthzSourcesBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListAuthzSourcesBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListBanned` endpoint, returned by [`EmqxBasic::list_banned`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListBannedBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, ListBannedBasicRequest>,
+);
+impl<'a> ListBannedBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, ListBannedBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListBannedBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        ListBannedBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateBan` endpoint, returned by [`EmqxBasic::create_ban`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateBanBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, CreateBanBasicRequest>,
+);
+impl<'a> CreateBanBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, CreateBanBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateBanBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        CreateBanBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteBan` endpoint, returned by [`EmqxBasic::delete_ban`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteBanBasicCall<'a>(
+    schematic_runtime::Call<'a, EmqxBasicApi, DeleteBanBasicRequest>,
+);
+impl<'a> DeleteBanBasicCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBasicApi, DeleteBanBasicRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteBanBasicCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBasicApi,
+        DeleteBanBasicRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl EmqxBasic {
+    /// List all nodes in the EMQX cluster
+    ///
+    /// `GET /nodes`
+    ///
+    /// Returns a [`ListNodesBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_nodes(&self) -> ListNodesBasicCall<'_> {
+        ListNodesBasicCall(self.0.send(ListNodesBasicRequest::default()))
+    }
+    /// Get detailed information about a specific node
+    ///
+    /// `GET /nodes/{node}`
+    ///
+    /// Returns a [`GetNodeBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `node: impl Into<String>`: the `{node}` path parameter
+    pub fn get_node(&self, node: impl Into<String>) -> GetNodeBasicCall<'_> {
+        GetNodeBasicCall(self.0.send(GetNodeBasicRequest::new(node)))
+    }
+    /// Get cluster status and node membership
+    ///
+    /// `GET /cluster`
+    ///
+    /// Returns a [`GetClusterBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_cluster(&self) -> GetClusterBasicCall<'_> {
+        GetClusterBasicCall(self.0.send(GetClusterBasicRequest::default()))
+    }
+    /// List all configured listeners
+    ///
+    /// `GET /listeners`
+    ///
+    /// Returns a [`ListListenersBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_listeners(&self) -> ListListenersBasicCall<'_> {
+        ListListenersBasicCall(self.0.send(ListListenersBasicRequest::default()))
+    }
+    /// Get details of a specific listener
+    ///
+    /// `GET /listeners/{id}`
+    ///
+    /// Returns a [`GetListenerBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_listener(&self, id: impl Into<String>) -> GetListenerBasicCall<'_> {
+        GetListenerBasicCall(self.0.send(GetListenerBasicRequest::new(id)))
+    }
+    /// Get broker metrics for all nodes
+    ///
+    /// `GET /metrics`
+    ///
+    /// Returns a [`ListMetricsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_metrics(&self) -> ListMetricsBasicCall<'_> {
+        ListMetricsBasicCall(self.0.send(ListMetricsBasicRequest::default()))
+    }
+    /// Get broker statistics for all nodes
+    ///
+    /// `GET /stats`
+    ///
+    /// Returns a [`ListStatsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_stats(&self) -> ListStatsBasicCall<'_> {
+        ListStatsBasicCall(self.0.send(ListStatsBasicRequest::default()))
+    }
+    /// Get metrics in Prometheus format
+    ///
+    /// `GET /prometheus/stats`
+    ///
+    /// Returns a [`GetPrometheusBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_prometheus(&self) -> GetPrometheusBasicCall<'_> {
+        GetPrometheusBasicCall(self.0.send(GetPrometheusBasicRequest::default()))
+    }
+    /// List active alarms
+    ///
+    /// `GET /alarms`
+    ///
+    /// Returns a [`ListAlarmsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_alarms(&self) -> ListAlarmsBasicCall<'_> {
+        ListAlarmsBasicCall(self.0.send(ListAlarmsBasicRequest::default()))
+    }
+    /// List connected MQTT clients with pagination
+    ///
+    /// `GET /clients`
+    ///
+    /// Returns a [`ListClientsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_clients(&self) -> ListClientsBasicCall<'_> {
+        ListClientsBasicCall(self.0.send(ListClientsBasicRequest::default()))
+    }
+    /// Get detailed information about a specific client
+    ///
+    /// `GET /clients/{clientid}`
+    ///
+    /// Returns a [`GetClientBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    pub fn get_client(&self, clientid: impl Into<String>) -> GetClientBasicCall<'_> {
+        GetClientBasicCall(self.0.send(GetClientBasicRequest::new(clientid)))
+    }
+    /// Forcefully disconnect a client from the broker
+    ///
+    /// `DELETE /clients/{clientid}`
+    ///
+    /// Returns a [`DisconnectClientBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    pub fn disconnect_client(
+        &self,
+        clientid: impl Into<String>,
+    ) -> DisconnectClientBasicCall<'_> {
+        DisconnectClientBasicCall(
+            self.0.send(DisconnectClientBasicRequest::new(clientid)),
+        )
+    }
+    /// Create a subscription for a connected client
+    ///
+    /// `POST /clients/{clientid}/subscribe`
+    ///
+    /// Returns a [`SubscribeClientBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    /// - `body: SubscribeBody`: the request body
+    pub fn subscribe_client(
+        &self,
+        clientid: impl Into<String>,
+        body: SubscribeBody,
+    ) -> SubscribeClientBasicCall<'_> {
+        SubscribeClientBasicCall(
+            self.0.send(SubscribeClientBasicRequest::new(clientid, body)),
+        )
+    }
+    /// Remove a subscription from a connected client
+    ///
+    /// `POST /clients/{clientid}/unsubscribe`
+    ///
+    /// Returns a [`UnsubscribeClientBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    /// - `body: SubscribeBody`: the request body
+    pub fn unsubscribe_client(
+        &self,
+        clientid: impl Into<String>,
+        body: SubscribeBody,
+    ) -> UnsubscribeClientBasicCall<'_> {
+        UnsubscribeClientBasicCall(
+            self.0.send(UnsubscribeClientBasicRequest::new(clientid, body)),
+        )
+    }
+    /// List all subscriptions across the cluster
+    ///
+    /// `GET /subscriptions`
+    ///
+    /// Returns a [`ListSubscriptionsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_subscriptions(&self) -> ListSubscriptionsBasicCall<'_> {
+        ListSubscriptionsBasicCall(self.0.send(ListSubscriptionsBasicRequest::default()))
+    }
+    /// Publish an MQTT message to a topic
+    ///
+    /// `POST /publish`
+    ///
+    /// Returns a [`PublishBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PublishBody`: the request body
+    pub fn publish(&self, body: PublishBody) -> PublishBasicCall<'_> {
+        PublishBasicCall(self.0.send(PublishBasicRequest::new(body)))
+    }
+    /// Publish multiple MQTT messages in a single request
+    ///
+    /// `POST /publish/bulk`
+    ///
+    /// Returns a [`PublishBulkBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PublishBatchBody`: the request body
+    pub fn publish_bulk(&self, body: PublishBatchBody) -> PublishBulkBasicCall<'_> {
+        PublishBulkBasicCall(self.0.send(PublishBulkBasicRequest::new(body)))
+    }
+    /// List active topics in the broker
+    ///
+    /// `GET /topics`
+    ///
+    /// Returns a [`ListTopicsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_topics(&self) -> ListTopicsBasicCall<'_> {
+        ListTopicsBasicCall(self.0.send(ListTopicsBasicRequest::default()))
+    }
+    /// List retained messages with pagination
+    ///
+    /// `GET /retainer/messages`
+    ///
+    /// Returns a [`ListRetainedBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_retained(&self) -> ListRetainedBasicCall<'_> {
+        ListRetainedBasicCall(self.0.send(ListRetainedBasicRequest::default()))
+    }
+    /// Get a specific retained message by topic
+    ///
+    /// `GET /retainer/messages/{topic}`
+    ///
+    /// Returns a [`GetRetainedBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `topic: impl Into<String>`: the `{topic}` path parameter
+    pub fn get_retained(&self, topic: impl Into<String>) -> GetRetainedBasicCall<'_> {
+        GetRetainedBasicCall(self.0.send(GetRetainedBasicRequest::new(topic)))
+    }
+    /// Delete a retained message
+    ///
+    /// `DELETE /retainer/messages/{topic}`
+    ///
+    /// Returns a [`DeleteRetainedBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `topic: impl Into<String>`: the `{topic}` path parameter
+    pub fn delete_retained(
+        &self,
+        topic: impl Into<String>,
+    ) -> DeleteRetainedBasicCall<'_> {
+        DeleteRetainedBasicCall(self.0.send(DeleteRetainedBasicRequest::new(topic)))
+    }
+    /// List all rules in the rules engine
+    ///
+    /// `GET /rules`
+    ///
+    /// Returns a [`ListRulesBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_rules(&self) -> ListRulesBasicCall<'_> {
+        ListRulesBasicCall(self.0.send(ListRulesBasicRequest::default()))
+    }
+    /// Create a new rule in the rules engine
+    ///
+    /// `POST /rules`
+    ///
+    /// Returns a [`CreateRuleBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateRuleBody`: the request body
+    pub fn create_rule(&self, body: CreateRuleBody) -> CreateRuleBasicCall<'_> {
+        CreateRuleBasicCall(self.0.send(CreateRuleBasicRequest::new(body)))
+    }
+    /// Get details of a specific rule
+    ///
+    /// `GET /rules/{id}`
+    ///
+    /// Returns a [`GetRuleBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_rule(&self, id: impl Into<String>) -> GetRuleBasicCall<'_> {
+        GetRuleBasicCall(self.0.send(GetRuleBasicRequest::new(id)))
+    }
+    /// Update an existing rule
+    ///
+    /// `PUT /rules/{id}`
+    ///
+    /// Returns a [`UpdateRuleBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: CreateRuleBody`: the request body
+    pub fn update_rule(
+        &self,
+        id: impl Into<String>,
+        body: CreateRuleBody,
+    ) -> UpdateRuleBasicCall<'_> {
+        UpdateRuleBasicCall(self.0.send(UpdateRuleBasicRequest::new(id, body)))
+    }
+    /// Delete a rule from the rules engine
+    ///
+    /// `DELETE /rules/{id}`
+    ///
+    /// Returns a [`DeleteRuleBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn delete_rule(&self, id: impl Into<String>) -> DeleteRuleBasicCall<'_> {
+        DeleteRuleBasicCall(self.0.send(DeleteRuleBasicRequest::new(id)))
+    }
+    /// Test a rule with sample data
+    ///
+    /// `POST /rules/{id}/test`
+    ///
+    /// Returns a [`TestRuleBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: TestRuleBody`: the request body
+    pub fn test_rule(
+        &self,
+        id: impl Into<String>,
+        body: TestRuleBody,
+    ) -> TestRuleBasicCall<'_> {
+        TestRuleBasicCall(self.0.send(TestRuleBasicRequest::new(id, body)))
+    }
+    /// List all configured authentication providers
+    ///
+    /// `GET /authentication`
+    ///
+    /// Returns a [`ListAuthenticatorsBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_authenticators(&self) -> ListAuthenticatorsBasicCall<'_> {
+        ListAuthenticatorsBasicCall(
+            self.0.send(ListAuthenticatorsBasicRequest::default()),
+        )
+    }
+    /// Get details of a specific authenticator
+    ///
+    /// `GET /authentication/{id}`
+    ///
+    /// Returns a [`GetAuthenticatorBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_authenticator(
+        &self,
+        id: impl Into<String>,
+    ) -> GetAuthenticatorBasicCall<'_> {
+        GetAuthenticatorBasicCall(self.0.send(GetAuthenticatorBasicRequest::new(id)))
+    }
+    /// List users in a built-in database authenticator
+    ///
+    /// `GET /authentication/{id}/users`
+    ///
+    /// Returns a [`ListAuthUsersBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn list_auth_users(&self, id: impl Into<String>) -> ListAuthUsersBasicCall<'_> {
+        ListAuthUsersBasicCall(self.0.send(ListAuthUsersBasicRequest::new(id)))
+    }
+    /// Create a new user in a built-in database authenticator
+    ///
+    /// `POST /authentication/{id}/users`
+    ///
+    /// Returns a [`CreateAuthUserBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: CreateAuthUserBody`: the request body
+    pub fn create_auth_user(
+        &self,
+        id: impl Into<String>,
+        body: CreateAuthUserBody,
+    ) -> CreateAuthUserBasicCall<'_> {
+        CreateAuthUserBasicCall(self.0.send(CreateAuthUserBasicRequest::new(id, body)))
+    }
+    /// Delete a user from a built-in database authenticator
+    ///
+    /// `DELETE /authentication/{id}/users/{user_id}`
+    ///
+    /// Returns a [`DeleteAuthUserBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn delete_auth_user(
+        &self,
+        id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> DeleteAuthUserBasicCall<'_> {
+        DeleteAuthUserBasicCall(
+            self.0.send(DeleteAuthUserBasicRequest::new(id, user_id)),
+        )
+    }
+    /// List all authorization sources
+    ///
+    /// `GET /authorization/sources`
+    ///
+    /// Returns a [`ListAuthzSourcesBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_authz_sources(&self) -> ListAuthzSourcesBasicCall<'_> {
+        ListAuthzSourcesBasicCall(self.0.send(ListAuthzSourcesBasicRequest::default()))
+    }
+    /// List all banned clients, usernames, and hosts
+    ///
+    /// `GET /banned`
+    ///
+    /// Returns a [`ListBannedBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_banned(&self) -> ListBannedBasicCall<'_> {
+        ListBannedBasicCall(self.0.send(ListBannedBasicRequest::default()))
+    }
+    /// Ban a client, username, or host
+    ///
+    /// `POST /banned`
+    ///
+    /// Returns a [`CreateBanBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateBanBody`: the request body
+    pub fn create_ban(&self, body: CreateBanBody) -> CreateBanBasicCall<'_> {
+        CreateBanBasicCall(self.0.send(CreateBanBasicRequest::new(body)))
+    }
+    /// Remove a ban by type (clientid, username, peerhost) and value
+    ///
+    /// `DELETE /banned/{ban_type}/{who}`
+    ///
+    /// Returns a [`DeleteBanBasicCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `ban_type: impl Into<String>`: the `{ban_type}` path parameter
+    /// - `who: impl Into<String>`: the `{who}` path parameter
+    pub fn delete_ban(
+        &self,
+        ban_type: impl Into<String>,
+        who: impl Into<String>,
+    ) -> DeleteBanBasicCall<'_> {
+        DeleteBanBasicCall(self.0.send(DeleteBanBasicRequest::new(ban_type, who)))
     }
 }
 /// Request for `Login` endpoint.
@@ -3466,5 +5622,2283 @@ impl schematic_runtime::EndpointSpec for DeleteBanBearerRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `Login` endpoint, returned by [`EmqxBearer::login`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LoginBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, LoginBearerRequest>,
+);
+impl<'a> LoginBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, LoginBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LoginBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        LoginBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Logout` endpoint, returned by [`EmqxBearer::logout`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LogoutBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, LogoutBearerRequest>,
+);
+impl<'a> LogoutBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, LogoutBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LogoutBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        LogoutBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListNodes` endpoint, returned by [`EmqxBearer::list_nodes`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListNodesBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListNodesBearerRequest>,
+);
+impl<'a> ListNodesBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListNodesBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListNodesBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListNodesBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetNode` endpoint, returned by [`EmqxBearer::get_node`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetNodeBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetNodeBearerRequest>,
+);
+impl<'a> GetNodeBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetNodeBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetNodeBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetNodeBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetCluster` endpoint, returned by [`EmqxBearer::get_cluster`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetClusterBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetClusterBearerRequest>,
+);
+impl<'a> GetClusterBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetClusterBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetClusterBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetClusterBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListListeners` endpoint, returned by [`EmqxBearer::list_listeners`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListListenersBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListListenersBearerRequest>,
+);
+impl<'a> ListListenersBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListListenersBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListListenersBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListListenersBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetListener` endpoint, returned by [`EmqxBearer::get_listener`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetListenerBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetListenerBearerRequest>,
+);
+impl<'a> GetListenerBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetListenerBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetListenerBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetListenerBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListMetrics` endpoint, returned by [`EmqxBearer::list_metrics`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListMetricsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListMetricsBearerRequest>,
+);
+impl<'a> ListMetricsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListMetricsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListMetricsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListMetricsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListStats` endpoint, returned by [`EmqxBearer::list_stats`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListStatsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListStatsBearerRequest>,
+);
+impl<'a> ListStatsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListStatsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListStatsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListStatsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetPrometheus` endpoint, returned by [`EmqxBearer::get_prometheus`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetPrometheusBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetPrometheusBearerRequest>,
+);
+impl<'a> GetPrometheusBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetPrometheusBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetPrometheusBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetPrometheusBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAlarms` endpoint, returned by [`EmqxBearer::list_alarms`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAlarmsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListAlarmsBearerRequest>,
+);
+impl<'a> ListAlarmsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListAlarmsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAlarmsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListAlarmsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListClients` endpoint, returned by [`EmqxBearer::list_clients`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListClientsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListClientsBearerRequest>,
+);
+impl<'a> ListClientsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListClientsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListClientsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListClientsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetClient` endpoint, returned by [`EmqxBearer::get_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetClientBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetClientBearerRequest>,
+);
+impl<'a> GetClientBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetClientBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetClientBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetClientBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DisconnectClient` endpoint, returned by [`EmqxBearer::disconnect_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DisconnectClientBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, DisconnectClientBearerRequest>,
+);
+impl<'a> DisconnectClientBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, DisconnectClientBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DisconnectClientBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        DisconnectClientBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `SubscribeClient` endpoint, returned by [`EmqxBearer::subscribe_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct SubscribeClientBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, SubscribeClientBearerRequest>,
+);
+impl<'a> SubscribeClientBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, SubscribeClientBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for SubscribeClientBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        SubscribeClientBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnsubscribeClient` endpoint, returned by [`EmqxBearer::unsubscribe_client`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnsubscribeClientBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, UnsubscribeClientBearerRequest>,
+);
+impl<'a> UnsubscribeClientBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, UnsubscribeClientBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnsubscribeClientBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        UnsubscribeClientBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListSubscriptions` endpoint, returned by [`EmqxBearer::list_subscriptions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListSubscriptionsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListSubscriptionsBearerRequest>,
+);
+impl<'a> ListSubscriptionsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListSubscriptionsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListSubscriptionsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListSubscriptionsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Publish` endpoint, returned by [`EmqxBearer::publish`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PublishBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, PublishBearerRequest>,
+);
+impl<'a> PublishBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, PublishBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PublishBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        PublishBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `PublishBulk` endpoint, returned by [`EmqxBearer::publish_bulk`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PublishBulkBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, PublishBulkBearerRequest>,
+);
+impl<'a> PublishBulkBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, PublishBulkBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PublishBulkBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        PublishBulkBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListTopics` endpoint, returned by [`EmqxBearer::list_topics`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListTopicsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListTopicsBearerRequest>,
+);
+impl<'a> ListTopicsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListTopicsBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListTopicsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListTopicsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRetained` endpoint, returned by [`EmqxBearer::list_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRetainedBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListRetainedBearerRequest>,
+);
+impl<'a> ListRetainedBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListRetainedBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRetainedBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListRetainedBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetRetained` endpoint, returned by [`EmqxBearer::get_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetRetainedBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetRetainedBearerRequest>,
+);
+impl<'a> GetRetainedBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetRetainedBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetRetainedBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetRetainedBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteRetained` endpoint, returned by [`EmqxBearer::delete_retained`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteRetainedBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, DeleteRetainedBearerRequest>,
+);
+impl<'a> DeleteRetainedBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, DeleteRetainedBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteRetainedBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        DeleteRetainedBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRules` endpoint, returned by [`EmqxBearer::list_rules`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRulesBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListRulesBearerRequest>,
+);
+impl<'a> ListRulesBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListRulesBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRulesBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListRulesBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRule` endpoint, returned by [`EmqxBearer::create_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRuleBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, CreateRuleBearerRequest>,
+);
+impl<'a> CreateRuleBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, CreateRuleBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRuleBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        CreateRuleBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetRule` endpoint, returned by [`EmqxBearer::get_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetRuleBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetRuleBearerRequest>,
+);
+impl<'a> GetRuleBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetRuleBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetRuleBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetRuleBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateRule` endpoint, returned by [`EmqxBearer::update_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateRuleBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, UpdateRuleBearerRequest>,
+);
+impl<'a> UpdateRuleBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, UpdateRuleBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateRuleBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        UpdateRuleBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteRule` endpoint, returned by [`EmqxBearer::delete_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteRuleBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, DeleteRuleBearerRequest>,
+);
+impl<'a> DeleteRuleBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, DeleteRuleBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteRuleBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        DeleteRuleBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `TestRule` endpoint, returned by [`EmqxBearer::test_rule`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct TestRuleBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, TestRuleBearerRequest>,
+);
+impl<'a> TestRuleBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, TestRuleBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for TestRuleBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        TestRuleBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthenticators` endpoint, returned by [`EmqxBearer::list_authenticators`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthenticatorsBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListAuthenticatorsBearerRequest>,
+);
+impl<'a> ListAuthenticatorsBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        EmqxBearerApi,
+        ListAuthenticatorsBearerRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthenticatorsBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListAuthenticatorsBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetAuthenticator` endpoint, returned by [`EmqxBearer::get_authenticator`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetAuthenticatorBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, GetAuthenticatorBearerRequest>,
+);
+impl<'a> GetAuthenticatorBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, GetAuthenticatorBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetAuthenticatorBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        GetAuthenticatorBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthUsers` endpoint, returned by [`EmqxBearer::list_auth_users`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthUsersBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListAuthUsersBearerRequest>,
+);
+impl<'a> ListAuthUsersBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListAuthUsersBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthUsersBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListAuthUsersBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateAuthUser` endpoint, returned by [`EmqxBearer::create_auth_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateAuthUserBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, CreateAuthUserBearerRequest>,
+);
+impl<'a> CreateAuthUserBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, CreateAuthUserBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateAuthUserBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        CreateAuthUserBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteAuthUser` endpoint, returned by [`EmqxBearer::delete_auth_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteAuthUserBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, DeleteAuthUserBearerRequest>,
+);
+impl<'a> DeleteAuthUserBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, DeleteAuthUserBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteAuthUserBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        DeleteAuthUserBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuthzSources` endpoint, returned by [`EmqxBearer::list_authz_sources`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuthzSourcesBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListAuthzSourcesBearerRequest>,
+);
+impl<'a> ListAuthzSourcesBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListAuthzSourcesBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuthzSourcesBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListAuthzSourcesBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListBanned` endpoint, returned by [`EmqxBearer::list_banned`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListBannedBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, ListBannedBearerRequest>,
+);
+impl<'a> ListBannedBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, ListBannedBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListBannedBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        ListBannedBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateBan` endpoint, returned by [`EmqxBearer::create_ban`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateBanBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, CreateBanBearerRequest>,
+);
+impl<'a> CreateBanBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, CreateBanBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateBanBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        CreateBanBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteBan` endpoint, returned by [`EmqxBearer::delete_ban`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteBanBearerCall<'a>(
+    schematic_runtime::Call<'a, EmqxBearerApi, DeleteBanBearerRequest>,
+);
+impl<'a> DeleteBanBearerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, EmqxBearerApi, DeleteBanBearerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteBanBearerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        EmqxBearerApi,
+        DeleteBanBearerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl EmqxBearer {
+    /// Authenticate with username/password and receive a JWT token
+    ///
+    /// `POST /login`
+    ///
+    /// Returns a [`LoginBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: LoginBody`: the request body
+    pub fn login(&self, body: LoginBody) -> LoginBearerCall<'_> {
+        LoginBearerCall(self.0.send(LoginBearerRequest::new(body)))
+    }
+    /// Invalidate the current bearer token
+    ///
+    /// `POST /logout`
+    ///
+    /// Returns a [`LogoutBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn logout(&self) -> LogoutBearerCall<'_> {
+        LogoutBearerCall(self.0.send(LogoutBearerRequest::default()))
+    }
+    /// List all nodes in the EMQX cluster
+    ///
+    /// `GET /nodes`
+    ///
+    /// Returns a [`ListNodesBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_nodes(&self) -> ListNodesBearerCall<'_> {
+        ListNodesBearerCall(self.0.send(ListNodesBearerRequest::default()))
+    }
+    /// Get detailed information about a specific node
+    ///
+    /// `GET /nodes/{node}`
+    ///
+    /// Returns a [`GetNodeBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `node: impl Into<String>`: the `{node}` path parameter
+    pub fn get_node(&self, node: impl Into<String>) -> GetNodeBearerCall<'_> {
+        GetNodeBearerCall(self.0.send(GetNodeBearerRequest::new(node)))
+    }
+    /// Get cluster status and node membership
+    ///
+    /// `GET /cluster`
+    ///
+    /// Returns a [`GetClusterBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_cluster(&self) -> GetClusterBearerCall<'_> {
+        GetClusterBearerCall(self.0.send(GetClusterBearerRequest::default()))
+    }
+    /// List all configured listeners
+    ///
+    /// `GET /listeners`
+    ///
+    /// Returns a [`ListListenersBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_listeners(&self) -> ListListenersBearerCall<'_> {
+        ListListenersBearerCall(self.0.send(ListListenersBearerRequest::default()))
+    }
+    /// Get details of a specific listener
+    ///
+    /// `GET /listeners/{id}`
+    ///
+    /// Returns a [`GetListenerBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_listener(&self, id: impl Into<String>) -> GetListenerBearerCall<'_> {
+        GetListenerBearerCall(self.0.send(GetListenerBearerRequest::new(id)))
+    }
+    /// Get broker metrics for all nodes
+    ///
+    /// `GET /metrics`
+    ///
+    /// Returns a [`ListMetricsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_metrics(&self) -> ListMetricsBearerCall<'_> {
+        ListMetricsBearerCall(self.0.send(ListMetricsBearerRequest::default()))
+    }
+    /// Get broker statistics for all nodes
+    ///
+    /// `GET /stats`
+    ///
+    /// Returns a [`ListStatsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_stats(&self) -> ListStatsBearerCall<'_> {
+        ListStatsBearerCall(self.0.send(ListStatsBearerRequest::default()))
+    }
+    /// Get metrics in Prometheus format
+    ///
+    /// `GET /prometheus/stats`
+    ///
+    /// Returns a [`GetPrometheusBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_prometheus(&self) -> GetPrometheusBearerCall<'_> {
+        GetPrometheusBearerCall(self.0.send(GetPrometheusBearerRequest::default()))
+    }
+    /// List active alarms
+    ///
+    /// `GET /alarms`
+    ///
+    /// Returns a [`ListAlarmsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_alarms(&self) -> ListAlarmsBearerCall<'_> {
+        ListAlarmsBearerCall(self.0.send(ListAlarmsBearerRequest::default()))
+    }
+    /// List connected MQTT clients with pagination
+    ///
+    /// `GET /clients`
+    ///
+    /// Returns a [`ListClientsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_clients(&self) -> ListClientsBearerCall<'_> {
+        ListClientsBearerCall(self.0.send(ListClientsBearerRequest::default()))
+    }
+    /// Get detailed information about a specific client
+    ///
+    /// `GET /clients/{clientid}`
+    ///
+    /// Returns a [`GetClientBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    pub fn get_client(&self, clientid: impl Into<String>) -> GetClientBearerCall<'_> {
+        GetClientBearerCall(self.0.send(GetClientBearerRequest::new(clientid)))
+    }
+    /// Forcefully disconnect a client from the broker
+    ///
+    /// `DELETE /clients/{clientid}`
+    ///
+    /// Returns a [`DisconnectClientBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    pub fn disconnect_client(
+        &self,
+        clientid: impl Into<String>,
+    ) -> DisconnectClientBearerCall<'_> {
+        DisconnectClientBearerCall(
+            self.0.send(DisconnectClientBearerRequest::new(clientid)),
+        )
+    }
+    /// Create a subscription for a connected client
+    ///
+    /// `POST /clients/{clientid}/subscribe`
+    ///
+    /// Returns a [`SubscribeClientBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    /// - `body: SubscribeBody`: the request body
+    pub fn subscribe_client(
+        &self,
+        clientid: impl Into<String>,
+        body: SubscribeBody,
+    ) -> SubscribeClientBearerCall<'_> {
+        SubscribeClientBearerCall(
+            self.0.send(SubscribeClientBearerRequest::new(clientid, body)),
+        )
+    }
+    /// Remove a subscription from a connected client
+    ///
+    /// `POST /clients/{clientid}/unsubscribe`
+    ///
+    /// Returns a [`UnsubscribeClientBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `clientid: impl Into<String>`: the `{clientid}` path parameter
+    /// - `body: SubscribeBody`: the request body
+    pub fn unsubscribe_client(
+        &self,
+        clientid: impl Into<String>,
+        body: SubscribeBody,
+    ) -> UnsubscribeClientBearerCall<'_> {
+        UnsubscribeClientBearerCall(
+            self.0.send(UnsubscribeClientBearerRequest::new(clientid, body)),
+        )
+    }
+    /// List all subscriptions across the cluster
+    ///
+    /// `GET /subscriptions`
+    ///
+    /// Returns a [`ListSubscriptionsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_subscriptions(&self) -> ListSubscriptionsBearerCall<'_> {
+        ListSubscriptionsBearerCall(
+            self.0.send(ListSubscriptionsBearerRequest::default()),
+        )
+    }
+    /// Publish an MQTT message to a topic
+    ///
+    /// `POST /publish`
+    ///
+    /// Returns a [`PublishBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PublishBody`: the request body
+    pub fn publish(&self, body: PublishBody) -> PublishBearerCall<'_> {
+        PublishBearerCall(self.0.send(PublishBearerRequest::new(body)))
+    }
+    /// Publish multiple MQTT messages in a single request
+    ///
+    /// `POST /publish/bulk`
+    ///
+    /// Returns a [`PublishBulkBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PublishBatchBody`: the request body
+    pub fn publish_bulk(&self, body: PublishBatchBody) -> PublishBulkBearerCall<'_> {
+        PublishBulkBearerCall(self.0.send(PublishBulkBearerRequest::new(body)))
+    }
+    /// List active topics in the broker
+    ///
+    /// `GET /topics`
+    ///
+    /// Returns a [`ListTopicsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_topics(&self) -> ListTopicsBearerCall<'_> {
+        ListTopicsBearerCall(self.0.send(ListTopicsBearerRequest::default()))
+    }
+    /// List retained messages with pagination
+    ///
+    /// `GET /retainer/messages`
+    ///
+    /// Returns a [`ListRetainedBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_retained(&self) -> ListRetainedBearerCall<'_> {
+        ListRetainedBearerCall(self.0.send(ListRetainedBearerRequest::default()))
+    }
+    /// Get a specific retained message by topic
+    ///
+    /// `GET /retainer/messages/{topic}`
+    ///
+    /// Returns a [`GetRetainedBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `topic: impl Into<String>`: the `{topic}` path parameter
+    pub fn get_retained(&self, topic: impl Into<String>) -> GetRetainedBearerCall<'_> {
+        GetRetainedBearerCall(self.0.send(GetRetainedBearerRequest::new(topic)))
+    }
+    /// Delete a retained message
+    ///
+    /// `DELETE /retainer/messages/{topic}`
+    ///
+    /// Returns a [`DeleteRetainedBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `topic: impl Into<String>`: the `{topic}` path parameter
+    pub fn delete_retained(
+        &self,
+        topic: impl Into<String>,
+    ) -> DeleteRetainedBearerCall<'_> {
+        DeleteRetainedBearerCall(self.0.send(DeleteRetainedBearerRequest::new(topic)))
+    }
+    /// List all rules in the rules engine
+    ///
+    /// `GET /rules`
+    ///
+    /// Returns a [`ListRulesBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_rules(&self) -> ListRulesBearerCall<'_> {
+        ListRulesBearerCall(self.0.send(ListRulesBearerRequest::default()))
+    }
+    /// Create a new rule in the rules engine
+    ///
+    /// `POST /rules`
+    ///
+    /// Returns a [`CreateRuleBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateRuleBody`: the request body
+    pub fn create_rule(&self, body: CreateRuleBody) -> CreateRuleBearerCall<'_> {
+        CreateRuleBearerCall(self.0.send(CreateRuleBearerRequest::new(body)))
+    }
+    /// Get details of a specific rule
+    ///
+    /// `GET /rules/{id}`
+    ///
+    /// Returns a [`GetRuleBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_rule(&self, id: impl Into<String>) -> GetRuleBearerCall<'_> {
+        GetRuleBearerCall(self.0.send(GetRuleBearerRequest::new(id)))
+    }
+    /// Update an existing rule
+    ///
+    /// `PUT /rules/{id}`
+    ///
+    /// Returns a [`UpdateRuleBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: CreateRuleBody`: the request body
+    pub fn update_rule(
+        &self,
+        id: impl Into<String>,
+        body: CreateRuleBody,
+    ) -> UpdateRuleBearerCall<'_> {
+        UpdateRuleBearerCall(self.0.send(UpdateRuleBearerRequest::new(id, body)))
+    }
+    /// Delete a rule from the rules engine
+    ///
+    /// `DELETE /rules/{id}`
+    ///
+    /// Returns a [`DeleteRuleBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn delete_rule(&self, id: impl Into<String>) -> DeleteRuleBearerCall<'_> {
+        DeleteRuleBearerCall(self.0.send(DeleteRuleBearerRequest::new(id)))
+    }
+    /// Test a rule with sample data
+    ///
+    /// `POST /rules/{id}/test`
+    ///
+    /// Returns a [`TestRuleBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: TestRuleBody`: the request body
+    pub fn test_rule(
+        &self,
+        id: impl Into<String>,
+        body: TestRuleBody,
+    ) -> TestRuleBearerCall<'_> {
+        TestRuleBearerCall(self.0.send(TestRuleBearerRequest::new(id, body)))
+    }
+    /// List all configured authentication providers
+    ///
+    /// `GET /authentication`
+    ///
+    /// Returns a [`ListAuthenticatorsBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_authenticators(&self) -> ListAuthenticatorsBearerCall<'_> {
+        ListAuthenticatorsBearerCall(
+            self.0.send(ListAuthenticatorsBearerRequest::default()),
+        )
+    }
+    /// Get details of a specific authenticator
+    ///
+    /// `GET /authentication/{id}`
+    ///
+    /// Returns a [`GetAuthenticatorBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn get_authenticator(
+        &self,
+        id: impl Into<String>,
+    ) -> GetAuthenticatorBearerCall<'_> {
+        GetAuthenticatorBearerCall(self.0.send(GetAuthenticatorBearerRequest::new(id)))
+    }
+    /// List users in a built-in database authenticator
+    ///
+    /// `GET /authentication/{id}/users`
+    ///
+    /// Returns a [`ListAuthUsersBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    pub fn list_auth_users(&self, id: impl Into<String>) -> ListAuthUsersBearerCall<'_> {
+        ListAuthUsersBearerCall(self.0.send(ListAuthUsersBearerRequest::new(id)))
+    }
+    /// Create a new user in a built-in database authenticator
+    ///
+    /// `POST /authentication/{id}/users`
+    ///
+    /// Returns a [`CreateAuthUserBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `body: CreateAuthUserBody`: the request body
+    pub fn create_auth_user(
+        &self,
+        id: impl Into<String>,
+        body: CreateAuthUserBody,
+    ) -> CreateAuthUserBearerCall<'_> {
+        CreateAuthUserBearerCall(self.0.send(CreateAuthUserBearerRequest::new(id, body)))
+    }
+    /// Delete a user from a built-in database authenticator
+    ///
+    /// `DELETE /authentication/{id}/users/{user_id}`
+    ///
+    /// Returns a [`DeleteAuthUserBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `id: impl Into<String>`: the `{id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn delete_auth_user(
+        &self,
+        id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> DeleteAuthUserBearerCall<'_> {
+        DeleteAuthUserBearerCall(
+            self.0.send(DeleteAuthUserBearerRequest::new(id, user_id)),
+        )
+    }
+    /// List all authorization sources
+    ///
+    /// `GET /authorization/sources`
+    ///
+    /// Returns a [`ListAuthzSourcesBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_authz_sources(&self) -> ListAuthzSourcesBearerCall<'_> {
+        ListAuthzSourcesBearerCall(self.0.send(ListAuthzSourcesBearerRequest::default()))
+    }
+    /// List all banned clients, usernames, and hosts
+    ///
+    /// `GET /banned`
+    ///
+    /// Returns a [`ListBannedBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_banned(&self) -> ListBannedBearerCall<'_> {
+        ListBannedBearerCall(self.0.send(ListBannedBearerRequest::default()))
+    }
+    /// Ban a client, username, or host
+    ///
+    /// `POST /banned`
+    ///
+    /// Returns a [`CreateBanBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateBanBody`: the request body
+    pub fn create_ban(&self, body: CreateBanBody) -> CreateBanBearerCall<'_> {
+        CreateBanBearerCall(self.0.send(CreateBanBearerRequest::new(body)))
+    }
+    /// Remove a ban by type (clientid, username, peerhost) and value
+    ///
+    /// `DELETE /banned/{ban_type}/{who}`
+    ///
+    /// Returns a [`DeleteBanBearerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `ban_type: impl Into<String>`: the `{ban_type}` path parameter
+    /// - `who: impl Into<String>`: the `{who}` path parameter
+    pub fn delete_ban(
+        &self,
+        ban_type: impl Into<String>,
+        who: impl Into<String>,
+    ) -> DeleteBanBearerCall<'_> {
+        DeleteBanBearerCall(self.0.send(DeleteBanBearerRequest::new(ban_type, who)))
     }
 }

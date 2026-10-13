@@ -326,6 +326,392 @@ impl schematic_runtime::EndpointSpec for ListImageToVideoModelsRequest {
         })
     }
 }
+/// A call to the `ListLlmModels` endpoint, returned by [`ArtificialAnalysisData::list_llm_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListLlmModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListLlmModelsRequest>,
+);
+impl<'a> ListLlmModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListLlmModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListLlmModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListLlmModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListTextToImageModels` endpoint, returned by [`ArtificialAnalysisData::list_text_to_image_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListTextToImageModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListTextToImageModelsRequest>,
+);
+impl<'a> ListTextToImageModelsCall<'a> {
+    /// Sets the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn include_categories(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_categories(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToImageModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListTextToImageModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToImageModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListImageEditingModels` endpoint, returned by [`ArtificialAnalysisData::list_image_editing_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListImageEditingModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListImageEditingModelsRequest>,
+);
+impl<'a> ListImageEditingModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListImageEditingModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListImageEditingModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListImageEditingModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListTextToSpeechModels` endpoint, returned by [`ArtificialAnalysisData::list_text_to_speech_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListTextToSpeechModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListTextToSpeechModelsRequest>,
+);
+impl<'a> ListTextToSpeechModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToSpeechModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListTextToSpeechModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToSpeechModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListTextToVideoModels` endpoint, returned by [`ArtificialAnalysisData::list_text_to_video_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListTextToVideoModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListTextToVideoModelsRequest>,
+);
+impl<'a> ListTextToVideoModelsCall<'a> {
+    /// Sets the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn include_categories(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_categories(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToVideoModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListTextToVideoModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListTextToVideoModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListImageToVideoModels` endpoint, returned by [`ArtificialAnalysisData::list_image_to_video_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListImageToVideoModelsCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisDataApi, ListImageToVideoModelsRequest>,
+);
+impl<'a> ListImageToVideoModelsCall<'a> {
+    /// Sets the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn include_categories(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_categories(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListImageToVideoModelsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListImageToVideoModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisDataApi,
+        ListImageToVideoModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl ArtificialAnalysisData {
+    /// Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing.
+    ///
+    /// `GET /data/llms/models`
+    ///
+    /// Returns a [`ListLlmModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_llm_models(&self) -> ListLlmModelsCall<'_> {
+        ListLlmModelsCall(self.0.send(ListLlmModelsRequest::default()))
+    }
+    /// Returns Elo ratings for text-to-image models.
+    ///
+    /// `GET /data/media/text-to-image`
+    ///
+    /// Returns a [`ListTextToImageModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include_categories`](ListTextToImageModelsCall::include_categories): the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn list_text_to_image_models(&self) -> ListTextToImageModelsCall<'_> {
+        ListTextToImageModelsCall(self.0.send(ListTextToImageModelsRequest::default()))
+    }
+    /// Returns Elo ratings for image-editing models.
+    ///
+    /// `GET /data/media/image-editing`
+    ///
+    /// Returns a [`ListImageEditingModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_image_editing_models(&self) -> ListImageEditingModelsCall<'_> {
+        ListImageEditingModelsCall(self.0.send(ListImageEditingModelsRequest::default()))
+    }
+    /// Returns Elo ratings for text-to-speech models.
+    ///
+    /// `GET /data/media/text-to-speech`
+    ///
+    /// Returns a [`ListTextToSpeechModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_text_to_speech_models(&self) -> ListTextToSpeechModelsCall<'_> {
+        ListTextToSpeechModelsCall(self.0.send(ListTextToSpeechModelsRequest::default()))
+    }
+    /// Returns Elo ratings for text-to-video models.
+    ///
+    /// `GET /data/media/text-to-video`
+    ///
+    /// Returns a [`ListTextToVideoModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include_categories`](ListTextToVideoModelsCall::include_categories): the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn list_text_to_video_models(&self) -> ListTextToVideoModelsCall<'_> {
+        ListTextToVideoModelsCall(self.0.send(ListTextToVideoModelsRequest::default()))
+    }
+    /// Returns Elo ratings for image-to-video models.
+    ///
+    /// `GET /data/media/image-to-video`
+    ///
+    /// Returns a [`ListImageToVideoModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include_categories`](ListImageToVideoModelsCall::include_categories): the `include_categories` query parameter (`bool`). Include a breakdown of Elo scores by category.
+    pub fn list_image_to_video_models(&self) -> ListImageToVideoModelsCall<'_> {
+        ListImageToVideoModelsCall(self.0.send(ListImageToVideoModelsRequest::default()))
+    }
+}
 /// The ArtificialAnalysisCritPt API: Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.
 ///
 /// Create a client with [`new`](Self::new), which never fails, and
@@ -440,5 +826,71 @@ impl schematic_runtime::EndpointSpec for EvaluateCritPtRequest {
                     })?,
             ),
         })
+    }
+}
+/// A call to the `EvaluateCritPt` endpoint, returned by [`ArtificialAnalysisCritPt::evaluate_crit_pt`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct EvaluateCritPtCall<'a>(
+    schematic_runtime::Call<'a, ArtificialAnalysisCritPtApi, EvaluateCritPtRequest>,
+);
+impl<'a> EvaluateCritPtCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ArtificialAnalysisCritPtApi,
+        EvaluateCritPtRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for EvaluateCritPtCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ArtificialAnalysisCritPtApi,
+        EvaluateCritPtRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl ArtificialAnalysisCritPt {
+    /// Submit a batch of code-generation submissions for evaluation against the CritPt benchmark.
+    ///
+    /// `POST /critpt/evaluate`
+    ///
+    /// Returns a [`EvaluateCritPtCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CritPtEvaluateBody`: the request body
+    pub fn evaluate_crit_pt(&self, body: CritPtEvaluateBody) -> EvaluateCritPtCall<'_> {
+        EvaluateCritPtCall(self.0.send(EvaluateCritPtRequest::new(body)))
     }
 }

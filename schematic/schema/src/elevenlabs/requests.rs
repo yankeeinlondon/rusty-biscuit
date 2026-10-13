@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::ElevenLabsApi;
+use super::{ElevenLabs, ElevenLabsApi};
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -2319,5 +2319,2661 @@ impl schematic_runtime::EndpointSpec for DeleteWebhookRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `CreateSpeech` endpoint, returned by [`ElevenLabs::create_speech`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSpeechCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateSpeechRequest>,
+);
+impl<'a> CreateSpeechCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreateSpeechRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSpeechCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateSpeechRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `StreamSpeech` endpoint, returned by [`ElevenLabs::stream_speech`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct StreamSpeechCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, StreamSpeechRequest>,
+);
+impl<'a> StreamSpeechCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, StreamSpeechRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for StreamSpeechCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        StreamSpeechRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateSpeechWithTimestamps` endpoint, returned by [`ElevenLabs::create_speech_with_timestamps`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSpeechWithTimestampsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateSpeechWithTimestampsRequest>,
+);
+impl<'a> CreateSpeechWithTimestampsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ElevenLabsApi,
+        CreateSpeechWithTimestampsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSpeechWithTimestampsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateSpeechWithTimestampsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `StreamSpeechWithTimestamps` endpoint, returned by [`ElevenLabs::stream_speech_with_timestamps`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct StreamSpeechWithTimestampsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, StreamSpeechWithTimestampsRequest>,
+);
+impl<'a> StreamSpeechWithTimestampsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ElevenLabsApi,
+        StreamSpeechWithTimestampsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for StreamSpeechWithTimestampsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        StreamSpeechWithTimestampsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListVoices` endpoint, returned by [`ElevenLabs::list_voices`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListVoicesCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListVoicesRequest>,
+);
+impl<'a> ListVoicesCall<'a> {
+    /// Sets the `page_size` query parameter (`i64`). Voices per page (at most 100)
+    pub fn page_size(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_page_size(value)))
+    }
+    /// Sets the `page_token` query parameter (`String`). The previous page's `next_page_token`
+    pub fn page_token(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page_token(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ListVoicesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListVoicesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListVoicesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVoice` endpoint, returned by [`ElevenLabs::get_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVoiceCall<'a>(schematic_runtime::Call<'a, ElevenLabsApi, GetVoiceRequest>);
+impl<'a> GetVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVoice` endpoint, returned by [`ElevenLabs::delete_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVoiceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DeleteVoiceRequest>,
+);
+impl<'a> DeleteVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DeleteVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DeleteVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetDefaultVoiceSettings` endpoint, returned by [`ElevenLabs::get_default_voice_settings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetDefaultVoiceSettingsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetDefaultVoiceSettingsRequest>,
+);
+impl<'a> GetDefaultVoiceSettingsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetDefaultVoiceSettingsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetDefaultVoiceSettingsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetDefaultVoiceSettingsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVoiceSettings` endpoint, returned by [`ElevenLabs::get_voice_settings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVoiceSettingsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetVoiceSettingsRequest>,
+);
+impl<'a> GetVoiceSettingsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetVoiceSettingsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVoiceSettingsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetVoiceSettingsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateVoiceSettings` endpoint, returned by [`ElevenLabs::update_voice_settings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateVoiceSettingsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, UpdateVoiceSettingsRequest>,
+);
+impl<'a> UpdateVoiceSettingsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, UpdateVoiceSettingsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateVoiceSettingsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        UpdateVoiceSettingsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVoiceSampleAudio` endpoint, returned by [`ElevenLabs::get_voice_sample_audio`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVoiceSampleAudioCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetVoiceSampleAudioRequest>,
+);
+impl<'a> GetVoiceSampleAudioCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetVoiceSampleAudioRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVoiceSampleAudioCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetVoiceSampleAudioRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVoiceSample` endpoint, returned by [`ElevenLabs::delete_voice_sample`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVoiceSampleCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DeleteVoiceSampleRequest>,
+);
+impl<'a> DeleteVoiceSampleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DeleteVoiceSampleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVoiceSampleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DeleteVoiceSampleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AddVoiceSample` endpoint, returned by [`ElevenLabs::add_voice_sample`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AddVoiceSampleCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, AddVoiceSampleRequest>,
+);
+impl<'a> AddVoiceSampleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, AddVoiceSampleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AddVoiceSampleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        AddVoiceSampleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListSharedVoices` endpoint, returned by [`ElevenLabs::list_shared_voices`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListSharedVoicesCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListSharedVoicesRequest>,
+);
+impl<'a> ListSharedVoicesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ListSharedVoicesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListSharedVoicesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListSharedVoicesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AddSharedVoice` endpoint, returned by [`ElevenLabs::add_shared_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AddSharedVoiceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, AddSharedVoiceRequest>,
+);
+impl<'a> AddSharedVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, AddSharedVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AddSharedVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        AddSharedVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreatePvcVoice` endpoint, returned by [`ElevenLabs::create_pvc_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreatePvcVoiceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreatePvcVoiceRequest>,
+);
+impl<'a> CreatePvcVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreatePvcVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreatePvcVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreatePvcVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdatePvcVoice` endpoint, returned by [`ElevenLabs::update_pvc_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdatePvcVoiceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, UpdatePvcVoiceRequest>,
+);
+impl<'a> UpdatePvcVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, UpdatePvcVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdatePvcVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        UpdatePvcVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `TrainPvcVoice` endpoint, returned by [`ElevenLabs::train_pvc_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct TrainPvcVoiceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, TrainPvcVoiceRequest>,
+);
+impl<'a> TrainPvcVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, TrainPvcVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for TrainPvcVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        TrainPvcVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateSoundEffect` endpoint, returned by [`ElevenLabs::create_sound_effect`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSoundEffectCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateSoundEffectRequest>,
+);
+impl<'a> CreateSoundEffectCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreateSoundEffectRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSoundEffectCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateSoundEffectRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`ElevenLabs::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListModelsRequest>,
+);
+impl<'a> ListModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ListModelsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateSingleUseToken` endpoint, returned by [`ElevenLabs::create_single_use_token`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSingleUseTokenCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateSingleUseTokenRequest>,
+);
+impl<'a> CreateSingleUseTokenCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreateSingleUseTokenRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSingleUseTokenCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateSingleUseTokenRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetHistory` endpoint, returned by [`ElevenLabs::get_history`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetHistoryCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetHistoryRequest>,
+);
+impl<'a> GetHistoryCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetHistoryRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetHistoryCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetHistoryRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetHistoryItem` endpoint, returned by [`ElevenLabs::get_history_item`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetHistoryItemCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetHistoryItemRequest>,
+);
+impl<'a> GetHistoryItemCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetHistoryItemRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetHistoryItemCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetHistoryItemRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteHistoryItem` endpoint, returned by [`ElevenLabs::delete_history_item`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteHistoryItemCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DeleteHistoryItemRequest>,
+);
+impl<'a> DeleteHistoryItemCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DeleteHistoryItemRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteHistoryItemCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DeleteHistoryItemRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetHistoryItemAudio` endpoint, returned by [`ElevenLabs::get_history_item_audio`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetHistoryItemAudioCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetHistoryItemAudioRequest>,
+);
+impl<'a> GetHistoryItemAudioCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetHistoryItemAudioRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetHistoryItemAudioCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetHistoryItemAudioRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DownloadHistoryItems` endpoint, returned by [`ElevenLabs::download_history_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DownloadHistoryItemsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DownloadHistoryItemsRequest>,
+);
+impl<'a> DownloadHistoryItemsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DownloadHistoryItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DownloadHistoryItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DownloadHistoryItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetUsageStats` endpoint, returned by [`ElevenLabs::get_usage_stats`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetUsageStatsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetUsageStatsRequest>,
+);
+impl<'a> GetUsageStatsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetUsageStatsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetUsageStatsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetUsageStatsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetUser` endpoint, returned by [`ElevenLabs::get_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetUserCall<'a>(schematic_runtime::Call<'a, ElevenLabsApi, GetUserRequest>);
+impl<'a> GetUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetUserSubscription` endpoint, returned by [`ElevenLabs::get_user_subscription`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetUserSubscriptionCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetUserSubscriptionRequest>,
+);
+impl<'a> GetUserSubscriptionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetUserSubscriptionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetUserSubscriptionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetUserSubscriptionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetResource` endpoint, returned by [`ElevenLabs::get_resource`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetResourceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, GetResourceRequest>,
+);
+impl<'a> GetResourceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, GetResourceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetResourceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        GetResourceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ShareResource` endpoint, returned by [`ElevenLabs::share_resource`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ShareResourceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ShareResourceRequest>,
+);
+impl<'a> ShareResourceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ShareResourceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ShareResourceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ShareResourceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnshareResource` endpoint, returned by [`ElevenLabs::unshare_resource`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnshareResourceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, UnshareResourceRequest>,
+);
+impl<'a> UnshareResourceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, UnshareResourceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnshareResourceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        UnshareResourceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CopyResourceToWorkspace` endpoint, returned by [`ElevenLabs::copy_resource_to_workspace`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CopyResourceToWorkspaceCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CopyResourceToWorkspaceRequest>,
+);
+impl<'a> CopyResourceToWorkspaceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CopyResourceToWorkspaceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CopyResourceToWorkspaceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CopyResourceToWorkspaceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListServiceAccounts` endpoint, returned by [`ElevenLabs::list_service_accounts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListServiceAccountsCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListServiceAccountsRequest>,
+);
+impl<'a> ListServiceAccountsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ListServiceAccountsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListServiceAccountsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListServiceAccountsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListServiceAccountApiKeys` endpoint, returned by [`ElevenLabs::list_service_account_api_keys`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListServiceAccountApiKeysCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListServiceAccountApiKeysRequest>,
+);
+impl<'a> ListServiceAccountApiKeysCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        ElevenLabsApi,
+        ListServiceAccountApiKeysRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListServiceAccountApiKeysCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListServiceAccountApiKeysRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateApiKey` endpoint, returned by [`ElevenLabs::create_api_key`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateApiKeyCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateApiKeyRequest>,
+);
+impl<'a> CreateApiKeyCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreateApiKeyRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateApiKeyCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateApiKeyRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateApiKey` endpoint, returned by [`ElevenLabs::update_api_key`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateApiKeyCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, UpdateApiKeyRequest>,
+);
+impl<'a> UpdateApiKeyCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, UpdateApiKeyRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateApiKeyCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        UpdateApiKeyRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteApiKey` endpoint, returned by [`ElevenLabs::delete_api_key`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteApiKeyCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DeleteApiKeyRequest>,
+);
+impl<'a> DeleteApiKeyCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DeleteApiKeyRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteApiKeyCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DeleteApiKeyRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListWebhooks` endpoint, returned by [`ElevenLabs::list_webhooks`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListWebhooksCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, ListWebhooksRequest>,
+);
+impl<'a> ListWebhooksCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, ListWebhooksRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListWebhooksCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        ListWebhooksRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateWebhook` endpoint, returned by [`ElevenLabs::create_webhook`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateWebhookCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, CreateWebhookRequest>,
+);
+impl<'a> CreateWebhookCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, CreateWebhookRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateWebhookCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        CreateWebhookRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateWebhook` endpoint, returned by [`ElevenLabs::update_webhook`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateWebhookCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, UpdateWebhookRequest>,
+);
+impl<'a> UpdateWebhookCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, UpdateWebhookRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateWebhookCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        UpdateWebhookRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteWebhook` endpoint, returned by [`ElevenLabs::delete_webhook`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteWebhookCall<'a>(
+    schematic_runtime::Call<'a, ElevenLabsApi, DeleteWebhookRequest>,
+);
+impl<'a> DeleteWebhookCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, ElevenLabsApi, DeleteWebhookRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteWebhookCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        ElevenLabsApi,
+        DeleteWebhookRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl ElevenLabs {
+    /// Converts text into speech and returns audio
+    ///
+    /// `POST /v1/text-to-speech/{voice_id}`
+    ///
+    /// Returns a [`CreateSpeechCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: CreateSpeechBody`: the request body
+    pub fn create_speech(
+        &self,
+        voice_id: impl Into<String>,
+        body: CreateSpeechBody,
+    ) -> CreateSpeechCall<'_> {
+        CreateSpeechCall(self.0.send(CreateSpeechRequest::new(voice_id, body)))
+    }
+    /// Streams audio as it's generated
+    ///
+    /// `POST /v1/text-to-speech/{voice_id}/stream`
+    ///
+    /// Returns a [`StreamSpeechCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: CreateSpeechBody`: the request body
+    pub fn stream_speech(
+        &self,
+        voice_id: impl Into<String>,
+        body: CreateSpeechBody,
+    ) -> StreamSpeechCall<'_> {
+        StreamSpeechCall(self.0.send(StreamSpeechRequest::new(voice_id, body)))
+    }
+    /// Returns audio with character-level timing information
+    ///
+    /// `POST /v1/text-to-speech/{voice_id}/with-timestamps`
+    ///
+    /// Returns a [`CreateSpeechWithTimestampsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: CreateSpeechBody`: the request body
+    pub fn create_speech_with_timestamps(
+        &self,
+        voice_id: impl Into<String>,
+        body: CreateSpeechBody,
+    ) -> CreateSpeechWithTimestampsCall<'_> {
+        CreateSpeechWithTimestampsCall(
+            self.0.send(CreateSpeechWithTimestampsRequest::new(voice_id, body)),
+        )
+    }
+    /// Streams audio chunks with timing information
+    ///
+    /// `POST /v1/text-to-speech/{voice_id}/stream/with-timestamps`
+    ///
+    /// Returns a [`StreamSpeechWithTimestampsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: CreateSpeechBody`: the request body
+    pub fn stream_speech_with_timestamps(
+        &self,
+        voice_id: impl Into<String>,
+        body: CreateSpeechBody,
+    ) -> StreamSpeechWithTimestampsCall<'_> {
+        StreamSpeechWithTimestampsCall(
+            self.0.send(StreamSpeechWithTimestampsRequest::new(voice_id, body)),
+        )
+    }
+    /// Lists all available voices
+    ///
+    /// `GET /v2/voices`
+    ///
+    /// Returns a [`ListVoicesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`page_size`](ListVoicesCall::page_size): the `page_size` query parameter (`i64`). Voices per page (at most 100)
+    /// - [`page_token`](ListVoicesCall::page_token): the `page_token` query parameter (`String`). The previous page's `next_page_token`
+    pub fn list_voices(&self) -> ListVoicesCall<'_> {
+        ListVoicesCall(self.0.send(ListVoicesRequest::default()))
+    }
+    /// Retrieves a voice by ID
+    ///
+    /// `GET /v1/voices/{voice_id}`
+    ///
+    /// Returns a [`GetVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    pub fn get_voice(&self, voice_id: impl Into<String>) -> GetVoiceCall<'_> {
+        GetVoiceCall(self.0.send(GetVoiceRequest::new(voice_id)))
+    }
+    /// Deletes a voice
+    ///
+    /// `DELETE /v1/voices/{voice_id}`
+    ///
+    /// Returns a [`DeleteVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    pub fn delete_voice(&self, voice_id: impl Into<String>) -> DeleteVoiceCall<'_> {
+        DeleteVoiceCall(self.0.send(DeleteVoiceRequest::new(voice_id)))
+    }
+    /// Gets default voice settings
+    ///
+    /// `GET /v1/voices/settings/default`
+    ///
+    /// Returns a [`GetDefaultVoiceSettingsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_default_voice_settings(&self) -> GetDefaultVoiceSettingsCall<'_> {
+        GetDefaultVoiceSettingsCall(
+            self.0.send(GetDefaultVoiceSettingsRequest::default()),
+        )
+    }
+    /// Gets voice settings for a specific voice
+    ///
+    /// `GET /v1/voices/{voice_id}/settings`
+    ///
+    /// Returns a [`GetVoiceSettingsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    pub fn get_voice_settings(
+        &self,
+        voice_id: impl Into<String>,
+    ) -> GetVoiceSettingsCall<'_> {
+        GetVoiceSettingsCall(self.0.send(GetVoiceSettingsRequest::new(voice_id)))
+    }
+    /// Updates voice settings
+    ///
+    /// `POST /v1/voices/{voice_id}/settings/edit`
+    ///
+    /// Returns a [`UpdateVoiceSettingsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: VoiceSettings`: the request body
+    pub fn update_voice_settings(
+        &self,
+        voice_id: impl Into<String>,
+        body: VoiceSettings,
+    ) -> UpdateVoiceSettingsCall<'_> {
+        UpdateVoiceSettingsCall(
+            self.0.send(UpdateVoiceSettingsRequest::new(voice_id, body)),
+        )
+    }
+    /// Gets audio for a voice sample
+    ///
+    /// `GET /v1/voices/{voice_id}/samples/{sample_id}/audio`
+    ///
+    /// Returns a [`GetVoiceSampleAudioCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `sample_id: impl Into<String>`: the `{sample_id}` path parameter
+    pub fn get_voice_sample_audio(
+        &self,
+        voice_id: impl Into<String>,
+        sample_id: impl Into<String>,
+    ) -> GetVoiceSampleAudioCall<'_> {
+        GetVoiceSampleAudioCall(
+            self.0.send(GetVoiceSampleAudioRequest::new(voice_id, sample_id)),
+        )
+    }
+    /// Deletes a voice sample
+    ///
+    /// `DELETE /v1/voices/{voice_id}/samples/{sample_id}`
+    ///
+    /// Returns a [`DeleteVoiceSampleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `sample_id: impl Into<String>`: the `{sample_id}` path parameter
+    pub fn delete_voice_sample(
+        &self,
+        voice_id: impl Into<String>,
+        sample_id: impl Into<String>,
+    ) -> DeleteVoiceSampleCall<'_> {
+        DeleteVoiceSampleCall(
+            self.0.send(DeleteVoiceSampleRequest::new(voice_id, sample_id)),
+        )
+    }
+    /// Upload audio sample for voice cloning
+    ///
+    /// `POST /v1/voices/{voice_id}/samples`
+    ///
+    /// Returns a [`AddVoiceSampleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: AddVoiceSampleForm`: the request body
+    pub fn add_voice_sample(
+        &self,
+        voice_id: impl Into<String>,
+        body: AddVoiceSampleForm,
+    ) -> AddVoiceSampleCall<'_> {
+        AddVoiceSampleCall(self.0.send(AddVoiceSampleRequest::new(voice_id, body)))
+    }
+    /// Lists voices from the public library
+    ///
+    /// `GET /v1/shared-voices`
+    ///
+    /// Returns a [`ListSharedVoicesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_shared_voices(&self) -> ListSharedVoicesCall<'_> {
+        ListSharedVoicesCall(self.0.send(ListSharedVoicesRequest::default()))
+    }
+    /// Adds a shared voice to your library
+    ///
+    /// `POST /v1/voices/add/{public_user_id}/{voice_id}`
+    ///
+    /// Returns a [`AddSharedVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `public_user_id: impl Into<String>`: the `{public_user_id}` path parameter
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: AddSharedVoiceBody`: the request body
+    pub fn add_shared_voice(
+        &self,
+        public_user_id: impl Into<String>,
+        voice_id: impl Into<String>,
+        body: AddSharedVoiceBody,
+    ) -> AddSharedVoiceCall<'_> {
+        AddSharedVoiceCall(
+            self.0.send(AddSharedVoiceRequest::new(public_user_id, voice_id, body)),
+        )
+    }
+    /// Creates a professional voice clone
+    ///
+    /// `POST /v1/voices/pvc`
+    ///
+    /// Returns a [`CreatePvcVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreatePvcVoiceBody`: the request body
+    pub fn create_pvc_voice(&self, body: CreatePvcVoiceBody) -> CreatePvcVoiceCall<'_> {
+        CreatePvcVoiceCall(self.0.send(CreatePvcVoiceRequest::new(body)))
+    }
+    /// Updates a PVC voice
+    ///
+    /// `POST /v1/voices/pvc/{voice_id}`
+    ///
+    /// Returns a [`UpdatePvcVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: CreatePvcVoiceBody`: the request body
+    pub fn update_pvc_voice(
+        &self,
+        voice_id: impl Into<String>,
+        body: CreatePvcVoiceBody,
+    ) -> UpdatePvcVoiceCall<'_> {
+        UpdatePvcVoiceCall(self.0.send(UpdatePvcVoiceRequest::new(voice_id, body)))
+    }
+    /// Starts training a PVC voice
+    ///
+    /// `POST /v1/voices/pvc/{voice_id}/train`
+    ///
+    /// Returns a [`TrainPvcVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
+    /// - `body: TrainPvcVoiceBody`: the request body
+    pub fn train_pvc_voice(
+        &self,
+        voice_id: impl Into<String>,
+        body: TrainPvcVoiceBody,
+    ) -> TrainPvcVoiceCall<'_> {
+        TrainPvcVoiceCall(self.0.send(TrainPvcVoiceRequest::new(voice_id, body)))
+    }
+    /// Generates a sound effect from text
+    ///
+    /// `POST /v1/sound-generation`
+    ///
+    /// Returns a [`CreateSoundEffectCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateSoundEffectBody`: the request body
+    pub fn create_sound_effect(
+        &self,
+        body: CreateSoundEffectBody,
+    ) -> CreateSoundEffectCall<'_> {
+        CreateSoundEffectCall(self.0.send(CreateSoundEffectRequest::new(body)))
+    }
+    /// Lists all available models
+    ///
+    /// `GET /v1/models`
+    ///
+    /// Returns a [`ListModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsCall<'_> {
+        ListModelsCall(self.0.send(ListModelsRequest::default()))
+    }
+    /// Creates a single-use token for WebSocket auth
+    ///
+    /// `POST /v1/single-use-token/{token_type}`
+    ///
+    /// Returns a [`CreateSingleUseTokenCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `token_type: impl Into<String>`: the `{token_type}` path parameter
+    pub fn create_single_use_token(
+        &self,
+        token_type: impl Into<String>,
+    ) -> CreateSingleUseTokenCall<'_> {
+        CreateSingleUseTokenCall(
+            self.0.send(CreateSingleUseTokenRequest::new(token_type)),
+        )
+    }
+    /// Gets generated items history
+    ///
+    /// `GET /v1/history`
+    ///
+    /// Returns a [`GetHistoryCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_history(&self) -> GetHistoryCall<'_> {
+        GetHistoryCall(self.0.send(GetHistoryRequest::default()))
+    }
+    /// Gets a specific history item
+    ///
+    /// `GET /v1/history/{history_item_id}`
+    ///
+    /// Returns a [`GetHistoryItemCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `history_item_id: impl Into<String>`: the `{history_item_id}` path parameter
+    pub fn get_history_item(
+        &self,
+        history_item_id: impl Into<String>,
+    ) -> GetHistoryItemCall<'_> {
+        GetHistoryItemCall(self.0.send(GetHistoryItemRequest::new(history_item_id)))
+    }
+    /// Deletes a history item
+    ///
+    /// `DELETE /v1/history/{history_item_id}`
+    ///
+    /// Returns a [`DeleteHistoryItemCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `history_item_id: impl Into<String>`: the `{history_item_id}` path parameter
+    pub fn delete_history_item(
+        &self,
+        history_item_id: impl Into<String>,
+    ) -> DeleteHistoryItemCall<'_> {
+        DeleteHistoryItemCall(
+            self.0.send(DeleteHistoryItemRequest::new(history_item_id)),
+        )
+    }
+    /// Gets audio for a history item
+    ///
+    /// `GET /v1/history/{history_item_id}/audio`
+    ///
+    /// Returns a [`GetHistoryItemAudioCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `history_item_id: impl Into<String>`: the `{history_item_id}` path parameter
+    pub fn get_history_item_audio(
+        &self,
+        history_item_id: impl Into<String>,
+    ) -> GetHistoryItemAudioCall<'_> {
+        GetHistoryItemAudioCall(
+            self.0.send(GetHistoryItemAudioRequest::new(history_item_id)),
+        )
+    }
+    /// Downloads multiple history items as ZIP
+    ///
+    /// `POST /v1/history/download`
+    ///
+    /// Returns a [`DownloadHistoryItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: DownloadHistoryBody`: the request body
+    pub fn download_history_items(
+        &self,
+        body: DownloadHistoryBody,
+    ) -> DownloadHistoryItemsCall<'_> {
+        DownloadHistoryItemsCall(self.0.send(DownloadHistoryItemsRequest::new(body)))
+    }
+    /// Gets usage statistics
+    ///
+    /// `GET /v1/usage/character-stats`
+    ///
+    /// Returns a [`GetUsageStatsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_usage_stats(&self) -> GetUsageStatsCall<'_> {
+        GetUsageStatsCall(self.0.send(GetUsageStatsRequest::default()))
+    }
+    /// Gets current user information
+    ///
+    /// `GET /v1/user`
+    ///
+    /// Returns a [`GetUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_user(&self) -> GetUserCall<'_> {
+        GetUserCall(self.0.send(GetUserRequest::default()))
+    }
+    /// Gets user subscription information
+    ///
+    /// `GET /v1/user/subscription`
+    ///
+    /// Returns a [`GetUserSubscriptionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_user_subscription(&self) -> GetUserSubscriptionCall<'_> {
+        GetUserSubscriptionCall(self.0.send(GetUserSubscriptionRequest::default()))
+    }
+    /// Gets resource information
+    ///
+    /// `GET /v1/workspace/resources/{resource_id}`
+    ///
+    /// Returns a [`GetResourceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
+    pub fn get_resource(&self, resource_id: impl Into<String>) -> GetResourceCall<'_> {
+        GetResourceCall(self.0.send(GetResourceRequest::new(resource_id)))
+    }
+    /// Shares a resource
+    ///
+    /// `POST /v1/workspace/resources/{resource_id}/share`
+    ///
+    /// Returns a [`ShareResourceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
+    /// - `body: ShareResourceBody`: the request body
+    pub fn share_resource(
+        &self,
+        resource_id: impl Into<String>,
+        body: ShareResourceBody,
+    ) -> ShareResourceCall<'_> {
+        ShareResourceCall(self.0.send(ShareResourceRequest::new(resource_id, body)))
+    }
+    /// Removes sharing for a resource
+    ///
+    /// `POST /v1/workspace/resources/{resource_id}/unshare`
+    ///
+    /// Returns a [`UnshareResourceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
+    /// - `body: UnshareResourceBody`: the request body
+    pub fn unshare_resource(
+        &self,
+        resource_id: impl Into<String>,
+        body: UnshareResourceBody,
+    ) -> UnshareResourceCall<'_> {
+        UnshareResourceCall(self.0.send(UnshareResourceRequest::new(resource_id, body)))
+    }
+    /// Copies a resource to another workspace
+    ///
+    /// `POST /v1/workspace/resources/{resource_id}/copy-to-workspace`
+    ///
+    /// Returns a [`CopyResourceToWorkspaceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
+    /// - `body: CopyResourceBody`: the request body
+    pub fn copy_resource_to_workspace(
+        &self,
+        resource_id: impl Into<String>,
+        body: CopyResourceBody,
+    ) -> CopyResourceToWorkspaceCall<'_> {
+        CopyResourceToWorkspaceCall(
+            self.0.send(CopyResourceToWorkspaceRequest::new(resource_id, body)),
+        )
+    }
+    /// Lists service accounts
+    ///
+    /// `GET /v1/service-accounts`
+    ///
+    /// Returns a [`ListServiceAccountsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_service_accounts(&self) -> ListServiceAccountsCall<'_> {
+        ListServiceAccountsCall(self.0.send(ListServiceAccountsRequest::default()))
+    }
+    /// Lists API keys for a service account
+    ///
+    /// `GET /v1/service-accounts/{service_account_user_id}/api-keys`
+    ///
+    /// Returns a [`ListServiceAccountApiKeysCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
+    pub fn list_service_account_api_keys(
+        &self,
+        service_account_user_id: impl Into<String>,
+    ) -> ListServiceAccountApiKeysCall<'_> {
+        ListServiceAccountApiKeysCall(
+            self.0.send(ListServiceAccountApiKeysRequest::new(service_account_user_id)),
+        )
+    }
+    /// Creates an API key for a service account
+    ///
+    /// `POST /v1/service-accounts/{service_account_user_id}/api-keys`
+    ///
+    /// Returns a [`CreateApiKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
+    /// - `body: CreateApiKeyBody`: the request body
+    pub fn create_api_key(
+        &self,
+        service_account_user_id: impl Into<String>,
+        body: CreateApiKeyBody,
+    ) -> CreateApiKeyCall<'_> {
+        CreateApiKeyCall(
+            self.0.send(CreateApiKeyRequest::new(service_account_user_id, body)),
+        )
+    }
+    /// Updates an API key
+    ///
+    /// `PATCH /v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}`
+    ///
+    /// Returns a [`UpdateApiKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
+    /// - `api_key_id: impl Into<String>`: the `{api_key_id}` path parameter
+    /// - `body: UpdateApiKeyBody`: the request body
+    pub fn update_api_key(
+        &self,
+        service_account_user_id: impl Into<String>,
+        api_key_id: impl Into<String>,
+        body: UpdateApiKeyBody,
+    ) -> UpdateApiKeyCall<'_> {
+        UpdateApiKeyCall(
+            self
+                .0
+                .send(
+                    UpdateApiKeyRequest::new(service_account_user_id, api_key_id, body),
+                ),
+        )
+    }
+    /// Deletes an API key
+    ///
+    /// `DELETE /v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}`
+    ///
+    /// Returns a [`DeleteApiKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
+    /// - `api_key_id: impl Into<String>`: the `{api_key_id}` path parameter
+    pub fn delete_api_key(
+        &self,
+        service_account_user_id: impl Into<String>,
+        api_key_id: impl Into<String>,
+    ) -> DeleteApiKeyCall<'_> {
+        DeleteApiKeyCall(
+            self.0.send(DeleteApiKeyRequest::new(service_account_user_id, api_key_id)),
+        )
+    }
+    /// Lists webhooks
+    ///
+    /// `GET /v1/workspace/webhooks`
+    ///
+    /// Returns a [`ListWebhooksCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_webhooks(&self) -> ListWebhooksCall<'_> {
+        ListWebhooksCall(self.0.send(ListWebhooksRequest::default()))
+    }
+    /// Creates a webhook
+    ///
+    /// `POST /v1/workspace/webhooks`
+    ///
+    /// Returns a [`CreateWebhookCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateWebhookBody`: the request body
+    pub fn create_webhook(&self, body: CreateWebhookBody) -> CreateWebhookCall<'_> {
+        CreateWebhookCall(self.0.send(CreateWebhookRequest::new(body)))
+    }
+    /// Updates a webhook
+    ///
+    /// `PATCH /v1/workspace/webhooks/{webhook_id}`
+    ///
+    /// Returns a [`UpdateWebhookCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `webhook_id: impl Into<String>`: the `{webhook_id}` path parameter
+    /// - `body: UpdateWebhookBody`: the request body
+    pub fn update_webhook(
+        &self,
+        webhook_id: impl Into<String>,
+        body: UpdateWebhookBody,
+    ) -> UpdateWebhookCall<'_> {
+        UpdateWebhookCall(self.0.send(UpdateWebhookRequest::new(webhook_id, body)))
+    }
+    /// Deletes a webhook
+    ///
+    /// `DELETE /v1/workspace/webhooks/{webhook_id}`
+    ///
+    /// Returns a [`DeleteWebhookCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `webhook_id: impl Into<String>`: the `{webhook_id}` path parameter
+    pub fn delete_webhook(
+        &self,
+        webhook_id: impl Into<String>,
+    ) -> DeleteWebhookCall<'_> {
+        DeleteWebhookCall(self.0.send(DeleteWebhookRequest::new(webhook_id)))
     }
 }

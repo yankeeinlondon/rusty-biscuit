@@ -3,12 +3,13 @@
 //! Convenient re-exports for working with generated API clients.
 //!
 //! This prelude exports each API's client struct, and
-//! the runtime types every send uses. Request and response types are
-//! **not** re-exported here to avoid naming conflicts. Import them
-//! from specific API modules instead:
+//! the runtime types every call uses. Request, call, and response
+//! types are **not** re-exported here to avoid naming conflicts. An
+//! endpoint method needs none of them imported; when one must be
+//! named, import it from its API module:
 //!
 //! ```text
-//! use schematic_schema::openai::{ListModelsRequest, ListModelsResponse};
+//! use schematic_schema::openai::{ListModelsCall, ListModelsRequest, ListModelsResponse};
 //! ```
 //!
 //! ## Re-exports
@@ -42,27 +43,23 @@
 //! - [`define_unfolded_circle_integration_ws_api_definition`] (UnfoldedCircleIntegrationWs)
 //! - [`define_samsung_smart_tv_remote_ws_api_definition`] (SamsungSmartTvRemote)
 //!
-//! **Runtime types:** [`CallOptions`], [`Credential`], [`Deadline`],
-//! [`OriginPolicy`], [`Response`], [`RawResponse`], and
-//! [`TransportError`] from [`schematic_runtime`].
+//! **Runtime types:** [`Call`], [`CallError`], [`CallOptions`],
+//! [`Credential`], [`Deadline`], [`FullCall`], [`OriginPolicy`],
+//! [`Response`], [`RawResponse`], and [`TransportError`] from
+//! [`schematic_runtime`].
 //!
 //! ## Examples
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::openai::RetrieveModelRequest;
 //!
 //! let client = OpenAI::new();
-//! let response = client
-//!     .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
-//!     .await?;
-//! if let Some(model) = response.data() {
-//!     println!("{}", model.id);
-//! }
+//! let model = client.retrieve_model("gpt-4").await?;
+//! println!("{}", model.id);
 //! ```
 pub use schematic_runtime::{
-    CallOptions, Credential, Deadline, OriginPolicy, RawResponse, Response,
-    TransportError,
+    Call, CallError, CallOptions, Credential, Deadline, FullCall, OriginPolicy,
+    RawResponse, Response, TransportError,
 };
 pub use crate::anthropic::Anthropic;
 pub use crate::artificial_analysis::ArtificialAnalysisData;

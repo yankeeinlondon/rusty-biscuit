@@ -31,12 +31,14 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = UnfoldedCircleCoreRest::new();
-//!     let response = client.send(GetSystemInfoCoreRestRequest::default(), &CallOptions::new()).await?;
+//!     let data = client.get_system_info().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.get_system_info().full().await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
 //! }
@@ -701,5 +703,745 @@ impl schematic_runtime::EndpointSpec for QueryLogsTextCoreRestRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `Login` endpoint, returned by [`UnfoldedCircleCoreRest::login`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LoginCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, LoginCoreRestRequest>,
+);
+impl<'a> LoginCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        LoginCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LoginCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        LoginCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Logout` endpoint, returned by [`UnfoldedCircleCoreRest::logout`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LogoutCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, LogoutCoreRestRequest>,
+);
+impl<'a> LogoutCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        LogoutCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LogoutCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        LogoutCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetSystemInfo` endpoint, returned by [`UnfoldedCircleCoreRest::get_system_info`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetSystemInfoCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, GetSystemInfoCoreRestRequest>,
+);
+impl<'a> GetSystemInfoCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        GetSystemInfoCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetSystemInfoCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        GetSystemInfoCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ExportBackup` endpoint, returned by [`UnfoldedCircleCoreRest::export_backup`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ExportBackupCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, ExportBackupCoreRestRequest>,
+);
+impl<'a> ExportBackupCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        ExportBackupCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ExportBackupCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        ExportBackupCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RestoreBackup` endpoint, returned by [`UnfoldedCircleCoreRest::restore_backup`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RestoreBackupCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, RestoreBackupCoreRestRequest>,
+);
+impl<'a> RestoreBackupCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        RestoreBackupCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RestoreBackupCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        RestoreBackupCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UploadResource` endpoint, returned by [`UnfoldedCircleCoreRest::upload_resource`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UploadResourceCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, UploadResourceCoreRestRequest>,
+);
+impl<'a> UploadResourceCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        UploadResourceCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UploadResourceCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        UploadResourceCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetResource` endpoint, returned by [`UnfoldedCircleCoreRest::get_resource`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetResourceCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, GetResourceCoreRestRequest>,
+);
+impl<'a> GetResourceCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        GetResourceCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetResourceCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        GetResourceCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `InstallCustomIntegration` endpoint, returned by [`UnfoldedCircleCoreRest::install_custom_integration`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct InstallCustomIntegrationCoreRestCall<'a>(
+    schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomIntegrationCoreRestRequest,
+    >,
+);
+impl<'a> InstallCustomIntegrationCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomIntegrationCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for InstallCustomIntegrationCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomIntegrationCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UploadCustomIrCodeSet` endpoint, returned by [`UnfoldedCircleCoreRest::upload_custom_ir_code_set`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UploadCustomIrCodeSetCoreRestCall<'a>(
+    schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        UploadCustomIrCodeSetCoreRestRequest,
+    >,
+);
+impl<'a> UploadCustomIrCodeSetCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        UploadCustomIrCodeSetCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UploadCustomIrCodeSetCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        UploadCustomIrCodeSetCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `InstallCustomComponent` endpoint, returned by [`UnfoldedCircleCoreRest::install_custom_component`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct InstallCustomComponentCoreRestCall<'a>(
+    schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomComponentCoreRestRequest,
+    >,
+);
+impl<'a> InstallCustomComponentCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomComponentCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for InstallCustomComponentCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        InstallCustomComponentCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `QueryLogsText` endpoint, returned by [`UnfoldedCircleCoreRest::query_logs_text`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct QueryLogsTextCoreRestCall<'a>(
+    schematic_runtime::Call<'a, UnfoldedCircleCoreRestApi, QueryLogsTextCoreRestRequest>,
+);
+impl<'a> QueryLogsTextCoreRestCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        QueryLogsTextCoreRestRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for QueryLogsTextCoreRestCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        UnfoldedCircleCoreRestApi,
+        QueryLogsTextCoreRestRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl UnfoldedCircleCoreRest {
+    /// Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference.
+    ///
+    /// `POST /pub/login`
+    ///
+    /// Returns a [`LoginCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: LoginRequest`: the request body
+    pub fn login(&self, body: LoginRequest) -> LoginCoreRestCall<'_> {
+        LoginCoreRestCall(self.0.send(LoginCoreRestRequest::new(body)))
+    }
+    /// Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.
+    ///
+    /// `POST /pub/logout`
+    ///
+    /// Returns a [`LogoutCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn logout(&self) -> LogoutCoreRestCall<'_> {
+        LogoutCoreRestCall(self.0.send(LogoutCoreRestRequest::default()))
+    }
+    /// Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn.
+    ///
+    /// `GET /system`
+    ///
+    /// Returns a [`GetSystemInfoCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_system_info(&self) -> GetSystemInfoCoreRestCall<'_> {
+        GetSystemInfoCoreRestCall(self.0.send(GetSystemInfoCoreRestRequest::default()))
+    }
+    /// Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream.
+    ///
+    /// `GET /system/backup/export`
+    ///
+    /// Returns a [`ExportBackupCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn export_backup(&self) -> ExportBackupCoreRestCall<'_> {
+        ExportBackupCoreRestCall(self.0.send(ExportBackupCoreRestRequest::default()))
+    }
+    /// Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.
+    ///
+    /// `PUT /system/backup/restore`
+    ///
+    /// Returns a [`RestoreBackupCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RestoreBackupForm`: the request body
+    pub fn restore_backup(
+        &self,
+        body: RestoreBackupForm,
+    ) -> RestoreBackupCoreRestCall<'_> {
+        RestoreBackupCoreRestCall(self.0.send(RestoreBackupCoreRestRequest::new(body)))
+    }
+    /// Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.
+    ///
+    /// `POST /resources/{resource_type}`
+    ///
+    /// Returns a [`UploadResourceCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_type: impl Into<String>`: the `{resource_type}` path parameter
+    /// - `body: UploadResourceForm`: the request body
+    pub fn upload_resource(
+        &self,
+        resource_type: impl Into<String>,
+        body: UploadResourceForm,
+    ) -> UploadResourceCoreRestCall<'_> {
+        UploadResourceCoreRestCall(
+            self.0.send(UploadResourceCoreRestRequest::new(resource_type, body)),
+        )
+    }
+    /// Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.
+    ///
+    /// `GET /resources/{resource_type}/{resource_id}`
+    ///
+    /// Returns a [`GetResourceCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `resource_type: impl Into<String>`: the `{resource_type}` path parameter
+    /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
+    pub fn get_resource(
+        &self,
+        resource_type: impl Into<String>,
+        resource_id: impl Into<String>,
+    ) -> GetResourceCoreRestCall<'_> {
+        GetResourceCoreRestCall(
+            self.0.send(GetResourceCoreRestRequest::new(resource_type, resource_id)),
+        )
+    }
+    /// Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.
+    ///
+    /// `POST /intg/install`
+    ///
+    /// Returns a [`InstallCustomIntegrationCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: InstallCustomIntegrationForm`: the request body
+    pub fn install_custom_integration(
+        &self,
+        body: InstallCustomIntegrationForm,
+    ) -> InstallCustomIntegrationCoreRestCall<'_> {
+        InstallCustomIntegrationCoreRestCall(
+            self.0.send(InstallCustomIntegrationCoreRestRequest::new(body)),
+        )
+    }
+    /// Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.
+    ///
+    /// `POST /ir/codes/custom/{code_set_id}`
+    ///
+    /// Returns a [`UploadCustomIrCodeSetCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `code_set_id: impl Into<String>`: the `{code_set_id}` path parameter
+    /// - `body: UploadCustomIrCodeSetForm`: the request body
+    pub fn upload_custom_ir_code_set(
+        &self,
+        code_set_id: impl Into<String>,
+        body: UploadCustomIrCodeSetForm,
+    ) -> UploadCustomIrCodeSetCoreRestCall<'_> {
+        UploadCustomIrCodeSetCoreRestCall(
+            self.0.send(UploadCustomIrCodeSetCoreRestRequest::new(code_set_id, body)),
+        )
+    }
+    /// Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.
+    ///
+    /// `POST /system/install/{custom_component}`
+    ///
+    /// Returns a [`InstallCustomComponentCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `custom_component: impl Into<String>`: the `{custom_component}` path parameter
+    /// - `body: InstallCustomComponentForm`: the request body
+    pub fn install_custom_component(
+        &self,
+        custom_component: impl Into<String>,
+        body: InstallCustomComponentForm,
+    ) -> InstallCustomComponentCoreRestCall<'_> {
+        InstallCustomComponentCoreRestCall(
+            self
+                .0
+                .send(InstallCustomComponentCoreRestRequest::new(custom_component, body)),
+        )
+    }
+    /// Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.
+    ///
+    /// `GET /system/logs`
+    ///
+    /// Returns a [`QueryLogsTextCoreRestCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn query_logs_text(&self) -> QueryLogsTextCoreRestCall<'_> {
+        QueryLogsTextCoreRestCall(self.0.send(QueryLogsTextCoreRestRequest::default()))
     }
 }

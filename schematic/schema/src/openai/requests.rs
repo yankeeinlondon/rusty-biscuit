@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::OpenAIApi;
+use super::{OpenAI, OpenAIApi};
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -19343,5 +19343,18738 @@ impl schematic_runtime::EndpointSpec for BetaGetinputtokencountsRequest {
                     })?,
             ),
         })
+    }
+}
+/// A call to the `CreateSpeech` endpoint, returned by [`OpenAI::create_speech`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSpeechCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateSpeechRequest>,
+);
+impl<'a> CreateSpeechCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateSpeechRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSpeechCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateSpeechRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateTranscription` endpoint, returned by [`OpenAI::create_transcription`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateTranscriptionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateTranscriptionRequest>,
+);
+impl<'a> CreateTranscriptionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateTranscriptionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateTranscriptionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateTranscriptionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateTranslation` endpoint, returned by [`OpenAI::create_translation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateTranslationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateTranslationRequest>,
+);
+impl<'a> CreateTranslationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateTranslationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateTranslationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateTranslationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListVoiceConsents` endpoint, returned by [`OpenAI::list_voice_consents`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListVoiceConsentsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListVoiceConsentsRequest>,
+);
+impl<'a> ListVoiceConsentsCall<'a> {
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListVoiceConsentsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListVoiceConsentsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListVoiceConsentsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVoiceConsent` endpoint, returned by [`OpenAI::create_voice_consent`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVoiceConsentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVoiceConsentRequest>,
+);
+impl<'a> CreateVoiceConsentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVoiceConsentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVoiceConsentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVoiceConsentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVoiceConsent` endpoint, returned by [`OpenAI::get_voice_consent`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVoiceConsentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetVoiceConsentRequest>,
+);
+impl<'a> GetVoiceConsentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVoiceConsentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVoiceConsentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVoiceConsentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateVoiceConsent` endpoint, returned by [`OpenAI::update_voice_consent`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateVoiceConsentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateVoiceConsentRequest>,
+);
+impl<'a> UpdateVoiceConsentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateVoiceConsentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateVoiceConsentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateVoiceConsentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVoiceConsent` endpoint, returned by [`OpenAI::delete_voice_consent`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVoiceConsentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteVoiceConsentRequest>,
+);
+impl<'a> DeleteVoiceConsentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteVoiceConsentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVoiceConsentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteVoiceConsentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVoice` endpoint, returned by [`OpenAI::create_voice`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVoiceCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVoiceRequest>,
+);
+impl<'a> CreateVoiceCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVoiceRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVoiceCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVoiceRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListBatches` endpoint, returned by [`OpenAI::list_batches`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListBatchesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListBatchesRequest>,
+);
+impl<'a> ListBatchesCall<'a> {
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListBatchesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListBatchesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListBatchesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateBatch` endpoint, returned by [`OpenAI::create_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateBatchRequest>,
+);
+impl<'a> CreateBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveBatch` endpoint, returned by [`OpenAI::retrieve_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveBatchRequest>,
+);
+impl<'a> RetrieveBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelBatch` endpoint, returned by [`OpenAI::cancel_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelBatchRequest>,
+);
+impl<'a> CancelBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListChatCompletions` endpoint, returned by [`OpenAI::list_chat_completions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListChatCompletionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListChatCompletionsRequest>,
+);
+impl<'a> ListChatCompletionsCall<'a> {
+    /// Sets the `model` query parameter (`String`). The model used to generate the Chat Completions.
+    pub fn model(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_model(value)))
+    }
+    /// Sets the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
+    pub fn metadata(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_metadata(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Identifier for the last chat completion from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of Chat Completions to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListChatCompletionsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListChatCompletionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListChatCompletionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateChatCompletion` endpoint, returned by [`OpenAI::create_chat_completion`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateChatCompletionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateChatCompletionRequest>,
+);
+impl<'a> CreateChatCompletionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateChatCompletionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateChatCompletionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateChatCompletionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetChatCompletion` endpoint, returned by [`OpenAI::get_chat_completion`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetChatCompletionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetChatCompletionRequest>,
+);
+impl<'a> GetChatCompletionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetChatCompletionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetChatCompletionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetChatCompletionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateChatCompletion` endpoint, returned by [`OpenAI::update_chat_completion`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateChatCompletionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateChatCompletionRequest>,
+);
+impl<'a> UpdateChatCompletionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateChatCompletionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateChatCompletionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateChatCompletionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteChatCompletion` endpoint, returned by [`OpenAI::delete_chat_completion`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteChatCompletionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteChatCompletionRequest>,
+);
+impl<'a> DeleteChatCompletionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteChatCompletionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteChatCompletionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteChatCompletionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetChatCompletionMessages` endpoint, returned by [`OpenAI::get_chat_completion_messages`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetChatCompletionMessagesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetChatCompletionMessagesRequest>,
+);
+impl<'a> GetChatCompletionMessagesCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last message from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of messages to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetChatCompletionMessagesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetChatCompletionMessagesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetChatCompletionMessagesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateCompletion` endpoint, returned by [`OpenAI::create_completion`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateCompletionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateCompletionRequest>,
+);
+impl<'a> CreateCompletionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateCompletionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateCompletionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateCompletionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListContainers` endpoint, returned by [`OpenAI::list_containers`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListContainersCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListContainersRequest>,
+);
+impl<'a> ListContainersCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `name` query parameter (`String`). Filter results by container name.
+    pub fn name(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_name(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListContainersRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListContainersCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListContainersRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateContainer` endpoint, returned by [`OpenAI::create_container`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateContainerCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateContainerRequest>,
+);
+impl<'a> CreateContainerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateContainerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateContainerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateContainerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveContainer` endpoint, returned by [`OpenAI::retrieve_container`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveContainerCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveContainerRequest>,
+);
+impl<'a> RetrieveContainerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveContainerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveContainerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveContainerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteContainer` endpoint, returned by [`OpenAI::delete_container`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteContainerCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteContainerRequest>,
+);
+impl<'a> DeleteContainerCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteContainerRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteContainerCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteContainerRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListContainerFiles` endpoint, returned by [`OpenAI::list_container_files`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListContainerFilesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListContainerFilesRequest>,
+);
+impl<'a> ListContainerFilesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListContainerFilesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListContainerFilesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListContainerFilesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateContainerFile` endpoint, returned by [`OpenAI::create_container_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateContainerFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateContainerFileRequest>,
+);
+impl<'a> CreateContainerFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateContainerFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateContainerFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateContainerFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveContainerFile` endpoint, returned by [`OpenAI::retrieve_container_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveContainerFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveContainerFileRequest>,
+);
+impl<'a> RetrieveContainerFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveContainerFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveContainerFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveContainerFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteContainerFile` endpoint, returned by [`OpenAI::delete_container_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteContainerFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteContainerFileRequest>,
+);
+impl<'a> DeleteContainerFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteContainerFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteContainerFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteContainerFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveContainerFileContent` endpoint, returned by [`OpenAI::retrieve_container_file_content`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveContainerFileContentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveContainerFileContentRequest>,
+);
+impl<'a> RetrieveContainerFileContentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveContainerFileContentRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveContainerFileContentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveContainerFileContentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListConversationItems` endpoint, returned by [`OpenAI::list_conversation_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListConversationItemsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListConversationItemsRequest>,
+);
+impl<'a> ListConversationItemsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListConversationItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListConversationItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListConversationItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateConversationItems` endpoint, returned by [`OpenAI::create_conversation_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateConversationItemsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateConversationItemsRequest>,
+);
+impl<'a> CreateConversationItemsCall<'a> {
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateConversationItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateConversationItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateConversationItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetConversationItem` endpoint, returned by [`OpenAI::get_conversation_item`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetConversationItemCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetConversationItemRequest>,
+);
+impl<'a> GetConversationItemCall<'a> {
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetConversationItemRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetConversationItemCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetConversationItemRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteConversationItem` endpoint, returned by [`OpenAI::delete_conversation_item`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteConversationItemCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteConversationItemRequest>,
+);
+impl<'a> DeleteConversationItemCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteConversationItemRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteConversationItemCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteConversationItemRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateEmbedding` endpoint, returned by [`OpenAI::create_embedding`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateEmbeddingCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateEmbeddingRequest>,
+);
+impl<'a> CreateEmbeddingCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateEmbeddingRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateEmbeddingCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateEmbeddingRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListEvals` endpoint, returned by [`OpenAI::list_evals`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListEvalsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListEvalsRequest>);
+impl<'a> ListEvalsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last eval from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of evals to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `order_by` query parameter (`String`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
+    pub fn order_by(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order_by(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListEvalsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListEvalsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListEvalsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateEval` endpoint, returned by [`OpenAI::create_eval`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateEvalRequest>);
+impl<'a> CreateEvalCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateEvalRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateEvalCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateEvalRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetEval` endpoint, returned by [`OpenAI::get_eval`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetEvalRequest>);
+impl<'a> GetEvalCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetEvalRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetEvalCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetEvalRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateEval` endpoint, returned by [`OpenAI::update_eval`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UpdateEvalRequest>);
+impl<'a> UpdateEvalCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateEvalRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateEvalCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateEvalRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteEval` endpoint, returned by [`OpenAI::delete_eval`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteEvalRequest>);
+impl<'a> DeleteEvalCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteEvalRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteEvalCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteEvalRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetEvalRuns` endpoint, returned by [`OpenAI::get_eval_runs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetEvalRunsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetEvalRunsRequest>,
+);
+impl<'a> GetEvalRunsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last run from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of runs to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `status` query parameter (`String`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
+    pub fn status(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_status(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetEvalRunsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetEvalRunsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetEvalRunsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateEvalRun` endpoint, returned by [`OpenAI::create_eval_run`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateEvalRunCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateEvalRunRequest>,
+);
+impl<'a> CreateEvalRunCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateEvalRunRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateEvalRunCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateEvalRunRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetEvalRun` endpoint, returned by [`OpenAI::get_eval_run`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetEvalRunCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetEvalRunRequest>);
+impl<'a> GetEvalRunCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetEvalRunRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetEvalRunCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetEvalRunRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelEvalRun` endpoint, returned by [`OpenAI::cancel_eval_run`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelEvalRunCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelEvalRunRequest>,
+);
+impl<'a> CancelEvalRunCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelEvalRunRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelEvalRunCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelEvalRunRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteEvalRun` endpoint, returned by [`OpenAI::delete_eval_run`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteEvalRunCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteEvalRunRequest>,
+);
+impl<'a> DeleteEvalRunCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteEvalRunRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteEvalRunCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteEvalRunRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetEvalRunOutputItems` endpoint, returned by [`OpenAI::get_eval_run_output_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetEvalRunOutputItemsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetEvalRunOutputItemsRequest>,
+);
+impl<'a> GetEvalRunOutputItemsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last output item from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of output items to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
+    pub fn status(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_status(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetEvalRunOutputItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetEvalRunOutputItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetEvalRunOutputItem` endpoint, returned by [`OpenAI::get_eval_run_output_item`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetEvalRunOutputItemCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetEvalRunOutputItemRequest>,
+);
+impl<'a> GetEvalRunOutputItemCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetEvalRunOutputItemRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetEvalRunOutputItemRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListFiles` endpoint, returned by [`OpenAI::list_files`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListFilesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListFilesRequest>);
+impl<'a> ListFilesCall<'a> {
+    /// Sets the `purpose` query parameter (`String`). Only return files with the given purpose.
+    pub fn purpose(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_purpose(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListFilesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListFilesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListFilesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateFile` endpoint, returned by [`OpenAI::create_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateFileCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateFileRequest>);
+impl<'a> CreateFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveFile` endpoint, returned by [`OpenAI::retrieve_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveFileRequest>,
+);
+impl<'a> RetrieveFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteFile` endpoint, returned by [`OpenAI::delete_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteFileCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteFileRequest>);
+impl<'a> DeleteFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DownloadFile` endpoint, returned by [`OpenAI::download_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DownloadFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DownloadFileRequest>,
+);
+impl<'a> DownloadFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DownloadFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DownloadFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DownloadFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RunGrader` endpoint, returned by [`OpenAI::run_grader`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RunGraderCall<'a>(schematic_runtime::Call<'a, OpenAIApi, RunGraderRequest>);
+impl<'a> RunGraderCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, RunGraderRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RunGraderCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RunGraderRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ValidateGrader` endpoint, returned by [`OpenAI::validate_grader`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ValidateGraderCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ValidateGraderRequest>,
+);
+impl<'a> ValidateGraderCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ValidateGraderRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ValidateGraderCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ValidateGraderRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListFineTuningCheckpointPermissions` endpoint, returned by [`OpenAI::list_fine_tuning_checkpoint_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListFineTuningCheckpointPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListFineTuningCheckpointPermissionsRequest>,
+);
+impl<'a> ListFineTuningCheckpointPermissionsCall<'a> {
+    /// Sets the `project_id` query parameter (`String`). The ID of the project to get permissions for.
+    pub fn project_id(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_project_id(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Identifier for the last permission ID from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of permissions to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). The order in which to retrieve permissions.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListFineTuningCheckpointPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateFineTuningCheckpointPermission` endpoint, returned by [`OpenAI::create_fine_tuning_checkpoint_permission`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateFineTuningCheckpointPermissionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateFineTuningCheckpointPermissionRequest>,
+);
+impl<'a> CreateFineTuningCheckpointPermissionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreateFineTuningCheckpointPermissionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateFineTuningCheckpointPermissionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateFineTuningCheckpointPermissionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteFineTuningCheckpointPermission` endpoint, returned by [`OpenAI::delete_fine_tuning_checkpoint_permission`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteFineTuningCheckpointPermissionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteFineTuningCheckpointPermissionRequest>,
+);
+impl<'a> DeleteFineTuningCheckpointPermissionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeleteFineTuningCheckpointPermissionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteFineTuningCheckpointPermissionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteFineTuningCheckpointPermissionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListPaginatedFineTuningJobs` endpoint, returned by [`OpenAI::list_paginated_fine_tuning_jobs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListPaginatedFineTuningJobsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListPaginatedFineTuningJobsRequest>,
+);
+impl<'a> ListPaginatedFineTuningJobsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last job from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of fine-tuning jobs to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
+    pub fn metadata(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_metadata(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListPaginatedFineTuningJobsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListPaginatedFineTuningJobsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListPaginatedFineTuningJobsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateFineTuningJob` endpoint, returned by [`OpenAI::create_fine_tuning_job`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateFineTuningJobCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateFineTuningJobRequest>,
+);
+impl<'a> CreateFineTuningJobCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateFineTuningJobRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateFineTuningJobCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateFineTuningJobRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveFineTuningJob` endpoint, returned by [`OpenAI::retrieve_fine_tuning_job`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveFineTuningJobCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveFineTuningJobRequest>,
+);
+impl<'a> RetrieveFineTuningJobCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveFineTuningJobRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveFineTuningJobCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveFineTuningJobRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelFineTuningJob` endpoint, returned by [`OpenAI::cancel_fine_tuning_job`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelFineTuningJobCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelFineTuningJobRequest>,
+);
+impl<'a> CancelFineTuningJobCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelFineTuningJobRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelFineTuningJobCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelFineTuningJobRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListFineTuningJobCheckpoints` endpoint, returned by [`OpenAI::list_fine_tuning_job_checkpoints`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListFineTuningJobCheckpointsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListFineTuningJobCheckpointsRequest>,
+);
+impl<'a> ListFineTuningJobCheckpointsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last checkpoint ID from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of checkpoints to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListFineTuningJobCheckpointsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListFineTuningEvents` endpoint, returned by [`OpenAI::list_fine_tuning_events`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListFineTuningEventsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListFineTuningEventsRequest>,
+);
+impl<'a> ListFineTuningEventsCall<'a> {
+    /// Sets the `after` query parameter (`String`). Identifier for the last event from the previous pagination request.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Number of events to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListFineTuningEventsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListFineTuningEventsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListFineTuningEventsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `PauseFineTuningJob` endpoint, returned by [`OpenAI::pause_fine_tuning_job`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PauseFineTuningJobCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, PauseFineTuningJobRequest>,
+);
+impl<'a> PauseFineTuningJobCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, PauseFineTuningJobRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PauseFineTuningJobCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        PauseFineTuningJobRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ResumeFineTuningJob` endpoint, returned by [`OpenAI::resume_fine_tuning_job`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ResumeFineTuningJobCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ResumeFineTuningJobRequest>,
+);
+impl<'a> ResumeFineTuningJobCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ResumeFineTuningJobRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ResumeFineTuningJobCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ResumeFineTuningJobRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateImageEdit` endpoint, returned by [`OpenAI::create_image_edit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateImageEditCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateImageEditRequest>,
+);
+impl<'a> CreateImageEditCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateImageEditRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateImageEditCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateImageEditRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateImage` endpoint, returned by [`OpenAI::create_image`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateImageCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateImageRequest>,
+);
+impl<'a> CreateImageCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateImageRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateImageCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateImageRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateImageVariation` endpoint, returned by [`OpenAI::create_image_variation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateImageVariationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateImageVariationRequest>,
+);
+impl<'a> CreateImageVariationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateImageVariationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateImageVariationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateImageVariationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`OpenAI::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListModelsRequest>);
+impl<'a> ListModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListModelsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveModel` endpoint, returned by [`OpenAI::retrieve_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveModelCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveModelRequest>,
+);
+impl<'a> RetrieveModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteModel` endpoint, returned by [`OpenAI::delete_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteModelCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteModelRequest>,
+);
+impl<'a> DeleteModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateModeration` endpoint, returned by [`OpenAI::create_moderation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateModerationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateModerationRequest>,
+);
+impl<'a> CreateModerationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateModerationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateModerationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateModerationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AdminApiKeysList` endpoint, returned by [`OpenAI::admin_api_keys_list`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AdminApiKeysListCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysListRequest>,
+);
+impl<'a> AdminApiKeysListCall<'a> {
+    /// Sets the `after` query parameter (`String`).
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`).
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`).
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AdminApiKeysListRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AdminApiKeysListCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AdminApiKeysListRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AdminApiKeysCreate` endpoint, returned by [`OpenAI::admin_api_keys_create`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AdminApiKeysCreateCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysCreateRequest>,
+);
+impl<'a> AdminApiKeysCreateCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AdminApiKeysCreateRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AdminApiKeysCreateCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AdminApiKeysCreateRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AdminApiKeysGet` endpoint, returned by [`OpenAI::admin_api_keys_get`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AdminApiKeysGetCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysGetRequest>,
+);
+impl<'a> AdminApiKeysGetCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AdminApiKeysGetRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AdminApiKeysGetCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AdminApiKeysGetRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AdminApiKeysDelete` endpoint, returned by [`OpenAI::admin_api_keys_delete`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AdminApiKeysDeleteCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysDeleteRequest>,
+);
+impl<'a> AdminApiKeysDeleteCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AdminApiKeysDeleteRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AdminApiKeysDeleteCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AdminApiKeysDeleteRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListAuditLogs` endpoint, returned by [`OpenAI::list_audit_logs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListAuditLogsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListAuditLogsRequest>,
+);
+impl<'a> ListAuditLogsCall<'a> {
+    /// Sets the `effective_at` query parameter (`serde_json::Value`). Return only events whose `effective_at` (Unix seconds) is in this range.
+    pub fn effective_at(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_effective_at(value)))
+    }
+    /// Sets the `project_ids[]` query parameter (`Vec<String>`). Return only events for these projects.
+    pub fn project_ids__(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids__(value)))
+    }
+    /// Sets the `event_types[]` query parameter (`Vec<serde_json::Value>`). Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object).
+    pub fn event_types__(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_event_types__(value)))
+    }
+    /// Sets the `actor_ids[]` query parameter (`Vec<String>`). Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID.
+    pub fn actor_ids__(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_actor_ids__(value)))
+    }
+    /// Sets the `actor_emails[]` query parameter (`Vec<String>`). Return only events performed by users with these emails.
+    pub fn actor_emails__(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_actor_emails__(value)))
+    }
+    /// Sets the `resource_ids[]` query parameter (`Vec<String>`). Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`.
+    pub fn resource_ids__(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_resource_ids__(value)))
+    }
+    /// Sets the `tenant_only` query parameter (`bool`). Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped.
+    pub fn tenant_only(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_tenant_only(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListAuditLogsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListAuditLogsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListOrganizationCertificates` endpoint, returned by [`OpenAI::list_organization_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListOrganizationCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListOrganizationCertificatesRequest>,
+);
+impl<'a> ListOrganizationCertificatesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListOrganizationCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UploadCertificate` endpoint, returned by [`OpenAI::upload_certificate`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UploadCertificateCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UploadCertificateRequest>,
+);
+impl<'a> UploadCertificateCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UploadCertificateRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UploadCertificateCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UploadCertificateRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ActivateOrganizationCertificates` endpoint, returned by [`OpenAI::activate_organization_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ActivateOrganizationCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ActivateOrganizationCertificatesRequest>,
+);
+impl<'a> ActivateOrganizationCertificatesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ActivateOrganizationCertificatesRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ActivateOrganizationCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ActivateOrganizationCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeactivateOrganizationCertificates` endpoint, returned by [`OpenAI::deactivate_organization_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeactivateOrganizationCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeactivateOrganizationCertificatesRequest>,
+);
+impl<'a> DeactivateOrganizationCertificatesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeactivateOrganizationCertificatesRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeactivateOrganizationCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeactivateOrganizationCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetCertificate` endpoint, returned by [`OpenAI::get_certificate`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetCertificateCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetCertificateRequest>,
+);
+impl<'a> GetCertificateCall<'a> {
+    /// Sets the `include` query parameter (`Vec<String>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
+    pub fn include(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetCertificateRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetCertificateCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetCertificateRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ModifyCertificate` endpoint, returned by [`OpenAI::modify_certificate`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ModifyCertificateCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ModifyCertificateRequest>,
+);
+impl<'a> ModifyCertificateCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ModifyCertificateRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ModifyCertificateCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ModifyCertificateRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteCertificate` endpoint, returned by [`OpenAI::delete_certificate`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteCertificateCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteCertificateRequest>,
+);
+impl<'a> DeleteCertificateCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteCertificateRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteCertificateCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteCertificateRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageCosts` endpoint, returned by [`OpenAI::usage_costs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageCostsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UsageCostsRequest>);
+impl<'a> UsageCostsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only costs for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only costs for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageCostsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageCostsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageCostsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveOrganizationDataRetention` endpoint, returned by [`OpenAI::retrieve_organization_data_retention`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveOrganizationDataRetentionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveOrganizationDataRetentionRequest>,
+);
+impl<'a> RetrieveOrganizationDataRetentionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveOrganizationDataRetentionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveOrganizationDataRetentionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveOrganizationDataRetentionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateOrganizationDataRetention` endpoint, returned by [`OpenAI::update_organization_data_retention`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateOrganizationDataRetentionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateOrganizationDataRetentionRequest>,
+);
+impl<'a> UpdateOrganizationDataRetentionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateOrganizationDataRetentionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateOrganizationDataRetentionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateOrganizationDataRetentionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListGroups` endpoint, returned by [`OpenAI::list_groups`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListGroupsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListGroupsRequest>);
+impl<'a> ListGroupsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Specifies the sort order of the returned groups.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListGroupsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListGroupsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListGroupsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateGroup` endpoint, returned by [`OpenAI::create_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateGroupRequest>,
+);
+impl<'a> CreateGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveGroup` endpoint, returned by [`OpenAI::retrieve_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveGroupRequest>,
+);
+impl<'a> RetrieveGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateGroup` endpoint, returned by [`OpenAI::update_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateGroupRequest>,
+);
+impl<'a> UpdateGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteGroup` endpoint, returned by [`OpenAI::delete_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteGroupRequest>,
+);
+impl<'a> DeleteGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListGroupRoleAssignments` endpoint, returned by [`OpenAI::list_group_role_assignments`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListGroupRoleAssignmentsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListGroupRoleAssignmentsRequest>,
+);
+impl<'a> ListGroupRoleAssignmentsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListGroupRoleAssignmentsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListGroupRoleAssignmentsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListGroupRoleAssignmentsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AssignGroupRole` endpoint, returned by [`OpenAI::assign_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AssignGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AssignGroupRoleRequest>,
+);
+impl<'a> AssignGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AssignGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AssignGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AssignGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveGroupRole` endpoint, returned by [`OpenAI::retrieve_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveGroupRoleRequest>,
+);
+impl<'a> RetrieveGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnassignGroupRole` endpoint, returned by [`OpenAI::unassign_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnassignGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UnassignGroupRoleRequest>,
+);
+impl<'a> UnassignGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UnassignGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnassignGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UnassignGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListGroupUsers` endpoint, returned by [`OpenAI::list_group_users`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListGroupUsersCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListGroupUsersRequest>,
+);
+impl<'a> ListGroupUsersCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Specifies the sort order of users in the list.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListGroupUsersRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListGroupUsersCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListGroupUsersRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AddGroupUser` endpoint, returned by [`OpenAI::add_group_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AddGroupUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AddGroupUserRequest>,
+);
+impl<'a> AddGroupUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AddGroupUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AddGroupUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AddGroupUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveGroupUser` endpoint, returned by [`OpenAI::retrieve_group_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveGroupUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveGroupUserRequest>,
+);
+impl<'a> RetrieveGroupUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveGroupUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveGroupUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveGroupUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RemoveGroupUser` endpoint, returned by [`OpenAI::remove_group_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RemoveGroupUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RemoveGroupUserRequest>,
+);
+impl<'a> RemoveGroupUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RemoveGroupUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RemoveGroupUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RemoveGroupUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListInvites` endpoint, returned by [`OpenAI::list_invites`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListInvitesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListInvitesRequest>,
+);
+impl<'a> ListInvitesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListInvitesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListInvitesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListInvitesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `InviteUser` endpoint, returned by [`OpenAI::invite_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct InviteUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, InviteUserRequest>);
+impl<'a> InviteUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, InviteUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for InviteUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        InviteUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveInvite` endpoint, returned by [`OpenAI::retrieve_invite`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveInviteCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveInviteRequest>,
+);
+impl<'a> RetrieveInviteCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveInviteRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveInviteCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveInviteRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteInvite` endpoint, returned by [`OpenAI::delete_invite`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteInviteCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteInviteRequest>,
+);
+impl<'a> DeleteInviteCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteInviteRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteInviteCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteInviteRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjects` endpoint, returned by [`OpenAI::list_projects`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectsRequest>,
+);
+impl<'a> ListProjectsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `include_archived` query parameter (`bool`). If `true` returns all projects including those that have been `archived`. Archived projects are not included by default.
+    pub fn include_archived(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_archived(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateProject` endpoint, returned by [`OpenAI::create_project`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateProjectCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateProjectRequest>,
+);
+impl<'a> CreateProjectCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateProjectRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateProjectCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateProjectRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProject` endpoint, returned by [`OpenAI::retrieve_project`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectRequest>,
+);
+impl<'a> RetrieveProjectCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ModifyProject` endpoint, returned by [`OpenAI::modify_project`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ModifyProjectCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ModifyProjectRequest>,
+);
+impl<'a> ModifyProjectCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ModifyProjectRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ModifyProjectCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ModifyProjectRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectApiKeys` endpoint, returned by [`OpenAI::list_project_api_keys`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectApiKeysCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectApiKeysRequest>,
+);
+impl<'a> ListProjectApiKeysCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
+    pub fn owner_project_access(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_owner_project_access(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectApiKeysRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectApiKeysCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectApiKeysRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectApiKey` endpoint, returned by [`OpenAI::retrieve_project_api_key`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectApiKeyCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectApiKeyRequest>,
+);
+impl<'a> RetrieveProjectApiKeyCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectApiKeyRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectApiKeyCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectApiKeyRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectApiKey` endpoint, returned by [`OpenAI::delete_project_api_key`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectApiKeyCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectApiKeyRequest>,
+);
+impl<'a> DeleteProjectApiKeyCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteProjectApiKeyRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectApiKeyCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectApiKeyRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ArchiveProject` endpoint, returned by [`OpenAI::archive_project`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ArchiveProjectCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ArchiveProjectRequest>,
+);
+impl<'a> ArchiveProjectCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ArchiveProjectRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ArchiveProjectCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ArchiveProjectRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectCertificates` endpoint, returned by [`OpenAI::list_project_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectCertificatesRequest>,
+);
+impl<'a> ListProjectCertificatesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectCertificatesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ActivateProjectCertificates` endpoint, returned by [`OpenAI::activate_project_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ActivateProjectCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ActivateProjectCertificatesRequest>,
+);
+impl<'a> ActivateProjectCertificatesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ActivateProjectCertificatesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ActivateProjectCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ActivateProjectCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeactivateProjectCertificates` endpoint, returned by [`OpenAI::deactivate_project_certificates`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeactivateProjectCertificatesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeactivateProjectCertificatesRequest>,
+);
+impl<'a> DeactivateProjectCertificatesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeactivateProjectCertificatesRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeactivateProjectCertificatesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeactivateProjectCertificatesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectDataRetention` endpoint, returned by [`OpenAI::retrieve_project_data_retention`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectDataRetentionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectDataRetentionRequest>,
+);
+impl<'a> RetrieveProjectDataRetentionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveProjectDataRetentionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectDataRetentionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectDataRetentionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectDataRetention` endpoint, returned by [`OpenAI::update_project_data_retention`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectDataRetentionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectDataRetentionRequest>,
+);
+impl<'a> UpdateProjectDataRetentionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateProjectDataRetentionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectDataRetentionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectDataRetentionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectGroups` endpoint, returned by [`OpenAI::list_project_groups`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectGroupsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupsRequest>,
+);
+impl<'a> ListProjectGroupsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of project groups to return. Defaults to 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned groups.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectGroupsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectGroupsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectGroupsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AddProjectGroup` endpoint, returned by [`OpenAI::add_project_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AddProjectGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AddProjectGroupRequest>,
+);
+impl<'a> AddProjectGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AddProjectGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AddProjectGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AddProjectGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectGroup` endpoint, returned by [`OpenAI::retrieve_project_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectGroupRequest>,
+);
+impl<'a> RetrieveProjectGroupCall<'a> {
+    /// Sets the `group_type` query parameter (`String`). The type of group to retrieve.
+    pub fn group_type(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_group_type(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RemoveProjectGroup` endpoint, returned by [`OpenAI::remove_project_group`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RemoveProjectGroupCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RemoveProjectGroupRequest>,
+);
+impl<'a> RemoveProjectGroupCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RemoveProjectGroupRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RemoveProjectGroupCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RemoveProjectGroupRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectHostedToolPermissions` endpoint, returned by [`OpenAI::retrieve_project_hosted_tool_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectHostedToolPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectHostedToolPermissionsRequest>,
+);
+impl<'a> RetrieveProjectHostedToolPermissionsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveProjectHostedToolPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectHostedToolPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectHostedToolPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectHostedToolPermissions` endpoint, returned by [`OpenAI::update_project_hosted_tool_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectHostedToolPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectHostedToolPermissionsRequest>,
+);
+impl<'a> UpdateProjectHostedToolPermissionsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateProjectHostedToolPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectHostedToolPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectHostedToolPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectModelPermissions` endpoint, returned by [`OpenAI::retrieve_project_model_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectModelPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectModelPermissionsRequest>,
+);
+impl<'a> RetrieveProjectModelPermissionsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveProjectModelPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectModelPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectModelPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectModelPermissions` endpoint, returned by [`OpenAI::update_project_model_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectModelPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectModelPermissionsRequest>,
+);
+impl<'a> UpdateProjectModelPermissionsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateProjectModelPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectModelPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectModelPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectModelPermissions` endpoint, returned by [`OpenAI::delete_project_model_permissions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectModelPermissionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectModelPermissionsRequest>,
+);
+impl<'a> DeleteProjectModelPermissionsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeleteProjectModelPermissionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectModelPermissionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectModelPermissionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectRateLimits` endpoint, returned by [`OpenAI::list_project_rate_limits`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectRateLimitsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectRateLimitsRequest>,
+);
+impl<'a> ListProjectRateLimitsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. The default is 100.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectRateLimitsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectRateLimitsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectRateLimits` endpoint, returned by [`OpenAI::update_project_rate_limits`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectRateLimitsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectRateLimitsRequest>,
+);
+impl<'a> UpdateProjectRateLimitsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateProjectRateLimitsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectRateLimitsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectRateLimitsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectServiceAccounts` endpoint, returned by [`OpenAI::list_project_service_accounts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectServiceAccountsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectServiceAccountsRequest>,
+);
+impl<'a> ListProjectServiceAccountsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectServiceAccountsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectServiceAccountsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectServiceAccountsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateProjectServiceAccount` endpoint, returned by [`OpenAI::create_project_service_account`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateProjectServiceAccountCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateProjectServiceAccountRequest>,
+);
+impl<'a> CreateProjectServiceAccountCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateProjectServiceAccountRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateProjectServiceAccountCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateProjectServiceAccountRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectServiceAccount` endpoint, returned by [`OpenAI::retrieve_project_service_account`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectServiceAccountCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectServiceAccountRequest>,
+);
+impl<'a> RetrieveProjectServiceAccountCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveProjectServiceAccountRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectServiceAccountCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectServiceAccountRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectServiceAccount` endpoint, returned by [`OpenAI::update_project_service_account`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectServiceAccountCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectServiceAccountRequest>,
+);
+impl<'a> UpdateProjectServiceAccountCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateProjectServiceAccountRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectServiceAccountCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectServiceAccountRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectServiceAccount` endpoint, returned by [`OpenAI::delete_project_service_account`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectServiceAccountCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectServiceAccountRequest>,
+);
+impl<'a> DeleteProjectServiceAccountCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteProjectServiceAccountRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectServiceAccountCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectServiceAccountRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectSpendAlerts` endpoint, returned by [`OpenAI::list_project_spend_alerts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectSpendAlertsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectSpendAlertsRequest>,
+);
+impl<'a> ListProjectSpendAlertsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectSpendAlertsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectSpendAlertsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateProjectSpendAlert` endpoint, returned by [`OpenAI::create_project_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateProjectSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateProjectSpendAlertRequest>,
+);
+impl<'a> CreateProjectSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateProjectSpendAlertRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateProjectSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateProjectSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectSpendAlert` endpoint, returned by [`OpenAI::retrieve_project_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectSpendAlertRequest>,
+);
+impl<'a> RetrieveProjectSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectSpendAlertRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectSpendAlert` endpoint, returned by [`OpenAI::update_project_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectSpendAlertRequest>,
+);
+impl<'a> UpdateProjectSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateProjectSpendAlertRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectSpendAlert` endpoint, returned by [`OpenAI::delete_project_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectSpendAlertRequest>,
+);
+impl<'a> DeleteProjectSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteProjectSpendAlertRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectUsers` endpoint, returned by [`OpenAI::list_project_users`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectUsersCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectUsersRequest>,
+);
+impl<'a> ListProjectUsersCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectUsersRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectUsersCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectUsersRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateProjectUser` endpoint, returned by [`OpenAI::create_project_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateProjectUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateProjectUserRequest>,
+);
+impl<'a> CreateProjectUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateProjectUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateProjectUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateProjectUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectUser` endpoint, returned by [`OpenAI::retrieve_project_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectUserRequest>,
+);
+impl<'a> RetrieveProjectUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ModifyProjectUser` endpoint, returned by [`OpenAI::modify_project_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ModifyProjectUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ModifyProjectUserRequest>,
+);
+impl<'a> ModifyProjectUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ModifyProjectUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ModifyProjectUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ModifyProjectUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectUser` endpoint, returned by [`OpenAI::delete_project_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectUserRequest>,
+);
+impl<'a> DeleteProjectUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteProjectUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRoles` endpoint, returned by [`OpenAI::list_roles`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRolesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListRolesRequest>);
+impl<'a> ListRolesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListRolesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRolesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListRolesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRole` endpoint, returned by [`OpenAI::create_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateRoleRequest>);
+impl<'a> CreateRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveRole` endpoint, returned by [`OpenAI::retrieve_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveRoleRequest>,
+);
+impl<'a> RetrieveRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateRole` endpoint, returned by [`OpenAI::update_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UpdateRoleRequest>);
+impl<'a> UpdateRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteRole` endpoint, returned by [`OpenAI::delete_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteRoleRequest>);
+impl<'a> DeleteRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListOrganizationSpendAlerts` endpoint, returned by [`OpenAI::list_organization_spend_alerts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListOrganizationSpendAlertsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListOrganizationSpendAlertsRequest>,
+);
+impl<'a> ListOrganizationSpendAlertsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListOrganizationSpendAlertsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListOrganizationSpendAlertsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateOrganizationSpendAlert` endpoint, returned by [`OpenAI::create_organization_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateOrganizationSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateOrganizationSpendAlertRequest>,
+);
+impl<'a> CreateOrganizationSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreateOrganizationSpendAlertRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateOrganizationSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateOrganizationSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveOrganizationSpendAlert` endpoint, returned by [`OpenAI::retrieve_organization_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveOrganizationSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveOrganizationSpendAlertRequest>,
+);
+impl<'a> RetrieveOrganizationSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveOrganizationSpendAlertRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveOrganizationSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveOrganizationSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateOrganizationSpendAlert` endpoint, returned by [`OpenAI::update_organization_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateOrganizationSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateOrganizationSpendAlertRequest>,
+);
+impl<'a> UpdateOrganizationSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateOrganizationSpendAlertRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateOrganizationSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateOrganizationSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteOrganizationSpendAlert` endpoint, returned by [`OpenAI::delete_organization_spend_alert`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteOrganizationSpendAlertCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteOrganizationSpendAlertRequest>,
+);
+impl<'a> DeleteOrganizationSpendAlertCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeleteOrganizationSpendAlertRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteOrganizationSpendAlertCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteOrganizationSpendAlertRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageAudioSpeeches` endpoint, returned by [`OpenAI::usage_audio_speeches`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageAudioSpeechesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageAudioSpeechesRequest>,
+);
+impl<'a> UsageAudioSpeechesCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageAudioSpeechesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageAudioSpeechesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageAudioSpeechesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageAudioTranscriptions` endpoint, returned by [`OpenAI::usage_audio_transcriptions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageAudioTranscriptionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageAudioTranscriptionsRequest>,
+);
+impl<'a> UsageAudioTranscriptionsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageAudioTranscriptionsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageAudioTranscriptionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageAudioTranscriptionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageCodeInterpreterSessions` endpoint, returned by [`OpenAI::usage_code_interpreter_sessions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageCodeInterpreterSessionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageCodeInterpreterSessionsRequest>,
+);
+impl<'a> UsageCodeInterpreterSessionsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageCodeInterpreterSessionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageCompletions` endpoint, returned by [`OpenAI::usage_completions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageCompletionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageCompletionsRequest>,
+);
+impl<'a> UsageCompletionsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `batch` query parameter (`bool`). If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.
+    pub fn batch(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_batch(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageCompletionsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageCompletionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageCompletionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageEmbeddings` endpoint, returned by [`OpenAI::usage_embeddings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageEmbeddingsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageEmbeddingsRequest>,
+);
+impl<'a> UsageEmbeddingsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageEmbeddingsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageEmbeddingsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageEmbeddingsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageFileSearchCalls` endpoint, returned by [`OpenAI::usage_file_search_calls`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageFileSearchCallsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageFileSearchCallsRequest>,
+);
+impl<'a> UsageFileSearchCallsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `vector_store_ids` query parameter (`Vec<String>`). Return only usage for these vector stores.
+    pub fn vector_store_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_vector_store_ids(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageFileSearchCallsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageFileSearchCallsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageFileSearchCallsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageImages` endpoint, returned by [`OpenAI::usage_images`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageImagesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageImagesRequest>,
+);
+impl<'a> UsageImagesCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `sources` query parameter (`Vec<String>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
+    pub fn sources(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_sources(value)))
+    }
+    /// Sets the `sizes` query parameter (`Vec<String>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
+    pub fn sizes(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_sizes(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageImagesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageImagesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageImagesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageModerations` endpoint, returned by [`OpenAI::usage_moderations`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageModerationsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageModerationsRequest>,
+);
+impl<'a> UsageModerationsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageModerationsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageModerationsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageModerationsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageVectorStores` endpoint, returned by [`OpenAI::usage_vector_stores`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageVectorStoresCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageVectorStoresRequest>,
+);
+impl<'a> UsageVectorStoresCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageVectorStoresRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageVectorStoresCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageVectorStoresRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UsageWebSearchCalls` endpoint, returned by [`OpenAI::usage_web_search_calls`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UsageWebSearchCallsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UsageWebSearchCallsRequest>,
+);
+impl<'a> UsageWebSearchCallsCall<'a> {
+    /// Sets the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    pub fn start_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_start_time(value)))
+    }
+    /// Sets the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    pub fn end_time(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_end_time(value)))
+    }
+    /// Sets the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    pub fn bucket_width(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_bucket_width(value)))
+    }
+    /// Sets the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    pub fn project_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_project_ids(value)))
+    }
+    /// Sets the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    pub fn user_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_user_ids(value)))
+    }
+    /// Sets the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    pub fn api_key_ids(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_api_key_ids(value)))
+    }
+    /// Sets the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    pub fn models(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_models(value)))
+    }
+    /// Sets the `context_levels` query parameter (`Vec<String>`). Return only web search usage for these context levels.
+    pub fn context_levels(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_context_levels(value)))
+    }
+    /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
+    pub fn group_by(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_group_by(value)))
+    }
+    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn page(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_page(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UsageWebSearchCallsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UsageWebSearchCallsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UsageWebSearchCallsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListUsers` endpoint, returned by [`OpenAI::list_users`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListUsersCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListUsersRequest>);
+impl<'a> ListUsersCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `emails` query parameter (`Vec<String>`). Filter by the email address of users.
+    pub fn emails(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_emails(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListUsersRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListUsersCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListUsersRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveUser` endpoint, returned by [`OpenAI::retrieve_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveUserCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveUserRequest>,
+);
+impl<'a> RetrieveUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ModifyUser` endpoint, returned by [`OpenAI::modify_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ModifyUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ModifyUserRequest>);
+impl<'a> ModifyUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ModifyUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ModifyUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ModifyUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteUser` endpoint, returned by [`OpenAI::delete_user`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteUserRequest>);
+impl<'a> DeleteUserCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteUserRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteUserCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteUserRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListUserRoleAssignments` endpoint, returned by [`OpenAI::list_user_role_assignments`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListUserRoleAssignmentsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListUserRoleAssignmentsRequest>,
+);
+impl<'a> ListUserRoleAssignmentsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListUserRoleAssignmentsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListUserRoleAssignmentsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListUserRoleAssignmentsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AssignUserRole` endpoint, returned by [`OpenAI::assign_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AssignUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AssignUserRoleRequest>,
+);
+impl<'a> AssignUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AssignUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AssignUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AssignUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveUserRole` endpoint, returned by [`OpenAI::retrieve_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveUserRoleRequest>,
+);
+impl<'a> RetrieveUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnassignUserRole` endpoint, returned by [`OpenAI::unassign_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnassignUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UnassignUserRoleRequest>,
+);
+impl<'a> UnassignUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UnassignUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnassignUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UnassignUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectGroupRoleAssignments` endpoint, returned by [`OpenAI::list_project_group_role_assignments`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectGroupRoleAssignmentsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupRoleAssignmentsRequest>,
+);
+impl<'a> ListProjectGroupRoleAssignmentsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectGroupRoleAssignmentsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AssignProjectGroupRole` endpoint, returned by [`OpenAI::assign_project_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AssignProjectGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AssignProjectGroupRoleRequest>,
+);
+impl<'a> AssignProjectGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AssignProjectGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AssignProjectGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AssignProjectGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectGroupRole` endpoint, returned by [`OpenAI::retrieve_project_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectGroupRoleRequest>,
+);
+impl<'a> RetrieveProjectGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnassignProjectGroupRole` endpoint, returned by [`OpenAI::unassign_project_group_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnassignProjectGroupRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UnassignProjectGroupRoleRequest>,
+);
+impl<'a> UnassignProjectGroupRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UnassignProjectGroupRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnassignProjectGroupRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UnassignProjectGroupRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectRoles` endpoint, returned by [`OpenAI::list_project_roles`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectRolesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectRolesRequest>,
+);
+impl<'a> ListProjectRolesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListProjectRolesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectRolesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectRolesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateProjectRole` endpoint, returned by [`OpenAI::create_project_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateProjectRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateProjectRoleRequest>,
+);
+impl<'a> CreateProjectRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateProjectRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateProjectRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateProjectRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectRole` endpoint, returned by [`OpenAI::retrieve_project_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectRoleRequest>,
+);
+impl<'a> RetrieveProjectRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateProjectRole` endpoint, returned by [`OpenAI::update_project_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateProjectRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateProjectRoleRequest>,
+);
+impl<'a> UpdateProjectRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateProjectRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateProjectRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateProjectRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteProjectRole` endpoint, returned by [`OpenAI::delete_project_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteProjectRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteProjectRoleRequest>,
+);
+impl<'a> DeleteProjectRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteProjectRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteProjectRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteProjectRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListProjectUserRoleAssignments` endpoint, returned by [`OpenAI::list_project_user_role_assignments`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListProjectUserRoleAssignmentsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListProjectUserRoleAssignmentsRequest>,
+);
+impl<'a> ListProjectUserRoleAssignmentsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListProjectUserRoleAssignmentsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AssignProjectUserRole` endpoint, returned by [`OpenAI::assign_project_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AssignProjectUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AssignProjectUserRoleRequest>,
+);
+impl<'a> AssignProjectUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AssignProjectUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AssignProjectUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AssignProjectUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveProjectUserRole` endpoint, returned by [`OpenAI::retrieve_project_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveProjectUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveProjectUserRoleRequest>,
+);
+impl<'a> RetrieveProjectUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveProjectUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveProjectUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveProjectUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnassignProjectUserRole` endpoint, returned by [`OpenAI::unassign_project_user_role`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnassignProjectUserRoleCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UnassignProjectUserRoleRequest>,
+);
+impl<'a> UnassignProjectUserRoleCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UnassignProjectUserRoleRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnassignProjectUserRoleCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UnassignProjectUserRoleRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRealtimeCall` endpoint, returned by [`OpenAI::create_realtime_call`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRealtimeCallCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateRealtimeCallRequest>,
+);
+impl<'a> CreateRealtimeCallCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateRealtimeCallRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRealtimeCallCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRealtimeCallRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AcceptRealtimeCall` endpoint, returned by [`OpenAI::accept_realtime_call`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AcceptRealtimeCallCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AcceptRealtimeCallRequest>,
+);
+impl<'a> AcceptRealtimeCallCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AcceptRealtimeCallRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AcceptRealtimeCallCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AcceptRealtimeCallRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `HangupRealtimeCall` endpoint, returned by [`OpenAI::hangup_realtime_call`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct HangupRealtimeCallCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, HangupRealtimeCallRequest>,
+);
+impl<'a> HangupRealtimeCallCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, HangupRealtimeCallRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for HangupRealtimeCallCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        HangupRealtimeCallRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ReferRealtimeCall` endpoint, returned by [`OpenAI::refer_realtime_call`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ReferRealtimeCallCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ReferRealtimeCallRequest>,
+);
+impl<'a> ReferRealtimeCallCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ReferRealtimeCallRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ReferRealtimeCallCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ReferRealtimeCallRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RejectRealtimeCall` endpoint, returned by [`OpenAI::reject_realtime_call`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RejectRealtimeCallCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RejectRealtimeCallRequest>,
+);
+impl<'a> RejectRealtimeCallCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RejectRealtimeCallRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RejectRealtimeCallCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RejectRealtimeCallRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRealtimeClientSecret` endpoint, returned by [`OpenAI::create_realtime_client_secret`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRealtimeClientSecretCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateRealtimeClientSecretRequest>,
+);
+impl<'a> CreateRealtimeClientSecretCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateRealtimeClientSecretRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRealtimeClientSecretCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRealtimeClientSecretRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRealtimeSession` endpoint, returned by [`OpenAI::create_realtime_session`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRealtimeSessionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateRealtimeSessionRequest>,
+);
+impl<'a> CreateRealtimeSessionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateRealtimeSessionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRealtimeSessionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRealtimeSessionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRealtimeTranscriptionSession` endpoint, returned by [`OpenAI::create_realtime_transcription_session`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRealtimeTranscriptionSessionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateRealtimeTranscriptionSessionRequest>,
+);
+impl<'a> CreateRealtimeTranscriptionSessionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreateRealtimeTranscriptionSessionRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRealtimeTranscriptionSessionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRealtimeTranscriptionSessionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateRealtimeTranslationClientSecret` endpoint, returned by [`OpenAI::create_realtime_translation_client_secret`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateRealtimeTranslationClientSecretCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateRealtimeTranslationClientSecretRequest>,
+);
+impl<'a> CreateRealtimeTranslationClientSecretCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreateRealtimeTranslationClientSecretRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateRealtimeTranslationClientSecretCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateRealtimeTranslationClientSecretRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateResponse` endpoint, returned by [`OpenAI::create_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateResponseRequest>,
+);
+impl<'a> CreateResponseCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetResponse` endpoint, returned by [`OpenAI::get_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetResponseRequest>,
+);
+impl<'a> GetResponseCall<'a> {
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// Sets the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
+    pub fn stream(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_stream(value)))
+    }
+    /// Sets the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
+    pub fn starting_after(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_starting_after(value)))
+    }
+    /// Sets the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
+    pub fn include_obfuscation(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_obfuscation(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteResponse` endpoint, returned by [`OpenAI::delete_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteResponseRequest>,
+);
+impl<'a> DeleteResponseCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelResponse` endpoint, returned by [`OpenAI::cancel_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelResponseRequest>,
+);
+impl<'a> CancelResponseCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListInputItems` endpoint, returned by [`OpenAI::list_input_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListInputItemsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListInputItemsRequest>,
+);
+impl<'a> ListInputItemsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListInputItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListInputItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListInputItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateUpload` endpoint, returned by [`OpenAI::create_upload`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateUploadCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateUploadRequest>,
+);
+impl<'a> CreateUploadCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateUploadRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateUploadCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateUploadRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelUpload` endpoint, returned by [`OpenAI::cancel_upload`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelUploadCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelUploadRequest>,
+);
+impl<'a> CancelUploadCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelUploadRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelUploadCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelUploadRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CompleteUpload` endpoint, returned by [`OpenAI::complete_upload`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CompleteUploadCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CompleteUploadRequest>,
+);
+impl<'a> CompleteUploadCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CompleteUploadRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CompleteUploadCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CompleteUploadRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `AddUploadPart` endpoint, returned by [`OpenAI::add_upload_part`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct AddUploadPartCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, AddUploadPartRequest>,
+);
+impl<'a> AddUploadPartCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, AddUploadPartRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for AddUploadPartCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        AddUploadPartRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListVectorStores` endpoint, returned by [`OpenAI::list_vector_stores`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListVectorStoresCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListVectorStoresRequest>,
+);
+impl<'a> ListVectorStoresCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListVectorStoresCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListVectorStoresRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVectorStore` endpoint, returned by [`OpenAI::create_vector_store`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVectorStoreCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVectorStoreRequest>,
+);
+impl<'a> CreateVectorStoreCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVectorStoreRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVectorStoreCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVectorStoreRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVectorStore` endpoint, returned by [`OpenAI::get_vector_store`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVectorStoreCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetVectorStoreRequest>,
+);
+impl<'a> GetVectorStoreCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVectorStoreRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVectorStoreCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVectorStoreRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ModifyVectorStore` endpoint, returned by [`OpenAI::modify_vector_store`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ModifyVectorStoreCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ModifyVectorStoreRequest>,
+);
+impl<'a> ModifyVectorStoreCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ModifyVectorStoreRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ModifyVectorStoreCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ModifyVectorStoreRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVectorStore` endpoint, returned by [`OpenAI::delete_vector_store`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVectorStoreCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteVectorStoreRequest>,
+);
+impl<'a> DeleteVectorStoreCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteVectorStoreRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVectorStoreCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteVectorStoreRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVectorStoreFileBatch` endpoint, returned by [`OpenAI::create_vector_store_file_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVectorStoreFileBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVectorStoreFileBatchRequest>,
+);
+impl<'a> CreateVectorStoreFileBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVectorStoreFileBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVectorStoreFileBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVectorStoreFileBatch` endpoint, returned by [`OpenAI::get_vector_store_file_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVectorStoreFileBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetVectorStoreFileBatchRequest>,
+);
+impl<'a> GetVectorStoreFileBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVectorStoreFileBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVectorStoreFileBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVectorStoreFileBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelVectorStoreFileBatch` endpoint, returned by [`OpenAI::cancel_vector_store_file_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelVectorStoreFileBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelVectorStoreFileBatchRequest>,
+);
+impl<'a> CancelVectorStoreFileBatchCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelVectorStoreFileBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelVectorStoreFileBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelVectorStoreFileBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListFilesInVectorStoreBatch` endpoint, returned by [`OpenAI::list_files_in_vector_store_batch`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListFilesInVectorStoreBatchCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListFilesInVectorStoreBatchRequest>,
+);
+impl<'a> ListFilesInVectorStoreBatchCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn filter(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_filter(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListFilesInVectorStoreBatchRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListFilesInVectorStoreBatchCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListVectorStoreFiles` endpoint, returned by [`OpenAI::list_vector_store_files`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListVectorStoreFilesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListVectorStoreFilesRequest>,
+);
+impl<'a> ListVectorStoreFilesCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn filter(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_filter(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListVectorStoreFilesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListVectorStoreFilesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVectorStoreFile` endpoint, returned by [`OpenAI::create_vector_store_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVectorStoreFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVectorStoreFileRequest>,
+);
+impl<'a> CreateVectorStoreFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVectorStoreFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVectorStoreFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVectorStoreFile` endpoint, returned by [`OpenAI::get_vector_store_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVectorStoreFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetVectorStoreFileRequest>,
+);
+impl<'a> GetVectorStoreFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVectorStoreFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVectorStoreFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVectorStoreFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateVectorStoreFileAttributes` endpoint, returned by [`OpenAI::update_vector_store_file_attributes`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateVectorStoreFileAttributesCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateVectorStoreFileAttributesRequest>,
+);
+impl<'a> UpdateVectorStoreFileAttributesCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateVectorStoreFileAttributesRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateVectorStoreFileAttributesCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateVectorStoreFileAttributesRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVectorStoreFile` endpoint, returned by [`OpenAI::delete_vector_store_file`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVectorStoreFileCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteVectorStoreFileRequest>,
+);
+impl<'a> DeleteVectorStoreFileCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteVectorStoreFileRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVectorStoreFileCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteVectorStoreFileRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveVectorStoreFileContent` endpoint, returned by [`OpenAI::retrieve_vector_store_file_content`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveVectorStoreFileContentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveVectorStoreFileContentRequest>,
+);
+impl<'a> RetrieveVectorStoreFileContentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        RetrieveVectorStoreFileContentRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveVectorStoreFileContentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveVectorStoreFileContentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `SearchVectorStore` endpoint, returned by [`OpenAI::search_vector_store`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct SearchVectorStoreCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, SearchVectorStoreRequest>,
+);
+impl<'a> SearchVectorStoreCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, SearchVectorStoreRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for SearchVectorStoreCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        SearchVectorStoreRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateConversation` endpoint, returned by [`OpenAI::create_conversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateConversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateConversationRequest>,
+);
+impl<'a> CreateConversationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateConversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateConversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateConversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetConversation` endpoint, returned by [`OpenAI::get_conversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetConversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetConversationRequest>,
+);
+impl<'a> GetConversationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetConversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetConversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetConversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateConversation` endpoint, returned by [`OpenAI::update_conversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateConversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateConversationRequest>,
+);
+impl<'a> UpdateConversationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateConversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateConversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateConversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteConversation` endpoint, returned by [`OpenAI::delete_conversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteConversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteConversationRequest>,
+);
+impl<'a> DeleteConversationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteConversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteConversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteConversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Getorganizationspendlimit` endpoint, returned by [`OpenAI::getorganizationspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetorganizationspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetorganizationspendlimitRequest>,
+);
+impl<'a> GetorganizationspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetorganizationspendlimitRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetorganizationspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetorganizationspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Updateorganizationspendlimit` endpoint, returned by [`OpenAI::updateorganizationspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateorganizationspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateorganizationspendlimitRequest>,
+);
+impl<'a> UpdateorganizationspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        UpdateorganizationspendlimitRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateorganizationspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateorganizationspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Deleteorganizationspendlimit` endpoint, returned by [`OpenAI::deleteorganizationspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteorganizationspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteorganizationspendlimitRequest>,
+);
+impl<'a> DeleteorganizationspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        DeleteorganizationspendlimitRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteorganizationspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteorganizationspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Getprojectspendlimit` endpoint, returned by [`OpenAI::getprojectspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetprojectspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetprojectspendlimitRequest>,
+);
+impl<'a> GetprojectspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetprojectspendlimitRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetprojectspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetprojectspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Updateprojectspendlimit` endpoint, returned by [`OpenAI::updateprojectspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateprojectspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateprojectspendlimitRequest>,
+);
+impl<'a> UpdateprojectspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateprojectspendlimitRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateprojectspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateprojectspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Deleteprojectspendlimit` endpoint, returned by [`OpenAI::deleteprojectspendlimit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteprojectspendlimitCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteprojectspendlimitRequest>,
+);
+impl<'a> DeleteprojectspendlimitCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteprojectspendlimitRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteprojectspendlimitCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteprojectspendlimitRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateanAPIkeyforaserviceaccount` endpoint, returned by [`OpenAI::createan_apikeyforaserviceaccount`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateanAPIkeyforaserviceaccountCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateanAPIkeyforaserviceaccountRequest>,
+);
+impl<'a> CreateanAPIkeyforaserviceaccountCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreateanAPIkeyforaserviceaccountRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateanAPIkeyforaserviceaccountCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateanAPIkeyforaserviceaccountRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Createcontentprovenancecheck` endpoint, returned by [`OpenAI::createcontentprovenancecheck`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreatecontentprovenancecheckCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreatecontentprovenancecheckRequest>,
+);
+impl<'a> CreatecontentprovenancecheckCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OpenAIApi,
+        CreatecontentprovenancecheckRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreatecontentprovenancecheckCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreatecontentprovenancecheckRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListVideos` endpoint, returned by [`OpenAI::list_videos`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListVideosCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListVideosRequest>);
+impl<'a> ListVideosCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). Number of items to retrieve
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    pub fn order(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListVideosRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListVideosCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListVideosRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVideo` endpoint, returned by [`OpenAI::create_video`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVideoCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVideoRequest>,
+);
+impl<'a> CreateVideoCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVideoRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVideoCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVideoRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVideoCharacter` endpoint, returned by [`OpenAI::create_video_character`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVideoCharacterCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVideoCharacterRequest>,
+);
+impl<'a> CreateVideoCharacterCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVideoCharacterRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVideoCharacterCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVideoCharacterRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVideoCharacter` endpoint, returned by [`OpenAI::get_video_character`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVideoCharacterCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetVideoCharacterRequest>,
+);
+impl<'a> GetVideoCharacterCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVideoCharacterRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVideoCharacterCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVideoCharacterRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVideoEdit` endpoint, returned by [`OpenAI::create_video_edit`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVideoEditCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVideoEditRequest>,
+);
+impl<'a> CreateVideoEditCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVideoEditRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVideoEditCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVideoEditRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVideoExtend` endpoint, returned by [`OpenAI::create_video_extend`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVideoExtendCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVideoExtendRequest>,
+);
+impl<'a> CreateVideoExtendCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVideoExtendRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVideoExtendCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVideoExtendRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetVideo` endpoint, returned by [`OpenAI::get_video`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetVideoCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetVideoRequest>);
+impl<'a> GetVideoCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetVideoRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetVideoCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetVideoRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteVideo` endpoint, returned by [`OpenAI::delete_video`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteVideoCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteVideoRequest>,
+);
+impl<'a> DeleteVideoCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteVideoRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteVideoCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteVideoRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveVideoContent` endpoint, returned by [`OpenAI::retrieve_video_content`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveVideoContentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, RetrieveVideoContentRequest>,
+);
+impl<'a> RetrieveVideoContentCall<'a> {
+    /// Sets the `variant` query parameter (`serde_json::Value`). Which downloadable asset to return. Defaults to the MP4 video.
+    pub fn variant(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_variant(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, RetrieveVideoContentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveVideoContentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        RetrieveVideoContentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateVideoRemix` endpoint, returned by [`OpenAI::create_video_remix`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateVideoRemixCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateVideoRemixRequest>,
+);
+impl<'a> CreateVideoRemixCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateVideoRemixRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateVideoRemixCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateVideoRemixRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Getinputtokencounts` endpoint, returned by [`OpenAI::getinputtokencounts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetinputtokencountsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetinputtokencountsRequest>,
+);
+impl<'a> GetinputtokencountsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetinputtokencountsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetinputtokencountsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetinputtokencountsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Compactconversation` endpoint, returned by [`OpenAI::compactconversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CompactconversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CompactconversationRequest>,
+);
+impl<'a> CompactconversationCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CompactconversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CompactconversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CompactconversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListSkills` endpoint, returned by [`OpenAI::list_skills`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListSkillsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListSkillsRequest>);
+impl<'a> ListSkillsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). Number of items to retrieve
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    pub fn order(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, ListSkillsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListSkillsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListSkillsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateSkill` endpoint, returned by [`OpenAI::create_skill`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSkillCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateSkillRequest>,
+);
+impl<'a> CreateSkillCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateSkillRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSkillCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateSkillRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetSkill` endpoint, returned by [`OpenAI::get_skill`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetSkillCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetSkillRequest>);
+impl<'a> GetSkillCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, GetSkillRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetSkillCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetSkillRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UpdateSkillDefaultVersion` endpoint, returned by [`OpenAI::update_skill_default_version`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UpdateSkillDefaultVersionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, UpdateSkillDefaultVersionRequest>,
+);
+impl<'a> UpdateSkillDefaultVersionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, UpdateSkillDefaultVersionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UpdateSkillDefaultVersionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        UpdateSkillDefaultVersionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteSkill` endpoint, returned by [`OpenAI::delete_skill`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteSkillCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteSkillRequest>,
+);
+impl<'a> DeleteSkillCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteSkillRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteSkillCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteSkillRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetSkillContent` endpoint, returned by [`OpenAI::get_skill_content`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetSkillContentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetSkillContentRequest>,
+);
+impl<'a> GetSkillContentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetSkillContentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetSkillContentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetSkillContentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListSkillVersions` endpoint, returned by [`OpenAI::list_skill_versions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListSkillVersionsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListSkillVersionsRequest>,
+);
+impl<'a> ListSkillVersionsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). Number of versions to retrieve.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
+    pub fn order(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). The skill version ID to start after.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListSkillVersionsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListSkillVersionsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListSkillVersionsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateSkillVersion` endpoint, returned by [`OpenAI::create_skill_version`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateSkillVersionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateSkillVersionRequest>,
+);
+impl<'a> CreateSkillVersionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateSkillVersionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateSkillVersionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateSkillVersionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetSkillVersion` endpoint, returned by [`OpenAI::get_skill_version`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetSkillVersionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetSkillVersionRequest>,
+);
+impl<'a> GetSkillVersionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetSkillVersionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetSkillVersionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetSkillVersionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteSkillVersion` endpoint, returned by [`OpenAI::delete_skill_version`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteSkillVersionCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteSkillVersionRequest>,
+);
+impl<'a> DeleteSkillVersionCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteSkillVersionRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteSkillVersionCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteSkillVersionRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetSkillVersionContent` endpoint, returned by [`OpenAI::get_skill_version_content`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetSkillVersionContentCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetSkillVersionContentRequest>,
+);
+impl<'a> GetSkillVersionContentCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetSkillVersionContentRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetSkillVersionContentCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetSkillVersionContentRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CancelChatSessionMethod` endpoint, returned by [`OpenAI::cancel_chat_session_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CancelChatSessionMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CancelChatSessionMethodRequest>,
+);
+impl<'a> CancelChatSessionMethodCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CancelChatSessionMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CancelChatSessionMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CancelChatSessionMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateChatSessionMethod` endpoint, returned by [`OpenAI::create_chat_session_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateChatSessionMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, CreateChatSessionMethodRequest>,
+);
+impl<'a> CreateChatSessionMethodCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, CreateChatSessionMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateChatSessionMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        CreateChatSessionMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListThreadItemsMethod` endpoint, returned by [`OpenAI::list_thread_items_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListThreadItemsMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListThreadItemsMethodRequest>,
+);
+impl<'a> ListThreadItemsMethodCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
+    pub fn order(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListThreadItemsMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListThreadItemsMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetThreadMethod` endpoint, returned by [`OpenAI::get_thread_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetThreadMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, GetThreadMethodRequest>,
+);
+impl<'a> GetThreadMethodCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, GetThreadMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetThreadMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        GetThreadMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteThreadMethod` endpoint, returned by [`OpenAI::delete_thread_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteThreadMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, DeleteThreadMethodRequest>,
+);
+impl<'a> DeleteThreadMethodCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, DeleteThreadMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteThreadMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        DeleteThreadMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListThreadsMethod` endpoint, returned by [`OpenAI::list_threads_method`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListThreadsMethodCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, ListThreadsMethodRequest>,
+);
+impl<'a> ListThreadsMethodCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
+    pub fn order(self, value: serde_json::Value) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
+    pub fn before(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_before(value)))
+    }
+    /// Sets the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
+    pub fn user(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_user(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListThreadsMethodCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        ListThreadsMethodRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaCreateResponse` endpoint, returned by [`OpenAI::beta_create_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaCreateResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaCreateResponseRequest>,
+);
+impl<'a> BetaCreateResponseCall<'a> {
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCreateResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaCreateResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaCreateResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaGetResponse` endpoint, returned by [`OpenAI::beta_get_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaGetResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaGetResponseRequest>,
+);
+impl<'a> BetaGetResponseCall<'a> {
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// Sets the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
+    pub fn stream(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_stream(value)))
+    }
+    /// Sets the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
+    pub fn starting_after(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_starting_after(value)))
+    }
+    /// Sets the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
+    pub fn include_obfuscation(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_include_obfuscation(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaGetResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaGetResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaGetResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaDeleteResponse` endpoint, returned by [`OpenAI::beta_delete_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaDeleteResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaDeleteResponseRequest>,
+);
+impl<'a> BetaDeleteResponseCall<'a> {
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaDeleteResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaDeleteResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaDeleteResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaCancelResponse` endpoint, returned by [`OpenAI::beta_cancel_response`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaCancelResponseCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaCancelResponseRequest>,
+);
+impl<'a> BetaCancelResponseCall<'a> {
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCancelResponseRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaCancelResponseCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaCancelResponseRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaCompactconversation` endpoint, returned by [`OpenAI::beta_compactconversation`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaCompactconversationCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaCompactconversationRequest>,
+);
+impl<'a> BetaCompactconversationCall<'a> {
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCompactconversationRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaCompactconversationCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaCompactconversationRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaListInputItems` endpoint, returned by [`OpenAI::beta_list_input_items`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaListInputItemsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaListInputItemsRequest>,
+);
+impl<'a> BetaListInputItemsCall<'a> {
+    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn limit(self, value: i64) -> Self {
+        Self(self.0.map_request(|request| request.with_limit(value)))
+    }
+    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    pub fn order(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_order(value)))
+    }
+    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    pub fn after(self, value: String) -> Self {
+        Self(self.0.map_request(|request| request.with_after(value)))
+    }
+    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
+        Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaListInputItemsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaListInputItemsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaListInputItemsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `BetaGetinputtokencounts` endpoint, returned by [`OpenAI::beta_getinputtokencounts`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct BetaGetinputtokencountsCall<'a>(
+    schematic_runtime::Call<'a, OpenAIApi, BetaGetinputtokencountsRequest>,
+);
+impl<'a> BetaGetinputtokencountsCall<'a> {
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaGetinputtokencountsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for BetaGetinputtokencountsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OpenAIApi,
+        BetaGetinputtokencountsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl OpenAI {
+    /// Generates audio from the input text.
+    ///
+    /// Returns the audio file content, or a stream of audio events.
+    ///
+    /// `POST /audio/speech`
+    ///
+    /// Returns a [`CreateSpeechCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateSpeechRequest2`: the request body
+    pub fn create_speech(&self, body: CreateSpeechRequest2) -> CreateSpeechCall<'_> {
+        CreateSpeechCall(self.0.send(CreateSpeechRequest::new(body)))
+    }
+    /// Transcribes audio into the input language.
+    ///
+    /// Returns a transcription object in `json`, `diarized_json`, or `verbose_json`
+    /// format, or a stream of transcript events.
+    ///
+    /// `POST /audio/transcriptions`
+    ///
+    /// Returns a [`CreateTranscriptionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateTranscriptionForm`: the request body
+    pub fn create_transcription(
+        &self,
+        body: CreateTranscriptionForm,
+    ) -> CreateTranscriptionCall<'_> {
+        CreateTranscriptionCall(self.0.send(CreateTranscriptionRequest::new(body)))
+    }
+    /// Translates audio into English.
+    ///
+    /// `POST /audio/translations`
+    ///
+    /// Returns a [`CreateTranslationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateTranslationForm`: the request body
+    pub fn create_translation(
+        &self,
+        body: CreateTranslationForm,
+    ) -> CreateTranslationCall<'_> {
+        CreateTranslationCall(self.0.send(CreateTranslationRequest::new(body)))
+    }
+    /// Returns a list of voice consent recordings.
+    ///
+    /// `GET /audio/voice_consents`
+    ///
+    /// Returns a [`ListVoiceConsentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListVoiceConsentsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`limit`](ListVoiceConsentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn list_voice_consents(&self) -> ListVoiceConsentsCall<'_> {
+        ListVoiceConsentsCall(self.0.send(ListVoiceConsentsRequest::default()))
+    }
+    /// Upload a voice consent recording.
+    ///
+    /// `POST /audio/voice_consents`
+    ///
+    /// Returns a [`CreateVoiceConsentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVoiceConsentForm`: the request body
+    pub fn create_voice_consent(
+        &self,
+        body: CreateVoiceConsentForm,
+    ) -> CreateVoiceConsentCall<'_> {
+        CreateVoiceConsentCall(self.0.send(CreateVoiceConsentRequest::new(body)))
+    }
+    /// Retrieves a voice consent recording.
+    ///
+    /// `GET /audio/voice_consents/{consent_id}`
+    ///
+    /// Returns a [`GetVoiceConsentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `consent_id: impl Into<String>`: the `{consent_id}` path parameter
+    pub fn get_voice_consent(
+        &self,
+        consent_id: impl Into<String>,
+    ) -> GetVoiceConsentCall<'_> {
+        GetVoiceConsentCall(self.0.send(GetVoiceConsentRequest::new(consent_id)))
+    }
+    /// Updates a voice consent recording (metadata only).
+    ///
+    /// `POST /audio/voice_consents/{consent_id}`
+    ///
+    /// Returns a [`UpdateVoiceConsentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `consent_id: impl Into<String>`: the `{consent_id}` path parameter
+    /// - `body: UpdateVoiceConsentRequest2`: the request body
+    pub fn update_voice_consent(
+        &self,
+        consent_id: impl Into<String>,
+        body: UpdateVoiceConsentRequest2,
+    ) -> UpdateVoiceConsentCall<'_> {
+        UpdateVoiceConsentCall(
+            self.0.send(UpdateVoiceConsentRequest::new(consent_id, body)),
+        )
+    }
+    /// Deletes a voice consent recording.
+    ///
+    /// `DELETE /audio/voice_consents/{consent_id}`
+    ///
+    /// Returns a [`DeleteVoiceConsentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `consent_id: impl Into<String>`: the `{consent_id}` path parameter
+    pub fn delete_voice_consent(
+        &self,
+        consent_id: impl Into<String>,
+    ) -> DeleteVoiceConsentCall<'_> {
+        DeleteVoiceConsentCall(self.0.send(DeleteVoiceConsentRequest::new(consent_id)))
+    }
+    /// Creates a custom voice.
+    ///
+    /// `POST /audio/voices`
+    ///
+    /// Returns a [`CreateVoiceCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVoiceForm`: the request body
+    pub fn create_voice(&self, body: CreateVoiceForm) -> CreateVoiceCall<'_> {
+        CreateVoiceCall(self.0.send(CreateVoiceRequest::new(body)))
+    }
+    /// List your organization's batches.
+    ///
+    /// `GET /batches`
+    ///
+    /// Returns a [`ListBatchesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListBatchesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`limit`](ListBatchesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    pub fn list_batches(&self) -> ListBatchesCall<'_> {
+        ListBatchesCall(self.0.send(ListBatchesRequest::default()))
+    }
+    /// Creates and executes a batch from an uploaded file of requests
+    ///
+    /// `POST /batches`
+    ///
+    /// Returns a [`CreateBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateBatchRequest2`: the request body
+    pub fn create_batch(&self, body: CreateBatchRequest2) -> CreateBatchCall<'_> {
+        CreateBatchCall(self.0.send(CreateBatchRequest::new(body)))
+    }
+    /// Retrieves a batch.
+    ///
+    /// `GET /batches/{batch_id}`
+    ///
+    /// Returns a [`RetrieveBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `batch_id: impl Into<String>`: the `{batch_id}` path parameter
+    pub fn retrieve_batch(&self, batch_id: impl Into<String>) -> RetrieveBatchCall<'_> {
+        RetrieveBatchCall(self.0.send(RetrieveBatchRequest::new(batch_id)))
+    }
+    /// Cancels an in-progress batch. The batch will be in status `cancelling` for up to 10 minutes, before changing to `cancelled`, where it will have partial results (if any) available in the output file.
+    ///
+    /// `POST /batches/{batch_id}/cancel`
+    ///
+    /// Returns a [`CancelBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `batch_id: impl Into<String>`: the `{batch_id}` path parameter
+    pub fn cancel_batch(&self, batch_id: impl Into<String>) -> CancelBatchCall<'_> {
+        CancelBatchCall(self.0.send(CancelBatchRequest::new(batch_id)))
+    }
+    /// List stored Chat Completions. Only Chat Completions that have been stored
+    /// with the `store` parameter set to `true` will be returned.
+    ///
+    /// `GET /chat/completions`
+    ///
+    /// Returns a [`ListChatCompletionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`model`](ListChatCompletionsCall::model): the `model` query parameter (`String`). The model used to generate the Chat Completions.
+    /// - [`metadata`](ListChatCompletionsCall::metadata): the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
+    /// - [`after`](ListChatCompletionsCall::after): the `after` query parameter (`String`). Identifier for the last chat completion from the previous pagination request.
+    /// - [`limit`](ListChatCompletionsCall::limit): the `limit` query parameter (`i64`). Number of Chat Completions to retrieve.
+    /// - [`order`](ListChatCompletionsCall::order): the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn list_chat_completions(&self) -> ListChatCompletionsCall<'_> {
+        ListChatCompletionsCall(self.0.send(ListChatCompletionsRequest::default()))
+    }
+    /// **Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)
+    /// to take advantage of the latest OpenAI platform features. Compare
+    /// [Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).
+    ///
+    /// ---
+    ///
+    /// Creates a model response for the given chat conversation. Learn more in the
+    /// [text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),
+    /// and [audio](/docs/guides/audio) guides.
+    ///
+    /// Parameter support can differ depending on the model used to generate the
+    /// response, particularly for newer reasoning models. Parameters that are only
+    /// supported for reasoning models are noted below. For the current state of
+    /// unsupported parameters in reasoning models,
+    /// [refer to the reasoning guide](/docs/guides/reasoning).
+    ///
+    /// Returns a chat completion object, or a streamed sequence of chat completion
+    /// chunk objects if the request is streamed.
+    ///
+    /// `POST /chat/completions`
+    ///
+    /// Returns a [`CreateChatCompletionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateChatCompletionRequest2`: the request body
+    pub fn create_chat_completion(
+        &self,
+        body: CreateChatCompletionRequest2,
+    ) -> CreateChatCompletionCall<'_> {
+        CreateChatCompletionCall(self.0.send(CreateChatCompletionRequest::new(body)))
+    }
+    /// Get a stored chat completion. Only Chat Completions that have been created
+    /// with the `store` parameter set to `true` will be returned.
+    ///
+    /// `GET /chat/completions/{completion_id}`
+    ///
+    /// Returns a [`GetChatCompletionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `completion_id: impl Into<String>`: the `{completion_id}` path parameter
+    pub fn get_chat_completion(
+        &self,
+        completion_id: impl Into<String>,
+    ) -> GetChatCompletionCall<'_> {
+        GetChatCompletionCall(self.0.send(GetChatCompletionRequest::new(completion_id)))
+    }
+    /// Modify a stored chat completion. Only Chat Completions that have been
+    /// created with the `store` parameter set to `true` can be modified. Currently,
+    /// the only supported modification is to update the `metadata` field.
+    ///
+    /// `POST /chat/completions/{completion_id}`
+    ///
+    /// Returns a [`UpdateChatCompletionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `completion_id: impl Into<String>`: the `{completion_id}` path parameter
+    /// - `body: serde_json::Value`: the request body
+    pub fn update_chat_completion(
+        &self,
+        completion_id: impl Into<String>,
+        body: serde_json::Value,
+    ) -> UpdateChatCompletionCall<'_> {
+        UpdateChatCompletionCall(
+            self.0.send(UpdateChatCompletionRequest::new(completion_id, body)),
+        )
+    }
+    /// Delete a stored chat completion. Only Chat Completions that have been
+    /// created with the `store` parameter set to `true` can be deleted.
+    ///
+    /// `DELETE /chat/completions/{completion_id}`
+    ///
+    /// Returns a [`DeleteChatCompletionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `completion_id: impl Into<String>`: the `{completion_id}` path parameter
+    pub fn delete_chat_completion(
+        &self,
+        completion_id: impl Into<String>,
+    ) -> DeleteChatCompletionCall<'_> {
+        DeleteChatCompletionCall(
+            self.0.send(DeleteChatCompletionRequest::new(completion_id)),
+        )
+    }
+    /// Get the messages in a stored chat completion. Only Chat Completions that
+    /// have been created with the `store` parameter set to `true` will be
+    /// returned.
+    ///
+    /// `GET /chat/completions/{completion_id}/messages`
+    ///
+    /// Returns a [`GetChatCompletionMessagesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `completion_id: impl Into<String>`: the `{completion_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](GetChatCompletionMessagesCall::after): the `after` query parameter (`String`). Identifier for the last message from the previous pagination request.
+    /// - [`limit`](GetChatCompletionMessagesCall::limit): the `limit` query parameter (`i64`). Number of messages to retrieve.
+    /// - [`order`](GetChatCompletionMessagesCall::order): the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn get_chat_completion_messages(
+        &self,
+        completion_id: impl Into<String>,
+    ) -> GetChatCompletionMessagesCall<'_> {
+        GetChatCompletionMessagesCall(
+            self.0.send(GetChatCompletionMessagesRequest::new(completion_id)),
+        )
+    }
+    /// Creates a completion for the provided prompt and parameters.
+    ///
+    /// Returns a completion object, or a sequence of completion objects if the request is streamed.
+    ///
+    /// `POST /completions`
+    ///
+    /// Returns a [`CreateCompletionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateCompletionRequest2`: the request body
+    pub fn create_completion(
+        &self,
+        body: CreateCompletionRequest2,
+    ) -> CreateCompletionCall<'_> {
+        CreateCompletionCall(self.0.send(CreateCompletionRequest::new(body)))
+    }
+    /// List Containers
+    ///
+    /// `GET /containers`
+    ///
+    /// Returns a [`ListContainersCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListContainersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListContainersCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListContainersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`name`](ListContainersCall::name): the `name` query parameter (`String`). Filter results by container name.
+    pub fn list_containers(&self) -> ListContainersCall<'_> {
+        ListContainersCall(self.0.send(ListContainersRequest::default()))
+    }
+    /// Create Container
+    ///
+    /// `POST /containers`
+    ///
+    /// Returns a [`CreateContainerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateContainerBody`: the request body
+    pub fn create_container(
+        &self,
+        body: CreateContainerBody,
+    ) -> CreateContainerCall<'_> {
+        CreateContainerCall(self.0.send(CreateContainerRequest::new(body)))
+    }
+    /// Retrieve Container
+    ///
+    /// `GET /containers/{container_id}`
+    ///
+    /// Returns a [`RetrieveContainerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    pub fn retrieve_container(
+        &self,
+        container_id: impl Into<String>,
+    ) -> RetrieveContainerCall<'_> {
+        RetrieveContainerCall(self.0.send(RetrieveContainerRequest::new(container_id)))
+    }
+    /// Delete Container
+    ///
+    /// `DELETE /containers/{container_id}`
+    ///
+    /// Returns a [`DeleteContainerCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    pub fn delete_container(
+        &self,
+        container_id: impl Into<String>,
+    ) -> DeleteContainerCall<'_> {
+        DeleteContainerCall(self.0.send(DeleteContainerRequest::new(container_id)))
+    }
+    /// List Container files
+    ///
+    /// `GET /containers/{container_id}/files`
+    ///
+    /// Returns a [`ListContainerFilesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListContainerFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListContainerFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListContainerFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn list_container_files(
+        &self,
+        container_id: impl Into<String>,
+    ) -> ListContainerFilesCall<'_> {
+        ListContainerFilesCall(self.0.send(ListContainerFilesRequest::new(container_id)))
+    }
+    /// Create a Container File
+    ///
+    /// You can send either a multipart/form-data request with the raw file content, or a JSON request with a file ID.
+    ///
+    /// `POST /containers/{container_id}/files`
+    ///
+    /// Returns a [`CreateContainerFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    /// - `body: CreateContainerFileBody`: the request body
+    pub fn create_container_file(
+        &self,
+        container_id: impl Into<String>,
+        body: CreateContainerFileBody,
+    ) -> CreateContainerFileCall<'_> {
+        CreateContainerFileCall(
+            self.0.send(CreateContainerFileRequest::new(container_id, body)),
+        )
+    }
+    /// Retrieve Container File
+    ///
+    /// `GET /containers/{container_id}/files/{file_id}`
+    ///
+    /// Returns a [`RetrieveContainerFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn retrieve_container_file(
+        &self,
+        container_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> RetrieveContainerFileCall<'_> {
+        RetrieveContainerFileCall(
+            self.0.send(RetrieveContainerFileRequest::new(container_id, file_id)),
+        )
+    }
+    /// Delete Container File
+    ///
+    /// `DELETE /containers/{container_id}/files/{file_id}`
+    ///
+    /// Returns a [`DeleteContainerFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn delete_container_file(
+        &self,
+        container_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> DeleteContainerFileCall<'_> {
+        DeleteContainerFileCall(
+            self.0.send(DeleteContainerFileRequest::new(container_id, file_id)),
+        )
+    }
+    /// Retrieve Container File Content
+    ///
+    /// `GET /containers/{container_id}/files/{file_id}/content`
+    ///
+    /// Returns a [`RetrieveContainerFileContentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn retrieve_container_file_content(
+        &self,
+        container_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> RetrieveContainerFileContentCall<'_> {
+        RetrieveContainerFileContentCall(
+            self.0.send(RetrieveContainerFileContentRequest::new(container_id, file_id)),
+        )
+    }
+    /// List all items for a conversation with the given ID.
+    ///
+    /// `GET /conversations/{conversation_id}/items`
+    ///
+    /// Returns a [`ListConversationItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListConversationItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListConversationItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    /// - [`after`](ListConversationItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    /// - [`include`](ListConversationItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
+    pub fn list_conversation_items(
+        &self,
+        conversation_id: impl Into<String>,
+    ) -> ListConversationItemsCall<'_> {
+        ListConversationItemsCall(
+            self.0.send(ListConversationItemsRequest::new(conversation_id)),
+        )
+    }
+    /// Create items in a conversation with the given ID.
+    ///
+    /// `POST /conversations/{conversation_id}/items`
+    ///
+    /// Returns a [`CreateConversationItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    /// - `body: serde_json::Value`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include`](CreateConversationItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
+    pub fn create_conversation_items(
+        &self,
+        conversation_id: impl Into<String>,
+        body: serde_json::Value,
+    ) -> CreateConversationItemsCall<'_> {
+        CreateConversationItemsCall(
+            self.0.send(CreateConversationItemsRequest::new(conversation_id, body)),
+        )
+    }
+    /// Get a single item from a conversation with the given IDs.
+    ///
+    /// `GET /conversations/{conversation_id}/items/{item_id}`
+    ///
+    /// Returns a [`GetConversationItemCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    /// - `item_id: impl Into<String>`: the `{item_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include`](GetConversationItemCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.
+    pub fn get_conversation_item(
+        &self,
+        conversation_id: impl Into<String>,
+        item_id: impl Into<String>,
+    ) -> GetConversationItemCall<'_> {
+        GetConversationItemCall(
+            self.0.send(GetConversationItemRequest::new(conversation_id, item_id)),
+        )
+    }
+    /// Delete an item from a conversation with the given IDs.
+    ///
+    /// `DELETE /conversations/{conversation_id}/items/{item_id}`
+    ///
+    /// Returns a [`DeleteConversationItemCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    /// - `item_id: impl Into<String>`: the `{item_id}` path parameter
+    pub fn delete_conversation_item(
+        &self,
+        conversation_id: impl Into<String>,
+        item_id: impl Into<String>,
+    ) -> DeleteConversationItemCall<'_> {
+        DeleteConversationItemCall(
+            self.0.send(DeleteConversationItemRequest::new(conversation_id, item_id)),
+        )
+    }
+    /// Creates an embedding vector representing the input text.
+    ///
+    /// `POST /embeddings`
+    ///
+    /// Returns a [`CreateEmbeddingCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateEmbeddingRequest2`: the request body
+    pub fn create_embedding(
+        &self,
+        body: CreateEmbeddingRequest2,
+    ) -> CreateEmbeddingCall<'_> {
+        CreateEmbeddingCall(self.0.send(CreateEmbeddingRequest::new(body)))
+    }
+    /// List evaluations for a project.
+    ///
+    /// `GET /evals`
+    ///
+    /// Returns a [`ListEvalsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListEvalsCall::after): the `after` query parameter (`String`). Identifier for the last eval from the previous pagination request.
+    /// - [`limit`](ListEvalsCall::limit): the `limit` query parameter (`i64`). Number of evals to retrieve.
+    /// - [`order`](ListEvalsCall::order): the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    /// - [`order_by`](ListEvalsCall::order_by): the `order_by` query parameter (`String`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
+    pub fn list_evals(&self) -> ListEvalsCall<'_> {
+        ListEvalsCall(self.0.send(ListEvalsRequest::default()))
+    }
+    /// Create the structure of an evaluation that can be used to test a model's performance.
+    /// An evaluation is a set of testing criteria and the config for a data source, which dictates the schema of the data used in the evaluation. After creating an evaluation, you can run it on different models and model parameters. We support several types of graders and datasources.
+    /// For more information, see the [Evals guide](/docs/guides/evals).
+    ///
+    /// `POST /evals`
+    ///
+    /// Returns a [`CreateEvalCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateEvalRequest2`: the request body
+    pub fn create_eval(&self, body: CreateEvalRequest2) -> CreateEvalCall<'_> {
+        CreateEvalCall(self.0.send(CreateEvalRequest::new(body)))
+    }
+    /// Get an evaluation by ID.
+    ///
+    /// `GET /evals/{eval_id}`
+    ///
+    /// Returns a [`GetEvalCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    pub fn get_eval(&self, eval_id: impl Into<String>) -> GetEvalCall<'_> {
+        GetEvalCall(self.0.send(GetEvalRequest::new(eval_id)))
+    }
+    /// Update certain properties of an evaluation.
+    ///
+    /// `POST /evals/{eval_id}`
+    ///
+    /// Returns a [`UpdateEvalCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `body: serde_json::Value`: the request body
+    pub fn update_eval(
+        &self,
+        eval_id: impl Into<String>,
+        body: serde_json::Value,
+    ) -> UpdateEvalCall<'_> {
+        UpdateEvalCall(self.0.send(UpdateEvalRequest::new(eval_id, body)))
+    }
+    /// Delete an evaluation.
+    ///
+    /// `DELETE /evals/{eval_id}`
+    ///
+    /// Returns a [`DeleteEvalCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    pub fn delete_eval(&self, eval_id: impl Into<String>) -> DeleteEvalCall<'_> {
+        DeleteEvalCall(self.0.send(DeleteEvalRequest::new(eval_id)))
+    }
+    /// Get a list of runs for an evaluation.
+    ///
+    /// `GET /evals/{eval_id}/runs`
+    ///
+    /// Returns a [`GetEvalRunsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](GetEvalRunsCall::after): the `after` query parameter (`String`). Identifier for the last run from the previous pagination request.
+    /// - [`limit`](GetEvalRunsCall::limit): the `limit` query parameter (`i64`). Number of runs to retrieve.
+    /// - [`order`](GetEvalRunsCall::order): the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    /// - [`status`](GetEvalRunsCall::status): the `status` query parameter (`String`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
+    pub fn get_eval_runs(&self, eval_id: impl Into<String>) -> GetEvalRunsCall<'_> {
+        GetEvalRunsCall(self.0.send(GetEvalRunsRequest::new(eval_id)))
+    }
+    /// Kicks off a new run for a given evaluation, specifying the data source, and what model configuration to use to test. The datasource will be validated against the schema specified in the config of the evaluation.
+    ///
+    /// `POST /evals/{eval_id}/runs`
+    ///
+    /// Returns a [`CreateEvalRunCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `body: CreateEvalRunRequest2`: the request body
+    pub fn create_eval_run(
+        &self,
+        eval_id: impl Into<String>,
+        body: CreateEvalRunRequest2,
+    ) -> CreateEvalRunCall<'_> {
+        CreateEvalRunCall(self.0.send(CreateEvalRunRequest::new(eval_id, body)))
+    }
+    /// Get an evaluation run by ID.
+    ///
+    /// `GET /evals/{eval_id}/runs/{run_id}`
+    ///
+    /// Returns a [`GetEvalRunCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `run_id: impl Into<String>`: the `{run_id}` path parameter
+    pub fn get_eval_run(
+        &self,
+        eval_id: impl Into<String>,
+        run_id: impl Into<String>,
+    ) -> GetEvalRunCall<'_> {
+        GetEvalRunCall(self.0.send(GetEvalRunRequest::new(eval_id, run_id)))
+    }
+    /// Cancel an ongoing evaluation run.
+    ///
+    /// `POST /evals/{eval_id}/runs/{run_id}`
+    ///
+    /// Returns a [`CancelEvalRunCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `run_id: impl Into<String>`: the `{run_id}` path parameter
+    pub fn cancel_eval_run(
+        &self,
+        eval_id: impl Into<String>,
+        run_id: impl Into<String>,
+    ) -> CancelEvalRunCall<'_> {
+        CancelEvalRunCall(self.0.send(CancelEvalRunRequest::new(eval_id, run_id)))
+    }
+    /// Delete an eval run.
+    ///
+    /// `DELETE /evals/{eval_id}/runs/{run_id}`
+    ///
+    /// Returns a [`DeleteEvalRunCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `run_id: impl Into<String>`: the `{run_id}` path parameter
+    pub fn delete_eval_run(
+        &self,
+        eval_id: impl Into<String>,
+        run_id: impl Into<String>,
+    ) -> DeleteEvalRunCall<'_> {
+        DeleteEvalRunCall(self.0.send(DeleteEvalRunRequest::new(eval_id, run_id)))
+    }
+    /// Get a list of output items for an evaluation run.
+    ///
+    /// `GET /evals/{eval_id}/runs/{run_id}/output_items`
+    ///
+    /// Returns a [`GetEvalRunOutputItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `run_id: impl Into<String>`: the `{run_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](GetEvalRunOutputItemsCall::after): the `after` query parameter (`String`). Identifier for the last output item from the previous pagination request.
+    /// - [`limit`](GetEvalRunOutputItemsCall::limit): the `limit` query parameter (`i64`). Number of output items to retrieve.
+    /// - [`status`](GetEvalRunOutputItemsCall::status): the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
+    /// - [`order`](GetEvalRunOutputItemsCall::order): the `order` query parameter (`String`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
+    pub fn get_eval_run_output_items(
+        &self,
+        eval_id: impl Into<String>,
+        run_id: impl Into<String>,
+    ) -> GetEvalRunOutputItemsCall<'_> {
+        GetEvalRunOutputItemsCall(
+            self.0.send(GetEvalRunOutputItemsRequest::new(eval_id, run_id)),
+        )
+    }
+    /// Get an evaluation run output item by ID.
+    ///
+    /// `GET /evals/{eval_id}/runs/{run_id}/output_items/{output_item_id}`
+    ///
+    /// Returns a [`GetEvalRunOutputItemCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
+    /// - `run_id: impl Into<String>`: the `{run_id}` path parameter
+    /// - `output_item_id: impl Into<String>`: the `{output_item_id}` path parameter
+    pub fn get_eval_run_output_item(
+        &self,
+        eval_id: impl Into<String>,
+        run_id: impl Into<String>,
+        output_item_id: impl Into<String>,
+    ) -> GetEvalRunOutputItemCall<'_> {
+        GetEvalRunOutputItemCall(
+            self
+                .0
+                .send(GetEvalRunOutputItemRequest::new(eval_id, run_id, output_item_id)),
+        )
+    }
+    /// Returns a list of files.
+    ///
+    /// `GET /files`
+    ///
+    /// Returns a [`ListFilesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`purpose`](ListFilesCall::purpose): the `purpose` query parameter (`String`). Only return files with the given purpose.
+    /// - [`limit`](ListFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.
+    /// - [`order`](ListFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn list_files(&self) -> ListFilesCall<'_> {
+        ListFilesCall(self.0.send(ListFilesRequest::default()))
+    }
+    /// Upload a file that can be used across various endpoints. Individual files
+    /// can be up to 512 MB, and each project can store up to 2.5 TB of files in
+    /// total. There is no organization-wide storage limit. Uploads to this
+    /// endpoint are rate-limited to 1,000 requests per minute per authenticated
+    /// user.
+    ///
+    /// - The Assistants API supports files up to 2 million tokens and of specific
+    ///   file types. See the [Assistants Tools guide](/docs/assistants/tools) for
+    ///   details.
+    /// - The Fine-tuning API only supports `.jsonl` files. The input also has
+    ///   certain required formats for fine-tuning
+    ///   [chat](/docs/api-reference/fine-tuning/chat-input) or
+    ///   [completions](/docs/api-reference/fine-tuning/completions-input) models.
+    /// - The Batch API only supports `.jsonl` files up to 200 MB in size. The input
+    ///   also has a specific required
+    ///   [format](/docs/api-reference/batch/request-input).
+    /// - For Retrieval or `file_search` ingestion, upload files here first. If
+    ///   you need to attach multiple uploaded files to the same vector store, use
+    ///   [`/vector_stores/{vector_store_id}/file_batches`](/docs/api-reference/vector-stores-file-batches/createBatch)
+    ///   instead of attaching them one by one. Vector store attachment has separate
+    ///   limits from file upload, including 2,000 attached files per minute per
+    ///   organization.
+    ///
+    /// Please [contact us](https://help.openai.com/) if you need to increase these
+    /// storage limits.
+    ///
+    /// `POST /files`
+    ///
+    /// Returns a [`CreateFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateFileForm`: the request body
+    pub fn create_file(&self, body: CreateFileForm) -> CreateFileCall<'_> {
+        CreateFileCall(self.0.send(CreateFileRequest::new(body)))
+    }
+    /// Returns information about a specific file.
+    ///
+    /// `GET /files/{file_id}`
+    ///
+    /// Returns a [`RetrieveFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn retrieve_file(&self, file_id: impl Into<String>) -> RetrieveFileCall<'_> {
+        RetrieveFileCall(self.0.send(RetrieveFileRequest::new(file_id)))
+    }
+    /// Delete a file and remove it from all vector stores.
+    ///
+    /// `DELETE /files/{file_id}`
+    ///
+    /// Returns a [`DeleteFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn delete_file(&self, file_id: impl Into<String>) -> DeleteFileCall<'_> {
+        DeleteFileCall(self.0.send(DeleteFileRequest::new(file_id)))
+    }
+    /// Returns the contents of the specified file.
+    ///
+    /// `GET /files/{file_id}/content`
+    ///
+    /// Returns a [`DownloadFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn download_file(&self, file_id: impl Into<String>) -> DownloadFileCall<'_> {
+        DownloadFileCall(self.0.send(DownloadFileRequest::new(file_id)))
+    }
+    /// Run a grader.
+    ///
+    /// `POST /fine_tuning/alpha/graders/run`
+    ///
+    /// Returns a [`RunGraderCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RunGraderRequest2`: the request body
+    pub fn run_grader(&self, body: RunGraderRequest2) -> RunGraderCall<'_> {
+        RunGraderCall(self.0.send(RunGraderRequest::new(body)))
+    }
+    /// Validate a grader.
+    ///
+    /// `POST /fine_tuning/alpha/graders/validate`
+    ///
+    /// Returns a [`ValidateGraderCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ValidateGraderRequest2`: the request body
+    pub fn validate_grader(
+        &self,
+        body: ValidateGraderRequest2,
+    ) -> ValidateGraderCall<'_> {
+        ValidateGraderCall(self.0.send(ValidateGraderRequest::new(body)))
+    }
+    /// **NOTE:** This endpoint requires an [admin API key](../admin-api-keys).
+    ///
+    /// Organization owners can use this endpoint to view all permissions for a fine-tuned model checkpoint.
+    ///
+    /// `GET /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions`
+    ///
+    /// Returns a [`ListFineTuningCheckpointPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuned_model_checkpoint: impl Into<String>`: the `{fine_tuned_model_checkpoint}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`project_id`](ListFineTuningCheckpointPermissionsCall::project_id): the `project_id` query parameter (`String`). The ID of the project to get permissions for.
+    /// - [`after`](ListFineTuningCheckpointPermissionsCall::after): the `after` query parameter (`String`). Identifier for the last permission ID from the previous pagination request.
+    /// - [`limit`](ListFineTuningCheckpointPermissionsCall::limit): the `limit` query parameter (`i64`). Number of permissions to retrieve.
+    /// - [`order`](ListFineTuningCheckpointPermissionsCall::order): the `order` query parameter (`String`). The order in which to retrieve permissions.
+    pub fn list_fine_tuning_checkpoint_permissions(
+        &self,
+        fine_tuned_model_checkpoint: impl Into<String>,
+    ) -> ListFineTuningCheckpointPermissionsCall<'_> {
+        ListFineTuningCheckpointPermissionsCall(
+            self
+                .0
+                .send(
+                    ListFineTuningCheckpointPermissionsRequest::new(
+                        fine_tuned_model_checkpoint,
+                    ),
+                ),
+        )
+    }
+    /// **NOTE:** Calling this endpoint requires an [admin API key](../admin-api-keys).
+    ///
+    /// This enables organization owners to share fine-tuned models with other projects in their organization.
+    ///
+    /// `POST /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions`
+    ///
+    /// Returns a [`CreateFineTuningCheckpointPermissionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuned_model_checkpoint: impl Into<String>`: the `{fine_tuned_model_checkpoint}` path parameter
+    /// - `body: CreateFineTuningCheckpointPermissionRequest2`: the request body
+    pub fn create_fine_tuning_checkpoint_permission(
+        &self,
+        fine_tuned_model_checkpoint: impl Into<String>,
+        body: CreateFineTuningCheckpointPermissionRequest2,
+    ) -> CreateFineTuningCheckpointPermissionCall<'_> {
+        CreateFineTuningCheckpointPermissionCall(
+            self
+                .0
+                .send(
+                    CreateFineTuningCheckpointPermissionRequest::new(
+                        fine_tuned_model_checkpoint,
+                        body,
+                    ),
+                ),
+        )
+    }
+    /// **NOTE:** This endpoint requires an [admin API key](../admin-api-keys).
+    ///
+    /// Organization owners can use this endpoint to delete a permission for a fine-tuned model checkpoint.
+    ///
+    /// `DELETE /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions/{permission_id}`
+    ///
+    /// Returns a [`DeleteFineTuningCheckpointPermissionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuned_model_checkpoint: impl Into<String>`: the `{fine_tuned_model_checkpoint}` path parameter
+    /// - `permission_id: impl Into<String>`: the `{permission_id}` path parameter
+    pub fn delete_fine_tuning_checkpoint_permission(
+        &self,
+        fine_tuned_model_checkpoint: impl Into<String>,
+        permission_id: impl Into<String>,
+    ) -> DeleteFineTuningCheckpointPermissionCall<'_> {
+        DeleteFineTuningCheckpointPermissionCall(
+            self
+                .0
+                .send(
+                    DeleteFineTuningCheckpointPermissionRequest::new(
+                        fine_tuned_model_checkpoint,
+                        permission_id,
+                    ),
+                ),
+        )
+    }
+    /// List your organization's fine-tuning jobs
+    ///
+    /// `GET /fine_tuning/jobs`
+    ///
+    /// Returns a [`ListPaginatedFineTuningJobsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListPaginatedFineTuningJobsCall::after): the `after` query parameter (`String`). Identifier for the last job from the previous pagination request.
+    /// - [`limit`](ListPaginatedFineTuningJobsCall::limit): the `limit` query parameter (`i64`). Number of fine-tuning jobs to retrieve.
+    /// - [`metadata`](ListPaginatedFineTuningJobsCall::metadata): the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
+    pub fn list_paginated_fine_tuning_jobs(
+        &self,
+    ) -> ListPaginatedFineTuningJobsCall<'_> {
+        ListPaginatedFineTuningJobsCall(
+            self.0.send(ListPaginatedFineTuningJobsRequest::default()),
+        )
+    }
+    /// Creates a fine-tuning job which begins the process of creating a new model from a given dataset.
+    ///
+    /// Response includes details of the enqueued job including job status and the name of the fine-tuned models once complete.
+    ///
+    /// [Learn more about fine-tuning](/docs/guides/model-optimization)
+    ///
+    /// `POST /fine_tuning/jobs`
+    ///
+    /// Returns a [`CreateFineTuningJobCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateFineTuningJobRequest2`: the request body
+    pub fn create_fine_tuning_job(
+        &self,
+        body: CreateFineTuningJobRequest2,
+    ) -> CreateFineTuningJobCall<'_> {
+        CreateFineTuningJobCall(self.0.send(CreateFineTuningJobRequest::new(body)))
+    }
+    /// Get info about a fine-tuning job.
+    ///
+    /// [Learn more about fine-tuning](/docs/guides/model-optimization)
+    ///
+    /// `GET /fine_tuning/jobs/{fine_tuning_job_id}`
+    ///
+    /// Returns a [`RetrieveFineTuningJobCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    pub fn retrieve_fine_tuning_job(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> RetrieveFineTuningJobCall<'_> {
+        RetrieveFineTuningJobCall(
+            self.0.send(RetrieveFineTuningJobRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// Immediately cancel a fine-tune job.
+    ///
+    /// `POST /fine_tuning/jobs/{fine_tuning_job_id}/cancel`
+    ///
+    /// Returns a [`CancelFineTuningJobCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    pub fn cancel_fine_tuning_job(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> CancelFineTuningJobCall<'_> {
+        CancelFineTuningJobCall(
+            self.0.send(CancelFineTuningJobRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// List checkpoints for a fine-tuning job.
+    ///
+    /// `GET /fine_tuning/jobs/{fine_tuning_job_id}/checkpoints`
+    ///
+    /// Returns a [`ListFineTuningJobCheckpointsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListFineTuningJobCheckpointsCall::after): the `after` query parameter (`String`). Identifier for the last checkpoint ID from the previous pagination request.
+    /// - [`limit`](ListFineTuningJobCheckpointsCall::limit): the `limit` query parameter (`i64`). Number of checkpoints to retrieve.
+    pub fn list_fine_tuning_job_checkpoints(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> ListFineTuningJobCheckpointsCall<'_> {
+        ListFineTuningJobCheckpointsCall(
+            self.0.send(ListFineTuningJobCheckpointsRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// Get status updates for a fine-tuning job.
+    ///
+    /// `GET /fine_tuning/jobs/{fine_tuning_job_id}/events`
+    ///
+    /// Returns a [`ListFineTuningEventsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](ListFineTuningEventsCall::after): the `after` query parameter (`String`). Identifier for the last event from the previous pagination request.
+    /// - [`limit`](ListFineTuningEventsCall::limit): the `limit` query parameter (`i64`). Number of events to retrieve.
+    pub fn list_fine_tuning_events(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> ListFineTuningEventsCall<'_> {
+        ListFineTuningEventsCall(
+            self.0.send(ListFineTuningEventsRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// Pause a fine-tune job.
+    ///
+    /// `POST /fine_tuning/jobs/{fine_tuning_job_id}/pause`
+    ///
+    /// Returns a [`PauseFineTuningJobCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    pub fn pause_fine_tuning_job(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> PauseFineTuningJobCall<'_> {
+        PauseFineTuningJobCall(
+            self.0.send(PauseFineTuningJobRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// Resume a fine-tune job.
+    ///
+    /// `POST /fine_tuning/jobs/{fine_tuning_job_id}/resume`
+    ///
+    /// Returns a [`ResumeFineTuningJobCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
+    pub fn resume_fine_tuning_job(
+        &self,
+        fine_tuning_job_id: impl Into<String>,
+    ) -> ResumeFineTuningJobCall<'_> {
+        ResumeFineTuningJobCall(
+            self.0.send(ResumeFineTuningJobRequest::new(fine_tuning_job_id)),
+        )
+    }
+    /// Creates an edited or extended image given one or more source images and a prompt. This endpoint supports GPT Image models (`gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`, and `chatgpt-image-latest`) and `dall-e-2`.
+    ///
+    /// `POST /images/edits`
+    ///
+    /// Returns a [`CreateImageEditCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: EditImageBodyJsonParam`: the request body
+    pub fn create_image_edit(
+        &self,
+        body: EditImageBodyJsonParam,
+    ) -> CreateImageEditCall<'_> {
+        CreateImageEditCall(self.0.send(CreateImageEditRequest::new(body)))
+    }
+    /// Creates an image given a prompt. [Learn more](/docs/guides/images).
+    ///
+    /// `POST /images/generations`
+    ///
+    /// Returns a [`CreateImageCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateImageRequest2`: the request body
+    pub fn create_image(&self, body: CreateImageRequest2) -> CreateImageCall<'_> {
+        CreateImageCall(self.0.send(CreateImageRequest::new(body)))
+    }
+    /// Creates a variation of a given image. This endpoint only supports `dall-e-2`.
+    ///
+    /// `POST /images/variations`
+    ///
+    /// Returns a [`CreateImageVariationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateImageVariationForm`: the request body
+    pub fn create_image_variation(
+        &self,
+        body: CreateImageVariationForm,
+    ) -> CreateImageVariationCall<'_> {
+        CreateImageVariationCall(self.0.send(CreateImageVariationRequest::new(body)))
+    }
+    /// Lists the currently available models, and provides basic information about each one such as the owner and availability.
+    ///
+    /// `GET /models`
+    ///
+    /// Returns a [`ListModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsCall<'_> {
+        ListModelsCall(self.0.send(ListModelsRequest::default()))
+    }
+    /// Retrieves a model instance, providing basic information about the model such as the owner and permissioning.
+    ///
+    /// `GET /models/{model}`
+    ///
+    /// Returns a [`RetrieveModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `model: impl Into<String>`: the `{model}` path parameter
+    pub fn retrieve_model(&self, model: impl Into<String>) -> RetrieveModelCall<'_> {
+        RetrieveModelCall(self.0.send(RetrieveModelRequest::new(model)))
+    }
+    /// Delete a fine-tuned model. You must have the Owner role in your organization to delete a model.
+    ///
+    /// `DELETE /models/{model}`
+    ///
+    /// Returns a [`DeleteModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `model: impl Into<String>`: the `{model}` path parameter
+    pub fn delete_model(&self, model: impl Into<String>) -> DeleteModelCall<'_> {
+        DeleteModelCall(self.0.send(DeleteModelRequest::new(model)))
+    }
+    /// Classifies if text and/or image inputs are potentially harmful. Learn
+    /// more in the [moderation guide](/docs/guides/moderation).
+    ///
+    /// `POST /moderations`
+    ///
+    /// Returns a [`CreateModerationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateModerationRequest2`: the request body
+    pub fn create_moderation(
+        &self,
+        body: CreateModerationRequest2,
+    ) -> CreateModerationCall<'_> {
+        CreateModerationCall(self.0.send(CreateModerationRequest::new(body)))
+    }
+    /// List organization API keys
+    ///
+    /// `GET /organization/admin_api_keys`
+    ///
+    /// Returns a [`AdminApiKeysListCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`after`](AdminApiKeysListCall::after): the `after` query parameter (`String`).
+    /// - [`order`](AdminApiKeysListCall::order): the `order` query parameter (`String`).
+    /// - [`limit`](AdminApiKeysListCall::limit): the `limit` query parameter (`i64`).
+    pub fn admin_api_keys_list(&self) -> AdminApiKeysListCall<'_> {
+        AdminApiKeysListCall(self.0.send(AdminApiKeysListRequest::default()))
+    }
+    /// Create an organization admin API key
+    ///
+    /// `POST /organization/admin_api_keys`
+    ///
+    /// Returns a [`AdminApiKeysCreateCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: serde_json::Value`: the request body
+    pub fn admin_api_keys_create(
+        &self,
+        body: serde_json::Value,
+    ) -> AdminApiKeysCreateCall<'_> {
+        AdminApiKeysCreateCall(self.0.send(AdminApiKeysCreateRequest::new(body)))
+    }
+    /// Retrieve a single organization API key
+    ///
+    /// `GET /organization/admin_api_keys/{key_id}`
+    ///
+    /// Returns a [`AdminApiKeysGetCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `key_id: impl Into<String>`: the `{key_id}` path parameter
+    pub fn admin_api_keys_get(
+        &self,
+        key_id: impl Into<String>,
+    ) -> AdminApiKeysGetCall<'_> {
+        AdminApiKeysGetCall(self.0.send(AdminApiKeysGetRequest::new(key_id)))
+    }
+    /// Delete an organization admin API key
+    ///
+    /// `DELETE /organization/admin_api_keys/{key_id}`
+    ///
+    /// Returns a [`AdminApiKeysDeleteCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `key_id: impl Into<String>`: the `{key_id}` path parameter
+    pub fn admin_api_keys_delete(
+        &self,
+        key_id: impl Into<String>,
+    ) -> AdminApiKeysDeleteCall<'_> {
+        AdminApiKeysDeleteCall(self.0.send(AdminApiKeysDeleteRequest::new(key_id)))
+    }
+    /// List user actions and configuration changes within this organization.
+    ///
+    /// `GET /organization/audit_logs`
+    ///
+    /// Returns a [`ListAuditLogsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`effective_at`](ListAuditLogsCall::effective_at): the `effective_at` query parameter (`serde_json::Value`). Return only events whose `effective_at` (Unix seconds) is in this range.
+    /// - [`project_ids__`](ListAuditLogsCall::project_ids__): the `project_ids[]` query parameter (`Vec<String>`). Return only events for these projects.
+    /// - [`event_types__`](ListAuditLogsCall::event_types__): the `event_types[]` query parameter (`Vec<serde_json::Value>`). Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object).
+    /// - [`actor_ids__`](ListAuditLogsCall::actor_ids__): the `actor_ids[]` query parameter (`Vec<String>`). Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID.
+    /// - [`actor_emails__`](ListAuditLogsCall::actor_emails__): the `actor_emails[]` query parameter (`Vec<String>`). Return only events performed by users with these emails.
+    /// - [`resource_ids__`](ListAuditLogsCall::resource_ids__): the `resource_ids[]` query parameter (`Vec<String>`). Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`.
+    /// - [`tenant_only`](ListAuditLogsCall::tenant_only): the `tenant_only` query parameter (`bool`). Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped.
+    /// - [`limit`](ListAuditLogsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListAuditLogsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`before`](ListAuditLogsCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn list_audit_logs(&self) -> ListAuditLogsCall<'_> {
+        ListAuditLogsCall(self.0.send(ListAuditLogsRequest::default()))
+    }
+    /// List uploaded certificates for this organization.
+    ///
+    /// `GET /organization/certificates`
+    ///
+    /// Returns a [`ListOrganizationCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListOrganizationCertificatesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListOrganizationCertificatesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`order`](ListOrganizationCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn list_organization_certificates(
+        &self,
+    ) -> ListOrganizationCertificatesCall<'_> {
+        ListOrganizationCertificatesCall(
+            self.0.send(ListOrganizationCertificatesRequest::default()),
+        )
+    }
+    /// Upload a certificate to the organization. This does **not** automatically activate the certificate.
+    ///
+    /// Organizations can upload up to 50 certificates.
+    ///
+    /// `POST /organization/certificates`
+    ///
+    /// Returns a [`UploadCertificateCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: UploadCertificateRequest2`: the request body
+    pub fn upload_certificate(
+        &self,
+        body: UploadCertificateRequest2,
+    ) -> UploadCertificateCall<'_> {
+        UploadCertificateCall(self.0.send(UploadCertificateRequest::new(body)))
+    }
+    /// Activate certificates at the organization level.
+    ///
+    /// You can atomically and idempotently activate up to 10 certificates at a time.
+    ///
+    /// `POST /organization/certificates/activate`
+    ///
+    /// Returns a [`ActivateOrganizationCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ToggleCertificatesRequest`: the request body
+    pub fn activate_organization_certificates(
+        &self,
+        body: ToggleCertificatesRequest,
+    ) -> ActivateOrganizationCertificatesCall<'_> {
+        ActivateOrganizationCertificatesCall(
+            self.0.send(ActivateOrganizationCertificatesRequest::new(body)),
+        )
+    }
+    /// Deactivate certificates at the organization level.
+    ///
+    /// You can atomically and idempotently deactivate up to 10 certificates at a time.
+    ///
+    /// `POST /organization/certificates/deactivate`
+    ///
+    /// Returns a [`DeactivateOrganizationCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ToggleCertificatesRequest`: the request body
+    pub fn deactivate_organization_certificates(
+        &self,
+        body: ToggleCertificatesRequest,
+    ) -> DeactivateOrganizationCertificatesCall<'_> {
+        DeactivateOrganizationCertificatesCall(
+            self.0.send(DeactivateOrganizationCertificatesRequest::new(body)),
+        )
+    }
+    /// Get a certificate that has been uploaded to the organization.
+    ///
+    /// You can get a certificate regardless of whether it is active or not.
+    ///
+    /// `GET /organization/certificates/{certificate_id}`
+    ///
+    /// Returns a [`GetCertificateCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `certificate_id: impl Into<String>`: the `{certificate_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include`](GetCertificateCall::include): the `include` query parameter (`Vec<String>`). A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate.
+    pub fn get_certificate(
+        &self,
+        certificate_id: impl Into<String>,
+    ) -> GetCertificateCall<'_> {
+        GetCertificateCall(self.0.send(GetCertificateRequest::new(certificate_id)))
+    }
+    /// Modify a certificate. Note that only the name can be modified.
+    ///
+    /// `POST /organization/certificates/{certificate_id}`
+    ///
+    /// Returns a [`ModifyCertificateCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `certificate_id: impl Into<String>`: the `{certificate_id}` path parameter
+    /// - `body: ModifyCertificateRequest2`: the request body
+    pub fn modify_certificate(
+        &self,
+        certificate_id: impl Into<String>,
+        body: ModifyCertificateRequest2,
+    ) -> ModifyCertificateCall<'_> {
+        ModifyCertificateCall(
+            self.0.send(ModifyCertificateRequest::new(certificate_id, body)),
+        )
+    }
+    /// Delete a certificate from the organization.
+    ///
+    /// The certificate must be inactive for the organization and all projects.
+    ///
+    /// `DELETE /organization/certificates/{certificate_id}`
+    ///
+    /// Returns a [`DeleteCertificateCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `certificate_id: impl Into<String>`: the `{certificate_id}` path parameter
+    pub fn delete_certificate(
+        &self,
+        certificate_id: impl Into<String>,
+    ) -> DeleteCertificateCall<'_> {
+        DeleteCertificateCall(self.0.send(DeleteCertificateRequest::new(certificate_id)))
+    }
+    /// Get costs details for the organization.
+    ///
+    /// `GET /organization/costs`
+    ///
+    /// Returns a [`UsageCostsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageCostsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageCostsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageCostsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently only `1d` is supported, default to `1d`.
+    /// - [`project_ids`](UsageCostsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only costs for these projects.
+    /// - [`api_key_ids`](UsageCostsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only costs for these API keys.
+    /// - [`group_by`](UsageCostsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
+    /// - [`limit`](UsageCostsCall::limit): the `limit` query parameter (`i64`). A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.
+    /// - [`page`](UsageCostsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_costs(&self) -> UsageCostsCall<'_> {
+        UsageCostsCall(self.0.send(UsageCostsRequest::default()))
+    }
+    /// Retrieves organization data retention controls.
+    ///
+    /// `GET /organization/data_retention`
+    ///
+    /// Returns a [`RetrieveOrganizationDataRetentionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn retrieve_organization_data_retention(
+        &self,
+    ) -> RetrieveOrganizationDataRetentionCall<'_> {
+        RetrieveOrganizationDataRetentionCall(
+            self.0.send(RetrieveOrganizationDataRetentionRequest::default()),
+        )
+    }
+    /// Updates organization data retention controls.
+    ///
+    /// `POST /organization/data_retention`
+    ///
+    /// Returns a [`UpdateOrganizationDataRetentionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: UpdateOrganizationDataRetentionBody`: the request body
+    pub fn update_organization_data_retention(
+        &self,
+        body: UpdateOrganizationDataRetentionBody,
+    ) -> UpdateOrganizationDataRetentionCall<'_> {
+        UpdateOrganizationDataRetentionCall(
+            self.0.send(UpdateOrganizationDataRetentionRequest::new(body)),
+        )
+    }
+    /// Lists all groups in the organization.
+    ///
+    /// `GET /organization/groups`
+    ///
+    /// Returns a [`ListGroupsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListGroupsCall::limit): the `limit` query parameter (`i64`). A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.
+    /// - [`after`](ListGroupsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.
+    /// - [`order`](ListGroupsCall::order): the `order` query parameter (`String`). Specifies the sort order of the returned groups.
+    pub fn list_groups(&self) -> ListGroupsCall<'_> {
+        ListGroupsCall(self.0.send(ListGroupsRequest::default()))
+    }
+    /// Creates a new group in the organization.
+    ///
+    /// `POST /organization/groups`
+    ///
+    /// Returns a [`CreateGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateGroupBody`: the request body
+    pub fn create_group(&self, body: CreateGroupBody) -> CreateGroupCall<'_> {
+        CreateGroupCall(self.0.send(CreateGroupRequest::new(body)))
+    }
+    /// Retrieves a group.
+    ///
+    /// `GET /organization/groups/{group_id}`
+    ///
+    /// Returns a [`RetrieveGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    pub fn retrieve_group(&self, group_id: impl Into<String>) -> RetrieveGroupCall<'_> {
+        RetrieveGroupCall(self.0.send(RetrieveGroupRequest::new(group_id)))
+    }
+    /// Updates a group's information.
+    ///
+    /// `POST /organization/groups/{group_id}`
+    ///
+    /// Returns a [`UpdateGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `body: UpdateGroupBody`: the request body
+    pub fn update_group(
+        &self,
+        group_id: impl Into<String>,
+        body: UpdateGroupBody,
+    ) -> UpdateGroupCall<'_> {
+        UpdateGroupCall(self.0.send(UpdateGroupRequest::new(group_id, body)))
+    }
+    /// Deletes a group from the organization.
+    ///
+    /// `DELETE /organization/groups/{group_id}`
+    ///
+    /// Returns a [`DeleteGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    pub fn delete_group(&self, group_id: impl Into<String>) -> DeleteGroupCall<'_> {
+        DeleteGroupCall(self.0.send(DeleteGroupRequest::new(group_id)))
+    }
+    /// Lists the organization roles assigned to a group within the organization.
+    ///
+    /// `GET /organization/groups/{group_id}/roles`
+    ///
+    /// Returns a [`ListGroupRoleAssignmentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListGroupRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
+    /// - [`after`](ListGroupRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
+    /// - [`order`](ListGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
+    pub fn list_group_role_assignments(
+        &self,
+        group_id: impl Into<String>,
+    ) -> ListGroupRoleAssignmentsCall<'_> {
+        ListGroupRoleAssignmentsCall(
+            self.0.send(ListGroupRoleAssignmentsRequest::new(group_id)),
+        )
+    }
+    /// Assigns an organization role to a group within the organization.
+    ///
+    /// `POST /organization/groups/{group_id}/roles`
+    ///
+    /// Returns a [`AssignGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    pub fn assign_group_role(
+        &self,
+        group_id: impl Into<String>,
+        body: PublicAssignOrganizationGroupRoleBody,
+    ) -> AssignGroupRoleCall<'_> {
+        AssignGroupRoleCall(self.0.send(AssignGroupRoleRequest::new(group_id, body)))
+    }
+    /// Retrieves an organization role assigned to a group.
+    ///
+    /// `GET /organization/groups/{group_id}/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_group_role(
+        &self,
+        group_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> RetrieveGroupRoleCall<'_> {
+        RetrieveGroupRoleCall(
+            self.0.send(RetrieveGroupRoleRequest::new(group_id, role_id)),
+        )
+    }
+    /// Unassigns an organization role from a group within the organization.
+    ///
+    /// `DELETE /organization/groups/{group_id}/roles/{role_id}`
+    ///
+    /// Returns a [`UnassignGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn unassign_group_role(
+        &self,
+        group_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> UnassignGroupRoleCall<'_> {
+        UnassignGroupRoleCall(
+            self.0.send(UnassignGroupRoleRequest::new(group_id, role_id)),
+        )
+    }
+    /// Lists the users assigned to a group.
+    ///
+    /// `GET /organization/groups/{group_id}/users`
+    ///
+    /// Returns a [`ListGroupUsersCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListGroupUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.
+    /// - [`after`](ListGroupUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.
+    /// - [`order`](ListGroupUsersCall::order): the `order` query parameter (`String`). Specifies the sort order of users in the list.
+    pub fn list_group_users(
+        &self,
+        group_id: impl Into<String>,
+    ) -> ListGroupUsersCall<'_> {
+        ListGroupUsersCall(self.0.send(ListGroupUsersRequest::new(group_id)))
+    }
+    /// Adds a user to a group.
+    ///
+    /// `POST /organization/groups/{group_id}/users`
+    ///
+    /// Returns a [`AddGroupUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `body: CreateGroupUserBody`: the request body
+    pub fn add_group_user(
+        &self,
+        group_id: impl Into<String>,
+        body: CreateGroupUserBody,
+    ) -> AddGroupUserCall<'_> {
+        AddGroupUserCall(self.0.send(AddGroupUserRequest::new(group_id, body)))
+    }
+    /// Retrieves a user in a group.
+    ///
+    /// `GET /organization/groups/{group_id}/users/{user_id}`
+    ///
+    /// Returns a [`RetrieveGroupUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn retrieve_group_user(
+        &self,
+        group_id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> RetrieveGroupUserCall<'_> {
+        RetrieveGroupUserCall(
+            self.0.send(RetrieveGroupUserRequest::new(group_id, user_id)),
+        )
+    }
+    /// Removes a user from a group.
+    ///
+    /// `DELETE /organization/groups/{group_id}/users/{user_id}`
+    ///
+    /// Returns a [`RemoveGroupUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn remove_group_user(
+        &self,
+        group_id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> RemoveGroupUserCall<'_> {
+        RemoveGroupUserCall(self.0.send(RemoveGroupUserRequest::new(group_id, user_id)))
+    }
+    /// Returns a list of invites in the organization.
+    ///
+    /// `GET /organization/invites`
+    ///
+    /// Returns a [`ListInvitesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListInvitesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListInvitesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn list_invites(&self) -> ListInvitesCall<'_> {
+        ListInvitesCall(self.0.send(ListInvitesRequest::default()))
+    }
+    /// Create an invite for a user to the organization. The invite must be accepted by the user before they have access to the organization.
+    ///
+    /// `POST /organization/invites`
+    ///
+    /// Returns a [`InviteUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: InviteRequest`: the request body
+    pub fn invite_user(&self, body: InviteRequest) -> InviteUserCall<'_> {
+        InviteUserCall(self.0.send(InviteUserRequest::new(body)))
+    }
+    /// Retrieves an invite.
+    ///
+    /// `GET /organization/invites/{invite_id}`
+    ///
+    /// Returns a [`RetrieveInviteCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `invite_id: impl Into<String>`: the `{invite_id}` path parameter
+    pub fn retrieve_invite(
+        &self,
+        invite_id: impl Into<String>,
+    ) -> RetrieveInviteCall<'_> {
+        RetrieveInviteCall(self.0.send(RetrieveInviteRequest::new(invite_id)))
+    }
+    /// Delete an invite. If the invite has already been accepted, it cannot be deleted.
+    ///
+    /// `DELETE /organization/invites/{invite_id}`
+    ///
+    /// Returns a [`DeleteInviteCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `invite_id: impl Into<String>`: the `{invite_id}` path parameter
+    pub fn delete_invite(&self, invite_id: impl Into<String>) -> DeleteInviteCall<'_> {
+        DeleteInviteCall(self.0.send(DeleteInviteRequest::new(invite_id)))
+    }
+    /// Returns a list of projects.
+    ///
+    /// `GET /organization/projects`
+    ///
+    /// Returns a [`ListProjectsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListProjectsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`include_archived`](ListProjectsCall::include_archived): the `include_archived` query parameter (`bool`). If `true` returns all projects including those that have been `archived`. Archived projects are not included by default.
+    pub fn list_projects(&self) -> ListProjectsCall<'_> {
+        ListProjectsCall(self.0.send(ListProjectsRequest::default()))
+    }
+    /// Create a new project in the organization. Projects can be created and archived, but cannot be deleted.
+    ///
+    /// `POST /organization/projects`
+    ///
+    /// Returns a [`CreateProjectCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ProjectCreateRequest`: the request body
+    pub fn create_project(&self, body: ProjectCreateRequest) -> CreateProjectCall<'_> {
+        CreateProjectCall(self.0.send(CreateProjectRequest::new(body)))
+    }
+    /// Retrieves a project.
+    ///
+    /// `GET /organization/projects/{project_id}`
+    ///
+    /// Returns a [`RetrieveProjectCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn retrieve_project(
+        &self,
+        project_id: impl Into<String>,
+    ) -> RetrieveProjectCall<'_> {
+        RetrieveProjectCall(self.0.send(RetrieveProjectRequest::new(project_id)))
+    }
+    /// Modifies a project in the organization.
+    ///
+    /// `POST /organization/projects/{project_id}`
+    ///
+    /// Returns a [`ModifyProjectCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ProjectUpdateRequest`: the request body
+    pub fn modify_project(
+        &self,
+        project_id: impl Into<String>,
+        body: ProjectUpdateRequest,
+    ) -> ModifyProjectCall<'_> {
+        ModifyProjectCall(self.0.send(ModifyProjectRequest::new(project_id, body)))
+    }
+    /// Returns a list of API keys in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/api_keys`
+    ///
+    /// Returns a [`ListProjectApiKeysCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectApiKeysCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListProjectApiKeysCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`owner_project_access`](ListProjectApiKeysCall::owner_project_access): the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
+    pub fn list_project_api_keys(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectApiKeysCall<'_> {
+        ListProjectApiKeysCall(self.0.send(ListProjectApiKeysRequest::new(project_id)))
+    }
+    /// Retrieves an API key in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/api_keys/{api_key_id}`
+    ///
+    /// Returns a [`RetrieveProjectApiKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `api_key_id: impl Into<String>`: the `{api_key_id}` path parameter
+    pub fn retrieve_project_api_key(
+        &self,
+        project_id: impl Into<String>,
+        api_key_id: impl Into<String>,
+    ) -> RetrieveProjectApiKeyCall<'_> {
+        RetrieveProjectApiKeyCall(
+            self.0.send(RetrieveProjectApiKeyRequest::new(project_id, api_key_id)),
+        )
+    }
+    /// Deletes an API key from the project.
+    ///
+    /// Returns confirmation of the key deletion, or an error if the key belonged to
+    /// a service account.
+    ///
+    /// `DELETE /organization/projects/{project_id}/api_keys/{api_key_id}`
+    ///
+    /// Returns a [`DeleteProjectApiKeyCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `api_key_id: impl Into<String>`: the `{api_key_id}` path parameter
+    pub fn delete_project_api_key(
+        &self,
+        project_id: impl Into<String>,
+        api_key_id: impl Into<String>,
+    ) -> DeleteProjectApiKeyCall<'_> {
+        DeleteProjectApiKeyCall(
+            self.0.send(DeleteProjectApiKeyRequest::new(project_id, api_key_id)),
+        )
+    }
+    /// Archives a project in the organization. Archived projects cannot be used or updated.
+    ///
+    /// `POST /organization/projects/{project_id}/archive`
+    ///
+    /// Returns a [`ArchiveProjectCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn archive_project(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ArchiveProjectCall<'_> {
+        ArchiveProjectCall(self.0.send(ArchiveProjectRequest::new(project_id)))
+    }
+    /// List certificates for this project.
+    ///
+    /// `GET /organization/projects/{project_id}/certificates`
+    ///
+    /// Returns a [`ListProjectCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectCertificatesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListProjectCertificatesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`order`](ListProjectCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    pub fn list_project_certificates(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectCertificatesCall<'_> {
+        ListProjectCertificatesCall(
+            self.0.send(ListProjectCertificatesRequest::new(project_id)),
+        )
+    }
+    /// Activate certificates at the project level.
+    ///
+    /// You can atomically and idempotently activate up to 10 certificates at a time.
+    ///
+    /// `POST /organization/projects/{project_id}/certificates/activate`
+    ///
+    /// Returns a [`ActivateProjectCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ToggleCertificatesRequest`: the request body
+    pub fn activate_project_certificates(
+        &self,
+        project_id: impl Into<String>,
+        body: ToggleCertificatesRequest,
+    ) -> ActivateProjectCertificatesCall<'_> {
+        ActivateProjectCertificatesCall(
+            self.0.send(ActivateProjectCertificatesRequest::new(project_id, body)),
+        )
+    }
+    /// Deactivate certificates at the project level. You can atomically and
+    /// idempotently deactivate up to 10 certificates at a time.
+    ///
+    /// `POST /organization/projects/{project_id}/certificates/deactivate`
+    ///
+    /// Returns a [`DeactivateProjectCertificatesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ToggleCertificatesRequest`: the request body
+    pub fn deactivate_project_certificates(
+        &self,
+        project_id: impl Into<String>,
+        body: ToggleCertificatesRequest,
+    ) -> DeactivateProjectCertificatesCall<'_> {
+        DeactivateProjectCertificatesCall(
+            self.0.send(DeactivateProjectCertificatesRequest::new(project_id, body)),
+        )
+    }
+    /// Retrieves project data retention controls.
+    ///
+    /// `GET /organization/projects/{project_id}/data_retention`
+    ///
+    /// Returns a [`RetrieveProjectDataRetentionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn retrieve_project_data_retention(
+        &self,
+        project_id: impl Into<String>,
+    ) -> RetrieveProjectDataRetentionCall<'_> {
+        RetrieveProjectDataRetentionCall(
+            self.0.send(RetrieveProjectDataRetentionRequest::new(project_id)),
+        )
+    }
+    /// Updates project data retention controls.
+    ///
+    /// `POST /organization/projects/{project_id}/data_retention`
+    ///
+    /// Returns a [`UpdateProjectDataRetentionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: UpdateProjectDataRetentionBody`: the request body
+    pub fn update_project_data_retention(
+        &self,
+        project_id: impl Into<String>,
+        body: UpdateProjectDataRetentionBody,
+    ) -> UpdateProjectDataRetentionCall<'_> {
+        UpdateProjectDataRetentionCall(
+            self.0.send(UpdateProjectDataRetentionRequest::new(project_id, body)),
+        )
+    }
+    /// Lists the groups that have access to a project.
+    ///
+    /// `GET /organization/projects/{project_id}/groups`
+    ///
+    /// Returns a [`ListProjectGroupsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectGroupsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project groups to return. Defaults to 20.
+    /// - [`after`](ListProjectGroupsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page.
+    /// - [`order`](ListProjectGroupsCall::order): the `order` query parameter (`String`). Sort order for the returned groups.
+    pub fn list_project_groups(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectGroupsCall<'_> {
+        ListProjectGroupsCall(self.0.send(ListProjectGroupsRequest::new(project_id)))
+    }
+    /// Grants a group access to a project.
+    ///
+    /// `POST /organization/projects/{project_id}/groups`
+    ///
+    /// Returns a [`AddProjectGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: InviteProjectGroupBody`: the request body
+    pub fn add_project_group(
+        &self,
+        project_id: impl Into<String>,
+        body: InviteProjectGroupBody,
+    ) -> AddProjectGroupCall<'_> {
+        AddProjectGroupCall(self.0.send(AddProjectGroupRequest::new(project_id, body)))
+    }
+    /// Retrieves a project's group.
+    ///
+    /// `GET /organization/projects/{project_id}/groups/{group_id}`
+    ///
+    /// Returns a [`RetrieveProjectGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`group_type`](RetrieveProjectGroupCall::group_type): the `group_type` query parameter (`String`). The type of group to retrieve.
+    pub fn retrieve_project_group(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+    ) -> RetrieveProjectGroupCall<'_> {
+        RetrieveProjectGroupCall(
+            self.0.send(RetrieveProjectGroupRequest::new(project_id, group_id)),
+        )
+    }
+    /// Revokes a group's access to a project.
+    ///
+    /// `DELETE /organization/projects/{project_id}/groups/{group_id}`
+    ///
+    /// Returns a [`RemoveProjectGroupCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    pub fn remove_project_group(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+    ) -> RemoveProjectGroupCall<'_> {
+        RemoveProjectGroupCall(
+            self.0.send(RemoveProjectGroupRequest::new(project_id, group_id)),
+        )
+    }
+    /// Returns hosted tool permissions for a project.
+    ///
+    /// `GET /organization/projects/{project_id}/hosted_tool_permissions`
+    ///
+    /// Returns a [`RetrieveProjectHostedToolPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn retrieve_project_hosted_tool_permissions(
+        &self,
+        project_id: impl Into<String>,
+    ) -> RetrieveProjectHostedToolPermissionsCall<'_> {
+        RetrieveProjectHostedToolPermissionsCall(
+            self.0.send(RetrieveProjectHostedToolPermissionsRequest::new(project_id)),
+        )
+    }
+    /// Updates hosted tool permissions for a project.
+    ///
+    /// `POST /organization/projects/{project_id}/hosted_tool_permissions`
+    ///
+    /// Returns a [`UpdateProjectHostedToolPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ProjectHostedToolPermissionsUpdateRequest`: the request body
+    pub fn update_project_hosted_tool_permissions(
+        &self,
+        project_id: impl Into<String>,
+        body: ProjectHostedToolPermissionsUpdateRequest,
+    ) -> UpdateProjectHostedToolPermissionsCall<'_> {
+        UpdateProjectHostedToolPermissionsCall(
+            self.0.send(UpdateProjectHostedToolPermissionsRequest::new(project_id, body)),
+        )
+    }
+    /// Returns model permissions for a project.
+    ///
+    /// `GET /organization/projects/{project_id}/model_permissions`
+    ///
+    /// Returns a [`RetrieveProjectModelPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn retrieve_project_model_permissions(
+        &self,
+        project_id: impl Into<String>,
+    ) -> RetrieveProjectModelPermissionsCall<'_> {
+        RetrieveProjectModelPermissionsCall(
+            self.0.send(RetrieveProjectModelPermissionsRequest::new(project_id)),
+        )
+    }
+    /// Updates model permissions for a project.
+    ///
+    /// `POST /organization/projects/{project_id}/model_permissions`
+    ///
+    /// Returns a [`UpdateProjectModelPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ProjectModelPermissionsUpdateRequest`: the request body
+    pub fn update_project_model_permissions(
+        &self,
+        project_id: impl Into<String>,
+        body: ProjectModelPermissionsUpdateRequest,
+    ) -> UpdateProjectModelPermissionsCall<'_> {
+        UpdateProjectModelPermissionsCall(
+            self.0.send(UpdateProjectModelPermissionsRequest::new(project_id, body)),
+        )
+    }
+    /// Deletes model permissions for a project.
+    ///
+    /// `DELETE /organization/projects/{project_id}/model_permissions`
+    ///
+    /// Returns a [`DeleteProjectModelPermissionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn delete_project_model_permissions(
+        &self,
+        project_id: impl Into<String>,
+    ) -> DeleteProjectModelPermissionsCall<'_> {
+        DeleteProjectModelPermissionsCall(
+            self.0.send(DeleteProjectModelPermissionsRequest::new(project_id)),
+        )
+    }
+    /// Returns the rate limits per model for a project.
+    ///
+    /// `GET /organization/projects/{project_id}/rate_limits`
+    ///
+    /// Returns a [`ListProjectRateLimitsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectRateLimitsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. The default is 100.
+    /// - [`after`](ListProjectRateLimitsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`before`](ListProjectRateLimitsCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn list_project_rate_limits(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectRateLimitsCall<'_> {
+        ListProjectRateLimitsCall(
+            self.0.send(ListProjectRateLimitsRequest::new(project_id)),
+        )
+    }
+    /// Updates a project rate limit.
+    ///
+    /// `POST /organization/projects/{project_id}/rate_limits/{rate_limit_id}`
+    ///
+    /// Returns a [`UpdateProjectRateLimitsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `rate_limit_id: impl Into<String>`: the `{rate_limit_id}` path parameter
+    /// - `body: ProjectRateLimitUpdateRequest`: the request body
+    pub fn update_project_rate_limits(
+        &self,
+        project_id: impl Into<String>,
+        rate_limit_id: impl Into<String>,
+        body: ProjectRateLimitUpdateRequest,
+    ) -> UpdateProjectRateLimitsCall<'_> {
+        UpdateProjectRateLimitsCall(
+            self
+                .0
+                .send(
+                    UpdateProjectRateLimitsRequest::new(project_id, rate_limit_id, body),
+                ),
+        )
+    }
+    /// Returns a list of service accounts in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/service_accounts`
+    ///
+    /// Returns a [`ListProjectServiceAccountsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectServiceAccountsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListProjectServiceAccountsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn list_project_service_accounts(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectServiceAccountsCall<'_> {
+        ListProjectServiceAccountsCall(
+            self.0.send(ListProjectServiceAccountsRequest::new(project_id)),
+        )
+    }
+    /// Creates a new service account in the project. By default, this also returns an unredacted API key for the service account.
+    ///
+    /// `POST /organization/projects/{project_id}/service_accounts`
+    ///
+    /// Returns a [`CreateProjectServiceAccountCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ProjectServiceAccountCreateRequest`: the request body
+    pub fn create_project_service_account(
+        &self,
+        project_id: impl Into<String>,
+        body: ProjectServiceAccountCreateRequest,
+    ) -> CreateProjectServiceAccountCall<'_> {
+        CreateProjectServiceAccountCall(
+            self.0.send(CreateProjectServiceAccountRequest::new(project_id, body)),
+        )
+    }
+    /// Retrieves a service account in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/service_accounts/{service_account_id}`
+    ///
+    /// Returns a [`RetrieveProjectServiceAccountCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
+    pub fn retrieve_project_service_account(
+        &self,
+        project_id: impl Into<String>,
+        service_account_id: impl Into<String>,
+    ) -> RetrieveProjectServiceAccountCall<'_> {
+        RetrieveProjectServiceAccountCall(
+            self
+                .0
+                .send(
+                    RetrieveProjectServiceAccountRequest::new(
+                        project_id,
+                        service_account_id,
+                    ),
+                ),
+        )
+    }
+    /// Updates a service account in the project.
+    ///
+    /// `POST /organization/projects/{project_id}/service_accounts/{service_account_id}`
+    ///
+    /// Returns a [`UpdateProjectServiceAccountCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
+    /// - `body: UpdateProjectServiceAccountBody`: the request body
+    pub fn update_project_service_account(
+        &self,
+        project_id: impl Into<String>,
+        service_account_id: impl Into<String>,
+        body: UpdateProjectServiceAccountBody,
+    ) -> UpdateProjectServiceAccountCall<'_> {
+        UpdateProjectServiceAccountCall(
+            self
+                .0
+                .send(
+                    UpdateProjectServiceAccountRequest::new(
+                        project_id,
+                        service_account_id,
+                        body,
+                    ),
+                ),
+        )
+    }
+    /// Deletes a service account from the project.
+    ///
+    /// Returns confirmation of service account deletion, or an error if the project
+    /// is archived (archived projects have no service accounts).
+    ///
+    /// `DELETE /organization/projects/{project_id}/service_accounts/{service_account_id}`
+    ///
+    /// Returns a [`DeleteProjectServiceAccountCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
+    pub fn delete_project_service_account(
+        &self,
+        project_id: impl Into<String>,
+        service_account_id: impl Into<String>,
+    ) -> DeleteProjectServiceAccountCall<'_> {
+        DeleteProjectServiceAccountCall(
+            self
+                .0
+                .send(
+                    DeleteProjectServiceAccountRequest::new(
+                        project_id,
+                        service_account_id,
+                    ),
+                ),
+        )
+    }
+    /// Lists project spend alerts.
+    ///
+    /// `GET /organization/projects/{project_id}/spend_alerts`
+    ///
+    /// Returns a [`ListProjectSpendAlertsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectSpendAlertsCall::limit): the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
+    /// - [`order`](ListProjectSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    /// - [`after`](ListProjectSpendAlertsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
+    /// - [`before`](ListProjectSpendAlertsCall::before): the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
+    pub fn list_project_spend_alerts(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectSpendAlertsCall<'_> {
+        ListProjectSpendAlertsCall(
+            self.0.send(ListProjectSpendAlertsRequest::new(project_id)),
+        )
+    }
+    /// Creates a project spend alert.
+    ///
+    /// `POST /organization/projects/{project_id}/spend_alerts`
+    ///
+    /// Returns a [`CreateProjectSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: CreateSpendAlertBody`: the request body
+    pub fn create_project_spend_alert(
+        &self,
+        project_id: impl Into<String>,
+        body: CreateSpendAlertBody,
+    ) -> CreateProjectSpendAlertCall<'_> {
+        CreateProjectSpendAlertCall(
+            self.0.send(CreateProjectSpendAlertRequest::new(project_id, body)),
+        )
+    }
+    /// Retrieves a project spend alert.
+    ///
+    /// `GET /organization/projects/{project_id}/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`RetrieveProjectSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    pub fn retrieve_project_spend_alert(
+        &self,
+        project_id: impl Into<String>,
+        alert_id: impl Into<String>,
+    ) -> RetrieveProjectSpendAlertCall<'_> {
+        RetrieveProjectSpendAlertCall(
+            self.0.send(RetrieveProjectSpendAlertRequest::new(project_id, alert_id)),
+        )
+    }
+    /// Updates a project spend alert.
+    ///
+    /// `POST /organization/projects/{project_id}/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`UpdateProjectSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    /// - `body: CreateSpendAlertBody`: the request body
+    pub fn update_project_spend_alert(
+        &self,
+        project_id: impl Into<String>,
+        alert_id: impl Into<String>,
+        body: CreateSpendAlertBody,
+    ) -> UpdateProjectSpendAlertCall<'_> {
+        UpdateProjectSpendAlertCall(
+            self.0.send(UpdateProjectSpendAlertRequest::new(project_id, alert_id, body)),
+        )
+    }
+    /// Deletes a project spend alert.
+    ///
+    /// `DELETE /organization/projects/{project_id}/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`DeleteProjectSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    pub fn delete_project_spend_alert(
+        &self,
+        project_id: impl Into<String>,
+        alert_id: impl Into<String>,
+    ) -> DeleteProjectSpendAlertCall<'_> {
+        DeleteProjectSpendAlertCall(
+            self.0.send(DeleteProjectSpendAlertRequest::new(project_id, alert_id)),
+        )
+    }
+    /// Returns a list of users in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/users`
+    ///
+    /// Returns a [`ListProjectUsersCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListProjectUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    pub fn list_project_users(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectUsersCall<'_> {
+        ListProjectUsersCall(self.0.send(ListProjectUsersRequest::new(project_id)))
+    }
+    /// Adds a user to the project. Users must already be members of the organization to be added to a project.
+    ///
+    /// `POST /organization/projects/{project_id}/users`
+    ///
+    /// Returns a [`CreateProjectUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: ProjectUserCreateRequest`: the request body
+    pub fn create_project_user(
+        &self,
+        project_id: impl Into<String>,
+        body: ProjectUserCreateRequest,
+    ) -> CreateProjectUserCall<'_> {
+        CreateProjectUserCall(
+            self.0.send(CreateProjectUserRequest::new(project_id, body)),
+        )
+    }
+    /// Retrieves a user in the project.
+    ///
+    /// `GET /organization/projects/{project_id}/users/{user_id}`
+    ///
+    /// Returns a [`RetrieveProjectUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn retrieve_project_user(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> RetrieveProjectUserCall<'_> {
+        RetrieveProjectUserCall(
+            self.0.send(RetrieveProjectUserRequest::new(project_id, user_id)),
+        )
+    }
+    /// Modifies a user's role in the project.
+    ///
+    /// `POST /organization/projects/{project_id}/users/{user_id}`
+    ///
+    /// Returns a [`ModifyProjectUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `body: ProjectUserUpdateRequest`: the request body
+    pub fn modify_project_user(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+        body: ProjectUserUpdateRequest,
+    ) -> ModifyProjectUserCall<'_> {
+        ModifyProjectUserCall(
+            self.0.send(ModifyProjectUserRequest::new(project_id, user_id, body)),
+        )
+    }
+    /// Deletes a user from the project.
+    ///
+    /// Returns confirmation of project user deletion, or an error if the project is
+    /// archived (archived projects have no users).
+    ///
+    /// `DELETE /organization/projects/{project_id}/users/{user_id}`
+    ///
+    /// Returns a [`DeleteProjectUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn delete_project_user(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> DeleteProjectUserCall<'_> {
+        DeleteProjectUserCall(
+            self.0.send(DeleteProjectUserRequest::new(project_id, user_id)),
+        )
+    }
+    /// Lists the roles configured for the organization.
+    ///
+    /// `GET /organization/roles`
+    ///
+    /// Returns a [`ListRolesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListRolesCall::limit): the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
+    /// - [`after`](ListRolesCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
+    /// - [`order`](ListRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
+    pub fn list_roles(&self) -> ListRolesCall<'_> {
+        ListRolesCall(self.0.send(ListRolesRequest::default()))
+    }
+    /// Creates a custom role for the organization.
+    ///
+    /// `POST /organization/roles`
+    ///
+    /// Returns a [`CreateRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PublicCreateOrganizationRoleBody`: the request body
+    pub fn create_role(
+        &self,
+        body: PublicCreateOrganizationRoleBody,
+    ) -> CreateRoleCall<'_> {
+        CreateRoleCall(self.0.send(CreateRoleRequest::new(body)))
+    }
+    /// Retrieves an organization role.
+    ///
+    /// `GET /organization/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_role(&self, role_id: impl Into<String>) -> RetrieveRoleCall<'_> {
+        RetrieveRoleCall(self.0.send(RetrieveRoleRequest::new(role_id)))
+    }
+    /// Updates an existing organization role.
+    ///
+    /// `POST /organization/roles/{role_id}`
+    ///
+    /// Returns a [`UpdateRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    /// - `body: PublicUpdateOrganizationRoleBody`: the request body
+    pub fn update_role(
+        &self,
+        role_id: impl Into<String>,
+        body: PublicUpdateOrganizationRoleBody,
+    ) -> UpdateRoleCall<'_> {
+        UpdateRoleCall(self.0.send(UpdateRoleRequest::new(role_id, body)))
+    }
+    /// Deletes a custom role from the organization.
+    ///
+    /// `DELETE /organization/roles/{role_id}`
+    ///
+    /// Returns a [`DeleteRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn delete_role(&self, role_id: impl Into<String>) -> DeleteRoleCall<'_> {
+        DeleteRoleCall(self.0.send(DeleteRoleRequest::new(role_id)))
+    }
+    /// Lists organization spend alerts.
+    ///
+    /// `GET /organization/spend_alerts`
+    ///
+    /// Returns a [`ListOrganizationSpendAlertsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListOrganizationSpendAlertsCall::limit): the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
+    /// - [`order`](ListOrganizationSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
+    /// - [`after`](ListOrganizationSpendAlertsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
+    /// - [`before`](ListOrganizationSpendAlertsCall::before): the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
+    pub fn list_organization_spend_alerts(&self) -> ListOrganizationSpendAlertsCall<'_> {
+        ListOrganizationSpendAlertsCall(
+            self.0.send(ListOrganizationSpendAlertsRequest::default()),
+        )
+    }
+    /// Creates an organization spend alert.
+    ///
+    /// `POST /organization/spend_alerts`
+    ///
+    /// Returns a [`CreateOrganizationSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateSpendAlertBody`: the request body
+    pub fn create_organization_spend_alert(
+        &self,
+        body: CreateSpendAlertBody,
+    ) -> CreateOrganizationSpendAlertCall<'_> {
+        CreateOrganizationSpendAlertCall(
+            self.0.send(CreateOrganizationSpendAlertRequest::new(body)),
+        )
+    }
+    /// Retrieves an organization spend alert.
+    ///
+    /// `GET /organization/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`RetrieveOrganizationSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    pub fn retrieve_organization_spend_alert(
+        &self,
+        alert_id: impl Into<String>,
+    ) -> RetrieveOrganizationSpendAlertCall<'_> {
+        RetrieveOrganizationSpendAlertCall(
+            self.0.send(RetrieveOrganizationSpendAlertRequest::new(alert_id)),
+        )
+    }
+    /// Updates an organization spend alert.
+    ///
+    /// `POST /organization/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`UpdateOrganizationSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    /// - `body: CreateSpendAlertBody`: the request body
+    pub fn update_organization_spend_alert(
+        &self,
+        alert_id: impl Into<String>,
+        body: CreateSpendAlertBody,
+    ) -> UpdateOrganizationSpendAlertCall<'_> {
+        UpdateOrganizationSpendAlertCall(
+            self.0.send(UpdateOrganizationSpendAlertRequest::new(alert_id, body)),
+        )
+    }
+    /// Deletes an organization spend alert.
+    ///
+    /// `DELETE /organization/spend_alerts/{alert_id}`
+    ///
+    /// Returns a [`DeleteOrganizationSpendAlertCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
+    pub fn delete_organization_spend_alert(
+        &self,
+        alert_id: impl Into<String>,
+    ) -> DeleteOrganizationSpendAlertCall<'_> {
+        DeleteOrganizationSpendAlertCall(
+            self.0.send(DeleteOrganizationSpendAlertRequest::new(alert_id)),
+        )
+    }
+    /// Get audio speeches usage details for the organization.
+    ///
+    /// `GET /organization/usage/audio_speeches`
+    ///
+    /// Returns a [`UsageAudioSpeechesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageAudioSpeechesCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageAudioSpeechesCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageAudioSpeechesCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageAudioSpeechesCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageAudioSpeechesCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageAudioSpeechesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageAudioSpeechesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`group_by`](UsageAudioSpeechesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    /// - [`limit`](UsageAudioSpeechesCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageAudioSpeechesCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_audio_speeches(&self) -> UsageAudioSpeechesCall<'_> {
+        UsageAudioSpeechesCall(self.0.send(UsageAudioSpeechesRequest::default()))
+    }
+    /// Get audio transcriptions usage details for the organization.
+    ///
+    /// `GET /organization/usage/audio_transcriptions`
+    ///
+    /// Returns a [`UsageAudioTranscriptionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageAudioTranscriptionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageAudioTranscriptionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageAudioTranscriptionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageAudioTranscriptionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageAudioTranscriptionsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageAudioTranscriptionsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageAudioTranscriptionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`group_by`](UsageAudioTranscriptionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    /// - [`limit`](UsageAudioTranscriptionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageAudioTranscriptionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_audio_transcriptions(&self) -> UsageAudioTranscriptionsCall<'_> {
+        UsageAudioTranscriptionsCall(
+            self.0.send(UsageAudioTranscriptionsRequest::default()),
+        )
+    }
+    /// Get code interpreter sessions usage details for the organization.
+    ///
+    /// `GET /organization/usage/code_interpreter_sessions`
+    ///
+    /// Returns a [`UsageCodeInterpreterSessionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageCodeInterpreterSessionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageCodeInterpreterSessionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageCodeInterpreterSessionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageCodeInterpreterSessionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`group_by`](UsageCodeInterpreterSessionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    /// - [`limit`](UsageCodeInterpreterSessionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageCodeInterpreterSessionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_code_interpreter_sessions(
+        &self,
+    ) -> UsageCodeInterpreterSessionsCall<'_> {
+        UsageCodeInterpreterSessionsCall(
+            self.0.send(UsageCodeInterpreterSessionsRequest::default()),
+        )
+    }
+    /// Get completions usage details for the organization.
+    ///
+    /// `GET /organization/usage/completions`
+    ///
+    /// Returns a [`UsageCompletionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageCompletionsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageCompletionsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageCompletionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageCompletionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageCompletionsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageCompletionsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageCompletionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`batch`](UsageCompletionsCall::batch): the `batch` query parameter (`bool`). If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.
+    /// - [`group_by`](UsageCompletionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
+    /// - [`limit`](UsageCompletionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageCompletionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_completions(&self) -> UsageCompletionsCall<'_> {
+        UsageCompletionsCall(self.0.send(UsageCompletionsRequest::default()))
+    }
+    /// Get embeddings usage details for the organization.
+    ///
+    /// `GET /organization/usage/embeddings`
+    ///
+    /// Returns a [`UsageEmbeddingsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageEmbeddingsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageEmbeddingsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageEmbeddingsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageEmbeddingsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageEmbeddingsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageEmbeddingsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageEmbeddingsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`group_by`](UsageEmbeddingsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    /// - [`limit`](UsageEmbeddingsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageEmbeddingsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_embeddings(&self) -> UsageEmbeddingsCall<'_> {
+        UsageEmbeddingsCall(self.0.send(UsageEmbeddingsRequest::default()))
+    }
+    /// Get file search calls usage details for the organization.
+    ///
+    /// `GET /organization/usage/file_search_calls`
+    ///
+    /// Returns a [`UsageFileSearchCallsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageFileSearchCallsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageFileSearchCallsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageFileSearchCallsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageFileSearchCallsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageFileSearchCallsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageFileSearchCallsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`vector_store_ids`](UsageFileSearchCallsCall::vector_store_ids): the `vector_store_ids` query parameter (`Vec<String>`). Return only usage for these vector stores.
+    /// - [`group_by`](UsageFileSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
+    /// - [`limit`](UsageFileSearchCallsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageFileSearchCallsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_file_search_calls(&self) -> UsageFileSearchCallsCall<'_> {
+        UsageFileSearchCallsCall(self.0.send(UsageFileSearchCallsRequest::default()))
+    }
+    /// Get images usage details for the organization.
+    ///
+    /// `GET /organization/usage/images`
+    ///
+    /// Returns a [`UsageImagesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageImagesCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageImagesCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageImagesCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`sources`](UsageImagesCall::sources): the `sources` query parameter (`Vec<String>`). Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them.
+    /// - [`sizes`](UsageImagesCall::sizes): the `sizes` query parameter (`Vec<String>`). Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them.
+    /// - [`project_ids`](UsageImagesCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageImagesCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageImagesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageImagesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`group_by`](UsageImagesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
+    /// - [`limit`](UsageImagesCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageImagesCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_images(&self) -> UsageImagesCall<'_> {
+        UsageImagesCall(self.0.send(UsageImagesRequest::default()))
+    }
+    /// Get moderations usage details for the organization.
+    ///
+    /// `GET /organization/usage/moderations`
+    ///
+    /// Returns a [`UsageModerationsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageModerationsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageModerationsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageModerationsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageModerationsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageModerationsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageModerationsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageModerationsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`group_by`](UsageModerationsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
+    /// - [`limit`](UsageModerationsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageModerationsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_moderations(&self) -> UsageModerationsCall<'_> {
+        UsageModerationsCall(self.0.send(UsageModerationsRequest::default()))
+    }
+    /// Get vector stores usage details for the organization.
+    ///
+    /// `GET /organization/usage/vector_stores`
+    ///
+    /// Returns a [`UsageVectorStoresCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageVectorStoresCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageVectorStoresCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageVectorStoresCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageVectorStoresCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`group_by`](UsageVectorStoresCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
+    /// - [`limit`](UsageVectorStoresCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageVectorStoresCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_vector_stores(&self) -> UsageVectorStoresCall<'_> {
+        UsageVectorStoresCall(self.0.send(UsageVectorStoresRequest::default()))
+    }
+    /// Get web search calls usage details for the organization.
+    ///
+    /// `GET /organization/usage/web_search_calls`
+    ///
+    /// Returns a [`UsageWebSearchCallsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`start_time`](UsageWebSearchCallsCall::start_time): the `start_time` query parameter (`i64`). Start time (Unix seconds) of the query time range, inclusive.
+    /// - [`end_time`](UsageWebSearchCallsCall::end_time): the `end_time` query parameter (`i64`). End time (Unix seconds) of the query time range, exclusive.
+    /// - [`bucket_width`](UsageWebSearchCallsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
+    /// - [`project_ids`](UsageWebSearchCallsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
+    /// - [`user_ids`](UsageWebSearchCallsCall::user_ids): the `user_ids` query parameter (`Vec<String>`). Return only usage for these users.
+    /// - [`api_key_ids`](UsageWebSearchCallsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
+    /// - [`models`](UsageWebSearchCallsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
+    /// - [`context_levels`](UsageWebSearchCallsCall::context_levels): the `context_levels` query parameter (`Vec<String>`). Return only web search usage for these context levels.
+    /// - [`group_by`](UsageWebSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
+    /// - [`limit`](UsageWebSearchCallsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
+    /// - [`page`](UsageWebSearchCallsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
+    pub fn usage_web_search_calls(&self) -> UsageWebSearchCallsCall<'_> {
+        UsageWebSearchCallsCall(self.0.send(UsageWebSearchCallsRequest::default()))
+    }
+    /// Lists all of the users in the organization.
+    ///
+    /// `GET /organization/users`
+    ///
+    /// Returns a [`ListUsersCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`after`](ListUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`emails`](ListUsersCall::emails): the `emails` query parameter (`Vec<String>`). Filter by the email address of users.
+    pub fn list_users(&self) -> ListUsersCall<'_> {
+        ListUsersCall(self.0.send(ListUsersRequest::default()))
+    }
+    /// Retrieves a user by their identifier.
+    ///
+    /// `GET /organization/users/{user_id}`
+    ///
+    /// Returns a [`RetrieveUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn retrieve_user(&self, user_id: impl Into<String>) -> RetrieveUserCall<'_> {
+        RetrieveUserCall(self.0.send(RetrieveUserRequest::new(user_id)))
+    }
+    /// Modifies a user's role in the organization.
+    ///
+    /// `POST /organization/users/{user_id}`
+    ///
+    /// Returns a [`ModifyUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `body: UserRoleUpdateRequest`: the request body
+    pub fn modify_user(
+        &self,
+        user_id: impl Into<String>,
+        body: UserRoleUpdateRequest,
+    ) -> ModifyUserCall<'_> {
+        ModifyUserCall(self.0.send(ModifyUserRequest::new(user_id, body)))
+    }
+    /// Deletes a user from the organization.
+    ///
+    /// `DELETE /organization/users/{user_id}`
+    ///
+    /// Returns a [`DeleteUserCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    pub fn delete_user(&self, user_id: impl Into<String>) -> DeleteUserCall<'_> {
+        DeleteUserCall(self.0.send(DeleteUserRequest::new(user_id)))
+    }
+    /// Lists the organization roles assigned to a user within the organization.
+    ///
+    /// `GET /organization/users/{user_id}/roles`
+    ///
+    /// Returns a [`ListUserRoleAssignmentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListUserRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
+    /// - [`after`](ListUserRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
+    /// - [`order`](ListUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
+    pub fn list_user_role_assignments(
+        &self,
+        user_id: impl Into<String>,
+    ) -> ListUserRoleAssignmentsCall<'_> {
+        ListUserRoleAssignmentsCall(
+            self.0.send(ListUserRoleAssignmentsRequest::new(user_id)),
+        )
+    }
+    /// Assigns an organization role to a user within the organization.
+    ///
+    /// `POST /organization/users/{user_id}/roles`
+    ///
+    /// Returns a [`AssignUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    pub fn assign_user_role(
+        &self,
+        user_id: impl Into<String>,
+        body: PublicAssignOrganizationGroupRoleBody,
+    ) -> AssignUserRoleCall<'_> {
+        AssignUserRoleCall(self.0.send(AssignUserRoleRequest::new(user_id, body)))
+    }
+    /// Retrieves an organization role assigned to a user.
+    ///
+    /// `GET /organization/users/{user_id}/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_user_role(
+        &self,
+        user_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> RetrieveUserRoleCall<'_> {
+        RetrieveUserRoleCall(self.0.send(RetrieveUserRoleRequest::new(user_id, role_id)))
+    }
+    /// Unassigns an organization role from a user within the organization.
+    ///
+    /// `DELETE /organization/users/{user_id}/roles/{role_id}`
+    ///
+    /// Returns a [`UnassignUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn unassign_user_role(
+        &self,
+        user_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> UnassignUserRoleCall<'_> {
+        UnassignUserRoleCall(self.0.send(UnassignUserRoleRequest::new(user_id, role_id)))
+    }
+    /// Lists the project roles assigned to a group within a project.
+    ///
+    /// `GET /projects/{project_id}/groups/{group_id}/roles`
+    ///
+    /// Returns a [`ListProjectGroupRoleAssignmentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectGroupRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
+    /// - [`after`](ListProjectGroupRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
+    /// - [`order`](ListProjectGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
+    pub fn list_project_group_role_assignments(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+    ) -> ListProjectGroupRoleAssignmentsCall<'_> {
+        ListProjectGroupRoleAssignmentsCall(
+            self
+                .0
+                .send(ListProjectGroupRoleAssignmentsRequest::new(project_id, group_id)),
+        )
+    }
+    /// Assigns a project role to a group within a project.
+    ///
+    /// `POST /projects/{project_id}/groups/{group_id}/roles`
+    ///
+    /// Returns a [`AssignProjectGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    pub fn assign_project_group_role(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+        body: PublicAssignOrganizationGroupRoleBody,
+    ) -> AssignProjectGroupRoleCall<'_> {
+        AssignProjectGroupRoleCall(
+            self.0.send(AssignProjectGroupRoleRequest::new(project_id, group_id, body)),
+        )
+    }
+    /// Retrieves a project role assigned to a group.
+    ///
+    /// `GET /projects/{project_id}/groups/{group_id}/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveProjectGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_project_group_role(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> RetrieveProjectGroupRoleCall<'_> {
+        RetrieveProjectGroupRoleCall(
+            self
+                .0
+                .send(
+                    RetrieveProjectGroupRoleRequest::new(project_id, group_id, role_id),
+                ),
+        )
+    }
+    /// Unassigns a project role from a group within a project.
+    ///
+    /// `DELETE /projects/{project_id}/groups/{group_id}/roles/{role_id}`
+    ///
+    /// Returns a [`UnassignProjectGroupRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn unassign_project_group_role(
+        &self,
+        project_id: impl Into<String>,
+        group_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> UnassignProjectGroupRoleCall<'_> {
+        UnassignProjectGroupRoleCall(
+            self
+                .0
+                .send(
+                    UnassignProjectGroupRoleRequest::new(project_id, group_id, role_id),
+                ),
+        )
+    }
+    /// Lists the roles configured for a project.
+    ///
+    /// `GET /projects/{project_id}/roles`
+    ///
+    /// Returns a [`ListProjectRolesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectRolesCall::limit): the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
+    /// - [`after`](ListProjectRolesCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
+    /// - [`order`](ListProjectRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
+    pub fn list_project_roles(
+        &self,
+        project_id: impl Into<String>,
+    ) -> ListProjectRolesCall<'_> {
+        ListProjectRolesCall(self.0.send(ListProjectRolesRequest::new(project_id)))
+    }
+    /// Creates a custom role for a project.
+    ///
+    /// `POST /projects/{project_id}/roles`
+    ///
+    /// Returns a [`CreateProjectRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: PublicCreateOrganizationRoleBody`: the request body
+    pub fn create_project_role(
+        &self,
+        project_id: impl Into<String>,
+        body: PublicCreateOrganizationRoleBody,
+    ) -> CreateProjectRoleCall<'_> {
+        CreateProjectRoleCall(
+            self.0.send(CreateProjectRoleRequest::new(project_id, body)),
+        )
+    }
+    /// Retrieves a project role.
+    ///
+    /// `GET /projects/{project_id}/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveProjectRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_project_role(
+        &self,
+        project_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> RetrieveProjectRoleCall<'_> {
+        RetrieveProjectRoleCall(
+            self.0.send(RetrieveProjectRoleRequest::new(project_id, role_id)),
+        )
+    }
+    /// Updates an existing project role.
+    ///
+    /// `POST /projects/{project_id}/roles/{role_id}`
+    ///
+    /// Returns a [`UpdateProjectRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    /// - `body: PublicUpdateOrganizationRoleBody`: the request body
+    pub fn update_project_role(
+        &self,
+        project_id: impl Into<String>,
+        role_id: impl Into<String>,
+        body: PublicUpdateOrganizationRoleBody,
+    ) -> UpdateProjectRoleCall<'_> {
+        UpdateProjectRoleCall(
+            self.0.send(UpdateProjectRoleRequest::new(project_id, role_id, body)),
+        )
+    }
+    /// Deletes a custom role from a project.
+    ///
+    /// `DELETE /projects/{project_id}/roles/{role_id}`
+    ///
+    /// Returns a [`DeleteProjectRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn delete_project_role(
+        &self,
+        project_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> DeleteProjectRoleCall<'_> {
+        DeleteProjectRoleCall(
+            self.0.send(DeleteProjectRoleRequest::new(project_id, role_id)),
+        )
+    }
+    /// Lists the project roles assigned to a user within a project.
+    ///
+    /// `GET /projects/{project_id}/users/{user_id}/roles`
+    ///
+    /// Returns a [`ListProjectUserRoleAssignmentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListProjectUserRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
+    /// - [`after`](ListProjectUserRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
+    /// - [`order`](ListProjectUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
+    pub fn list_project_user_role_assignments(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+    ) -> ListProjectUserRoleAssignmentsCall<'_> {
+        ListProjectUserRoleAssignmentsCall(
+            self.0.send(ListProjectUserRoleAssignmentsRequest::new(project_id, user_id)),
+        )
+    }
+    /// Assigns a project role to a user within a project.
+    ///
+    /// `POST /projects/{project_id}/users/{user_id}/roles`
+    ///
+    /// Returns a [`AssignProjectUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    pub fn assign_project_user_role(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+        body: PublicAssignOrganizationGroupRoleBody,
+    ) -> AssignProjectUserRoleCall<'_> {
+        AssignProjectUserRoleCall(
+            self.0.send(AssignProjectUserRoleRequest::new(project_id, user_id, body)),
+        )
+    }
+    /// Retrieves a project role assigned to a user.
+    ///
+    /// `GET /projects/{project_id}/users/{user_id}/roles/{role_id}`
+    ///
+    /// Returns a [`RetrieveProjectUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn retrieve_project_user_role(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> RetrieveProjectUserRoleCall<'_> {
+        RetrieveProjectUserRoleCall(
+            self
+                .0
+                .send(RetrieveProjectUserRoleRequest::new(project_id, user_id, role_id)),
+        )
+    }
+    /// Unassigns a project role from a user within a project.
+    ///
+    /// `DELETE /projects/{project_id}/users/{user_id}/roles/{role_id}`
+    ///
+    /// Returns a [`UnassignProjectUserRoleCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
+    /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
+    pub fn unassign_project_user_role(
+        &self,
+        project_id: impl Into<String>,
+        user_id: impl Into<String>,
+        role_id: impl Into<String>,
+    ) -> UnassignProjectUserRoleCall<'_> {
+        UnassignProjectUserRoleCall(
+            self
+                .0
+                .send(UnassignProjectUserRoleRequest::new(project_id, user_id, role_id)),
+        )
+    }
+    /// Create a new Realtime API call over WebRTC and receive the SDP answer needed
+    /// to complete the peer connection.
+    ///
+    /// `POST /realtime/calls`
+    ///
+    /// Returns a [`CreateRealtimeCallCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateRealtimeCallForm`: the request body
+    pub fn create_realtime_call(
+        &self,
+        body: CreateRealtimeCallForm,
+    ) -> CreateRealtimeCallCall<'_> {
+        CreateRealtimeCallCall(self.0.send(CreateRealtimeCallRequest::new(body)))
+    }
+    /// Accept an incoming SIP call and configure the realtime session that will
+    /// handle it.
+    ///
+    /// `POST /realtime/calls/{call_id}/accept`
+    ///
+    /// Returns a [`AcceptRealtimeCallCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
+    /// - `body: RealtimeSessionCreateRequestGA`: the request body
+    pub fn accept_realtime_call(
+        &self,
+        call_id: impl Into<String>,
+        body: RealtimeSessionCreateRequestGA,
+    ) -> AcceptRealtimeCallCall<'_> {
+        AcceptRealtimeCallCall(
+            self.0.send(AcceptRealtimeCallRequest::new(call_id, body)),
+        )
+    }
+    /// End an active Realtime API call, whether it was initiated over SIP or
+    /// WebRTC.
+    ///
+    /// `POST /realtime/calls/{call_id}/hangup`
+    ///
+    /// Returns a [`HangupRealtimeCallCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
+    pub fn hangup_realtime_call(
+        &self,
+        call_id: impl Into<String>,
+    ) -> HangupRealtimeCallCall<'_> {
+        HangupRealtimeCallCall(self.0.send(HangupRealtimeCallRequest::new(call_id)))
+    }
+    /// Transfer an active SIP call to a new destination using the SIP REFER verb.
+    ///
+    /// `POST /realtime/calls/{call_id}/refer`
+    ///
+    /// Returns a [`ReferRealtimeCallCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
+    /// - `body: RealtimeCallReferRequest`: the request body
+    pub fn refer_realtime_call(
+        &self,
+        call_id: impl Into<String>,
+        body: RealtimeCallReferRequest,
+    ) -> ReferRealtimeCallCall<'_> {
+        ReferRealtimeCallCall(self.0.send(ReferRealtimeCallRequest::new(call_id, body)))
+    }
+    /// Decline an incoming SIP call by returning a SIP status code to the caller.
+    ///
+    /// `POST /realtime/calls/{call_id}/reject`
+    ///
+    /// Returns a [`RejectRealtimeCallCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
+    /// - `body: RealtimeCallRejectRequest`: the request body
+    pub fn reject_realtime_call(
+        &self,
+        call_id: impl Into<String>,
+        body: RealtimeCallRejectRequest,
+    ) -> RejectRealtimeCallCall<'_> {
+        RejectRealtimeCallCall(
+            self.0.send(RejectRealtimeCallRequest::new(call_id, body)),
+        )
+    }
+    /// Create a Realtime client secret with an associated session configuration.
+    ///
+    /// Client secrets are short-lived tokens that can be passed to a client app,
+    /// such as a web frontend or mobile client, which grants access to the Realtime API without
+    /// leaking your main API key. You can configure a custom TTL for each client secret.
+    ///
+    /// You can also attach session configuration options to the client secret, which will be
+    /// applied to any sessions created using that client secret, but these can also be overridden
+    /// by the client connection.
+    ///
+    /// [Learn more about authentication with client secrets over WebRTC](/docs/guides/realtime-webrtc).
+    ///
+    /// Returns the created client secret and the effective session object. The client secret is a string that looks like `ek_1234`.
+    ///
+    /// `POST /realtime/client_secrets`
+    ///
+    /// Returns a [`CreateRealtimeClientSecretCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RealtimeCreateClientSecretRequest`: the request body
+    pub fn create_realtime_client_secret(
+        &self,
+        body: RealtimeCreateClientSecretRequest,
+    ) -> CreateRealtimeClientSecretCall<'_> {
+        CreateRealtimeClientSecretCall(
+            self.0.send(CreateRealtimeClientSecretRequest::new(body)),
+        )
+    }
+    /// Create an ephemeral API token for use in client-side applications with the
+    /// Realtime API. Can be configured with the same session parameters as the
+    /// `session.update` client event.
+    ///
+    /// It responds with a session object, plus a `client_secret` key which contains
+    /// a usable ephemeral API token that can be used to authenticate browser clients
+    /// for the Realtime API.
+    ///
+    /// Returns the created Realtime session object, plus an ephemeral key.
+    ///
+    /// `POST /realtime/sessions`
+    ///
+    /// Returns a [`CreateRealtimeSessionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RealtimeSessionCreateRequest`: the request body
+    pub fn create_realtime_session(
+        &self,
+        body: RealtimeSessionCreateRequest,
+    ) -> CreateRealtimeSessionCall<'_> {
+        CreateRealtimeSessionCall(self.0.send(CreateRealtimeSessionRequest::new(body)))
+    }
+    /// Create an ephemeral API token for use in client-side applications with the
+    /// Realtime API specifically for realtime transcriptions.
+    /// Can be configured with the same session parameters as the `transcription_session.update` client event.
+    ///
+    /// It responds with a session object, plus a `client_secret` key which contains
+    /// a usable ephemeral API token that can be used to authenticate browser clients
+    /// for the Realtime API.
+    ///
+    /// Returns the created Realtime transcription session object, plus an ephemeral key.
+    ///
+    /// `POST /realtime/transcription_sessions`
+    ///
+    /// Returns a [`CreateRealtimeTranscriptionSessionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RealtimeTranscriptionSessionCreateRequest`: the request body
+    pub fn create_realtime_transcription_session(
+        &self,
+        body: RealtimeTranscriptionSessionCreateRequest,
+    ) -> CreateRealtimeTranscriptionSessionCall<'_> {
+        CreateRealtimeTranscriptionSessionCall(
+            self.0.send(CreateRealtimeTranscriptionSessionRequest::new(body)),
+        )
+    }
+    /// Create a Realtime translation client secret with an associated translation session configuration.
+    ///
+    /// Client secrets are short-lived tokens that can be passed to a client app,
+    /// such as a web frontend or mobile client, which grants access to the Realtime
+    /// Translation API without leaking your main API key. You can configure a custom
+    /// TTL for each client secret.
+    ///
+    /// Returns the created client secret and the effective translation session object.
+    /// The client secret is a string that looks like `ek_1234`.
+    ///
+    /// `POST /realtime/translations/client_secrets`
+    ///
+    /// Returns a [`CreateRealtimeTranslationClientSecretCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: RealtimeTranslationClientSecretCreateRequest`: the request body
+    pub fn create_realtime_translation_client_secret(
+        &self,
+        body: RealtimeTranslationClientSecretCreateRequest,
+    ) -> CreateRealtimeTranslationClientSecretCall<'_> {
+        CreateRealtimeTranslationClientSecretCall(
+            self.0.send(CreateRealtimeTranslationClientSecretRequest::new(body)),
+        )
+    }
+    /// Creates a model response. Provide [text](/docs/guides/text) or
+    /// [image](/docs/guides/images) inputs to generate [text](/docs/guides/text)
+    /// or [JSON](/docs/guides/structured-outputs) outputs. Have the model call
+    /// your own [custom code](/docs/guides/function-calling) or use built-in
+    /// [tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)
+    /// or [file search](/docs/guides/tools-file-search) to use your own data
+    /// as input for the model's response.
+    ///
+    /// `POST /responses`
+    ///
+    /// Returns a [`CreateResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateResponse`: the request body
+    pub fn create_response(&self, body: CreateResponse) -> CreateResponseCall<'_> {
+        CreateResponseCall(self.0.send(CreateResponseRequest::new(body)))
+    }
+    /// Retrieves a model response with the given ID.
+    ///
+    /// `GET /responses/{response_id}`
+    ///
+    /// Returns a [`GetResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include`](GetResponseCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    /// - [`stream`](GetResponseCall::stream): the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
+    /// - [`starting_after`](GetResponseCall::starting_after): the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
+    /// - [`include_obfuscation`](GetResponseCall::include_obfuscation): the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
+    pub fn get_response(&self, response_id: impl Into<String>) -> GetResponseCall<'_> {
+        GetResponseCall(self.0.send(GetResponseRequest::new(response_id)))
+    }
+    /// Deletes a model response with the given ID.
+    ///
+    /// `DELETE /responses/{response_id}`
+    ///
+    /// Returns a [`DeleteResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    pub fn delete_response(
+        &self,
+        response_id: impl Into<String>,
+    ) -> DeleteResponseCall<'_> {
+        DeleteResponseCall(self.0.send(DeleteResponseRequest::new(response_id)))
+    }
+    /// Cancels a model response with the given ID. Only responses created with
+    /// the `background` parameter set to `true` can be cancelled.
+    /// [Learn more](/docs/guides/background).
+    ///
+    /// `POST /responses/{response_id}/cancel`
+    ///
+    /// Returns a [`CancelResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    pub fn cancel_response(
+        &self,
+        response_id: impl Into<String>,
+    ) -> CancelResponseCall<'_> {
+        CancelResponseCall(self.0.send(CancelResponseRequest::new(response_id)))
+    }
+    /// Returns a list of input items for a given response.
+    ///
+    /// `GET /responses/{response_id}/input_items`
+    ///
+    /// Returns a [`ListInputItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListInputItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    /// - [`after`](ListInputItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    /// - [`include`](ListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    pub fn list_input_items(
+        &self,
+        response_id: impl Into<String>,
+    ) -> ListInputItemsCall<'_> {
+        ListInputItemsCall(self.0.send(ListInputItemsRequest::new(response_id)))
+    }
+    /// Creates an intermediate [Upload](/docs/api-reference/uploads/object) object
+    /// that you can add [Parts](/docs/api-reference/uploads/part-object) to.
+    /// Currently, an Upload can accept at most 8 GB in total and expires after an
+    /// hour after you create it.
+    ///
+    /// Once you complete the Upload, we will create a
+    /// [File](/docs/api-reference/files/object) object that contains all the parts
+    /// you uploaded. This File is usable in the rest of our platform as a regular
+    /// File object.
+    ///
+    /// For certain `purpose` values, the correct `mime_type` must be specified.
+    /// Please refer to documentation for the
+    /// [supported MIME types for your use case](/docs/assistants/tools/file-search#supported-files).
+    ///
+    /// For guidance on the proper filename extensions for each purpose, please
+    /// follow the documentation on [creating a
+    /// File](/docs/api-reference/files/create).
+    ///
+    /// Returns the Upload object with status `pending`.
+    ///
+    /// `POST /uploads`
+    ///
+    /// Returns a [`CreateUploadCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateUploadRequest2`: the request body
+    pub fn create_upload(&self, body: CreateUploadRequest2) -> CreateUploadCall<'_> {
+        CreateUploadCall(self.0.send(CreateUploadRequest::new(body)))
+    }
+    /// Cancels the Upload. No Parts may be added after an Upload is cancelled.
+    ///
+    /// Returns the Upload object with status `cancelled`.
+    ///
+    /// `POST /uploads/{upload_id}/cancel`
+    ///
+    /// Returns a [`CancelUploadCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `upload_id: impl Into<String>`: the `{upload_id}` path parameter
+    pub fn cancel_upload(&self, upload_id: impl Into<String>) -> CancelUploadCall<'_> {
+        CancelUploadCall(self.0.send(CancelUploadRequest::new(upload_id)))
+    }
+    /// Completes the [Upload](/docs/api-reference/uploads/object).
+    ///
+    /// Within the returned Upload object, there is a nested [File](/docs/api-reference/files/object) object that is ready to use in the rest of the platform.
+    ///
+    /// You can specify the order of the Parts by passing in an ordered list of the Part IDs.
+    ///
+    /// The number of bytes uploaded upon completion must match the number of bytes initially specified when creating the Upload object. No Parts may be added after an Upload is completed.
+    /// Returns the Upload object with status `completed`, including an additional `file` property containing the created usable File object.
+    ///
+    /// `POST /uploads/{upload_id}/complete`
+    ///
+    /// Returns a [`CompleteUploadCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `upload_id: impl Into<String>`: the `{upload_id}` path parameter
+    /// - `body: CompleteUploadRequest2`: the request body
+    pub fn complete_upload(
+        &self,
+        upload_id: impl Into<String>,
+        body: CompleteUploadRequest2,
+    ) -> CompleteUploadCall<'_> {
+        CompleteUploadCall(self.0.send(CompleteUploadRequest::new(upload_id, body)))
+    }
+    /// Adds a [Part](/docs/api-reference/uploads/part-object) to an [Upload](/docs/api-reference/uploads/object) object. A Part represents a chunk of bytes from the file you are trying to upload.
+    ///
+    /// Each Part can be at most 64 MB, and you can add Parts until you hit the Upload maximum of 8 GB.
+    ///
+    /// It is possible to add multiple Parts in parallel. You can decide the intended order of the Parts when you [complete the Upload](/docs/api-reference/uploads/complete).
+    ///
+    /// `POST /uploads/{upload_id}/parts`
+    ///
+    /// Returns a [`AddUploadPartCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `upload_id: impl Into<String>`: the `{upload_id}` path parameter
+    /// - `body: AddUploadPartForm`: the request body
+    pub fn add_upload_part(
+        &self,
+        upload_id: impl Into<String>,
+        body: AddUploadPartForm,
+    ) -> AddUploadPartCall<'_> {
+        AddUploadPartCall(self.0.send(AddUploadPartRequest::new(upload_id, body)))
+    }
+    /// Returns a list of vector stores.
+    ///
+    /// `GET /vector_stores`
+    ///
+    /// Returns a [`ListVectorStoresCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListVectorStoresCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListVectorStoresCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListVectorStoresCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`before`](ListVectorStoresCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    pub fn list_vector_stores(&self) -> ListVectorStoresCall<'_> {
+        ListVectorStoresCall(self.0.send(ListVectorStoresRequest::default()))
+    }
+    /// Create a vector store.
+    ///
+    /// `POST /vector_stores`
+    ///
+    /// Returns a [`CreateVectorStoreCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVectorStoreRequest2`: the request body
+    pub fn create_vector_store(
+        &self,
+        body: CreateVectorStoreRequest2,
+    ) -> CreateVectorStoreCall<'_> {
+        CreateVectorStoreCall(self.0.send(CreateVectorStoreRequest::new(body)))
+    }
+    /// Retrieves a vector store.
+    ///
+    /// `GET /vector_stores/{vector_store_id}`
+    ///
+    /// Returns a [`GetVectorStoreCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    pub fn get_vector_store(
+        &self,
+        vector_store_id: impl Into<String>,
+    ) -> GetVectorStoreCall<'_> {
+        GetVectorStoreCall(self.0.send(GetVectorStoreRequest::new(vector_store_id)))
+    }
+    /// Modifies a vector store.
+    ///
+    /// `POST /vector_stores/{vector_store_id}`
+    ///
+    /// Returns a [`ModifyVectorStoreCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `body: UpdateVectorStoreRequest`: the request body
+    pub fn modify_vector_store(
+        &self,
+        vector_store_id: impl Into<String>,
+        body: UpdateVectorStoreRequest,
+    ) -> ModifyVectorStoreCall<'_> {
+        ModifyVectorStoreCall(
+            self.0.send(ModifyVectorStoreRequest::new(vector_store_id, body)),
+        )
+    }
+    /// Delete a vector store.
+    ///
+    /// `DELETE /vector_stores/{vector_store_id}`
+    ///
+    /// Returns a [`DeleteVectorStoreCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    pub fn delete_vector_store(
+        &self,
+        vector_store_id: impl Into<String>,
+    ) -> DeleteVectorStoreCall<'_> {
+        DeleteVectorStoreCall(
+            self.0.send(DeleteVectorStoreRequest::new(vector_store_id)),
+        )
+    }
+    /// Create a vector store file batch.
+    ///
+    /// `POST /vector_stores/{vector_store_id}/file_batches`
+    ///
+    /// Returns a [`CreateVectorStoreFileBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `body: CreateVectorStoreFileBatchRequest2`: the request body
+    pub fn create_vector_store_file_batch(
+        &self,
+        vector_store_id: impl Into<String>,
+        body: CreateVectorStoreFileBatchRequest2,
+    ) -> CreateVectorStoreFileBatchCall<'_> {
+        CreateVectorStoreFileBatchCall(
+            self.0.send(CreateVectorStoreFileBatchRequest::new(vector_store_id, body)),
+        )
+    }
+    /// Retrieves a vector store file batch.
+    ///
+    /// `GET /vector_stores/{vector_store_id}/file_batches/{batch_id}`
+    ///
+    /// Returns a [`GetVectorStoreFileBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `batch_id: impl Into<String>`: the `{batch_id}` path parameter
+    pub fn get_vector_store_file_batch(
+        &self,
+        vector_store_id: impl Into<String>,
+        batch_id: impl Into<String>,
+    ) -> GetVectorStoreFileBatchCall<'_> {
+        GetVectorStoreFileBatchCall(
+            self.0.send(GetVectorStoreFileBatchRequest::new(vector_store_id, batch_id)),
+        )
+    }
+    /// Cancel a vector store file batch. This attempts to cancel the processing of files in this batch as soon as possible.
+    ///
+    /// `POST /vector_stores/{vector_store_id}/file_batches/{batch_id}/cancel`
+    ///
+    /// Returns a [`CancelVectorStoreFileBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `batch_id: impl Into<String>`: the `{batch_id}` path parameter
+    pub fn cancel_vector_store_file_batch(
+        &self,
+        vector_store_id: impl Into<String>,
+        batch_id: impl Into<String>,
+    ) -> CancelVectorStoreFileBatchCall<'_> {
+        CancelVectorStoreFileBatchCall(
+            self
+                .0
+                .send(CancelVectorStoreFileBatchRequest::new(vector_store_id, batch_id)),
+        )
+    }
+    /// Returns a list of vector store files in a batch.
+    ///
+    /// `GET /vector_stores/{vector_store_id}/file_batches/{batch_id}/files`
+    ///
+    /// Returns a [`ListFilesInVectorStoreBatchCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `batch_id: impl Into<String>`: the `{batch_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListFilesInVectorStoreBatchCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListFilesInVectorStoreBatchCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListFilesInVectorStoreBatchCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`before`](ListFilesInVectorStoreBatchCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    /// - [`filter`](ListFilesInVectorStoreBatchCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn list_files_in_vector_store_batch(
+        &self,
+        vector_store_id: impl Into<String>,
+        batch_id: impl Into<String>,
+    ) -> ListFilesInVectorStoreBatchCall<'_> {
+        ListFilesInVectorStoreBatchCall(
+            self
+                .0
+                .send(ListFilesInVectorStoreBatchRequest::new(vector_store_id, batch_id)),
+        )
+    }
+    /// Returns a list of vector store files.
+    ///
+    /// `GET /vector_stores/{vector_store_id}/files`
+    ///
+    /// Returns a [`ListVectorStoreFilesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListVectorStoreFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](ListVectorStoreFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
+    /// - [`after`](ListVectorStoreFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
+    /// - [`before`](ListVectorStoreFilesCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+    /// - [`filter`](ListVectorStoreFilesCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
+    pub fn list_vector_store_files(
+        &self,
+        vector_store_id: impl Into<String>,
+    ) -> ListVectorStoreFilesCall<'_> {
+        ListVectorStoreFilesCall(
+            self.0.send(ListVectorStoreFilesRequest::new(vector_store_id)),
+        )
+    }
+    /// Create a vector store file by attaching a [File](/docs/api-reference/files) to a [vector store](/docs/api-reference/vector-stores/object).
+    ///
+    /// `POST /vector_stores/{vector_store_id}/files`
+    ///
+    /// Returns a [`CreateVectorStoreFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `body: CreateVectorStoreFileRequest2`: the request body
+    pub fn create_vector_store_file(
+        &self,
+        vector_store_id: impl Into<String>,
+        body: CreateVectorStoreFileRequest2,
+    ) -> CreateVectorStoreFileCall<'_> {
+        CreateVectorStoreFileCall(
+            self.0.send(CreateVectorStoreFileRequest::new(vector_store_id, body)),
+        )
+    }
+    /// Retrieves a vector store file.
+    ///
+    /// `GET /vector_stores/{vector_store_id}/files/{file_id}`
+    ///
+    /// Returns a [`GetVectorStoreFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn get_vector_store_file(
+        &self,
+        vector_store_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> GetVectorStoreFileCall<'_> {
+        GetVectorStoreFileCall(
+            self.0.send(GetVectorStoreFileRequest::new(vector_store_id, file_id)),
+        )
+    }
+    /// Update attributes on a vector store file.
+    ///
+    /// `POST /vector_stores/{vector_store_id}/files/{file_id}`
+    ///
+    /// Returns a [`UpdateVectorStoreFileAttributesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    /// - `body: UpdateVectorStoreFileAttributesRequest2`: the request body
+    pub fn update_vector_store_file_attributes(
+        &self,
+        vector_store_id: impl Into<String>,
+        file_id: impl Into<String>,
+        body: UpdateVectorStoreFileAttributesRequest2,
+    ) -> UpdateVectorStoreFileAttributesCall<'_> {
+        UpdateVectorStoreFileAttributesCall(
+            self
+                .0
+                .send(
+                    UpdateVectorStoreFileAttributesRequest::new(
+                        vector_store_id,
+                        file_id,
+                        body,
+                    ),
+                ),
+        )
+    }
+    /// Delete a vector store file. This will remove the file from the vector store but the file itself will not be deleted. To delete the file, use the [delete file](/docs/api-reference/files/delete) endpoint.
+    ///
+    /// `DELETE /vector_stores/{vector_store_id}/files/{file_id}`
+    ///
+    /// Returns a [`DeleteVectorStoreFileCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn delete_vector_store_file(
+        &self,
+        vector_store_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> DeleteVectorStoreFileCall<'_> {
+        DeleteVectorStoreFileCall(
+            self.0.send(DeleteVectorStoreFileRequest::new(vector_store_id, file_id)),
+        )
+    }
+    /// Retrieve the parsed contents of a vector store file.
+    ///
+    /// `GET /vector_stores/{vector_store_id}/files/{file_id}/content`
+    ///
+    /// Returns a [`RetrieveVectorStoreFileContentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
+    pub fn retrieve_vector_store_file_content(
+        &self,
+        vector_store_id: impl Into<String>,
+        file_id: impl Into<String>,
+    ) -> RetrieveVectorStoreFileContentCall<'_> {
+        RetrieveVectorStoreFileContentCall(
+            self
+                .0
+                .send(
+                    RetrieveVectorStoreFileContentRequest::new(vector_store_id, file_id),
+                ),
+        )
+    }
+    /// Search a vector store for relevant chunks based on a query and file attributes filter.
+    ///
+    /// `POST /vector_stores/{vector_store_id}/search`
+    ///
+    /// Returns a [`SearchVectorStoreCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
+    /// - `body: VectorStoreSearchRequest`: the request body
+    pub fn search_vector_store(
+        &self,
+        vector_store_id: impl Into<String>,
+        body: VectorStoreSearchRequest,
+    ) -> SearchVectorStoreCall<'_> {
+        SearchVectorStoreCall(
+            self.0.send(SearchVectorStoreRequest::new(vector_store_id, body)),
+        )
+    }
+    /// Create a conversation.
+    ///
+    /// `POST /conversations`
+    ///
+    /// Returns a [`CreateConversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateConversationBody`: the request body
+    pub fn create_conversation(
+        &self,
+        body: CreateConversationBody,
+    ) -> CreateConversationCall<'_> {
+        CreateConversationCall(self.0.send(CreateConversationRequest::new(body)))
+    }
+    /// Get a conversation
+    ///
+    /// `GET /conversations/{conversation_id}`
+    ///
+    /// Returns a [`GetConversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    pub fn get_conversation(
+        &self,
+        conversation_id: impl Into<String>,
+    ) -> GetConversationCall<'_> {
+        GetConversationCall(self.0.send(GetConversationRequest::new(conversation_id)))
+    }
+    /// Update a conversation
+    ///
+    /// `POST /conversations/{conversation_id}`
+    ///
+    /// Returns a [`UpdateConversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    /// - `body: UpdateConversationBody`: the request body
+    pub fn update_conversation(
+        &self,
+        conversation_id: impl Into<String>,
+        body: UpdateConversationBody,
+    ) -> UpdateConversationCall<'_> {
+        UpdateConversationCall(
+            self.0.send(UpdateConversationRequest::new(conversation_id, body)),
+        )
+    }
+    /// Delete a conversation. Items in the conversation will not be deleted.
+    ///
+    /// `DELETE /conversations/{conversation_id}`
+    ///
+    /// Returns a [`DeleteConversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
+    pub fn delete_conversation(
+        &self,
+        conversation_id: impl Into<String>,
+    ) -> DeleteConversationCall<'_> {
+        DeleteConversationCall(
+            self.0.send(DeleteConversationRequest::new(conversation_id)),
+        )
+    }
+    /// Get the organization's hard spend limit.
+    ///
+    /// `GET /organization/spend_limit`
+    ///
+    /// Returns a [`GetorganizationspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn getorganizationspendlimit(&self) -> GetorganizationspendlimitCall<'_> {
+        GetorganizationspendlimitCall(
+            self.0.send(GetorganizationspendlimitRequest::default()),
+        )
+    }
+    /// Create or replace the organization's hard spend limit.
+    ///
+    /// `POST /organization/spend_limit`
+    ///
+    /// Returns a [`UpdateorganizationspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: UpdateOrganizationSpendLimitBody`: the request body
+    pub fn updateorganizationspendlimit(
+        &self,
+        body: UpdateOrganizationSpendLimitBody,
+    ) -> UpdateorganizationspendlimitCall<'_> {
+        UpdateorganizationspendlimitCall(
+            self.0.send(UpdateorganizationspendlimitRequest::new(body)),
+        )
+    }
+    /// Delete the organization's hard spend limit.
+    ///
+    /// `DELETE /organization/spend_limit`
+    ///
+    /// Returns a [`DeleteorganizationspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn deleteorganizationspendlimit(&self) -> DeleteorganizationspendlimitCall<'_> {
+        DeleteorganizationspendlimitCall(
+            self.0.send(DeleteorganizationspendlimitRequest::default()),
+        )
+    }
+    /// Get a project's hard spend limit.
+    ///
+    /// `GET /organization/projects/{project_id}/spend_limit`
+    ///
+    /// Returns a [`GetprojectspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn getprojectspendlimit(
+        &self,
+        project_id: impl Into<String>,
+    ) -> GetprojectspendlimitCall<'_> {
+        GetprojectspendlimitCall(
+            self.0.send(GetprojectspendlimitRequest::new(project_id)),
+        )
+    }
+    /// Create or replace a project's hard spend limit.
+    ///
+    /// `POST /organization/projects/{project_id}/spend_limit`
+    ///
+    /// Returns a [`UpdateprojectspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `body: UpdateProjectSpendLimitBody`: the request body
+    pub fn updateprojectspendlimit(
+        &self,
+        project_id: impl Into<String>,
+        body: UpdateProjectSpendLimitBody,
+    ) -> UpdateprojectspendlimitCall<'_> {
+        UpdateprojectspendlimitCall(
+            self.0.send(UpdateprojectspendlimitRequest::new(project_id, body)),
+        )
+    }
+    /// Delete a project's hard spend limit.
+    ///
+    /// `DELETE /organization/projects/{project_id}/spend_limit`
+    ///
+    /// Returns a [`DeleteprojectspendlimitCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    pub fn deleteprojectspendlimit(
+        &self,
+        project_id: impl Into<String>,
+    ) -> DeleteprojectspendlimitCall<'_> {
+        DeleteprojectspendlimitCall(
+            self.0.send(DeleteprojectspendlimitRequest::new(project_id)),
+        )
+    }
+    /// Creates an API key for a service account in the project.
+    ///
+    /// `POST /organization/projects/{project_id}/service_accounts/{service_account_id}/api_keys`
+    ///
+    /// Returns a [`CreateanAPIkeyforaserviceaccountCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
+    /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
+    /// - `body: CreateProjectServiceAccountApiKeyBody`: the request body
+    pub fn createan_apikeyforaserviceaccount(
+        &self,
+        project_id: impl Into<String>,
+        service_account_id: impl Into<String>,
+        body: CreateProjectServiceAccountApiKeyBody,
+    ) -> CreateanAPIkeyforaserviceaccountCall<'_> {
+        CreateanAPIkeyforaserviceaccountCall(
+            self
+                .0
+                .send(
+                    CreateanAPIkeyforaserviceaccountRequest::new(
+                        project_id,
+                        service_account_id,
+                        body,
+                    ),
+                ),
+        )
+    }
+    /// Check whether an image or audio file contains known OpenAI provenance signals. [Learn more about content provenance](/api/docs/guides/content-provenance).
+    ///
+    /// If `not_detected`, it means the tool did not find supported signals in the uploaded file. The content could still have been generated by OpenAI if the metadata was stripped or has evidence of tampering, the watermark was degraded, it comes from a legacy generation model, or it was created before provenance signals were available. Content could also still be AI-generated by another company's model, which the tool currently does not detect.
+    ///
+    /// `POST /content_provenance_checks`
+    ///
+    /// Returns a [`CreatecontentprovenancecheckCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreatecontentprovenancecheckForm`: the request body
+    pub fn createcontentprovenancecheck(
+        &self,
+        body: CreatecontentprovenancecheckForm,
+    ) -> CreatecontentprovenancecheckCall<'_> {
+        CreatecontentprovenancecheckCall(
+            self.0.send(CreatecontentprovenancecheckRequest::new(body)),
+        )
+    }
+    /// List recently generated videos for the current project.
+    ///
+    /// `GET /videos`
+    ///
+    /// Returns a [`ListVideosCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListVideosCall::limit): the `limit` query parameter (`i64`). Number of items to retrieve
+    /// - [`order`](ListVideosCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    /// - [`after`](ListVideosCall::after): the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
+    pub fn list_videos(&self) -> ListVideosCall<'_> {
+        ListVideosCall(self.0.send(ListVideosRequest::default()))
+    }
+    /// Create a new video generation job from a prompt and optional reference assets.
+    ///
+    /// `POST /videos`
+    ///
+    /// Returns a [`CreateVideoCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVideoJsonBody`: the request body
+    pub fn create_video(&self, body: CreateVideoJsonBody) -> CreateVideoCall<'_> {
+        CreateVideoCall(self.0.send(CreateVideoRequest::new(body)))
+    }
+    /// Create a character from an uploaded video.
+    ///
+    /// `POST /videos/characters`
+    ///
+    /// Returns a [`CreateVideoCharacterCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVideoCharacterForm`: the request body
+    pub fn create_video_character(
+        &self,
+        body: CreateVideoCharacterForm,
+    ) -> CreateVideoCharacterCall<'_> {
+        CreateVideoCharacterCall(self.0.send(CreateVideoCharacterRequest::new(body)))
+    }
+    /// Fetch a character.
+    ///
+    /// `GET /videos/characters/{character_id}`
+    ///
+    /// Returns a [`GetVideoCharacterCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `character_id: impl Into<String>`: the `{character_id}` path parameter
+    pub fn get_video_character(
+        &self,
+        character_id: impl Into<String>,
+    ) -> GetVideoCharacterCall<'_> {
+        GetVideoCharacterCall(self.0.send(GetVideoCharacterRequest::new(character_id)))
+    }
+    /// Create a new video generation job by editing a source video or existing generated video.
+    ///
+    /// `POST /videos/edits`
+    ///
+    /// Returns a [`CreateVideoEditCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVideoEditJsonBody`: the request body
+    pub fn create_video_edit(
+        &self,
+        body: CreateVideoEditJsonBody,
+    ) -> CreateVideoEditCall<'_> {
+        CreateVideoEditCall(self.0.send(CreateVideoEditRequest::new(body)))
+    }
+    /// Create an extension of a completed video.
+    ///
+    /// `POST /videos/extensions`
+    ///
+    /// Returns a [`CreateVideoExtendCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateVideoExtendJsonBody`: the request body
+    pub fn create_video_extend(
+        &self,
+        body: CreateVideoExtendJsonBody,
+    ) -> CreateVideoExtendCall<'_> {
+        CreateVideoExtendCall(self.0.send(CreateVideoExtendRequest::new(body)))
+    }
+    /// Fetch the latest metadata for a generated video.
+    ///
+    /// `GET /videos/{video_id}`
+    ///
+    /// Returns a [`GetVideoCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
+    pub fn get_video(&self, video_id: impl Into<String>) -> GetVideoCall<'_> {
+        GetVideoCall(self.0.send(GetVideoRequest::new(video_id)))
+    }
+    /// Permanently delete a completed or failed video and its stored assets.
+    ///
+    /// `DELETE /videos/{video_id}`
+    ///
+    /// Returns a [`DeleteVideoCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
+    pub fn delete_video(&self, video_id: impl Into<String>) -> DeleteVideoCall<'_> {
+        DeleteVideoCall(self.0.send(DeleteVideoRequest::new(video_id)))
+    }
+    /// Download the generated video bytes or a derived preview asset.
+    ///
+    /// Streams the rendered video content for the specified video job.
+    ///
+    /// `GET /videos/{video_id}/content`
+    ///
+    /// Returns a [`RetrieveVideoContentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`variant`](RetrieveVideoContentCall::variant): the `variant` query parameter (`serde_json::Value`). Which downloadable asset to return. Defaults to the MP4 video.
+    pub fn retrieve_video_content(
+        &self,
+        video_id: impl Into<String>,
+    ) -> RetrieveVideoContentCall<'_> {
+        RetrieveVideoContentCall(self.0.send(RetrieveVideoContentRequest::new(video_id)))
+    }
+    /// Create a remix of a completed video using a refreshed prompt.
+    ///
+    /// `POST /videos/{video_id}/remix`
+    ///
+    /// Returns a [`CreateVideoRemixCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
+    /// - `body: CreateVideoRemixBody`: the request body
+    pub fn create_video_remix(
+        &self,
+        video_id: impl Into<String>,
+        body: CreateVideoRemixBody,
+    ) -> CreateVideoRemixCall<'_> {
+        CreateVideoRemixCall(self.0.send(CreateVideoRemixRequest::new(video_id, body)))
+    }
+    /// Returns input token counts of the request.
+    ///
+    /// Returns an object with `object` set to `response.input_tokens` and an `input_tokens` count.
+    ///
+    /// `POST /responses/input_tokens`
+    ///
+    /// Returns a [`GetinputtokencountsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: TokenCountsBody`: the request body
+    pub fn getinputtokencounts(
+        &self,
+        body: TokenCountsBody,
+    ) -> GetinputtokencountsCall<'_> {
+        GetinputtokencountsCall(self.0.send(GetinputtokencountsRequest::new(body)))
+    }
+    /// Compact a conversation. Returns a compacted response object.
+    ///
+    /// Learn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced).
+    ///
+    /// `POST /responses/compact`
+    ///
+    /// Returns a [`CompactconversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CompactResponseMethodPublicBody`: the request body
+    pub fn compactconversation(
+        &self,
+        body: CompactResponseMethodPublicBody,
+    ) -> CompactconversationCall<'_> {
+        CompactconversationCall(self.0.send(CompactconversationRequest::new(body)))
+    }
+    /// List all skills for the current project.
+    ///
+    /// `GET /skills`
+    ///
+    /// Returns a [`ListSkillsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListSkillsCall::limit): the `limit` query parameter (`i64`). Number of items to retrieve
+    /// - [`order`](ListSkillsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
+    /// - [`after`](ListSkillsCall::after): the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
+    pub fn list_skills(&self) -> ListSkillsCall<'_> {
+        ListSkillsCall(self.0.send(ListSkillsRequest::default()))
+    }
+    /// Create a new skill.
+    ///
+    /// `POST /skills`
+    ///
+    /// Returns a [`CreateSkillCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateSkillBody`: the request body
+    pub fn create_skill(&self, body: CreateSkillBody) -> CreateSkillCall<'_> {
+        CreateSkillCall(self.0.send(CreateSkillRequest::new(body)))
+    }
+    /// Get a skill by its ID.
+    ///
+    /// `GET /skills/{skill_id}`
+    ///
+    /// Returns a [`GetSkillCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    pub fn get_skill(&self, skill_id: impl Into<String>) -> GetSkillCall<'_> {
+        GetSkillCall(self.0.send(GetSkillRequest::new(skill_id)))
+    }
+    /// Update the default version pointer for a skill.
+    ///
+    /// `POST /skills/{skill_id}`
+    ///
+    /// Returns a [`UpdateSkillDefaultVersionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    /// - `body: SetDefaultSkillVersionBody`: the request body
+    pub fn update_skill_default_version(
+        &self,
+        skill_id: impl Into<String>,
+        body: SetDefaultSkillVersionBody,
+    ) -> UpdateSkillDefaultVersionCall<'_> {
+        UpdateSkillDefaultVersionCall(
+            self.0.send(UpdateSkillDefaultVersionRequest::new(skill_id, body)),
+        )
+    }
+    /// Delete a skill by its ID.
+    ///
+    /// `DELETE /skills/{skill_id}`
+    ///
+    /// Returns a [`DeleteSkillCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    pub fn delete_skill(&self, skill_id: impl Into<String>) -> DeleteSkillCall<'_> {
+        DeleteSkillCall(self.0.send(DeleteSkillRequest::new(skill_id)))
+    }
+    /// Download a skill zip bundle by its ID.
+    ///
+    /// `GET /skills/{skill_id}/content`
+    ///
+    /// Returns a [`GetSkillContentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    pub fn get_skill_content(
+        &self,
+        skill_id: impl Into<String>,
+    ) -> GetSkillContentCall<'_> {
+        GetSkillContentCall(self.0.send(GetSkillContentRequest::new(skill_id)))
+    }
+    /// List skill versions for a skill.
+    ///
+    /// `GET /skills/{skill_id}/versions`
+    ///
+    /// Returns a [`ListSkillVersionsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListSkillVersionsCall::limit): the `limit` query parameter (`i64`). Number of versions to retrieve.
+    /// - [`order`](ListSkillVersionsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
+    /// - [`after`](ListSkillVersionsCall::after): the `after` query parameter (`String`). The skill version ID to start after.
+    pub fn list_skill_versions(
+        &self,
+        skill_id: impl Into<String>,
+    ) -> ListSkillVersionsCall<'_> {
+        ListSkillVersionsCall(self.0.send(ListSkillVersionsRequest::new(skill_id)))
+    }
+    /// Create a new immutable skill version.
+    ///
+    /// `POST /skills/{skill_id}/versions`
+    ///
+    /// Returns a [`CreateSkillVersionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    /// - `body: CreateSkillVersionBody`: the request body
+    pub fn create_skill_version(
+        &self,
+        skill_id: impl Into<String>,
+        body: CreateSkillVersionBody,
+    ) -> CreateSkillVersionCall<'_> {
+        CreateSkillVersionCall(
+            self.0.send(CreateSkillVersionRequest::new(skill_id, body)),
+        )
+    }
+    /// Get a specific skill version.
+    ///
+    /// `GET /skills/{skill_id}/versions/{version}`
+    ///
+    /// Returns a [`GetSkillVersionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    /// - `version: impl Into<String>`: the `{version}` path parameter
+    pub fn get_skill_version(
+        &self,
+        skill_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> GetSkillVersionCall<'_> {
+        GetSkillVersionCall(self.0.send(GetSkillVersionRequest::new(skill_id, version)))
+    }
+    /// Delete a skill version.
+    ///
+    /// `DELETE /skills/{skill_id}/versions/{version}`
+    ///
+    /// Returns a [`DeleteSkillVersionCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    /// - `version: impl Into<String>`: the `{version}` path parameter
+    pub fn delete_skill_version(
+        &self,
+        skill_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> DeleteSkillVersionCall<'_> {
+        DeleteSkillVersionCall(
+            self.0.send(DeleteSkillVersionRequest::new(skill_id, version)),
+        )
+    }
+    /// Download a skill version zip bundle.
+    ///
+    /// `GET /skills/{skill_id}/versions/{version}/content`
+    ///
+    /// Returns a [`GetSkillVersionContentCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
+    /// - `version: impl Into<String>`: the `{version}` path parameter
+    pub fn get_skill_version_content(
+        &self,
+        skill_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> GetSkillVersionContentCall<'_> {
+        GetSkillVersionContentCall(
+            self.0.send(GetSkillVersionContentRequest::new(skill_id, version)),
+        )
+    }
+    /// Cancel an active ChatKit session and return its most recent metadata.
+    ///
+    /// Cancelling prevents new requests from using the issued client secret.
+    ///
+    /// `POST /chatkit/sessions/{session_id}/cancel`
+    ///
+    /// Returns a [`CancelChatSessionMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id: impl Into<String>`: the `{session_id}` path parameter
+    pub fn cancel_chat_session_method(
+        &self,
+        session_id: impl Into<String>,
+    ) -> CancelChatSessionMethodCall<'_> {
+        CancelChatSessionMethodCall(
+            self.0.send(CancelChatSessionMethodRequest::new(session_id)),
+        )
+    }
+    /// Create a ChatKit session.
+    ///
+    /// `POST /chatkit/sessions`
+    ///
+    /// Returns a [`CreateChatSessionMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateChatSessionBody`: the request body
+    pub fn create_chat_session_method(
+        &self,
+        body: CreateChatSessionBody,
+    ) -> CreateChatSessionMethodCall<'_> {
+        CreateChatSessionMethodCall(
+            self.0.send(CreateChatSessionMethodRequest::new(body)),
+        )
+    }
+    /// List items that belong to a ChatKit thread.
+    ///
+    /// `GET /chatkit/threads/{thread_id}/items`
+    ///
+    /// Returns a [`ListThreadItemsMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `thread_id: impl Into<String>`: the `{thread_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListThreadItemsMethodCall::limit): the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
+    /// - [`order`](ListThreadItemsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
+    /// - [`after`](ListThreadItemsMethodCall::after): the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
+    /// - [`before`](ListThreadItemsMethodCall::before): the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
+    pub fn list_thread_items_method(
+        &self,
+        thread_id: impl Into<String>,
+    ) -> ListThreadItemsMethodCall<'_> {
+        ListThreadItemsMethodCall(
+            self.0.send(ListThreadItemsMethodRequest::new(thread_id)),
+        )
+    }
+    /// Retrieve a ChatKit thread by its identifier.
+    ///
+    /// `GET /chatkit/threads/{thread_id}`
+    ///
+    /// Returns a [`GetThreadMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `thread_id: impl Into<String>`: the `{thread_id}` path parameter
+    pub fn get_thread_method(
+        &self,
+        thread_id: impl Into<String>,
+    ) -> GetThreadMethodCall<'_> {
+        GetThreadMethodCall(self.0.send(GetThreadMethodRequest::new(thread_id)))
+    }
+    /// Delete a ChatKit thread along with its items and stored attachments.
+    ///
+    /// `DELETE /chatkit/threads/{thread_id}`
+    ///
+    /// Returns a [`DeleteThreadMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `thread_id: impl Into<String>`: the `{thread_id}` path parameter
+    pub fn delete_thread_method(
+        &self,
+        thread_id: impl Into<String>,
+    ) -> DeleteThreadMethodCall<'_> {
+        DeleteThreadMethodCall(self.0.send(DeleteThreadMethodRequest::new(thread_id)))
+    }
+    /// List ChatKit threads with optional pagination and user filters.
+    ///
+    /// `GET /chatkit/threads`
+    ///
+    /// Returns a [`ListThreadsMethodCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](ListThreadsMethodCall::limit): the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
+    /// - [`order`](ListThreadsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
+    /// - [`after`](ListThreadsMethodCall::after): the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
+    /// - [`before`](ListThreadsMethodCall::before): the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
+    /// - [`user`](ListThreadsMethodCall::user): the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
+    pub fn list_threads_method(&self) -> ListThreadsMethodCall<'_> {
+        ListThreadsMethodCall(self.0.send(ListThreadsMethodRequest::default()))
+    }
+    /// Creates a model response. Provide [text](/docs/guides/text) or
+    /// [image](/docs/guides/images) inputs to generate [text](/docs/guides/text)
+    /// or [JSON](/docs/guides/structured-outputs) outputs. Have the model call
+    /// your own [custom code](/docs/guides/function-calling) or use built-in
+    /// [tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)
+    /// or [file search](/docs/guides/tools-file-search) to use your own data
+    /// as input for the model's response.
+    ///
+    /// `POST /responses?beta=true`
+    ///
+    /// Returns a [`BetaCreateResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: BetaCreateResponse`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`openai_beta`](BetaCreateResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_create_response(
+        &self,
+        body: BetaCreateResponse,
+    ) -> BetaCreateResponseCall<'_> {
+        BetaCreateResponseCall(self.0.send(BetaCreateResponseRequest::new(body)))
+    }
+    /// Retrieves a model response with the given ID.
+    ///
+    /// `GET /responses/{response_id}?beta=true`
+    ///
+    /// Returns a [`BetaGetResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`include`](BetaGetResponseCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    /// - [`stream`](BetaGetResponseCall::stream): the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
+    /// - [`starting_after`](BetaGetResponseCall::starting_after): the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
+    /// - [`include_obfuscation`](BetaGetResponseCall::include_obfuscation): the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
+    /// - [`openai_beta`](BetaGetResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_get_response(
+        &self,
+        response_id: impl Into<String>,
+    ) -> BetaGetResponseCall<'_> {
+        BetaGetResponseCall(self.0.send(BetaGetResponseRequest::new(response_id)))
+    }
+    /// Deletes a model response with the given ID.
+    ///
+    /// `DELETE /responses/{response_id}?beta=true`
+    ///
+    /// Returns a [`BetaDeleteResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`openai_beta`](BetaDeleteResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_delete_response(
+        &self,
+        response_id: impl Into<String>,
+    ) -> BetaDeleteResponseCall<'_> {
+        BetaDeleteResponseCall(self.0.send(BetaDeleteResponseRequest::new(response_id)))
+    }
+    /// Cancels a model response with the given ID. Only responses created with
+    /// the `background` parameter set to `true` can be cancelled.
+    /// [Learn more](/docs/guides/background).
+    ///
+    /// `POST /responses/{response_id}/cancel?beta=true`
+    ///
+    /// Returns a [`BetaCancelResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`openai_beta`](BetaCancelResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_cancel_response(
+        &self,
+        response_id: impl Into<String>,
+    ) -> BetaCancelResponseCall<'_> {
+        BetaCancelResponseCall(self.0.send(BetaCancelResponseRequest::new(response_id)))
+    }
+    /// Compact a conversation. Returns a compacted response object.
+    ///
+    /// Learn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced).
+    ///
+    /// `POST /responses/compact?beta=true`
+    ///
+    /// Returns a [`BetaCompactconversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: BetaCompactResponseMethodPublicBody`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`openai_beta`](BetaCompactconversationCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_compactconversation(
+        &self,
+        body: BetaCompactResponseMethodPublicBody,
+    ) -> BetaCompactconversationCall<'_> {
+        BetaCompactconversationCall(
+            self.0.send(BetaCompactconversationRequest::new(body)),
+        )
+    }
+    /// Returns a list of input items for a given response.
+    ///
+    /// `GET /responses/{response_id}/input_items?beta=true`
+    ///
+    /// Returns a [`BetaListInputItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`limit`](BetaListInputItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
+    /// - [`order`](BetaListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
+    /// - [`after`](BetaListInputItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
+    /// - [`include`](BetaListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    /// - [`openai_beta`](BetaListInputItemsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_list_input_items(
+        &self,
+        response_id: impl Into<String>,
+    ) -> BetaListInputItemsCall<'_> {
+        BetaListInputItemsCall(self.0.send(BetaListInputItemsRequest::new(response_id)))
+    }
+    /// Returns input token counts of the request.
+    ///
+    /// Returns an object with `object` set to `response.input_tokens` and an `input_tokens` count.
+    ///
+    /// `POST /responses/input_tokens?beta=true`
+    ///
+    /// Returns a [`BetaGetinputtokencountsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: BetaTokenCountsBody`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`openai_beta`](BetaGetinputtokencountsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn beta_getinputtokencounts(
+        &self,
+        body: BetaTokenCountsBody,
+    ) -> BetaGetinputtokencountsCall<'_> {
+        BetaGetinputtokencountsCall(
+            self.0.send(BetaGetinputtokencountsRequest::new(body)),
+        )
     }
 }

@@ -651,6 +651,666 @@ impl schematic_runtime::EndpointSpec for ListRunningModelsNativeRequest {
         })
     }
 }
+/// A call to the `Generate` endpoint, returned by [`OllamaNative::generate`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GenerateNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, GenerateNativeRequest>,
+);
+impl<'a> GenerateNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, GenerateNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GenerateNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        GenerateNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Chat` endpoint, returned by [`OllamaNative::chat`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ChatNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, ChatNativeRequest>,
+);
+impl<'a> ChatNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, ChatNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ChatNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        ChatNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Embeddings` endpoint, returned by [`OllamaNative::embeddings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct EmbeddingsNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, EmbeddingsNativeRequest>,
+);
+impl<'a> EmbeddingsNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, EmbeddingsNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for EmbeddingsNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        EmbeddingsNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`OllamaNative::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, ListModelsNativeRequest>,
+);
+impl<'a> ListModelsNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, ListModelsNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        ListModelsNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ShowModel` endpoint, returned by [`OllamaNative::show_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ShowModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, ShowModelNativeRequest>,
+);
+impl<'a> ShowModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, ShowModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ShowModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        ShowModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `PullModel` endpoint, returned by [`OllamaNative::pull_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PullModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, PullModelNativeRequest>,
+);
+impl<'a> PullModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, PullModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PullModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        PullModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `PushModel` endpoint, returned by [`OllamaNative::push_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct PushModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, PushModelNativeRequest>,
+);
+impl<'a> PushModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, PushModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for PushModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        PushModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CopyModel` endpoint, returned by [`OllamaNative::copy_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CopyModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, CopyModelNativeRequest>,
+);
+impl<'a> CopyModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, CopyModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CopyModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        CopyModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DeleteModel` endpoint, returned by [`OllamaNative::delete_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DeleteModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, DeleteModelNativeRequest>,
+);
+impl<'a> DeleteModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, DeleteModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DeleteModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        DeleteModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CreateModel` endpoint, returned by [`OllamaNative::create_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateModelNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, CreateModelNativeRequest>,
+);
+impl<'a> CreateModelNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaNativeApi, CreateModelNativeRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateModelNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        CreateModelNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListRunningModels` endpoint, returned by [`OllamaNative::list_running_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListRunningModelsNativeCall<'a>(
+    schematic_runtime::Call<'a, OllamaNativeApi, ListRunningModelsNativeRequest>,
+);
+impl<'a> ListRunningModelsNativeCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        OllamaNativeApi,
+        ListRunningModelsNativeRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListRunningModelsNativeCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaNativeApi,
+        ListRunningModelsNativeRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl OllamaNative {
+    /// Generate text completion from a prompt (streaming NDJSON by default)
+    ///
+    /// `POST /api/generate`
+    ///
+    /// Returns a [`GenerateNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: GenerateBody`: the request body
+    pub fn generate(&self, body: GenerateBody) -> GenerateNativeCall<'_> {
+        GenerateNativeCall(self.0.send(GenerateNativeRequest::new(body)))
+    }
+    /// Generate chat completion from messages (streaming NDJSON by default)
+    ///
+    /// `POST /api/chat`
+    ///
+    /// Returns a [`ChatNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ChatBody`: the request body
+    pub fn chat(&self, body: ChatBody) -> ChatNativeCall<'_> {
+        ChatNativeCall(self.0.send(ChatNativeRequest::new(body)))
+    }
+    /// Generate embeddings for text
+    ///
+    /// `POST /api/embeddings`
+    ///
+    /// Returns a [`EmbeddingsNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: EmbeddingsBody`: the request body
+    pub fn embeddings(&self, body: EmbeddingsBody) -> EmbeddingsNativeCall<'_> {
+        EmbeddingsNativeCall(self.0.send(EmbeddingsNativeRequest::new(body)))
+    }
+    /// List locally available models
+    ///
+    /// `GET /api/tags`
+    ///
+    /// Returns a [`ListModelsNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsNativeCall<'_> {
+        ListModelsNativeCall(self.0.send(ListModelsNativeRequest::default()))
+    }
+    /// Show detailed information about a model
+    ///
+    /// `POST /api/show`
+    ///
+    /// Returns a [`ShowModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ShowModelBody`: the request body
+    pub fn show_model(&self, body: ShowModelBody) -> ShowModelNativeCall<'_> {
+        ShowModelNativeCall(self.0.send(ShowModelNativeRequest::new(body)))
+    }
+    /// Pull a model from the Ollama registry (streaming progress by default)
+    ///
+    /// `POST /api/pull`
+    ///
+    /// Returns a [`PullModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PullModelBody`: the request body
+    pub fn pull_model(&self, body: PullModelBody) -> PullModelNativeCall<'_> {
+        PullModelNativeCall(self.0.send(PullModelNativeRequest::new(body)))
+    }
+    /// Push a model to the Ollama registry (streaming progress by default)
+    ///
+    /// `POST /api/push`
+    ///
+    /// Returns a [`PushModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: PushModelBody`: the request body
+    pub fn push_model(&self, body: PushModelBody) -> PushModelNativeCall<'_> {
+        PushModelNativeCall(self.0.send(PushModelNativeRequest::new(body)))
+    }
+    /// Copy a model to a new name
+    ///
+    /// `POST /api/copy`
+    ///
+    /// Returns a [`CopyModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CopyModelBody`: the request body
+    pub fn copy_model(&self, body: CopyModelBody) -> CopyModelNativeCall<'_> {
+        CopyModelNativeCall(self.0.send(CopyModelNativeRequest::new(body)))
+    }
+    /// Delete a model
+    ///
+    /// `DELETE /api/delete`
+    ///
+    /// Returns a [`DeleteModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: DeleteModelBody`: the request body
+    pub fn delete_model(&self, body: DeleteModelBody) -> DeleteModelNativeCall<'_> {
+        DeleteModelNativeCall(self.0.send(DeleteModelNativeRequest::new(body)))
+    }
+    /// Create a model from a Modelfile (streaming progress by default)
+    ///
+    /// `POST /api/create`
+    ///
+    /// Returns a [`CreateModelNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateModelBody`: the request body
+    pub fn create_model(&self, body: CreateModelBody) -> CreateModelNativeCall<'_> {
+        CreateModelNativeCall(self.0.send(CreateModelNativeRequest::new(body)))
+    }
+    /// List models currently loaded in memory
+    ///
+    /// `GET /api/ps`
+    ///
+    /// Returns a [`ListRunningModelsNativeCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_running_models(&self) -> ListRunningModelsNativeCall<'_> {
+        ListRunningModelsNativeCall(
+            self.0.send(ListRunningModelsNativeRequest::default()),
+        )
+    }
+}
 /// The OllamaOpenAI API: Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients
 ///
 /// Create a client with [`new`](Self::new), which never fails, and
@@ -899,5 +1559,246 @@ impl schematic_runtime::EndpointSpec for ListModelsOaiRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `ChatCompletions` endpoint, returned by [`OllamaOpenAI::chat_completions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ChatCompletionsOaiCall<'a>(
+    schematic_runtime::Call<'a, OllamaOpenAIApi, ChatCompletionsOaiRequest>,
+);
+impl<'a> ChatCompletionsOaiCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaOpenAIApi, ChatCompletionsOaiRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ChatCompletionsOaiCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaOpenAIApi,
+        ChatCompletionsOaiRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Completions` endpoint, returned by [`OllamaOpenAI::completions`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CompletionsOaiCall<'a>(
+    schematic_runtime::Call<'a, OllamaOpenAIApi, CompletionsOaiRequest>,
+);
+impl<'a> CompletionsOaiCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaOpenAIApi, CompletionsOaiRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CompletionsOaiCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaOpenAIApi,
+        CompletionsOaiRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `Embeddings` endpoint, returned by [`OllamaOpenAI::embeddings`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct EmbeddingsOaiCall<'a>(
+    schematic_runtime::Call<'a, OllamaOpenAIApi, EmbeddingsOaiRequest>,
+);
+impl<'a> EmbeddingsOaiCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaOpenAIApi, EmbeddingsOaiRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for EmbeddingsOaiCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaOpenAIApi,
+        EmbeddingsOaiRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`OllamaOpenAI::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsOaiCall<'a>(
+    schematic_runtime::Call<'a, OllamaOpenAIApi, ListModelsOaiRequest>,
+);
+impl<'a> ListModelsOaiCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, OllamaOpenAIApi, ListModelsOaiRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsOaiCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        OllamaOpenAIApi,
+        ListModelsOaiRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl OllamaOpenAI {
+    /// Create chat completion (SSE streaming when stream=true)
+    ///
+    /// `POST /v1/chat/completions`
+    ///
+    /// Returns a [`ChatCompletionsOaiCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: OpenAIChatCompletionRequest`: the request body
+    pub fn chat_completions(
+        &self,
+        body: OpenAIChatCompletionRequest,
+    ) -> ChatCompletionsOaiCall<'_> {
+        ChatCompletionsOaiCall(self.0.send(ChatCompletionsOaiRequest::new(body)))
+    }
+    /// Create text completion (SSE streaming when stream=true)
+    ///
+    /// `POST /v1/completions`
+    ///
+    /// Returns a [`CompletionsOaiCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: OpenAICompletionRequest`: the request body
+    pub fn completions(&self, body: OpenAICompletionRequest) -> CompletionsOaiCall<'_> {
+        CompletionsOaiCall(self.0.send(CompletionsOaiRequest::new(body)))
+    }
+    /// Generate embeddings for text
+    ///
+    /// `POST /v1/embeddings`
+    ///
+    /// Returns a [`EmbeddingsOaiCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: OpenAIEmbeddingRequest`: the request body
+    pub fn embeddings(&self, body: OpenAIEmbeddingRequest) -> EmbeddingsOaiCall<'_> {
+        EmbeddingsOaiCall(self.0.send(EmbeddingsOaiRequest::new(body)))
+    }
+    /// List available models in OpenAI format
+    ///
+    /// `GET /v1/models`
+    ///
+    /// Returns a [`ListModelsOaiCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsOaiCall<'_> {
+        ListModelsOaiCall(self.0.send(ListModelsOaiRequest::default()))
     }
 }

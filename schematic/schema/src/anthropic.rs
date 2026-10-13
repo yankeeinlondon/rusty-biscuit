@@ -22,12 +22,14 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::anthropic::ListModelsRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = Anthropic::new();
-//!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
+//!     let data = client.list_models().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.list_models().full().await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
 //! }
@@ -307,5 +309,243 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `CreateMessage` endpoint, returned by [`Anthropic::create_message`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CreateMessageCall<'a>(
+    schematic_runtime::Call<'a, AnthropicApi, CreateMessageRequest>,
+);
+impl<'a> CreateMessageCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, AnthropicApi, CreateMessageRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CreateMessageCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        AnthropicApi,
+        CreateMessageRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CountTokens` endpoint, returned by [`Anthropic::count_tokens`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CountTokensCall<'a>(
+    schematic_runtime::Call<'a, AnthropicApi, CountTokensRequest>,
+);
+impl<'a> CountTokensCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, AnthropicApi, CountTokensRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CountTokensCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        AnthropicApi,
+        CountTokensRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`Anthropic::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsCall<'a>(
+    schematic_runtime::Call<'a, AnthropicApi, ListModelsRequest>,
+);
+impl<'a> ListModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, AnthropicApi, ListModelsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        AnthropicApi,
+        ListModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `RetrieveModel` endpoint, returned by [`Anthropic::retrieve_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct RetrieveModelCall<'a>(
+    schematic_runtime::Call<'a, AnthropicApi, RetrieveModelRequest>,
+);
+impl<'a> RetrieveModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, AnthropicApi, RetrieveModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for RetrieveModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        AnthropicApi,
+        RetrieveModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl Anthropic {
+    /// Create a message with optional tool use for agent interactions
+    ///
+    /// `POST /messages`
+    ///
+    /// Returns a [`CreateMessageCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CreateMessageBody`: the request body
+    pub fn create_message(&self, body: CreateMessageBody) -> CreateMessageCall<'_> {
+        CreateMessageCall(self.0.send(CreateMessageRequest::new(body)))
+    }
+    /// Count tokens in a message before sending
+    ///
+    /// `POST /messages/count_tokens`
+    ///
+    /// Returns a [`CountTokensCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: CountTokensBody`: the request body
+    pub fn count_tokens(&self, body: CountTokensBody) -> CountTokensCall<'_> {
+        CountTokensCall(self.0.send(CountTokensRequest::new(body)))
+    }
+    /// List available Claude models
+    ///
+    /// `GET /models`
+    ///
+    /// Returns a [`ListModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsCall<'_> {
+        ListModelsCall(self.0.send(ListModelsRequest::default()))
+    }
+    /// Get information about a specific model
+    ///
+    /// `GET /models/{model_id}`
+    ///
+    /// Returns a [`RetrieveModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `model_id: impl Into<String>`: the `{model_id}` path parameter
+    pub fn retrieve_model(&self, model_id: impl Into<String>) -> RetrieveModelCall<'_> {
+        RetrieveModelCall(self.0.send(RetrieveModelRequest::new(model_id)))
     }
 }

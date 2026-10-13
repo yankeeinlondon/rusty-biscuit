@@ -29,12 +29,14 @@
 //!
 //! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::samsung_smart_tv::GetDeviceInfoRequest;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = SamsungSmartTv::new();
-//!     let response = client.send(GetDeviceInfoRequest::default(), &CallOptions::new()).await?;
+//!     let data = client.get_device_info().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.get_device_info().full().await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
 //! }
@@ -431,5 +433,435 @@ impl schematic_runtime::EndpointSpec for InstallAppRequest {
             headers,
             body: schematic_runtime::RequestBody::Empty,
         })
+    }
+}
+/// A call to the `GetDeviceInfo` endpoint, returned by [`SamsungSmartTv::get_device_info`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetDeviceInfoCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetDeviceInfoRequest>,
+);
+impl<'a> GetDeviceInfoCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetDeviceInfoRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetDeviceInfoCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetDeviceInfoRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetServerLogs` endpoint, returned by [`SamsungSmartTv::get_server_logs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetServerLogsCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetServerLogsRequest>,
+);
+impl<'a> GetServerLogsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetServerLogsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetServerLogsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetServerLogsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `LaunchApplicationById` endpoint, returned by [`SamsungSmartTv::launch_application_by_id`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LaunchApplicationByIdCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, LaunchApplicationByIdRequest>,
+);
+impl<'a> LaunchApplicationByIdCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByIdRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LaunchApplicationByIdCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByIdRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `LaunchApplicationByName` endpoint, returned by [`SamsungSmartTv::launch_application_by_name`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LaunchApplicationByNameCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, LaunchApplicationByNameRequest>,
+);
+impl<'a> LaunchApplicationByNameCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByNameRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LaunchApplicationByNameCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByNameRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetAppStatus` endpoint, returned by [`SamsungSmartTv::get_app_status`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetAppStatusCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetAppStatusRequest>,
+);
+impl<'a> GetAppStatusCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetAppStatusRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetAppStatusCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetAppStatusRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CloseApp` endpoint, returned by [`SamsungSmartTv::close_app`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CloseAppCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, CloseAppRequest>,
+);
+impl<'a> CloseAppCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, CloseAppRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CloseAppCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        CloseAppRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `InstallApp` endpoint, returned by [`SamsungSmartTv::install_app`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct InstallAppCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, InstallAppRequest>,
+);
+impl<'a> InstallAppCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, InstallAppRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the request cannot be encoded.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for InstallAppCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        InstallAppRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl SamsungSmartTv {
+    /// Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation.
+    ///
+    /// `GET /api/v2/`
+    ///
+    /// Returns a [`GetDeviceInfoCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_device_info(&self) -> GetDeviceInfoCall<'_> {
+        GetDeviceInfoCall(self.0.send(GetDeviceInfoRequest::default()))
+    }
+    /// Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled.
+    ///
+    /// `GET /logs/`
+    ///
+    /// Returns a [`GetServerLogsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_server_logs(&self) -> GetServerLogsCall<'_> {
+        GetServerLogsCall(self.0.send(GetServerLogsRequest::default()))
+    }
+    /// Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName.
+    ///
+    /// `POST /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`LaunchApplicationByIdCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn launch_application_by_id(
+        &self,
+        app_id: impl Into<String>,
+    ) -> LaunchApplicationByIdCall<'_> {
+        LaunchApplicationByIdCall(self.0.send(LaunchApplicationByIdRequest::new(app_id)))
+    }
+    /// Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.
+    ///
+    /// `POST /ws/apps/{app_name}`
+    ///
+    /// Returns a [`LaunchApplicationByNameCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_name: impl Into<String>`: the `{app_name}` path parameter
+    pub fn launch_application_by_name(
+        &self,
+        app_name: impl Into<String>,
+    ) -> LaunchApplicationByNameCall<'_> {
+        LaunchApplicationByNameCall(
+            self.0.send(LaunchApplicationByNameRequest::new(app_name)),
+        )
+    }
+    /// Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.
+    ///
+    /// `GET /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`GetAppStatusCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn get_app_status(&self, app_id: impl Into<String>) -> GetAppStatusCall<'_> {
+        GetAppStatusCall(self.0.send(GetAppStatusRequest::new(app_id)))
+    }
+    /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
+    ///
+    /// `DELETE /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`CloseAppCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn close_app(&self, app_id: impl Into<String>) -> CloseAppCall<'_> {
+        CloseAppCall(self.0.send(CloseAppRequest::new(app_id)))
+    }
+    /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
+    ///
+    /// `PUT /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`InstallAppCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn install_app(&self, app_id: impl Into<String>) -> InstallAppCall<'_> {
+        InstallAppCall(self.0.send(InstallAppRequest::new(app_id)))
     }
 }
