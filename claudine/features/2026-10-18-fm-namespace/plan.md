@@ -4,6 +4,13 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1:
+    - darkmatter/lib/tests/l1/request_context_builder.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Implementation Plan: The `fm` Frontmatter Namespace
@@ -88,7 +95,7 @@ agents must inherit the session's non-interactive constraints.
 
 ### Wave 1 — Contract Discovery (sequential)
 
-- [ ] **Surface Inventory**
+- [x] **Surface Inventory**
   - Inspect Darkmatter's root catalog, `expression/doc_namespace.rs`,
     conditions, shell expansion, effective-state lookup, interpolation,
     error blocks, lazy-root capture, and preflight; inspect DMLS classification,
@@ -104,7 +111,7 @@ agents must inherit the session's non-interactive constraints.
     applicability. Read relevant request, expression, testing, and OS skills
     before designing API changes or platform-specific evidence.
 
-- [ ] **Environment Spike**
+- [x] **Environment Spike**
   - Prerequisite: inventory. Run once, before Phase 3; use one host and a tiny
     supplied-map fixture, without mutating process environment or launching a
     real provider. Exercise the existing context derivation API to determine
