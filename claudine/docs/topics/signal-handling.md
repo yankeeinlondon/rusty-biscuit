@@ -1,7 +1,8 @@
 # Claudine Signal Handling
 
 This is the canonical reference for how Claudine handles process signals
-(`SIGINT`, `SIGTERM`, `SIGKILL`) and the user-interrupt flag they raise.
+(`SIGINT`, `SIGHUP`, `SIGTERM`, `SIGKILL`) and the user-interrupt flag they
+raise.
 Other docs link here rather than duplicating the model.
 
 The signal story has two distinct surfaces:
@@ -12,6 +13,9 @@ The signal story has two distinct surfaces:
 2. **Wrapper-driven termination** (`SIGTERM` → `SIGKILL`) of the agent
    child, used by the timeout watchdog ([timeouts.md](timeouts.md)) and
    the rate-limit / hung-process recovery paths.
+3. **Claudine itself being ended** (`SIGHUP` when its terminal closes, or a
+   `SIGTERM` sent to it): the signal is passed to the agent child first; see
+   [Hangup and termination of the wrapper](#hangup-and-termination-of-the-wrapper).
 
 The two surfaces share one infrastructure: a process-scoped
 [`USER_INTERRUPTED`](#process-scoped-flag) flag that any synchronous
@@ -27,6 +31,7 @@ wrapper code can consult to short-circuit blocking work.
 | `130` | User pressed Ctrl+C — equivalent to `128 + SIGINT(2)` | compose interrupt guard |
 | `143` | Wrapper-driven `SIGTERM` (rare, observable when watchdog fires before child reaps) | child exit signal |
 | `137` | Wrapper-escalated `SIGKILL` after grace period | child exit signal |
+| `129` / `143` | Claudine received `SIGHUP` / `SIGTERM`; it ended the child, then itself from the same signal | Claudine's own signal death |
 
 Exit code `130` is the single source of truth for "user pressed Ctrl+C
 during compose." The constant [`USER_INTERRUPT_EXIT_CODE`] in
@@ -480,6 +485,43 @@ labeling and emits the feedback line.
 
 A `child_exited` atomic guards against signaling a recycled PID after
 the child has been reaped.
+
+### Hangup and termination of the wrapper
+
+The agent child leads its own process group, so a signal aimed at Claudine
+never reaches it on its own. Closing the terminal (`SIGHUP` to the foreground
+group) or `kill <claudine pid>` (`SIGTERM`) used to end Claudine and leave the
+agent running as an orphan, still working and spending tokens with no one
+watching it.
+
+On Unix, the same per-child handler set that counts Ctrl+C presses also
+catches `SIGHUP` and `SIGTERM` while a child runs:
+
+```mermaid
+sequenceDiagram
+    participant OS
+    participant Handler as SIGHUP/SIGTERM handler
+    participant Child as agent child group
+    participant Loop as wait loop
+    OS->>Handler: SIGHUP (terminal closed)
+    Handler->>Child: kill(-pgid, SIGHUP)
+    Child-->>Loop: exits
+    Loop->>Loop: reap, unregister handlers
+    Loop->>OS: re-raise SIGHUP → Claudine exits 129
+```
+
+- The signal is passed on unchanged; a child that ignores it keeps Claudine
+  waiting for it, the way a shell job that ignores `SIGHUP` keeps running.
+- A signal that arrives before the child is known is delivered as soon as
+  the wait loop arms the handlers, like an early Ctrl+C.
+- After the child is reaped, Claudine re-raises the signal with its default
+  action, so it ends the way it was asked to (`129` / `143`) instead of
+  continuing to a sequence's next step or lifecycle.
+- A child sharing Claudine's process group (interactive TUI passthrough) is
+  signalled by pid alone.
+
+On Windows no handler is needed: the child's Job Object is created with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the tree ends when Claudine does.
 
 ### Watchdog-driven SIGTERM
 

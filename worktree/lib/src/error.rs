@@ -168,31 +168,77 @@ pub struct WorktreeCandidate {
 }
 
 fn in_use_message(path: &std::path::Path, processes: &[sniff::os::WorkingProcess]) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    in_use_message_at(path, processes, now)
+}
+
+/// Longest command line shown per program before it is cut with `…`.
+const COMMAND_SHOWN: usize = 160;
+
+/// Lists only the topmost process of each tree standing in the folder: a
+/// script's loop starts a fresh child every second, so its children would
+/// show pids that are gone by the time the user reads them, and ending the
+/// parent ends them.
+fn in_use_message_at(
+    path: &std::path::Path,
+    processes: &[sniff::os::WorkingProcess],
+    now: u64,
+) -> String {
     let path = path.display();
     if processes.is_empty() {
         return format!("Nothing was removed: the folder {path} is in use by another program.");
     }
-    // One entry per program name, keeping the order processes were found in.
-    let mut programs: Vec<(&str, Vec<u32>)> = Vec::new();
-    for process in processes {
-        match programs.iter_mut().find(|(name, _)| *name == process.name) {
-            Some((_, pids)) => pids.push(process.pid),
-            None => programs.push((&process.name, vec![process.pid])),
+    let is_listed = |pid: Option<u32>| pid.is_some_and(|pid| processes.iter().any(|p| p.pid == pid));
+    let (roots, children): (Vec<_>, Vec<_>) =
+        processes.iter().partition(|process| !is_listed(process.parent));
+
+    let who = match roots.len() {
+        1 => "another program".to_string(),
+        count => format!("{count} other programs"),
+    };
+    let started = match children.len() {
+        0 => String::new(),
+        1 => " (and 1 process they started)".to_string(),
+        count => format!(" (and {count} processes they started)"),
+    };
+    let mut message = format!("Nothing was removed: the folder {path} is in use by {who}{started}:");
+    for process in &roots {
+        let mut facts = vec![format!("pid {}", process.pid)];
+        if process.started > 0 {
+            let age = crate::util::age_text(now.saturating_sub(process.started));
+            facts.push(format!("started {age} ago"));
         }
+        // On Unix an orphan is adopted by pid 1; one still standing in a
+        // worktree is usually a leaked script nobody will come back for.
+        if cfg!(unix) && process.parent == Some(1) {
+            facts.push("orphaned".to_string());
+        }
+        message.push_str(&format!("\n  - {}: {}", facts.join(", "), command_text(process)));
     }
-    let listed = programs
-        .iter()
-        .map(|(name, pids)| {
-            let ids = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
-            format!("{name} (pid{} {ids})", if pids.len() == 1 { "" } else { "s" })
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let who = if processes.len() == 1 { "another program" } else { "other programs" };
-    format!(
-        "Nothing was removed: the folder {path} is in use by {who}: {listed}. \
-        Close them, or move them out of it, and run wt remove again."
-    )
+    let pids = roots.iter().map(|p| p.pid.to_string()).collect::<Vec<_>>();
+    let end = if cfg!(windows) {
+        format!("Stop-Process -Id {}", pids.join(", "))
+    } else {
+        format!("kill {}", pids.join(" "))
+    };
+    message.push_str(&format!(
+        "\nClose them, or move them out of it, and run wt remove again. To end them: {end}"
+    ));
+    message
+}
+
+/// The command line, or the executable's name when the OS hides it.
+fn command_text(process: &sniff::os::WorkingProcess) -> String {
+    if process.command.is_empty() {
+        return process.name.clone();
+    }
+    let mut text = process.command.join(" ");
+    if text.chars().count() > COMMAND_SHOWN {
+        text = text.chars().take(COMMAND_SHOWN).collect::<String>() + "…";
+    }
+    text
 }
 
 fn delete_command(path: &std::path::Path) -> String {
@@ -215,4 +261,70 @@ fn ambiguous_message(name: &str, candidates: &[WorktreeCandidate]) -> String {
     }
     message.push_str("\nUse a branch or directory name that matches only one of them.");
     message
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sniff::os::WorkingProcess;
+    use std::path::Path;
+
+    const NOW: u64 = 1_000_000;
+
+    fn process(pid: u32, parent: u32, command: &[&str], age: u64) -> WorkingProcess {
+        WorkingProcess {
+            pid,
+            name: command.first().map_or("x", |c| c).rsplit('/').next().unwrap().to_string(),
+            command: command.iter().map(|arg| arg.to_string()).collect(),
+            parent: Some(parent),
+            started: NOW - age,
+            cwd: "/wt/feat-x".into(),
+        }
+    }
+
+    #[test]
+    fn a_script_is_shown_by_its_command_line_and_its_children_are_folded_into_it() {
+        let processes = [
+            process(11231, 1, &["/bin/sh", "/tmp/.tmpA/bin/opencode", "run"], 4 * 86_400),
+            process(78796, 11231, &["/bin/sleep", "1"], 0),
+        ];
+
+        let message = in_use_message_at(Path::new("/wt/feat-x"), &processes, NOW);
+
+        assert!(message.contains("in use by another program (and 1 process they started):"), "{message}");
+        assert!(message.contains("/bin/sh /tmp/.tmpA/bin/opencode run"), "{message}");
+        assert!(!message.contains("78796"), "{message}");
+    }
+
+    #[test]
+    fn each_program_shows_its_age_and_whether_its_parent_exited() {
+        let processes = [
+            process(11231, 1, &["/bin/sh", "a.sh"], 4 * 86_400),
+            process(25749, 900, &["rust-analyzer"], 120),
+        ];
+
+        let message = in_use_message_at(Path::new("/wt/feat-x"), &processes, NOW);
+
+        let orphan = if cfg!(unix) { ", orphaned" } else { "" };
+        assert!(
+            message.contains(&format!("pid 11231, started 4 days ago{orphan}: /bin/sh a.sh")),
+            "{message}"
+        );
+        assert!(message.contains("pid 25749, started 2 min ago: rust-analyzer"), "{message}");
+        let end = if cfg!(windows) { "Stop-Process -Id 11231, 25749" } else { "kill 11231 25749" };
+        assert!(message.ends_with(&format!("To end them: {end}")), "{message}");
+    }
+
+    #[test]
+    fn a_hidden_command_line_falls_back_to_the_name_and_a_long_one_is_cut() {
+        let mut hidden = process(7, 1, &[], 0);
+        hidden.name = "launchd-helper".into();
+        let long_arg = "x".repeat(400);
+        let long = process(8, 1, &["/bin/sh", &long_arg], 0);
+
+        let message = in_use_message_at(Path::new("/wt/feat-x"), &[hidden, long], NOW);
+
+        assert!(message.contains(": launchd-helper\n"), "{message}");
+        assert!(message.contains(&format!("/bin/sh {}…", "x".repeat(COMMAND_SHOWN - 8))), "{message}");
+    }
 }

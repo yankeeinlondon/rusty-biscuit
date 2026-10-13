@@ -38,6 +38,7 @@ use worktree::listing::{
 use worktree::pull_requests::{OpenPullRequest, PrListing, PrPlacement, placement};
 use worktree::remote_head::{CheckFailure, FetchFailure, REMOTE_HEAD_REFRESH_DEADLINE};
 use worktree::remote_update::FETCH_DEADLINE;
+use worktree::util::age_text;
 use worktree::availability::{Availability, OtherCondition};
 use worktree::error::WorktreeError;
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeList, WorktreeStatus, resolve_worktree};
@@ -767,18 +768,6 @@ pub fn credential_markup(line: &CredentialLine) -> String {
         }
     };
     Prose::escape_text(&text)
-}
-
-/// An age in the PR age line's units: `less than 1 min` below a minute, then
-/// minutes below an hour, hours below two days, then days.
-pub fn age_text(seconds: u64) -> String {
-    let minutes = seconds / 60;
-    match minutes {
-        0 => "less than 1 min".to_string(),
-        1..=59 => format!("{minutes} min"),
-        60..=2879 => format!("{} h", minutes / 60),
-        _ => format!("{} days", minutes / 1440),
-    }
 }
 
 /// The legend lines: the Worktree column's glyphs, then the Branch column's.
