@@ -14,8 +14,43 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/biscuit-speaks/SKILL.md
+source_files_during_phase_2:
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/lib.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/traits.rs
+    - biscuit-speaks/lib/src/test_support.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/tests/common/mod.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+docs_updated_during_phase_2:
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-speaks/api-reference.md
 packages:
     - biscuit-speaks
+source_files_during_phase_3:
+    - biscuit-speaks/lib/src/cache.rs
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/say/system_defaults.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+    - biscuit-speaks/lib/tests/common/mod.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+    - biscuit-speaks/lib/tests/volume_control.rs
+    - biscuit-speaks/lib/tests/detached_phase4.rs
+docs_updated_during_phase_3:
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-speaks/SKILL.md
+    - .claude/skills/biscuit-speaks/configuration.md
+    - .claude/skills/os/windows.md
 ---
 # Speak Prepare — Implementation Plan
 
@@ -171,16 +206,16 @@ Dependencies: Phase 1. Highest-fan-out phase; do Wave 2 first, then Wave 3.
 
 ### Wave 2 (sequential, one owner — shared types)
 
-- [ ] **Task: `ResolvedSynthesis` and `Resolution`.** Define in a new
+- [x] **Task: `ResolvedSynthesis` and `Resolution`.** Define in a new
   crate-private module (e.g. `prepared.rs`) per ruling 1; serde round-trip
   tests.
-- [ ] **Task: Trait default.** Add `TtsExecutor::prepare(&self, &str, &TtsConfig)
+- [x] **Task: Trait default.** Add `TtsExecutor::prepare(&self, &str, &TtsConfig)
   -> impl Future<Output=Result<(),TtsError>> + Send` with `Ok(())` default, not
   gated on `playa`. Dry-run short-circuit lives in a shared helper
   (`dry_run_enabled()`), accepting `1`, `true`, `TRUE`, `yes` exactly as
   `play_detached` does, and **callable without `playa`**. Refactor
   `play_detached` to use the same helper (single source of truth).
-- [ ] **Task: `Speak` state.** Replace `audio`/`audio_format` with the retained
+- [x] **Task: `Speak` state.** Replace `audio`/`audio_format` with the retained
   `Option<(TtsProvider, ResolvedSynthesis)>`. `is_prepared()` = retained state
   present. `with_config/voice/gender/language/failover` clear it;
   `with_volume` keeps it; `Clone` copies it. Rewrite docs for the struct,
@@ -194,21 +229,21 @@ Each provider task: implement `resolve` + shared `cache_path_for`, route
 consult the cache before synthesizing, publish via `write_atomic`, clean temp
 files/children on failure or cancellation.
 
-- [ ] **Kokoro** (`providers/host/kokoro.rs`): concrete voice; speed applied at playback, not in key.
-- [ ] **gTTS** (`providers/host/gtts.rs`): language identity only (no manufactured voice); speed at playback.
-- [ ] **Echogarden** (`providers/host/echogarden.rs`): key = engine + voice + synthesis speed; the existing `voice.unwrap_or("default")` literal is replaced — a mutable engine-selected default that cannot be pinned is `Unresolved`; do not re-apply speed at playback.
-- [ ] **eSpeak/SAPI**: confirm they keep the default no-op; add the "no subprocess, no file" test.
+- [x] **Kokoro** (`providers/host/kokoro.rs`): concrete voice; speed applied at playback, not in key.
+- [x] **gTTS** (`providers/host/gtts.rs`): language identity only (no manufactured voice); speed at playback.
+- [x] **Echogarden** (`providers/host/echogarden.rs`): key = engine + voice + synthesis speed; the existing `voice.unwrap_or("default")` literal is replaced — a mutable engine-selected default that cannot be pinned is `Unresolved`; do not re-apply speed at playback.
+- [x] **eSpeak/SAPI**: confirm they keep the default no-op; add the "no subprocess, no file" test.
 
 ### Wave 4 (after Waves 2–3): `Speak::prepare`
 
-- [ ] **Task: selection and retention.** Order: dry run (return `Ok(self)`
+- [x] **Task: selection and retention.** Order: dry run (return `Ok(self)`
   unchanged, before any provider lookup) → `get_providers_for_strategy` → empty
   ⇒ `NoProvidersAvailable` → take the first candidate only → resolve + prepare →
   on `Resolved` store the pair; on `Unresolved`/eSpeak/SAPI return success
   with state unchanged → provider error propagates with no further provider
   tried. Enum-only providers return the ruling-10 error. No cloud added to
   automatic host selection; no readiness probes.
-- [ ] **Task: tests** for acceptance 1, 2, 7, 8 (builder + direct), and
+- [x] **Task: tests** for acceptance 1, 2, 7, 8 (builder + direct), and
   Kokoro/gTTS/Echogarden halves of 3, 5, 9.
 
 **Checkpoint 2:** `just test` + `just lint` in `biscuit-speaks/`, with and
@@ -222,44 +257,44 @@ Waves 5 and 6 are independent and run concurrently (different files:
 
 ### Wave 5 — Say (macOS-gated provider; portable resolver/key tests)
 
-- [ ] **Task: production resolver.** Implement `SystemSpeechDefaults` from the
+- [x] **Task: production resolver.** Implement `SystemSpeechDefaults` from the
   Spike A lookup. Absent, malformed, or unrecognized output ⇒ `None`
   ⇒ `Unresolved`. Record how the real lookup was verified (spec requirement)
   in the implementation log and the provider doc comment's *why*, not a
   command narration.
-- [ ] **Task: shared key and resolution.** Voice from explicit request, else
+- [x] **Task: shared key and resolution.** Voice from explicit request, else
   gender (Alex/Samantha, per existing `resolve_voice`), else system default
   from the resolver; rate per ruling 8. Key `("say", "{voice};rate={wpm}")`
   — same spelling as today for concrete inputs. Never read or write
   `system-default`. Remove the legacy path-based cache key in `detached_job`'s
   unresolved branch, or confirm it never reads the shared cache.
-- [ ] **Task: ordinary playback caching.** `speak`/`speak_with_result` look up
+- [x] **Task: ordinary playback caching.** `speak`/`speak_with_result` look up
   and publish through the cache with and without `playa`; volume applied at
   playback only; rate already in WAV.
-- [ ] **Task: `cached_detached_job`.** Ready job when the resolved key's file
+- [x] **Task: `cached_detached_job`.** Ready job when the resolved key's file
   exists, even with no requested voice and Normal speed; `Unresolved` ⇒ `Ok(None)`.
-- [ ] **Task: tests** (acceptance 3-Say, 4-Say, 5): gender choices preserved;
+- [x] **Task: tests** (acceptance 3-Say, 4-Say, 5): gender choices preserved;
   changing the stubbed default makes a fresh object miss while the prepared
   object keeps its settings; unresolved voice or rate ⇒ no file, no cache lookup.
 
 ### Wave 6 — ElevenLabs resolution snapshot
 
-- [ ] **Task: selection refactor.** Extract today's `resolve_voice_id` into a
+- [x] **Task: selection refactor.** Extract today's `resolve_voice_id` into a
   function returning `(voice, model, inputs)`; behavior (gender match →
   first voice → configured fallback) is untouched and covered by a
   characterization test written *first*.
-- [ ] **Task: snapshot module.** Serialize/deserialize `Snapshot{ voice, model,
+- [x] **Task: snapshot module.** Serialize/deserialize `Snapshot{ voice, model,
   inputs(gender, language, model, fallback), account_context, written_at }`;
   atomic publish under the `BISCUIT_SPEAKS_CACHE` directory; no credential
   field exists on the type (compile-time guarantee) and a test greps the file.
-- [ ] **Task: write/refresh rule.** Every `prepare` re-resolves via the API
+- [x] **Task: write/refresh rule.** Every `prepare` re-resolves via the API
   and rewrites the snapshot; normal synthesis also records it. A changed
   account voice list updates the snapshot.
-- [ ] **Task: read rule in `cached_detached_job`.** With no requested voice,
+- [x] **Task: read rule in `cached_detached_job`.** With no requested voice,
   compute inputs + account context locally, load a *trusted* snapshot
   (matching, `< 24h`), build the key, publish a ready job with **zero** API
   requests. Any other outcome ⇒ cache miss ⇒ today's miss path.
-- [ ] **Task: tests** — see Input Robustness Matrix below plus acceptance 11.
+- [x] **Task: tests** — see Input Robustness Matrix below plus acceptance 11.
 
 #### Input Robustness Matrix — ElevenLabs snapshot (reader of a local file)
 

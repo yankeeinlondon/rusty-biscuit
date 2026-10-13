@@ -34,6 +34,7 @@ pipeline_step: 9
 related:
     - 2026-10-22-tts-prewarm
     - 2026-10-20-lifecycle-grammar
+implemented: true
 ---
 # Speak Prepare
 
