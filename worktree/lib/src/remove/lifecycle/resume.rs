@@ -19,16 +19,15 @@ use sniff::filesystem::query::NativeString;
 
 use super::{
     Approval, Attempt, BranchActions, Boundary, Crashed, Environment, Hook, Presence, Refusal, Removal, Tree, check_usage,
-    confirm_unchanged, event, now_ms, presence, recheck, registration_state, retained_entries,
+    confirm_unchanged, event, now_ms, preflight_runs, presence, recheck, registration_state, retained_entries,
 };
 use crate::availability::{self, EntryKind};
-use crate::git::git_from;
 use crate::remove::admin_entry::{AdminEntry, common_git_dir, same_location};
 use crate::remove::missing::{MissingCheckout, MissingRefusal, bind_index, remove_missing_record};
 use crate::remove::observation::Targets;
 use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::outcome::{
-    DiscoveryPurpose, DiscoveryResult, DiscoveryRun, JournalSummary, OperationReport, OriginalState, QuarantineReport,
+    JournalSummary, OperationReport, OriginalState, QuarantineReport,
     QuarantineState, RegistrationState, RemovalOutcome, Step, StepResult,
 };
 use crate::remove::quarantine::association::{MoveRefusal, verify_quarantined};
@@ -48,9 +47,9 @@ pub struct Inspection {
     pub original: Presence,
     pub quarantine: Presence,
     pub registration: RegistrationState,
-    /// The current journal, its unconfirmed entries resolved against the
-    /// quarantine; `None` when the quarantine is not the moved checkout, so
-    /// nothing in it could be checked.
+    /// Every attempt's journal, the current one's unconfirmed entries
+    /// resolved against the quarantine; `None` when the quarantine is not the
+    /// moved checkout, so nothing in it could be checked.
     pub journal: Option<JournalSummary>,
     /// The journal's last line was cut short by a crash.
     pub torn_tail: bool,
@@ -342,7 +341,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
     }
 
     /// Reopens the operation with `inventory` and wraps it for the shared
-    /// steps.
+    /// steps, carrying the report an earlier attempt saved into `report`.
     fn attempt(
         &self,
         lock: crate::remove::recovery::lock::OperationLock,
@@ -352,8 +351,10 @@ impl<'r, 'a> Resumed<'r, 'a> {
     where
         'a: 'r,
     {
-        let operation = self.store.reopen(lock, &self.record.operation_id, &self.expected, inventory).map_err(Refusal::Store)?;
-        Ok(Attempt::new(
+        let id = &self.record.operation_id;
+        let earlier = self.store.read_report(id);
+        let operation = self.store.reopen(lock, id, &self.expected, inventory).map_err(Refusal::Store)?;
+        let mut attempt = Attempt::new(
             self.request.base,
             self.env,
             operation,
@@ -363,7 +364,22 @@ impl<'r, 'a> Resumed<'r, 'a> {
             self.quarantine(),
             self.record.checkout_identity,
             self.admin(),
-        ))
+        );
+        match earlier {
+            Ok(Some(earlier)) => attempt.report.continue_from(earlier),
+            // The earlier attempt crashed before saving one.
+            Ok(None) => {}
+            Err(error) => attempt.warnings.push(format!("the earlier attempt's report could not be read, so it is not carried: {error}")),
+        }
+        Ok(attempt)
+    }
+
+    /// The inventory of a retry that deletes nothing: empty, since the
+    /// quarantine is gone. An earlier attempt's unconfirmed entry is then
+    /// never taken as still present (see
+    /// [`Operation::journal_entries`](crate::remove::recovery::store::Operation::journal_entries)).
+    fn nothing_to_delete(&self) -> Arc<DeletionInventory> {
+        Arc::new(DeletionInventory::empty(self.record.checkout_identity))
     }
 
     /// [`Resolution::Quarantined`]: the first attempt's steps from
@@ -422,12 +438,10 @@ impl<'r, 'a> Resumed<'r, 'a> {
             retained_entries: inventory.entries().len() as u64,
             retained: Vec::new(),
         });
-        report.discovery.push(DiscoveryRun {
-            at_ms: discovered_at,
-            purpose: DiscoveryPurpose::Preflight,
-            path: self.record.quarantine.clone(),
-            result: DiscoveryResult::Report(Box::new(clearance.report)),
-        });
+        if let Some(search) = &clearance.search_recheck {
+            report.timeline.push(event(Step::Discovery, StepResult::Succeeded, Some(search.summary(true))));
+        }
+        report.discovery.extend(preflight_runs(discovered_at, self.record.quarantine.clone(), clearance));
         let attempt = match self.attempt(lock, Arc::clone(&inventory), report) {
             Ok(attempt) => attempt,
             Err(refusal) => return refuse(refusal),
@@ -461,13 +475,9 @@ impl<'r, 'a> Resumed<'r, 'a> {
             Ok(entry) => entry,
             Err(refusal) => return refuse(refusal),
         };
-        let inventory = match self.store.recover(&self.record.operation_id, &self.expected, |_| Ok(false)) {
-            Ok(recovered) => Arc::new(recovered.inventory),
-            Err(error) => return refuse(Refusal::Store(error)),
-        };
         let mut report = self.report();
         report.registration = RegistrationState::AtQuarantine;
-        let mut attempt = match self.attempt(lock, inventory, report) {
+        let mut attempt = match self.attempt(lock, self.nothing_to_delete(), report) {
             Ok(attempt) => attempt,
             Err(refusal) => return refuse(refusal),
         };
@@ -500,10 +510,6 @@ impl<'r, 'a> Resumed<'r, 'a> {
     where
         'a: 'r,
     {
-        let inventory = match self.store.recover(&self.record.operation_id, &self.expected, |_| Ok(false)) {
-            Ok(recovered) => Arc::new(recovered.inventory),
-            Err(error) => return Ok(Removal::Refused(Box::new(Refusal::Store(error)))),
-        };
         let mut report = self.report();
         report.quarantine = Some(QuarantineReport {
             path: self.record.quarantine.clone(),
@@ -512,7 +518,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
             retained_entries: 0,
             retained: Vec::new(),
         });
-        let attempt = match self.attempt(lock, inventory, report) {
+        let attempt = match self.attempt(lock, self.nothing_to_delete(), report) {
             Ok(attempt) => attempt,
             Err(refusal) => return Ok(Removal::Refused(Box::new(refusal))),
         };
@@ -525,7 +531,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
 
 /// Git's one registration at `path`.
 fn listed_at(base: &Path, path: &Path) -> Result<WorktreeEntry, Refusal> {
-    let listing = git_from(base, base, &["worktree", "list", "--porcelain"]).map_err(Refusal::Git)?;
+    let listing = crate::git::worktree_list_from(base, base).map_err(Refusal::Git)?;
     let found: Vec<WorktreeEntry> = parse_worktree_list(&listing).into_iter().filter(|entry| same_location(&entry.path, path)).collect();
     match <[WorktreeEntry; 1]>::try_from(found) {
         Ok([entry]) => Ok(entry),

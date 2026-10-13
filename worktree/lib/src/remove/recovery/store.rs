@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::journal::{self, DEFAULT_JOURNAL_LIMIT, JournalEntry, JournalInvalid, JournalWriteError, JournalWriter};
+use super::journal::{self, DEFAULT_JOURNAL_LIMIT, EntryState, JournalEntry, JournalInvalid, JournalLog, JournalWriteError, JournalWriter};
 use super::lock::{self, LOCKS_DIR, LockError, OperationLock};
 use super::record::{self, Phase, RecordInvalid, RecoveryRecord, RepositoryBinding};
 use super::storage::{self, StorageProblem};
@@ -66,10 +66,12 @@ pub struct PendingRecord {
 #[derive(Debug)]
 pub struct Recovered {
     pub record: RecoveryRecord,
-    /// What the operation was approved to delete, as it was at the start.
+    /// What the current attempt was approved to delete, as it was when that
+    /// attempt started.
     pub inventory: DeletionInventory,
+    /// Every attempt's entries; see [`Operation::journal_entries`].
     pub entries: Vec<JournalEntry>,
-    /// The journal's final line was cut short by a crash.
+    /// The current journal's final line was cut short by a crash.
     pub torn_tail: bool,
 }
 
@@ -210,6 +212,11 @@ impl RecoveryStore {
     /// describe the worktree record `expected` names and `lock` must cover
     /// it. The journal so far is kept as `journal-<n>.jsonl`, and a new one
     /// starts with `inventory`, a fresh inventory of what survives.
+    ///
+    /// `journal.jsonl` stays the previous attempt's journal until the new one
+    /// is complete and flushed under a hidden name, and is then replaced by a
+    /// rename. A crash or failure at any point before that leaves the
+    /// previous attempt recoverable and authorizes nothing new.
     pub fn reopen(
         &self,
         lock: OperationLock,
@@ -231,16 +238,28 @@ impl RecoveryStore {
         }
         let dir = self.operation_dir(id);
         let current = dir.join(JOURNAL_FILE);
-        let archived = (1..)
-            .map(|generation| dir.join(format!("journal-{generation}.jsonl")))
-            .find(|path| matches!(fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound))
-            .expect("an unused generation exists");
-        // The name was just found unused, and the held lock keeps every other
-        // `wt` out of this operation's directory.
-        fs::rename(&current, &archived)?;
-        let file = storage::create_private_file(&current)?;
-        let journal = JournalWriter::start(file, id, inventory, DEFAULT_JOURNAL_LIMIT)?;
-        storage::sync_dir(&dir)?;
+        let previous = storage::read_private_file(&current).map_err(storage_error(&current))?;
+        // The held lock keeps every other `wt` out of this operation's
+        // directory.
+        archive_journal(&dir, &previous)?;
+        fault::at(ReopenStep::Archived, &current)?;
+        let next = storage::temp_beside(&current)?;
+        let staged = (|| -> Result<(), StoreError> {
+            let file = storage::create_private_file(&next)?;
+            fault::at(ReopenStep::Created, &next)?;
+            // Closed before the rename, as in `begin`.
+            drop(JournalWriter::start(file, id, Arc::clone(&inventory), DEFAULT_JOURNAL_LIMIT)?);
+            fault::at(ReopenStep::Initialized, &next)?;
+            Ok(storage::publish(&next, &current)?)
+        })();
+        if let Err(error) = staged {
+            if !fault::crashed(&error) {
+                let _ = fs::remove_file(&next);
+            }
+            return Err(error);
+        }
+        let file = storage::open_append(&current)?;
+        let journal = JournalWriter::after_header(file, inventory, DEFAULT_JOURNAL_LIMIT);
         Ok(Operation { dir, record, journal, _lock: lock })
     }
 
@@ -259,14 +278,24 @@ impl RecoveryStore {
             return Err(StoreError::Completed(id.clone()));
         }
         record.check_binding(expected).map_err(|reason| StoreError::Record { id: id.to_string(), reason })?;
-        let path = self.operation_dir(id).join(JOURNAL_FILE);
-        let bytes = storage::read_private_file(&path).map_err(storage_error(&path))?;
-        let log = journal::parse(&bytes, id).map_err(|reason| StoreError::Journal { id: id.clone(), reason })?;
+        let (log, entries) = replay_generations(&self.operation_dir(id), id, present)?;
         if *log.inventory.root() != record.checkout_identity {
             return Err(StoreError::InventoryMismatch);
         }
-        let entries = log.replay(present)?;
         Ok(Recovered { record, inventory: log.inventory, entries, torn_tail: log.torn_tail })
+    }
+
+    /// The report the last attempt of operation `id` saved, or `None` when no
+    /// attempt saved one.
+    pub fn read_report(&self, id: &OperationId) -> Result<Option<OperationReport>, StoreError> {
+        let path = self.operation_dir(id).join(REPORT_FILE);
+        let bytes = match storage::read_private_file(&path) {
+            Ok(bytes) => bytes,
+            Err(StorageProblem::Missing) => return Ok(None),
+            Err(problem) => return Err(storage_error(&path)(problem)),
+        };
+        let report = serde_json::from_slice(&bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(Some(report))
     }
 }
 
@@ -317,24 +346,39 @@ impl Operation {
         self.advance(phase)
     }
 
-    /// The current journal replayed, as [`RecoveryStore::recover`] does;
-    /// `present` reports whether a quarantine-relative path still exists.
+    /// Every attempt's journal replayed, oldest first, as
+    /// [`RecoveryStore::recover`] does. `present` reports whether a
+    /// quarantine-relative path still exists, and is asked only about the
+    /// current attempt's unconfirmed entries.
+    ///
+    /// An earlier attempt contributes only the entries that were gone when
+    /// the next attempt began (deleted, already absent, or uncertain): one
+    /// still present then is in the next attempt's inventory and is that
+    /// attempt's to resolve. Whether an earlier unconfirmed entry was present
+    /// is read from that next inventory, never from the filesystem now, so an
+    /// entry is never counted twice and an uncertain one never becomes
+    /// confirmed.
     pub fn journal_entries(&self, present: impl FnMut(&Path) -> io::Result<bool>) -> Result<Vec<JournalEntry>, StoreError> {
-        let path = self.dir.join(JOURNAL_FILE);
-        let bytes = storage::read_private_file(&path).map_err(storage_error(&path))?;
-        let id = self.id().clone();
-        let log = journal::parse(&bytes, &id).map_err(|reason| StoreError::Journal { id, reason })?;
-        Ok(log.replay(present)?)
+        Ok(replay_generations(&self.dir, self.id(), present)?.1)
     }
 
     /// Deletes this operation's directory. Only for an operation that
     /// changed nothing: its record then describes nothing that happened.
+    ///
+    /// The directory is first renamed to a hidden name that is no operation,
+    /// so a crash part-way through deleting it never leaves a pending record
+    /// without its journal.
     pub fn discard(self) -> Result<(), StoreError> {
-        let Self { dir, journal, _lock, .. } = self;
-        // Closed first: Windows cannot delete an open file.
+        let Self { dir, journal, record, _lock } = self;
+        // Closed first: Windows can neither rename a directory with an open
+        // file inside nor delete an open file.
         drop(journal);
-        fs::remove_dir_all(&dir)?;
-        Ok(storage::sync_dir(dir.parent().unwrap_or(&dir))?)
+        let root = dir.parent().unwrap_or(&dir);
+        let doomed = root.join(format!(".{}.discarded", record.operation_id));
+        fs::rename(&dir, &doomed)?;
+        storage::sync_dir(root)?;
+        fs::remove_dir_all(&doomed)?;
+        Ok(storage::sync_dir(root)?)
     }
 
     /// Saves `report` as `report.json`, replacing any earlier one.
@@ -343,16 +387,21 @@ impl Operation {
         Ok(storage::write_durable(&self.report_path(), &bytes)?)
     }
 
-    /// Saves the final `report`, then persists completion, then deletes the
-    /// journal. Completion is durable before the journal goes, so a failure
-    /// to delete it is only a [`BookkeepingWarning`].
-    pub fn complete(mut self, report: &OperationReport) -> Result<Vec<BookkeepingWarning>, StoreError> {
+    /// Saves the final `report`, then persists completion, then deletes every
+    /// journal when `journal_reported` says `report` lists all of their
+    /// entries ([`OperationReport::journal_entries`]); otherwise they are
+    /// kept as the only full record. Completion is durable before a journal
+    /// goes, so a failure to delete one is only a [`BookkeepingWarning`].
+    pub fn complete(mut self, report: &OperationReport, journal_reported: bool) -> Result<Vec<BookkeepingWarning>, StoreError> {
         self.save_report(report)?;
         self.persist_phase(Phase::Completed)?;
         let Self { dir, journal, .. } = self;
         drop(journal);
+        if !journal_reported {
+            return Ok(Vec::new());
+        }
         let mut journals = vec![dir.join(JOURNAL_FILE)];
-        journals.extend((1..).map(|generation| dir.join(format!("journal-{generation}.jsonl"))).take_while(|path| path.exists()));
+        journals.extend((1..).map(|generation| archive_path(&dir, generation)).take_while(|path| path.exists()));
         Ok(journals
             .into_iter()
             .filter_map(|path| match fs::remove_file(&path) {
@@ -368,6 +417,154 @@ impl Operation {
         storage::write_durable(&self.dir.join(RECORD_FILE), &next.to_json())?;
         self.record = next;
         Ok(())
+    }
+}
+
+/// Keeps `journal` (the bytes of `dir`'s current journal) as the next
+/// `journal-<n>.jsonl`, written durably, unless the newest archive already
+/// holds exactly these bytes: a retry whose `reopen` stopped after archiving
+/// the same journal.
+fn archive_journal(dir: &Path, journal: &[u8]) -> Result<(), StoreError> {
+    let generation = |n: u32| archive_path(dir, n);
+    let unused = (1..)
+        .find(|&n| matches!(fs::symlink_metadata(generation(n)), Err(error) if error.kind() == io::ErrorKind::NotFound))
+        .expect("an unused generation exists");
+    if unused > 1 && storage::read_private_file(&generation(unused - 1)).is_ok_and(|newest| newest == journal) {
+        return Ok(());
+    }
+    Ok(storage::write_durable(&generation(unused), journal)?)
+}
+
+/// The `n`th archived journal of the operation in `dir`.
+fn archive_path(dir: &Path, n: u32) -> PathBuf {
+    dir.join(format!("journal-{n}.jsonl"))
+}
+
+/// The current journal of operation `id` in `dir`, parsed, and every
+/// attempt's entries; see [`Operation::journal_entries`].
+fn replay_generations(
+    dir: &Path,
+    id: &OperationId,
+    present: impl FnMut(&Path) -> io::Result<bool>,
+) -> Result<(JournalLog, Vec<JournalEntry>), StoreError> {
+    let read = |path: &Path| storage::read_private_file(path).map_err(storage_error(path));
+    let parse = |bytes: &[u8]| journal::parse(bytes, id).map_err(|reason| StoreError::Journal { id: id.clone(), reason });
+    let current_bytes = read(&dir.join(JOURNAL_FILE))?;
+    let current = parse(&current_bytes)?;
+    let mut archives = Vec::new();
+    for n in 1.. {
+        let path = archive_path(dir, n);
+        match storage::read_private_file(&path) {
+            Ok(bytes) => archives.push(bytes),
+            Err(StorageProblem::Missing) => break,
+            Err(problem) => return Err(storage_error(&path)(problem)),
+        }
+    }
+    // A retry stopped after archiving but before publishing its journal
+    // leaves the newest archive identical to the current journal: one
+    // attempt, not two.
+    if archives.last() == Some(&current_bytes) {
+        archives.pop();
+    }
+    let earlier = archives.iter().map(|bytes| parse(bytes)).collect::<Result<Vec<_>, _>>()?;
+    let mut entries = Vec::new();
+    for (index, log) in earlier.iter().enumerate() {
+        let next = earlier.get(index + 1).map_or(&current.inventory, |next| &next.inventory);
+        let attempt = index as u32 + 1;
+        entries.extend(
+            log.replay(|path| Ok(next.get(path).is_some()))?
+                .into_iter()
+                .filter(|entry| matches!(entry.state, EntryState::Deleted | EntryState::ExternallyAbsent | EntryState::Uncertain))
+                .map(|entry| JournalEntry { attempt, ..entry }),
+        );
+    }
+    let attempt = earlier.len() as u32 + 1;
+    entries.extend(current.replay(present)?.into_iter().map(|entry| JournalEntry { attempt, ..entry }));
+    Ok((current, entries))
+}
+
+/// The points inside [`RecoveryStore::reopen`] where a test can stop it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReopenStep {
+    /// The previous journal is archived; no replacement exists yet.
+    Archived,
+    /// The replacement exists under its hidden name and is empty.
+    Created,
+    /// The replacement is complete and flushed, not yet published.
+    Initialized,
+}
+
+#[cfg(not(test))]
+mod fault {
+    use std::path::Path;
+
+    use super::{ReopenStep, StoreError};
+
+    pub(super) fn at(_step: ReopenStep, _path: &Path) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    pub(super) fn crashed(_error: &StoreError) -> bool {
+        false
+    }
+}
+
+/// Test-only fault injection for [`RecoveryStore::reopen`].
+#[cfg(test)]
+pub(crate) mod fault {
+    use std::cell::RefCell;
+    use std::io;
+    use std::path::Path;
+
+    use super::{ReopenStep, StoreError};
+
+    /// What an injected fault does at a [`ReopenStep`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Fault {
+        /// Stop as if the process died: nothing more is written or cleaned
+        /// up.
+        Crash,
+        /// Fail as a write would, through the ordinary error path.
+        Fail,
+    }
+
+    type Injector = Box<dyn FnMut(ReopenStep, &Path) -> Option<Fault>>;
+
+    thread_local! {
+        static INJECTOR: RefCell<Option<Injector>> = const { RefCell::new(None) };
+    }
+
+    const CRASHED: &str = "injected crash";
+
+    /// Removes the injector when dropped.
+    pub(crate) struct Injected;
+
+    impl Drop for Injected {
+        fn drop(&mut self) {
+            INJECTOR.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    /// Calls `injector` at each step of every `reopen` on this thread until
+    /// the guard drops. The path is the file the step concerns: the current
+    /// journal, then the hidden replacement.
+    #[must_use]
+    pub(crate) fn inject(injector: impl FnMut(ReopenStep, &Path) -> Option<Fault> + 'static) -> Injected {
+        INJECTOR.with(|slot| *slot.borrow_mut() = Some(Box::new(injector)));
+        Injected
+    }
+
+    pub(super) fn at(step: ReopenStep, path: &Path) -> Result<(), StoreError> {
+        let fault = INJECTOR.with(|slot| slot.borrow_mut().as_mut().and_then(|injector| injector(step, path)));
+        match fault {
+            None => Ok(()),
+            Some(Fault::Crash) => Err(StoreError::Io(io::Error::other(CRASHED))),
+            Some(Fault::Fail) => Err(StoreError::Io(io::Error::other("injected write failure"))),
+        }
+    }
+
+    pub(super) fn crashed(error: &StoreError) -> bool {
+        matches!(error, StoreError::Io(error) if error.to_string() == CRASHED)
     }
 }
 

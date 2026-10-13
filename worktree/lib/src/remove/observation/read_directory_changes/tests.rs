@@ -46,43 +46,55 @@ fn summary(drain: &Drain) -> Vec<(Scope, EventKind, Option<bool>)> {
     drain.events.iter().map(|event| (event.scope.clone(), event.kind, event.directory)).collect()
 }
 
-/// One `FILE_NOTIFY_INFORMATION` entry as the system lays it out.
-fn entry(action: u32, name: &str, last: bool) -> Vec<u8> {
+/// One notification entry as the system lays it out in `format`.
+fn entry(format: Format, action: u32, attributes: u32, name: &str, last: bool) -> Vec<u8> {
+    let (attributes_at, length_at, name_at) = format.offsets();
     let units: Vec<u16> = name.encode_utf16().collect();
     let length = units.len() * 2;
-    let size = (12 + length).next_multiple_of(4);
-    let mut bytes = Vec::with_capacity(size);
-    bytes.extend_from_slice(&(if last { 0 } else { size as u32 }).to_le_bytes());
-    bytes.extend_from_slice(&action.to_le_bytes());
-    bytes.extend_from_slice(&(length as u32).to_le_bytes());
-    units.iter().for_each(|unit| bytes.extend_from_slice(&unit.to_le_bytes()));
-    bytes.resize(size, 0);
+    let size = (name_at + length).next_multiple_of(8);
+    let mut bytes = vec![0; size];
+    let mut put = |at: usize, value: u32| bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    put(0, if last { 0 } else { size as u32 });
+    put(4, action);
+    if let Some(at) = attributes_at {
+        put(at, attributes);
+    }
+    put(length_at, length as u32);
+    for (index, unit) in units.iter().enumerate() {
+        bytes[name_at + 2 * index..name_at + 2 * index + 2].copy_from_slice(&unit.to_le_bytes());
+    }
     bytes
 }
 
 #[test]
 fn notification_buffers_are_parsed_entry_by_entry() {
-    let mut buffer = entry(FILE_ACTION_ADDED, r"checkout\sub\ü.txt", false);
-    buffer.extend(entry(FILE_ACTION_RENAMED_OLD_NAME, "a", false));
-    buffer.extend(entry(FILE_ACTION_RENAMED_NEW_NAME, "b", true));
-    assert_eq!(
-        parse(&buffer).unwrap(),
-        vec![
-            (FILE_ACTION_ADDED, OsString::from(r"checkout\sub\ü.txt")),
-            (FILE_ACTION_RENAMED_OLD_NAME, OsString::from("a")),
-            (FILE_ACTION_RENAMED_NEW_NAME, OsString::from("b")),
-        ]
-    );
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_ARCHIVE;
+    for (format, carried) in [(Format::Extended, true), (Format::Plain, false)] {
+        let attributes = |value: u32| carried.then_some(value);
+        let mut buffer = entry(format, FILE_ACTION_ADDED, FILE_ATTRIBUTE_ARCHIVE, r"checkout\sub\ü.txt", false);
+        buffer.extend(entry(format, FILE_ACTION_RENAMED_OLD_NAME, FILE_ATTRIBUTE_DIRECTORY, "a", false));
+        buffer.extend(entry(format, FILE_ACTION_RENAMED_NEW_NAME, FILE_ATTRIBUTE_DIRECTORY, "b", true));
+        assert_eq!(
+            parse(&buffer, format).unwrap(),
+            vec![
+                (FILE_ACTION_ADDED, attributes(FILE_ATTRIBUTE_ARCHIVE), OsString::from(r"checkout\sub\ü.txt")),
+                (FILE_ACTION_RENAMED_OLD_NAME, attributes(FILE_ATTRIBUTE_DIRECTORY), OsString::from("a")),
+                (FILE_ACTION_RENAMED_NEW_NAME, attributes(FILE_ATTRIBUTE_DIRECTORY), OsString::from("b")),
+            ],
+            "{format:?}"
+        );
 
-    // An entry pointing past the bytes read, a name running past them, and a
-    // truncated header are errors, not a shorter list.
-    let mut past = entry(FILE_ACTION_ADDED, "a", false);
-    past[0..4].copy_from_slice(&64_u32.to_le_bytes());
-    assert!(parse(&past).is_err());
-    let mut long_name = entry(FILE_ACTION_ADDED, "a", true);
-    long_name[8..12].copy_from_slice(&200_u32.to_le_bytes());
-    assert!(parse(&long_name).is_err());
-    assert!(parse(&[0; 8]).is_err());
+        // An entry pointing past the bytes read, a name running past them, and
+        // a truncated header are errors, not a shorter list.
+        let (_, length_at, name_at) = format.offsets();
+        let mut past = entry(format, FILE_ACTION_ADDED, 0, "a", false);
+        past[0..4].copy_from_slice(&256_u32.to_le_bytes());
+        assert!(parse(&past, format).is_err(), "{format:?}");
+        let mut long_name = entry(format, FILE_ACTION_ADDED, 0, "a", true);
+        long_name[length_at..length_at + 4].copy_from_slice(&200_u32.to_le_bytes());
+        assert!(parse(&long_name, format).is_err(), "{format:?}");
+        assert!(parse(&vec![0; name_at - 4], format).is_err(), "{format:?}");
+    }
 }
 
 #[test]
@@ -206,6 +218,29 @@ fn a_watched_directory_deleted_before_release_and_one_released_first() {
     fs::create_dir(&fixture.admin).expect("the name is free again");
     let drain = drain(&mut adapter, &fixture.targets);
     assert_eq!(drain.lost, None, "{:?}", summary(&drain));
+}
+
+/// The type of an entry comes from the notification: a directory and a file
+/// removed before their creation is read are still reported as a directory
+/// and a file. The adapter used to open each entry to learn its type, and that
+/// handle, inside the tree, made a move made at the same moment fail with
+/// `ERROR_ACCESS_DENIED` (3 in 300 moves under a parallel test run).
+#[test]
+fn an_entry_type_is_known_without_opening_the_entry() {
+    let fixture = new_fixture();
+    let mut adapter = start(&fixture);
+    let gate = adapter.shared.gate.lock().unwrap();
+    fs::create_dir(fixture.checkout.join("sub").join("d")).unwrap();
+    fs::write(fixture.checkout.join("sub").join("f"), b"x").unwrap();
+    fs::remove_dir(fixture.checkout.join("sub").join("d")).unwrap();
+    fs::remove_file(fixture.checkout.join("sub").join("f")).unwrap();
+    drop(gate);
+    let drain = drain(&mut adapter, &fixture.targets);
+    let created = |path: &str| {
+        drain.events.iter().find(|event| event.scope == Scope::Tree(path.into()) && event.kind == EventKind::Created).map(|event| event.directory)
+    };
+    assert_eq!((created(r"sub\d"), created(r"sub\f")), (Some(Some(true)), Some(Some(false))), "{:?}", summary(&drain));
+    assert_eq!(drain.lost, None);
 }
 
 #[test]

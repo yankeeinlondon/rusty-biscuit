@@ -96,26 +96,39 @@ pub(super) fn read_private_file(path: &Path) -> Result<Vec<u8>, StorageProblem> 
 /// Replaces `path` with `bytes`: an owner-only temporary file beside it is
 /// written and flushed, renamed over `path`, and the directory is flushed.
 pub(super) fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let parent = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
-    let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    let mut nonce = [0_u8; 8];
-    getrandom::fill(&mut nonce).map_err(|e| io::Error::other(format!("no OS randomness: {e}")))?;
-    let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-    let temp = parent.join(format!(".{}.{nonce}.tmp", name.to_string_lossy()));
+    let temp = temp_beside(path)?;
     let result = (|| {
         let mut file = create_private_file(&temp)?;
         file.write_all(bytes)?;
         flush(&file)?;
         drop(file);
-        // Replacement is the point here; the no-replacement rule is for the
-        // checkout move, not for the store's own files.
-        fs::rename(&temp, path)?;
-        sync_dir(parent)
+        publish(&temp, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+/// An unused hidden name beside `path` for building its replacement. It is
+/// never an operation ID or a journal generation, so nothing reads it.
+pub(super) fn temp_beside(path: &Path) -> io::Result<std::path::PathBuf> {
+    let parent = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
+    let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let mut nonce = [0_u8; 8];
+    getrandom::fill(&mut nonce).map_err(|e| io::Error::other(format!("no OS randomness: {e}")))?;
+    let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(parent.join(format!(".{}.{nonce}.tmp", name.to_string_lossy())))
+}
+
+/// Renames the flushed, closed file `temp` over `path` and flushes the
+/// directory: a reader of `path` sees the old file or the new one, never
+/// neither. Std's rename replaces an existing file on Windows too.
+pub(super) fn publish(temp: &Path, path: &Path) -> io::Result<()> {
+    // Replacement is the point here; the no-replacement rule is for the
+    // checkout move, not for the store's own files.
+    fs::rename(temp, path)?;
+    sync_dir(path.parent().unwrap_or(path))
 }
 
 /// Creates `path` as a new owner-only file; it must not exist.

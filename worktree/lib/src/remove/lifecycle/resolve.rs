@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 
 use super::{Presence, presence};
 use crate::error::WorktreeError;
-use crate::git::git_from;
 use crate::remove::admin_entry::{common_git_dir, same_location};
 use crate::remove::recovery::OperationId;
 use crate::remove::recovery::record::RecoveryRecord;
@@ -66,8 +65,17 @@ pub enum ResolveError {
 /// failure to list. A pending record that cannot be read matches nothing
 /// here; starting any removal of the repository refuses while it exists.
 pub fn resolve_target(base: &Path, name: &str) -> Result<Target, ResolveError> {
-    let listing = git_from(base, base, &["worktree", "list", "--porcelain"]).map_err(ResolveError::Git)?;
-    let entries = parse_worktree_list(&listing);
+    let listing = crate::git::worktree_list_from(base, base).map_err(ResolveError::Git)?;
+    resolve_target_in(base, parse_worktree_list(&listing), name)
+}
+
+/// [`resolve_target`] against `entries`, a `git worktree list` the caller
+/// has just read (the CLI reads one to find `base` and resolves from it).
+///
+/// ## Errors
+///
+/// As [`resolve_target`], except that nothing is listed here.
+pub fn resolve_target_in(base: &Path, entries: Vec<WorktreeEntry>, name: &str) -> Result<Target, ResolveError> {
     if name == "base" {
         return entries.into_iter().find(|entry| entry.is_main).map(Target::Live).ok_or_else(|| ResolveError::NotFound(name.into()));
     }

@@ -3,7 +3,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use super::*;
@@ -157,7 +156,7 @@ fn injected(setup: &Setup) -> (Observation, Injector) {
 
 /// Runs `git` from the base checkout with `GIT_INDEX_FILE` set.
 fn git_with_index(setup: &Setup, index: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = crate::git::command()
         .current_dir(setup.repo.path())
         .args(args)
         .env("GIT_INDEX_FILE", index)

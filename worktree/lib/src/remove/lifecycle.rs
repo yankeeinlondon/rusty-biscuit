@@ -10,7 +10,8 @@
 //!    [`DeletionInventory`] is captured, so no window exists in which a new
 //!    writer is seen by neither;
 //! 3. the decisive [`check_usage`] runs, excluding only the observer's own
-//!    registered handles;
+//!    registered handles (and rechecking once when only Windows Search
+//!    held files);
 //! 4. the approval's bindings are read again (the branch tip and the consent
 //!    fingerprint), the inventory is confirmed against everything observed
 //!    so far, and the index is bound ([`bind_index`]);
@@ -25,7 +26,7 @@
 //!
 //! Nothing is moved before step 6, so every failure up to there is a
 //! [`Refusal`] that changed nothing (exit 3 or 4, or 1 for an operational
-//! error). From the move on, the operation always ends as [`Finished`]: a
+//! error or an interrupt seen just before the move). From the move on, the operation always ends as [`Finished`]: a
 //! saved report, and a pending record whenever the checkout or a branch
 //! action is unfinished. [`resume`] picks such a record up again, and
 //! [`resolve_target`] finds it by the name the user typed.
@@ -35,7 +36,7 @@ mod resume;
 #[cfg(test)]
 mod tests;
 
-pub use resolve::{Candidate, PendingTarget, ResolveError, Target, resolve_target};
+pub use resolve::{Candidate, PendingTarget, ResolveError, Target, resolve_target, resolve_target_in};
 pub use resume::{Inspection, RecordApproval, Resolution, ResumeRequest, inspect, release_unstarted, resume};
 
 use std::cell::RefCell;
@@ -61,20 +62,20 @@ use super::observation::{Drain, EventKind, Observation, ObservationError, Observ
 use super::outcome::{
     ActivityKind, ActivityLocation, BranchOutcome, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult,
     DiscoveryRun, ObservedActivity, OperationReport, OriginalState, QuarantineReport, QuarantineState, RegistrationState,
-    RemovalOutcome, Step, StepResult, TimelineEvent,
+    RemovalOutcome, ReportNote, Step, StepResult, TimelineEvent,
 };
 use super::quarantine::association::{MoveError, MoveErrorClass, MovePlan, MoveRefusal, move_to_quarantine, plan_move};
 use super::quarantine::association::CheckoutLocation;
 use super::quarantine::rename;
 use super::quarantine::unregister::{UnregisterError, unregister_quarantine};
 use super::recovery::OperationId;
-use super::recovery::journal::summarize;
+use super::recovery::journal::{EntryState, summarize};
 use super::recovery::lock::LockError;
 use super::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord, RepositoryBinding};
 use super::recovery::store::{BookkeepingWarning, Operation, RecoveryStore, StoreError};
 use super::remote::delete_remote_branch;
 use super::remove_local_branch;
-use super::usage::{OwnedHandles, UsageRefusal, UsageSource, check_usage};
+use super::usage::{OwnedHandles, UsageClearance, UsageRefusal, UsageSource, check_usage};
 
 /// What the user approved, as the report showed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,7 +148,8 @@ pub type StartObservation<'a> = dyn Fn(Targets, bool) -> Result<Observation, Obs
 /// What the lifecycle asks of its surroundings. Tests inject each.
 pub struct Environment<'a> {
     pub usage: &'a dyn UsageSource,
-    /// Polled at every deletion entry boundary.
+    /// Polled once before the move, where it refuses with nothing changed,
+    /// and at every deletion entry boundary, where it stops the removal.
     pub interrupted: &'a dyn Fn() -> bool,
     pub observe: &'a StartObservation<'a>,
 }
@@ -209,6 +211,9 @@ pub enum Refusal {
     /// cleaned up automatically.
     #[error("removal {} cannot be resumed: {}", .0.id, .0.resolution)]
     Recovery(Box<Inspection>),
+    /// [`Environment::interrupted`] held before the move.
+    #[error("the removal was interrupted before anything was moved")]
+    Interrupted,
 }
 
 impl Refusal {
@@ -228,7 +233,7 @@ impl Refusal {
                 MoveErrorClass::BlockedByEnvironment => ExitClass::Blocked,
                 MoveErrorClass::Failed => ExitClass::Failure,
             },
-            Self::Git(_) => ExitClass::Failure,
+            Self::Git(_) | Self::Interrupted => ExitClass::Failure,
             Self::Usage(_)
             | Self::Ineligible(_)
             | Self::Inventory(_)
@@ -352,7 +357,8 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         Ok(clearance) => clearance,
         Err(refusal) => return refuse(Refusal::Usage(refusal)),
     };
-    timeline.push(event(Step::Discovery, StepResult::Succeeded, None));
+    let search_recheck = clearance.search_recheck.as_ref().map(|search| search.summary(true));
+    timeline.push(event(Step::Discovery, StepResult::Succeeded, search_recheck));
 
     // After discovery and observation setup: the approval must still
     // describe the checkout.
@@ -387,6 +393,9 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return Err(Crashed);
     }
 
+    if (env.interrupted)() {
+        return Ok(discard(operation, Refusal::Interrupted));
+    }
     // The last look before the move; anything since the binding refuses.
     if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(), &plan.original, Tree::AtOriginal, false) {
         return Ok(discard(operation, refusal));
@@ -398,12 +407,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
 
     let mut report = OperationReport::new(Some(id), RemovalOutcome::Removed, NativeString::from(plan.original.as_path()));
     report.timeline = timeline;
-    report.discovery.push(DiscoveryRun {
-        at_ms: discovered_at,
-        purpose: DiscoveryPurpose::Preflight,
-        path: NativeString::from(plan.original.as_path()),
-        result: DiscoveryResult::Report(Box::new(clearance.report)),
-    });
+    report.discovery.extend(preflight_runs(discovered_at, NativeString::from(plan.original.as_path()), clearance));
     let mut attempt = Attempt::new(base, env, operation, report, branches, &plan.original, &plan.quarantine, plan.identity, &plan.admin.dir);
     match moved {
         Ok(()) => {}
@@ -447,6 +451,25 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return Ok(attempt.stop(outcome, why));
     }
     attempt.delete(observation, &binding, hook)
+}
+
+/// The report's runs for one preflight check that started at
+/// `discovered_at`: the decisive query, preceded by the first one when only
+/// Windows Search held files and the check rechecked.
+fn preflight_runs(discovered_at: u64, path: NativeString, clearance: UsageClearance) -> Vec<DiscoveryRun> {
+    let mut runs = Vec::new();
+    let mut at_ms = discovered_at;
+    if let Some(recheck) = clearance.search_recheck {
+        runs.push(DiscoveryRun {
+            at_ms,
+            purpose: DiscoveryPurpose::WindowsSearchHold,
+            path: path.clone(),
+            result: DiscoveryResult::Report(Box::new(recheck.first)),
+        });
+        at_ms = ms(recheck.rechecked_at);
+    }
+    runs.push(DiscoveryRun { at_ms, purpose: DiscoveryPurpose::Preflight, path, result: DiscoveryResult::Report(Box::new(clearance.report)) });
+    runs
 }
 
 /// Refuses while any operation of the worktree record `admin_dir` is
@@ -645,6 +668,9 @@ struct Attempt<'a> {
     identity: FileIdentity,
     admin_dir: PathBuf,
     warnings: Vec<String>,
+    /// The report lists every journal entry, so completion may delete the
+    /// journals.
+    journal_reported: bool,
 }
 
 impl<'a> Attempt<'a> {
@@ -671,6 +697,7 @@ impl<'a> Attempt<'a> {
             identity,
             admin_dir: admin_dir.to_path_buf(),
             warnings: Vec::new(),
+            journal_reported: false,
         }
     }
 
@@ -790,13 +817,16 @@ impl<'a> Attempt<'a> {
             return Err(Crashed);
         }
         self.step(Step::Completed, StepResult::Succeeded, None);
-        let Self { operation, report, mut warnings, .. } = self;
+        let Self { operation, report, mut warnings, journal_reported, .. } = self;
         let report_path = operation.report_path();
-        match operation.complete(&report) {
+        match operation.complete(&report, journal_reported) {
             Ok(bookkeeping) => warnings.extend(bookkeeping.into_iter().map(|BookkeepingWarning::JournalNotCleared { path, error }| {
                 format!("could not delete the deletion journal {}: {error}", path.display())
             })),
             Err(error) => warnings.push(format!("the removal's completion could not be recorded: {error}")),
+        }
+        if !journal_reported {
+            warnings.push("the deletion journals were kept, since the report could not list their entries".into());
         }
         Ok(Removal::Finished(Box::new(Finished { report, report_path, warnings })))
     }
@@ -885,9 +915,9 @@ impl<'a> Attempt<'a> {
         }
     }
 
-    /// Fills the report's journal counts from the journal itself, asking
-    /// the quarantine (through a verified handle) about unconfirmed
-    /// entries.
+    /// Fills the report's journal counts, entries, and deleted paths from
+    /// every attempt's journal, asking the quarantine (through a verified
+    /// handle) about the current attempt's unconfirmed entries.
     fn summarize_journal(&mut self) {
         let quarantine = presence(&self.quarantine, &self.identity);
         let handle = match quarantine {
@@ -904,8 +934,20 @@ impl<'a> Attempt<'a> {
             _ => Err(io::Error::other("the quarantine is not the moved checkout")),
         });
         match entries {
-            Ok(entries) => self.report.journal = summarize(&entries),
-            Err(error) => self.report.errors.push(format!("the deletion journal could not be summarized: {error}")),
+            Ok(entries) => {
+                self.report.journal = summarize(&entries);
+                let deleted = entries.iter().filter(|entry| entry.state == EntryState::Deleted);
+                self.report.set_deleted(deleted.map(|entry| NativeString::from(self.quarantine.join(entry.path.as_path()).as_path())).collect());
+                if self.report.journal.deleted.total() > 0 && !self.report.notes.contains(&ReportNote::ConcurrentWriteLimit) {
+                    self.report.notes.push(ReportNote::ConcurrentWriteLimit);
+                }
+                self.report.journal_entries = entries;
+                self.journal_reported = true;
+            }
+            Err(error) => {
+                self.journal_reported = false;
+                self.report.errors.push(format!("the deletion journal could not be summarized: {error}"));
+            }
         }
     }
 

@@ -14,7 +14,7 @@ use std::process::Command;
 use predicates::prelude::*;
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = worktree::git::command()
         .current_dir(dir)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -28,19 +28,144 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// Appends `text` to the repository's own config file: one write, where a
+/// `git config` per key costs a process each (20–50 ms on Windows).
+fn append_config(dir: &Path, text: &str) {
+    append_to_config_file(&dir.join(".git").join("config"), text);
+}
+
+/// [`append_config`] for a config file by path, such as a bare
+/// repository's `config`.
+fn append_to_config_file(config: &Path, text: &str) {
+    use std::io::Write as _;
+    let mut file = fs::OpenOptions::new().append(true).open(config).unwrap_or_else(|e| panic!("{config:?}: {e}"));
+    file.write_all(text.as_bytes()).unwrap();
+}
+
+/// `maintenance.auto = false`: every commit and push otherwise starts a
+/// detached `git maintenance run --auto`, one more process per step.
 fn configure(dir: &Path) {
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        ("gc.auto", "0"),
-    ] {
-        git(dir, &["config", key, value]);
-    }
+    append_config(
+        dir,
+        "[user]\n\temail = test@example.com\n\tname = Test User\n[commit]\n\tgpgsign = false\n[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n",
+    );
+}
+
+/// `git remote add origin <url>`, written to the config file.
+fn add_origin(dir: &Path, url: &str) {
+    // A Windows path's backslashes are escapes in a config file.
+    let url = url.replace('\\', "\\\\").replace('"', "\\\"");
+    append_config(dir, &format!("[remote \"origin\"]\n\turl = \"{url}\"\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"));
+}
+
+/// `git rev-parse HEAD` in `dir` right after a commit there, read from the
+/// loose ref the commit wrote rather than by another process. Anything else
+/// (a subdirectory, a packed ref, a detached HEAD) asks Git.
+fn head_after_commit(dir: &Path) -> String {
+    let read = || -> Option<String> {
+        let dot_git = dir.join(".git");
+        let git_dir = match fs::read_to_string(&dot_git) {
+            Ok(link) => dir.join(link.trim().strip_prefix("gitdir: ")?),
+            Err(_) if dot_git.is_dir() => dot_git,
+            Err(_) => return None,
+        };
+        let common = match fs::read_to_string(git_dir.join("commondir")) {
+            Ok(relative) => git_dir.join(relative.trim()),
+            Err(_) => git_dir.clone(),
+        };
+        let head = fs::read_to_string(git_dir.join("HEAD")).ok()?;
+        let sha = fs::read_to_string(common.join(head.trim().strip_prefix("ref: ")?)).ok()?;
+        Some(sha.trim().to_string()).filter(|sha| sha.len() >= 40)
+    };
+    read().unwrap_or_else(|| git(dir, &["rev-parse", "HEAD"]))
 }
 
 fn canonical(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Copies `from` into `to`, leaving out `git init`'s `*.sample` hooks.
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let (source, name) = (entry.path(), entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&source, &to.join(&name));
+        } else if !name.to_string_lossy().ends_with(".sample") {
+            fs::copy(&source, to.join(&name)).unwrap();
+        }
+    }
+}
+
+/// The start every [`Fixture`] copies: `repo` on `main` with one commit
+/// and a bare `origin.git` cloned from it, built once per build of this test
+/// binary and shared by its test processes (nextest runs each test in a
+/// process of its own). It holds no absolute path: the clone's
+/// `remote.origin.url` is cut, and a fixture names its own `origin`.
+///
+/// It lives beside the binary, so `cargo clean` removes it, and is keyed by
+/// the binary's path, size, and modification time. A process that finds none
+/// builds one, renames it into place (a racing process's copy is discarded),
+/// and removes earlier builds' templates; a finished template is never
+/// written again.
+fn template() -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let exe = std::env::current_exe().unwrap();
+    let metadata = fs::metadata(&exe).unwrap();
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (&exe, metadata.len(), metadata.modified().unwrap()).hash(&mut key);
+    let parent = exe.parent().unwrap().join("wt-remove-fixture-templates");
+    let template = parent.join(format!("{:016x}", key.finish()));
+    if template.is_dir() {
+        return template;
+    }
+    fs::create_dir_all(&parent).unwrap();
+    let building = tempfile::tempdir_in(&parent).unwrap();
+    let repo = building.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    configure(&repo);
+    fs::write(repo.join("README.md"), "README.md\n").unwrap();
+    git(&repo, &["add", "README.md"]);
+    git(&repo, &["commit", "-q", "-m", "add README.md"]);
+    // A local bare clone hardlinks the objects in one process; `init
+    // --bare` and a push start several (the push's receive-pack and
+    // pack-objects among them), 20–50 ms each on Windows.
+    git(building.path(), &["clone", "-q", "--bare", "repo", "origin.git"]);
+    let config = building.path().join("origin.git").join("config");
+    let text = fs::read_to_string(&config).unwrap();
+    let kept = text.split_inclusive('\n').scan(true, |keep, line| {
+        if line.starts_with('[') {
+            *keep = !line.starts_with("[remote ");
+        }
+        Some((*keep).then_some(line))
+    });
+    fs::write(&config, kept.flatten().collect::<String>()).unwrap();
+    append_to_config_file(&config, "[maintenance]\n\tauto = false\n");
+    let built = building.keep();
+    if fs::rename(&built, &template).is_err() {
+        assert!(template.is_dir(), "the template could not be put in place at {template:?}");
+        let _ = fs::remove_dir_all(&built);
+    }
+    // Another key belongs to an earlier build of this binary, which no
+    // longer exists at this path; an unfinished build is a racing process's.
+    for entry in fs::read_dir(&parent).unwrap().flatten() {
+        let name = entry.file_name();
+        if name.len() == 16 && name != template.file_name().unwrap() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    template
+}
+
+/// What `git update-ref <name> <commit>` writes in the repository at
+/// `git_dir` when no reflog is kept: one loose ref, which overrides a packed
+/// one.
+fn write_ref(git_dir: &Path, name: &str, commit: &str) {
+    let reference = git_dir.join(name);
+    fs::create_dir_all(reference.parent().unwrap()).unwrap();
+    fs::write(reference, format!("{commit}\n")).unwrap();
 }
 
 struct Fixture {
@@ -51,22 +176,19 @@ impl Fixture {
     /// `root/repo` on `main` with one commit; worktrees go in `root/wts`.
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let repo = root.path().join("repo");
-        fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-q", "-b", "main"]);
-        configure(&repo);
-        let this = Self { root };
-        this.commit(&this.repo(), "README.md");
-        this
+        copy_tree(&template().join("repo"), &root.path().join("repo"));
+        Self { root }
     }
 
-    /// [`Fixture::new`] plus a bare `origin` holding `main`.
+    /// [`Fixture::new`] plus a bare `origin` holding `main`, which `main`
+    /// tracks, as `git push -u origin main` leaves them.
     fn with_origin() -> Self {
         let this = Self::new();
-        let origin = this.origin();
-        git(this.root.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
-        git(&this.repo(), &["remote", "add", "origin", origin.to_str().unwrap()]);
-        git(&this.repo(), &["push", "-q", "-u", "origin", "main"]);
+        let (repo, origin) = (this.repo(), this.origin());
+        copy_tree(&template().join("origin.git"), &origin);
+        add_origin(&repo, origin.to_str().unwrap());
+        this.track("main", "main");
+        this.set_tracking_ref("main", &this.tip("main"));
         this
     }
 
@@ -82,13 +204,92 @@ impl Fixture {
         fs::write(dir.join(file), format!("{file}\n")).unwrap();
         git(dir, &["add", file]);
         git(dir, &["commit", "-q", "-m", &format!("add {file}")]);
-        git(dir, &["rev-parse", "HEAD"])
+        head_after_commit(dir)
     }
 
+    /// A new branch `branch` at `main`, checked out in `root/wts/<dir_name>`.
+    /// The branch is written first, which spares `worktree add -b` its
+    /// `git branch` child.
     fn add_worktree(&self, branch: &str, dir_name: &str) -> PathBuf {
         let path = self.root.path().join("wts").join(dir_name);
-        git(&self.repo(), &["worktree", "add", "-q", "-b", branch, path.to_str().unwrap(), "main"]);
+        write_ref(&self.repo().join(".git"), &format!("refs/heads/{branch}"), &self.tip("main"));
+        git(&self.repo(), &["worktree", "add", "-q", path.to_str().unwrap(), branch]);
         path
+    }
+
+    /// The commit `refs/heads/<branch>` names, read from its loose ref when
+    /// there is one.
+    fn tip(&self, branch: &str) -> String {
+        let loose = self.repo().join(".git").join("refs").join("heads").join(branch);
+        match fs::read_to_string(loose) {
+            Ok(sha) => sha.trim().to_string(),
+            Err(_) => git(&self.repo(), &["rev-parse", &format!("refs/heads/{branch}")]),
+        }
+    }
+
+    fn set_tracking_ref(&self, branch: &str, commit: &str) {
+        write_ref(&self.repo().join(".git"), &format!("refs/remotes/origin/{branch}"), commit);
+    }
+
+    /// What `git branch --set-upstream-to=origin/<upstream> <branch>` writes.
+    fn track(&self, branch: &str, upstream: &str) {
+        append_config(&self.repo(), &format!("[branch \"{branch}\"]\n\tremote = origin\n\tmerge = refs/heads/{upstream}\n"));
+    }
+
+    /// What `git push <bare> <commit>:refs/heads/<branch>` leaves in the
+    /// bare repository `bare`: the branch at `commit`, with the objects it
+    /// needs. It starts no process, where a push starts seven (receive-pack,
+    /// pack-objects, unpack-objects, rev-list, and for-each-ref among them).
+    /// `bare` receives every loose object it lacks, a superset of the
+    /// commit's; `wt` reads only a remote's refs. A repository with a pack
+    /// falls back to `git push`.
+    fn publish(&self, bare: &Path, commit: &str, branch: &str) {
+        let objects = self.repo().join(".git").join("objects");
+        let packed = fs::read_dir(objects.join("pack")).is_ok_and(|mut entries| entries.next().is_some());
+        if packed {
+            git(&self.repo(), &["push", "-q", "--force", bare.to_str().unwrap(), &format!("{commit}:refs/heads/{branch}")]);
+            return;
+        }
+        for directory in fs::read_dir(&objects).unwrap().map(|entry| entry.unwrap()) {
+            let name = directory.file_name();
+            if name.len() != 2 || !directory.file_type().unwrap().is_dir() {
+                continue;
+            }
+            for object in fs::read_dir(directory.path()).unwrap().map(|entry| entry.unwrap()) {
+                let target = bare.join("objects").join(&name).join(object.file_name());
+                if !target.exists() {
+                    fs::create_dir_all(target.parent().unwrap()).unwrap();
+                    fs::copy(object.path(), target).unwrap();
+                }
+            }
+        }
+        write_ref(bare, &format!("refs/heads/{branch}"), commit);
+    }
+
+    /// What `git push origin <commit>:refs/heads/<branch>` leaves behind:
+    /// [`Fixture::publish`] to origin, and the tracking ref `origin/<branch>`
+    /// moved, as origin's fetch refspec makes a push do.
+    fn push(&self, commit: &str, branch: &str) {
+        self.publish(&self.origin(), commit, branch);
+        self.set_tracking_ref(branch, commit);
+    }
+
+    /// `git push -u origin <branch>`: [`Fixture::push`] of the branch's tip,
+    /// tracked.
+    fn push_upstream(&self, branch: &str) {
+        self.push(&self.tip(branch), branch);
+        self.track(branch, branch);
+    }
+
+    /// Someone else's push to origin: origin's `refs/heads/<branch>` moved
+    /// to `commit` (an object origin has), or deleted, while this
+    /// repository's tracking ref stays where it was.
+    fn others_push(&self, branch: &str, commit: Option<&str>) {
+        let reference = format!("refs/heads/{branch}");
+        match commit {
+            Some(commit) => git(&self.origin(), &["update-ref", &reference, commit]),
+            None => git(&self.origin(), &["update-ref", "-d", &reference]),
+        };
     }
 
     fn wt(&self, cwd: &Path) -> assert_cmd::Command {
@@ -105,7 +306,7 @@ impl Fixture {
     }
 
     fn branch_exists(&self, branch: &str) -> bool {
-        Command::new("git")
+        worktree::git::command()
             .current_dir(self.repo())
             .args(["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])
             .status()
@@ -180,9 +381,12 @@ fn changed_included_copy_requires_force_and_preserves_state_on_refusal() {
     assert!(!target.exists());
 }
 
-#[test]
-fn same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes() {
-    for size in [11, 2_000_000] {
+mod same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes {
+    use super::*;
+
+    const ROWS: [usize; 2] = [11, 2_000_000];
+
+    fn check(size: usize) {
         let fixture = Fixture::new();
         fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
         fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
@@ -203,6 +407,23 @@ fn same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes() 
         assert_eq!(output.status.code(), Some(3), "size={size}: {}", String::from_utf8_lossy(&output.stderr));
         assert!(String::from_utf8_lossy(&output.stderr).contains("changed"));
         assert_eq!(fs::read(path).unwrap(), vec![b'b'; size]);
+    }
+
+    #[test]
+    fn small() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn large() {
+        check(ROWS[1]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 2);
     }
 }
 
@@ -514,12 +735,36 @@ fn example_clean_and_merged_removes_worktree_and_branch() {
     );
 }
 
+/// A clean, merged removal starts this many Git processes, each 20–50 ms
+/// on Windows; the lifecycle's share is pinned call by call in the library
+/// (`a_clean_removal_starts_only_its_deliberate_git_processes`). The rest
+/// are the report's: the file inventory and the three tier reads.
+/// Metadata (origin, refs, the common directory), the worktree listings, and
+/// the plain index reads are read in-process, except the last listing, which
+/// Git answers because the deleted checkout is prunable by then. `GIT_TRACE`
+/// logs one `built-in` line per process.
+#[test]
+fn a_clean_removal_starts_10_git_processes() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("chore/old-cleanup", "old-cleanup");
+    let trace = fixture.root.path().join("git-trace.log");
+
+    fixture.wt(&fixture.repo()).env("GIT_TRACE", &trace).args(["remove", "old-cleanup"]).assert().code(0);
+
+    assert!(!wt.exists());
+    let log = fs::read_to_string(&trace).unwrap();
+    let started: Vec<&str> = log.lines().filter(|line| line.contains("trace: built-in: git ")).collect();
+    assert_eq!(started.len(), 10, "{started:#?}");
+    let listings = started.iter().filter(|line| line.contains("built-in: git worktree list")).count();
+    assert_eq!(listings, 1, "{started:#?}");
+}
+
 #[test]
 fn example_pushed_without_a_pr_is_pretty_safe_and_names_the_origin_copy() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("feat/dark-fixes", "feat-dark-fixes");
     fixture.commit(&wt, "dark.txt");
-    git(&wt, &["push", "-q", "-u", "origin", "feat/dark-fixes"]);
+    fixture.push_upstream("feat/dark-fixes");
 
     fixture
         .wt(&fixture.repo())
@@ -606,7 +851,7 @@ fn example_all_three_flags_remove_worktree_branch_and_origin_branch() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("fix/wt-ux", "fix-wt-ux");
     fixture.commit(&wt, "fix.txt");
-    git(&wt, &["push", "-q", "-u", "origin", "fix/wt-ux"]);
+    fixture.push_upstream("fix/wt-ux");
     fs::write(wt.join("scratch.txt"), "x\n").unwrap();
 
     fixture
@@ -629,9 +874,12 @@ fn example_all_three_flags_remove_worktree_branch_and_origin_branch() {
 
 // --- Ignored entries, conflicts, and remote failures -------------------------
 
-#[test]
-fn ordinary_ignored_entries_are_disposable() {
-    for (ignore, make) in [(".env", ".env"), ("target/", "target/debug/app")] {
+mod ordinary_ignored_entries_are_disposable {
+    use super::*;
+
+    const ROWS: [(&str, &str); 2] = [(".env", ".env"), ("target/", "target/debug/app")];
+
+    fn check((ignore, make): (&str, &str)) {
         let fixture = Fixture::new();
         fs::write(fixture.repo().join(".gitignore"), format!("{ignore}\n")).unwrap();
         git(&fixture.repo(), &["add", ".gitignore"]);
@@ -648,6 +896,23 @@ fn ordinary_ignored_entries_are_disposable() {
             .code(0)
             .stderr(predicate::str::contains("Also deletes ignored files").not());
         assert!(!wt.exists(), "{ignore}");
+    }
+
+    #[test]
+    fn a_dotenv_file() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn a_target_directory() {
+        check(ROWS[1]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 2);
     }
 }
 
@@ -713,7 +978,7 @@ fn force_branch_on_a_dirty_worktree_without_force_worktree_is_a_conflict() {
 fn force_remote_with_an_unreachable_origin_removes_locally_then_exits_1() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("feat/x", "feat-x");
-    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    fixture.push_upstream("feat/x");
     git(&fixture.repo(), &["remote", "set-url", "origin", "/nonexistent/origin.git"]);
 
     fixture
@@ -749,7 +1014,7 @@ fn force_remote_keeps_a_branch_whose_only_other_copy_it_deletes() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    fixture.push_upstream("feat/x");
 
     fixture
         .wt(&fixture.repo())
@@ -769,11 +1034,13 @@ fn force_remote_keeps_a_branch_whose_only_other_copy_it_deletes() {
 fn feature_tracking_origin_main(fixture: &Fixture) -> (PathBuf, String) {
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let tip = fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "origin", "feat/x:main"]);
-    git(&wt, &["branch", "-q", "--set-upstream-to=origin/main", "feat/x"]);
-    git(&fixture.repo(), &["remote", "set-head", "origin", "main"]);
+    fixture.push(&tip, "main");
+    // What `git branch --set-upstream-to=origin/main feat/x` and `git remote
+    // set-head origin main` write, without a process each.
+    append_config(&fixture.repo(), "[branch \"feat/x\"]\n\tremote = origin\n\tmerge = refs/heads/main\n");
+    fs::write(fixture.repo().join(".git/refs/remotes/origin/HEAD"), "ref: refs/remotes/origin/main\n").unwrap();
     // A bare repository refuses to delete its HEAD branch by default.
-    git(&fixture.origin(), &["config", "receive.denyDeleteCurrent", "ignore"]);
+    append_to_config_file(&fixture.origin().join("config"), "[receive]\n\tdenyDeleteCurrent = ignore\n");
     (wt, tip)
 }
 
@@ -869,14 +1136,13 @@ fn the_report_names_ahead_behind_against_the_selected_target() {
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fixture.commit(&wt, "one.txt");
     fixture.commit(&wt, "two.txt");
-    // origin/main moves ahead of local main: it becomes the target.
-    git(&fixture.repo(), &["push", "-q", "origin", "feat/x:refs/heads/elsewhere"]);
-    let other = fixture.root.path().join("other");
-    git(fixture.root.path(), &["clone", "-q", fixture.origin().to_str().unwrap(), "other"]);
-    configure(&other);
-    fixture.commit(&other, "upstream.txt");
-    git(&other, &["push", "-q", "origin", "main"]);
-    git(&fixture.repo(), &["fetch", "-q", "origin"]);
+    // origin/main moves ahead of local main (someone else's commit): it
+    // becomes the target. One push writes both refs on origin and, through
+    // origin's fetch refspec, both tracking refs, as a fetch would.
+    let upstream = git(&fixture.repo(), &["commit-tree", "-p", "main", "-m", "upstream", "main^{tree}"]);
+    fixture.push(&fixture.tip("feat/x"), "elsewhere");
+    fixture.push(&upstream, "main");
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/main"]), upstream);
 
     fixture
         .wt(&fixture.repo())
@@ -896,7 +1162,7 @@ fn a_branch_merged_into_head_but_not_its_upstream_is_deleted() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("fix/ci-build", "ci-build");
     fixture.commit(&wt, "one.txt");
-    git(&wt, &["push", "-q", "-u", "origin", "fix/ci-build"]);
+    fixture.push_upstream("fix/ci-build");
     fixture.commit(&wt, "two.txt");
     git(&fixture.repo(), &["merge", "-q", "--no-ff", "-m", "merge", "fix/ci-build"]);
 
@@ -1212,14 +1478,12 @@ fn edit_keeping_size_and_mtime(path: &Path) -> Vec<u8> {
 /// modification time, to a large dirty file and to files inside an untracked
 /// nested repository, refuses the handoff and keeps the edit. The consumed
 /// token cannot then be replayed.
-#[test]
-fn a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit() {
-    for case in [
-        "a large untracked file",
-        "a large modified tracked file",
-        "a file inside an untracked nested repo",
-        "a large file inside an untracked nested repo",
-    ] {
+mod a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit {
+    use super::*;
+
+    const ROWS: [&str; 4] = ["a large untracked file", "a large modified tracked file", "a file inside an untracked nested repo", "a large file inside an untracked nested repo"];
+
+    fn check(case: &str) {
         let fixture = Fixture::new();
         let (wt, edited) = match case {
             "a large untracked file" => {
@@ -1272,6 +1536,33 @@ fn a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit() {
         assert!(fs::read(&edited).unwrap() == new_bytes, "{case}: a replay removes nothing");
         assert_nothing_removed(&fixture, &wt);
     }
+
+    #[test]
+    fn a_large_untracked_file() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn a_large_modified_tracked_file() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn a_file_inside_an_untracked_nested_repo() {
+        check(ROWS[2]);
+    }
+
+    #[test]
+    fn a_large_file_inside_an_untracked_nested_repo() {
+        check(ROWS[3]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 4);
+    }
 }
 
 /// Keeps `path` unreadable while alive: mode 000 on Unix, an exclusive open
@@ -1319,9 +1610,12 @@ impl Drop for Unreadable {
 /// A dirty file the second run cannot read, at the top level or inside an
 /// untracked nested repository, refuses the handoff (exit 4, as every
 /// `WorktreeError::Io` does) and keeps the file.
-#[test]
-fn an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept() {
-    for case in ["an untracked file", "a file inside an untracked nested repo"] {
+mod an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept {
+    use super::*;
+
+    const ROWS: [&str; 2] = ["an untracked file", "a file inside an untracked nested repo"];
+
+    fn check(case: &str) {
         let fixture = Fixture::new();
         let (wt, dirty, contents) = if case == "an untracked file" {
             let wt = fixture.add_worktree("feat/x", "feat-x");
@@ -1335,7 +1629,7 @@ fn an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept() {
 
         let Some(unreadable) = Unreadable::new(&dirty) else {
             eprintln!("skipping {case}: the file stays readable to this user");
-            continue;
+            return;
         };
         let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
         drop(unreadable);
@@ -1347,6 +1641,23 @@ fn an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept() {
         assert!(!stderr.contains("Removed"), "{case}: {stderr}");
         assert_eq!(fs::read_to_string(&dirty).unwrap(), contents, "{case}");
         assert_nothing_removed(&fixture, &wt);
+    }
+
+    #[test]
+    fn an_untracked_file() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn a_file_inside_an_untracked_nested_repo() {
+        check(ROWS[1]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 2);
     }
 }
 
@@ -1698,7 +2009,8 @@ fn a_branch_that_stops_being_safe_between_the_runs_refuses() {
 #[test]
 fn a_changed_remote_destination_between_the_runs_refuses_with_nothing_removed() {
     let fixture = Fixture::with_origin();
-    git(&fixture.repo(), &["push", "-q", "origin", "main:approved", "main:unapproved"]);
+    fixture.push(&fixture.tip("main"), "approved");
+    fixture.push(&fixture.tip("main"), "unapproved");
     let wt = fixture.add_worktree("feat/x", "feat-x");
     git(&fixture.repo(), &["branch", "--set-upstream-to=origin/approved", "feat/x"]);
     let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
@@ -1746,7 +2058,7 @@ fn a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip() {
     let old_main = git(&fixture.repo(), &["rev-parse", "main"]);
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let tip = fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "origin", "feat/x:main"]);
+    fixture.push(&tip, "main");
     assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/main"]), tip);
     assert_eq!(git(&fixture.repo(), &["rev-parse", "main"]), old_main, "local main is older");
 
@@ -1762,8 +2074,7 @@ fn a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip() {
         .clone();
     let (landing, token) = protocol(&first);
 
-    let pusher = pusher(&fixture);
-    git(&pusher, &["push", "-q", "--force", "origin", &format!("{old_main}:refs/heads/main")]);
+    fixture.others_push("main", Some(&old_main));
     assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/main"]), tip, "the tracking ref is unchanged");
 
     fixture
@@ -1783,8 +2094,8 @@ fn a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip() {
 fn a_branch_proved_only_by_origin_default_is_deleted_while_origin_still_has_it() {
     let fixture = Fixture::with_origin();
     let wt = fixture.add_worktree("feat/x", "feat-x");
-    fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "origin", "feat/x:main"]);
+    let tip = fixture.commit(&wt, "only-here.txt");
+    fixture.push(&tip, "main");
     let (landing, token) = first_run(&fixture, &wt, &[]);
 
     fixture
@@ -1802,7 +2113,7 @@ fn a_branch_proved_only_by_origin_default_is_deleted_while_origin_still_has_it()
 /// `--force-remote` while origin had it.
 fn approved_with_origin_branch_present(fixture: &Fixture) -> (PathBuf, PathBuf, String) {
     let wt = fixture.add_worktree("feat/x", "feat-x");
-    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    fixture.push_upstream("feat/x");
     let (landing, token) = first_run(fixture, &wt, &["--force-remote"]);
     (wt, landing, token)
 }
@@ -1812,8 +2123,7 @@ fn an_origin_branch_deleted_between_the_runs_refuses_with_nothing_removed() {
     let fixture = Fixture::with_origin();
     let (wt, landing, token) = approved_with_origin_branch_present(&fixture);
 
-    let pusher = pusher(&fixture);
-    git(&pusher, &["push", "-q", "origin", "--delete", "feat/x"]);
+    fixture.others_push("feat/x", None);
     fixture
         .wt(&landing)
         .args(["remove", "--handoff", &token])
@@ -1889,8 +2199,7 @@ fn an_origin_branch_created_between_the_runs_refuses_with_nothing_removed() {
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
 
-    let pusher = pusher(&fixture);
-    git(&pusher, &["push", "-q", "origin", "main:refs/heads/feat/x"]);
+    fixture.others_push("feat/x", Some(&fixture.tip("main")));
     fixture
         .wt(&landing)
         .args(["remove", "--handoff", &token])
@@ -1909,10 +2218,11 @@ fn an_origin_branch_created_between_the_runs_refuses_with_nothing_removed() {
 #[test]
 fn a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result() {
     let fixture = Fixture::with_origin();
-    let main = git(&fixture.repo(), &["rev-parse", "main"]);
+    // The base checkout is on `main`.
+    let main = head_after_commit(&fixture.repo());
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    fixture.push_upstream("feat/x");
     let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
 
     let hooks = fixture.root.path().join("hooks");
@@ -1929,7 +2239,9 @@ fn a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result()
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    git(&fixture.repo(), &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    // A Windows path's backslashes are escapes in a config file.
+    let hooks_path = hooks.to_str().unwrap().replace('\\', "\\\\");
+    append_config(&fixture.repo(), &format!("[core]\n\thooksPath = \"{hooks_path}\"\n"));
 
     let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2072,7 +2384,7 @@ fn is_pr_lookup(request_line: &str) -> bool {
 /// every HTTP request counted, and returns the second run's stderr after
 /// asserting it made none.
 fn second_run_without_network(fixture: &Fixture, wt: &Path, extra: &[&str]) -> String {
-    git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+    add_origin(&fixture.repo(), PROXIED_ORIGIN);
     let proxy = CountingProxy::start();
     let mut first = fixture.wt(wt);
     proxy.apply(&mut first);
@@ -2121,9 +2433,12 @@ fn an_explicitly_deleted_branch_makes_no_network_request_in_the_second_run() {
     assert!(!fixture.branch_exists("feat/x"));
 }
 
-#[test]
-fn automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_run() {
-    for proof in ["the local default branch", "another local branch", "a tag"] {
+mod automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_run {
+    use super::*;
+
+    const ROWS: [&str; 3] = ["the local default branch", "another local branch", "a tag"];
+
+    fn check(proof: &str) {
         let fixture = Fixture::new();
         let wt = fixture.add_worktree("feat/x", "feat-x");
         // The worktree starts at main's tip; the other proofs hold a commit
@@ -2137,6 +2452,28 @@ fn automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_ru
         let stderr = second_run_without_network(&fixture, &wt, &[]);
         assert!(stderr.contains("Deleted branch feat/x"), "{proof}: {stderr}");
         assert!(!fixture.branch_exists("feat/x"), "{proof}");
+    }
+
+    #[test]
+    fn the_local_default_branch() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn another_local_branch() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn a_tag() {
+        check(ROWS[2]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 3);
     }
 }
 
@@ -2161,11 +2498,14 @@ fn merged_pr_list(head: &str) -> String {
 /// Only a merged PR holds the tip, so the second run must ask the provider
 /// again: it deletes while the PR still answers, and refuses before
 /// removing anything once the PR is gone or the provider does not answer.
-#[test]
-fn automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_run() {
-    for (second_answer, expected_code) in [("the same PR", 0), ("no PR", 3), ("no answer", 3)] {
+mod automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_run {
+    use super::*;
+
+    const ROWS: [(&str, i32); 3] = [("the same PR", 0), ("no PR", 3), ("no answer", 3)];
+
+    fn check((second_answer, expected_code): (&str, i32)) {
         let fixture = Fixture::new();
-        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        add_origin(&fixture.repo(), PROXIED_ORIGIN);
         let wt = fixture.add_worktree("feat/x", "feat-x");
         let tip = fixture.commit(&wt, "only-here.txt");
         let proxy = CountingProxy::start();
@@ -2211,6 +2551,28 @@ fn automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_
             assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
         }
     }
+
+    #[test]
+    fn the_same_pr() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn no_pr() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn no_answer() {
+        check(ROWS[2]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 3);
+    }
 }
 
 /// `feat/x` has a commit of its own that only `origin/backup` holds (not the
@@ -2219,7 +2581,7 @@ fn automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_
 fn approved_on_another_origin_branch(fixture: &Fixture) -> (PathBuf, PathBuf, String, String) {
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let tip = fixture.commit(&wt, "only-here.txt");
-    git(&wt, &["push", "-q", "origin", "feat/x:refs/heads/backup"]);
+    fixture.push(&tip, "backup");
     assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip);
     let out = fixture
         .wt(&wt)
@@ -2237,19 +2599,21 @@ fn approved_on_another_origin_branch(fixture: &Fixture) -> (PathBuf, PathBuf, St
 
 /// The last remote protection is taken away on origin itself; the tracking
 /// ref still holds the tip, so only a live check can notice.
-#[test]
-fn a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it() {
-    for change in ["unchanged", "deleted on origin", "moved on origin"] {
+mod a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it {
+    use super::*;
+
+    const ROWS: [&str; 3] = ["unchanged", "deleted on origin", "moved on origin"];
+
+    fn check(change: &str) {
         let fixture = Fixture::with_origin();
         let old_main = git(&fixture.repo(), &["rev-parse", "main"]);
         let (wt, landing, token, tip) = approved_on_another_origin_branch(&fixture);
 
         if change != "unchanged" {
-            let pusher = pusher(&fixture);
             match change {
-                "deleted on origin" => git(&pusher, &["push", "-q", "origin", "--delete", "backup"]),
-                _ => git(&pusher, &["push", "-q", "--force", "origin", &format!("{old_main}:refs/heads/backup")]),
-            };
+                "deleted on origin" => fixture.others_push("backup", None),
+                _ => fixture.others_push("backup", Some(&old_main)),
+            }
             assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip, "{change}");
         }
 
@@ -2266,6 +2630,28 @@ fn a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it() 
             assert_nothing_removed(&fixture, &wt);
             assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip, "{change}");
         }
+    }
+
+    #[test]
+    fn unchanged() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn deleted_on_origin() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn moved_on_origin() {
+        check(ROWS[2]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 3);
     }
 }
 
@@ -2301,15 +2687,14 @@ fn automatic_deletion_proved_only_by_another_origin_branch_asks_origin_again_in_
 /// answer, so every row refuses before removing anything. The preflight is
 /// asserted as "at least one git request" because git's smart-HTTP client
 /// may open more than one connection for one `ls-remote`.
-#[test]
-fn a_force_remote_second_run_makes_only_the_preflight_request() {
-    for (approval, extra) in [
-        ("keep", &["--force-remote"][..]),
-        ("explicit delete", &["--force-remote", "--force-branch"][..]),
-        ("tag proof", &["--force-remote"][..]),
-    ] {
+mod a_force_remote_second_run_makes_only_the_preflight_request {
+    use super::*;
+
+    const ROWS: [(&str, &[&str]); 3] = [("keep", &["--force-remote"]), ("explicit delete", &["--force-remote", "--force-branch"]), ("tag proof", &["--force-remote"])];
+
+    fn check((approval, extra): (&str, &[&str])) {
         let fixture = Fixture::new();
-        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        add_origin(&fixture.repo(), PROXIED_ORIGIN);
         let wt = fixture.add_worktree("feat/x", "feat-x");
         let tip = fixture.commit(&wt, "only-here.txt");
         if approval == "tag proof" {
@@ -2345,6 +2730,28 @@ fn a_force_remote_second_run_makes_only_the_preflight_request() {
         assert!(stderr.contains("could not be reached"), "{approval}: {stderr}");
         assert!(!stderr.contains("Removed"), "{approval}: {stderr}");
         assert_nothing_removed(&fixture, &wt);
+    }
+
+    #[test]
+    fn keep() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn explicit_delete() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn tag_proof() {
+        check(ROWS[2]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 3);
     }
 }
 
@@ -2382,12 +2789,13 @@ impl TwoRemotes {
 
     fn build(fixture: Fixture, approved: PathBuf, other: PathBuf, origin: &str) -> Self {
         let wt = fixture.add_worktree("feat/x", "feat-x");
+        // Each holds `main` and `feat/x`, as a bare clone of the repository
+        // would: the template's clone holds `main`, and `feat/x` is `main`.
         for bare in [&approved, &other] {
-            let bare = bare.to_str().unwrap();
-            git(fixture.root.path(), &["init", "-q", "--bare", "-b", "main", bare]);
-            git(&fixture.repo(), &["push", "-q", bare, "main", "feat/x"]);
+            copy_tree(&template().join("origin.git"), bare);
+            write_ref(bare, "refs/heads/feat/x", &fixture.tip("main"));
         }
-        git(&fixture.repo(), &["remote", "add", "origin", origin]);
+        add_origin(&fixture.repo(), origin);
         Self {
             fixture,
             wt,
@@ -2447,11 +2855,13 @@ fn a_changed_origin_push_url_between_the_runs_refuses_with_nothing_removed() {
 fn a_separate_push_url_is_both_observed_and_deleted_from() {
     let remotes = TwoRemotes::new();
     let repo = remotes.fixture.repo();
-    git(&repo, &["checkout", "-q", "-b", "side"]);
-    let side = remotes.fixture.commit(&repo, "side.txt");
-    git(&repo, &["checkout", "-q", "main"]);
-    git(&repo, &["push", "-q", "--force", TwoRemotes::url(&remotes.approved), "side:feat/x"]);
-    git(&repo, &["remote", "set-url", "--push", "origin", TwoRemotes::url(&remotes.other)]);
+    // A commit on a local branch `side` only, made without a checkout.
+    let side = git(&repo, &["commit-tree", "-p", "main", "-m", "side", "main^{tree}"]);
+    write_ref(&repo.join(".git"), "refs/heads/side", &side);
+    remotes.fixture.publish(&remotes.approved, &side, "feat/x");
+    // What `git remote set-url --push origin <other>` writes.
+    let other = TwoRemotes::url(&remotes.other).replace('\\', "\\\\");
+    append_config(&repo, &format!("[remote \"origin\"]\n\tpushurl = \"{other}\"\n"));
 
     let out = remotes
         .fixture
@@ -3018,9 +3428,12 @@ fn a_link_broken_between_the_runs_refuses_without_another_repair() {
     assert!(fixture.branch_exists("feat/x"));
 }
 
-#[test]
-fn a_link_redirected_between_the_runs_refuses_with_nothing_removed() {
-    for repaired_first in [true, false] {
+mod a_link_redirected_between_the_runs_refuses_with_nothing_removed {
+    use super::*;
+
+    const ROWS: [bool; 2] = [true, false];
+
+    fn check(repaired_first: bool) {
         let fixture = Fixture::new();
         let wt = add_nested_worktree(&fixture, "feat/x", "feat-x");
         let other = fixture.add_worktree("feat/y", "feat-y");
@@ -3038,6 +3451,23 @@ fn a_link_redirected_between_the_runs_refuses_with_nothing_removed() {
         assert!(wt.join("README.md").exists());
         assert!(other.join("README.md").exists());
         assert!(fixture.branch_exists("feat/x") && fixture.branch_exists("feat/y"));
+    }
+
+    #[test]
+    fn repaired_first() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn healthy_first() {
+        check(ROWS[1]);
+    }
+
+    /// One test per row of `ROWS` (test-speed.md #2), so a row added
+    /// there fails here until it has its own test above.
+    #[test]
+    fn every_row_has_a_test() {
+        assert_eq!(ROWS.len(), 2);
     }
 }
 
@@ -3398,7 +3828,15 @@ fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
     fs::write(wt.join("README.md"), "staged after the report\n").unwrap();
     let path = one_shot_git_shim(&fixture, "ls-files --stage", &format!("\"$real\" -C '{}' add README.md", wt.display()));
 
-    let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "feat-x", "--force-worktree"]).output().unwrap();
+    // The report's index read is a Git call again, so the shim fires right
+    // after it rather than at the lifecycle's binding.
+    let output = fixture
+        .wt(&fixture.repo())
+        .env("PATH", path)
+        .env(worktree::git::TEST_LIST_THROUGH_GIT_VAR, "1")
+        .args(["remove", "feat-x", "--force-worktree"])
+        .output()
+        .unwrap();
 
     let stderr = stderr_of(&output);
     assert_eq!(output.status.code(), Some(3), "{stderr}");
@@ -3412,3 +3850,4 @@ fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
     fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"]).assert().code(0);
     assert!(!wt.exists());
 }
+

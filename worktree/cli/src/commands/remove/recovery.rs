@@ -5,6 +5,10 @@
 //! ([`inspection_markup`]), and a name that matches a pending removal and
 //! another worktree ([`ambiguous_markup`]).
 //!
+//! The stopped and pending reports also say what each process check could
+//! not see ([`coverage_note`]), since a removal goes ahead despite limited
+//! discovery; a check that saw everything adds nothing.
+//!
 //! Every builder returns Prose markup, one line per `\n`, for stderr. Paths,
 //! names, and errors come from the filesystem, Git, and other processes, so
 //! each is shown through [`visible`]. The full detail is in the saved
@@ -16,14 +20,15 @@ use sniff::filesystem::query::NativeString;
 use worktree::WorktreeError;
 use worktree::remove::lifecycle::{Candidate, ExitClass, Finished, Inspection, Presence, Refusal, Resolution};
 use worktree::remove::outcome::{
-    ActivityKind, ActivityLocation, BranchState, BranchTarget, EntryCounts, OperationReport, OriginalState,
-    QuarantineState, RegistrationState, RemovalOutcome, ReportNote,
+    ActivityKind, ActivityLocation, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult, DiscoveryRun,
+    EntryCounts, OperationReport, OriginalState, QuarantineState, RegistrationState, RemovalOutcome, ReportNote,
 };
+use worktree::remove::usage::CoverageSummary;
 use worktree::remove::quarantine::association::MoveErrorClass;
 use worktree::remove::recovery::store::STORE_DIR;
 
 use super::typed_command;
-use super::usage::{usage_refusal, visible};
+use super::usage::{coverage_note, usage_refusal, visible};
 
 /// Observed changes listed before the rest are counted.
 pub const ACTIVITY_LIMIT: usize = 3;
@@ -77,7 +82,7 @@ pub fn refusal_markup(refusal: &Refusal, display_name: &str, name: &str) -> Stri
 
 /// The report for a removal that changed something and did not finish: both
 /// locations, what was deleted and what is left, observed activity, Git's
-/// registration, each branch, and how to retry. `branch` is the worktree's
+/// registration, each branch, limited process checks, and how to retry. `branch` is the worktree's
 /// branch, reported kept when no step touched it; `base` is the base
 /// checkout a retry runs from.
 pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branch: Option<&str>, base: &Path) -> String {
@@ -114,6 +119,7 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
                 .to_string(),
         );
     }
+    lines.extend(discovery_lines(report));
 
     lines.push(String::new());
     if report.outcome != RemovalOutcome::Removed {
@@ -166,6 +172,44 @@ fn location_lines(report: &OperationReport) -> Vec<String> {
         lines.push(format!("<dim>…and {omitted} more changes, listed in the saved report</dim>"));
     }
     lines
+}
+
+/// One line per process check whose coverage was limited: the last check
+/// before a mutation (from an earlier attempt when this one made none), and
+/// each diagnostic check after this stop. A check that saw everything adds
+/// nothing.
+fn discovery_lines(report: &OperationReport) -> Vec<String> {
+    let current = report.discovery.iter().any(|run| run.purpose == DiscoveryPurpose::Preflight);
+    let earlier = report
+        .earlier_attempts
+        .iter()
+        .rev()
+        .flat_map(|attempt| attempt.discovery.iter().rev())
+        .find(|run| run.purpose == DiscoveryPurpose::Preflight)
+        .filter(|_| !current);
+    earlier
+        .map(|run| (run, " (earlier attempt)"))
+        .into_iter()
+        .chain(report.discovery.iter().map(|run| (run, "")))
+        .filter_map(|(run, attempt)| {
+            let context = match run.purpose {
+                DiscoveryPurpose::Preflight if run.path == report.original => format!("Before the move{attempt}"),
+                DiscoveryPurpose::Preflight => format!("Before deleting from the moved directory{attempt}"),
+                DiscoveryPurpose::Diagnostic => format!("After the stop, at {}", native(&run.path)),
+                // The recheck after it is the decisive preflight.
+                DiscoveryPurpose::WindowsSearchHold => return None,
+            };
+            run_note(run).map(|note| format!("<dim>{context}: {note}</dim>"))
+        })
+        .collect()
+}
+
+/// [`coverage_note`] for `run`, or why the query itself failed.
+fn run_note(run: &DiscoveryRun) -> Option<String> {
+    match &run.result {
+        DiscoveryResult::Report(report) => coverage_note(&CoverageSummary::of(report)),
+        DiscoveryResult::Failed { message, .. } => Some(format!("Discovery could not run ({}).", first_line(message))),
+    }
 }
 
 /// The first non-empty line of `error`, shown safely; Git's errors run to
@@ -292,8 +336,8 @@ fn clock(at_ms: u64) -> String {
     format!("{:02}:{:02}:{:02} UTC", seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 
-/// Why a pending removal cannot be continued, what is where, and the manual
-/// way out. Nothing was changed by the run that prints it.
+/// Why a pending removal cannot be continued, what is where, the limits of
+/// the saved process check, and the manual way out. Nothing was changed by the run that prints it.
 pub fn inspection_markup(inspection: &Inspection, name: &str) -> String {
     let record = &inspection.record;
     let mut lines = vec![
@@ -315,6 +359,9 @@ pub fn inspection_markup(inspection: &Inspection, name: &str) -> String {
     }
     if let Some(retained) = &inspection.retained {
         lines.push(format!("Remaining: {} in the moved directory", entries(retained.len() as u64)));
+    }
+    if let Some(note) = coverage_note(&CoverageSummary::of(&record.discovery)) {
+        lines.push(format!("<dim>Saved from before the move: {note}</dim>"));
     }
     lines.push(String::new());
     lines.push("<b>Nothing was deleted or repaired by this run.</b>".to_string());

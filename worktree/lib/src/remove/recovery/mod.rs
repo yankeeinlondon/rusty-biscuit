@@ -6,9 +6,13 @@
 //! | File | Written | Kept after completion |
 //! | --- | --- | --- |
 //! | `record.json` ([`record`]) | before any mutation; rewritten as phases finish | yes, marked completed |
-//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | no |
-//! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, the journal so far is kept under the next free `<n>` | no |
-//! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes | yes |
+//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | only when the final report could not list its entries |
+//! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, a copy of the journal so far is kept under the next free `<n>` | as `journal.jsonl` |
+//! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes; a retry carries the earlier attempt's report into its own | yes |
+//!
+//! Every attempt's journal counts toward the report: the archives are read
+//! with the current journal (see [`store::Operation::journal_entries`]), and
+//! the completed report lists every entry before the journals are deleted.
 //!
 //! The store lives in the common Git directory, outside both checkout paths
 //! and outside the target's own worktree record, which removal deletes.
@@ -26,6 +30,16 @@
 //! - `record.json` and `report.json` are replaced by write-temp, `fsync`,
 //!   rename, then `fsync` of the directory, so a reader sees the old or the
 //!   new record, never a torn one.
+//! - A retry replaces `journal.jsonl` without ever leaving the operation
+//!   without a readable journal: it first copies the old journal durably to
+//!   `journal-<n>.jsonl` (reusing the newest archive when a stopped retry
+//!   already wrote the same bytes), builds and flushes the new journal under a
+//!   hidden name, then renames it over `journal.jsonl`. A crash or failed write
+//!   before that rename leaves the previous attempt's journal in place, so
+//!   recovery reads it as before and nothing new is authorized; at worst a
+//!   hidden temporary file is left beside it, which nothing reads.
+//! - A discarded operation's directory is renamed to a hidden name before it
+//!   is deleted, so a crash part-way never leaves a record without its journal.
 //! - The journal is append-only. A batch's intent is flushed before any of
 //!   its entries is unlinked, and its result is flushed after. A crash between
 //!   the two leaves an intent without a result; recovery reports an absent
@@ -33,7 +47,8 @@
 //!   A torn final line is a write the crash interrupted and is ignored.
 //! - On Windows a directory cannot be opened to `fsync` it, so the rename of
 //!   a replaced file is durable only once the filesystem flushes its
-//!   metadata.
+//!   metadata. Std's rename replaces an existing file there as on Unix, which
+//!   every replacement above relies on; each replaced file is closed first.
 
 pub mod journal;
 pub mod lock;

@@ -11,18 +11,20 @@ use serde::{Deserialize, Serialize};
 use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 
 use super::recovery::OperationId;
+use super::recovery::journal::JournalEntry;
 
 /// Version of the [`OperationReport`] serialization. Bump it with any change
 /// to the persisted shape.
-pub const REPORT_VERSION: u32 = 2;
+pub const REPORT_VERSION: u32 = 4;
 
 /// The most activity observations a report lists. Later ones are counted in
 /// [`Truncation::activity_omitted`]; the deletion journal itself is never
 /// truncated.
 pub const MAX_REPORTED_ACTIVITY: usize = 200;
 
-/// The most deleted entries a report names. The journal summary's counts
-/// stay exact.
+/// The most deleted entries [`OperationReport::deleted`] names. The journal
+/// summary's counts stay exact, and [`OperationReport::journal_entries`]
+/// lists every entry.
 pub const MAX_REPORTED_DELETED: usize = 200;
 
 /// The most retained entries a report names. The count in
@@ -140,6 +142,9 @@ pub enum DiscoveryPurpose {
     Preflight,
     /// A query after a stop, to name processes at either location.
     Diagnostic,
+    /// A first preflight query that found only Windows Search holding files;
+    /// the `preflight` run after it is the one recheck that decided.
+    WindowsSearchHold,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -251,7 +256,8 @@ pub struct BranchOutcome {
     pub state: BranchState,
 }
 
-/// Lists cut short in this report. The journal and the counts stay complete.
+/// Lists cut short in this report. The counts and
+/// [`OperationReport::journal_entries`] stay complete.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Truncation {
@@ -271,7 +277,29 @@ pub enum ReportNote {
     ConcurrentWriteLimit,
 }
 
-/// Everything known about one removal attempt; persisted as `report.json`.
+/// What an earlier attempt of the same operation reported when it stopped,
+/// carried into every later report so a retry never replaces it. Its
+/// deletions are in [`OperationReport::journal_entries`], not here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EarlierAttempt {
+    pub outcome: RemovalOutcome,
+    pub original_state: OriginalState,
+    pub quarantine: Option<QuarantineReport>,
+    pub registration: RegistrationState,
+    pub timeline: Vec<TimelineEvent>,
+    pub discovery: Vec<DiscoveryRun>,
+    pub activity: Vec<ObservedActivity>,
+    /// Activity past [`MAX_REPORTED_ACTIVITY`] that attempt counted.
+    pub activity_omitted: u64,
+    pub branches: Vec<BranchOutcome>,
+    pub errors: Vec<String>,
+}
+
+/// Everything known about one removal operation; persisted as
+/// `report.json`. The top-level fields describe the latest attempt; earlier
+/// attempts are in [`OperationReport::earlier_attempts`], and the journal
+/// counts and entries cover every attempt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationReport {
@@ -287,6 +315,10 @@ pub struct OperationReport {
     pub discovery: Vec<DiscoveryRun>,
     pub activity: Vec<ObservedActivity>,
     pub journal: JournalSummary,
+    /// Every entry any attempt's journal planned, with its resolved state;
+    /// never truncated. The journals themselves are deleted once completion
+    /// saves this list.
+    pub journal_entries: Vec<JournalEntry>,
     /// Up to [`MAX_REPORTED_DELETED`] entries this operation deleted, as
     /// absolute paths.
     pub deleted: Vec<NativeString>,
@@ -294,6 +326,8 @@ pub struct OperationReport {
     pub branches: Vec<BranchOutcome>,
     pub errors: Vec<String>,
     pub truncation: Truncation,
+    /// Earlier attempts that saved a report, oldest first.
+    pub earlier_attempts: Vec<EarlierAttempt>,
 }
 
 impl OperationReport {
@@ -311,12 +345,32 @@ impl OperationReport {
             discovery: Vec::new(),
             activity: Vec::new(),
             journal: JournalSummary::default(),
+            journal_entries: Vec::new(),
             deleted: Vec::new(),
             notes: Vec::new(),
             branches: Vec::new(),
             errors: Vec::new(),
             truncation: Truncation::default(),
+            earlier_attempts: Vec::new(),
         }
+    }
+
+    /// Carries `earlier`, the report of the attempt this one resumes, into
+    /// [`OperationReport::earlier_attempts`] after the attempts it carried.
+    pub fn continue_from(&mut self, earlier: OperationReport) {
+        self.earlier_attempts.extend(earlier.earlier_attempts);
+        self.earlier_attempts.push(EarlierAttempt {
+            outcome: earlier.outcome,
+            original_state: earlier.original_state,
+            quarantine: earlier.quarantine,
+            registration: earlier.registration,
+            timeline: earlier.timeline,
+            discovery: earlier.discovery,
+            activity: earlier.activity,
+            activity_omitted: earlier.truncation.activity_omitted,
+            branches: earlier.branches,
+            errors: earlier.errors,
+        });
     }
 
     /// Records `activity`, counting it as omitted past

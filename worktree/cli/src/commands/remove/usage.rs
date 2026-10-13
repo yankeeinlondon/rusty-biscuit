@@ -1,6 +1,7 @@
 //! The refusal `wt remove` prints when another process is using the checkout
 //! ([`UsageRefusal`]), or when the usage check could not verify it. Both are
-//! exit 3: nothing was moved, and no flag overrides the refusal.
+//! exit 3: nothing was moved, and no flag overrides the refusal. A refusal
+//! that followed the usage check's one Windows Search recheck says so.
 //!
 //! Names and paths come from other processes and the filesystem, so every
 //! one is shown with control characters escaped and Prose markup escaped.
@@ -50,6 +51,13 @@ pub fn refusal_markup(refusal: &UsageRefusal, display_name: &str, name: &str) ->
                 but removal pauses whenever usage is seen.</dim>"
                     .to_string(),
             );
+            if let Some(search) = &in_use.search_recheck {
+                lines.push(format!(
+                    "<dim>The first check found only Windows Search, so <i>wt</i> waited {} ms and checked once more; \
+                    the processes above are from that second check.</dim>",
+                    search.waited.as_millis()
+                ));
+            }
             if let Some(note) = coverage_note(&in_use.coverage) {
                 lines.push(format!("<dim>{note}</dim>"));
             }

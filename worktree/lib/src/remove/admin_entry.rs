@@ -112,9 +112,13 @@ fn display_list(paths: &[PathBuf]) -> String {
     paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", ")
 }
 
-/// This repository's common Git directory, as an absolute path, from Git
-/// itself (the base checkout's `.git` may be a file).
+/// This repository's common Git directory, as an absolute path (the base
+/// checkout's `.git` may be a file). Read in-process; Git runs only when
+/// that read can't open the repository.
 pub fn common_git_dir(base: &Path) -> Result<PathBuf, WorktreeError> {
+    if let Some(common) = crate::git_metadata::common_dir(base) {
+        return Ok(common);
+    }
     git_from(base, base, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).map(PathBuf::from)
 }
 
@@ -304,7 +308,7 @@ mod tests {
         let base = dir.path().join("base");
         let separate = dir.path().join("separate.git");
         let git = |cwd: &Path, args: &[&str]| {
-            let status = std::process::Command::new("git").current_dir(cwd).args(args).output().unwrap();
+            let status = crate::git::command().current_dir(cwd).args(args).output().unwrap();
             assert!(status.status.success(), "{args:?}: {}", String::from_utf8_lossy(&status.stderr));
         };
         fs::create_dir(&base).unwrap();

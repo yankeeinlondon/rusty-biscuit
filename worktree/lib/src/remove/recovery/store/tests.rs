@@ -7,7 +7,8 @@ use tempfile::TempDir;
 use super::*;
 use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::outcome::RemovalOutcome;
-use crate::remove::recovery::journal::{EntryKind, EntryState, PlannedEntry, ResultState};
+use crate::remove::recovery::journal::{EntryKind, EntryState, JournalEntry, PlannedEntry, ResultState};
+use super::fault::{self, Fault};
 use crate::remove::recovery::record::{BranchBinding, IntendedAction, RECORD_VERSION};
 
 struct Fixture {
@@ -275,7 +276,7 @@ fn completion_keeps_the_report_drops_the_journal_and_never_authorizes_again() {
     let dir = op.dir().to_path_buf();
     let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
 
-    assert_eq!(op.complete(&report).unwrap(), Vec::new());
+    assert_eq!(op.complete(&report, true).unwrap(), Vec::new());
     let saved_report: OperationReport = serde_json::from_slice(&fs::read(dir.join(REPORT_FILE)).unwrap()).unwrap();
     assert_eq!(saved_report, report);
     assert!(!dir.join(JOURNAL_FILE).exists());
@@ -299,7 +300,7 @@ fn a_journal_that_cannot_be_cleared_is_a_warning_after_completion() {
     fs::write(journal.join("keep"), b"x").unwrap();
 
     let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
-    let warnings = op.complete(&report).unwrap();
+    let warnings = op.complete(&report, true).unwrap();
     assert!(matches!(&warnings[..], [BookkeepingWarning::JournalNotCleared { path, .. }] if *path == journal));
     assert!(f.store.pending().unwrap().is_empty());
 }
@@ -649,4 +650,175 @@ fn begin_refuses_an_inventory_of_another_checkout() {
     let other = Arc::new(DeletionInventory::listing(identity(4), &["a"]));
     assert!(matches!(f.store.begin(lock, saved.clone(), other), Err(StoreError::InventoryMismatch)));
     assert!(f.store.pending().unwrap().is_empty(), "nothing was saved");
+}
+
+// ---- Replacing the journal on retry ----------------------------------------
+
+/// An operation that deleted `a` and stopped, with its lock released: what a
+/// retry finds.
+fn stopped_after_deleting_a(f: &Fixture) -> (RecoveryRecord, Vec<u8>) {
+    let saved = record(f, "wt1");
+    let mut op = begin(f, saved.clone());
+    op.journal().begin_batch(vec![file("a")]).unwrap();
+    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
+    let journal = fs::read(op.dir().join(JOURNAL_FILE)).unwrap();
+    drop(op);
+    (saved, journal)
+}
+
+fn deleted_a() -> Vec<JournalEntry> {
+    vec![JournalEntry { attempt: 1, batch: 1, path: NativeString::from("a"), kind: EntryKind::File, state: EntryState::Deleted }]
+}
+
+fn reopen(f: &Fixture, saved: &RecoveryRecord) -> Result<Operation, StoreError> {
+    let lock = f.store.lock(&saved.repository).unwrap();
+    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory())
+}
+
+/// Every shape `reopen` can leave when it stops part-way: the previous
+/// attempt stays recoverable through the public API, its journal is
+/// unchanged, and no operation (the only thing that journals a deletion)
+/// is returned. A later retry then reopens normally.
+#[test]
+fn a_reopen_stopped_at_any_step_leaves_the_previous_attempt_recoverable() {
+    type Write = fn(&[u8]) -> Vec<u8>;
+    let header_only: Write = |journal| journal[..=journal.iter().position(|b| *b == b'\n').unwrap()].to_vec();
+    let partial_inventory: Write = |journal| {
+        let header = journal.iter().position(|b| *b == b'\n').unwrap() + 1;
+        journal[..header + (journal.len() - header) / 4].to_vec()
+    };
+    let cases: [(&str, ReopenStep, Fault, Option<Write>); 7] = [
+        ("after archiving", ReopenStep::Archived, Fault::Crash, None),
+        ("empty replacement", ReopenStep::Created, Fault::Crash, None),
+        ("header only", ReopenStep::Created, Fault::Crash, Some(header_only)),
+        ("header and part of the inventory", ReopenStep::Created, Fault::Crash, Some(partial_inventory)),
+        ("complete but unpublished", ReopenStep::Initialized, Fault::Crash, None),
+        ("initialization write failure", ReopenStep::Created, Fault::Fail, Some(header_only)),
+        ("publication failure", ReopenStep::Initialized, Fault::Fail, None),
+    ];
+    for (name, at, fault, write) in cases {
+        let f = fixture();
+        let (saved, previous) = stopped_after_deleting_a(&f);
+        let dir = f.store.operation_dir(&saved.operation_id);
+        // The replacement repeats the previous journal's header and
+        // inventory: same operation, same inventory.
+        let written = write.map(|write| write(&previous));
+        let injected = fault::inject(move |step, path| {
+            if step != at {
+                return None;
+            }
+            if let Some(bytes) = &written {
+                fs::write(path, bytes).unwrap();
+            }
+            Some(fault)
+        });
+        let outcome = reopen(&f, &saved);
+        assert!(outcome.is_err(), "{name}: the stopped reopen returned an operation");
+        drop(outcome);
+        drop(injected);
+
+        assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous, "{name}: the journal was replaced");
+        assert_eq!(f.store.pending().unwrap().len(), 1, "{name}");
+        let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
+        assert_eq!(recovered.record, saved, "{name}");
+        assert_eq!(recovered.entries, deleted_a(), "{name}: the confirmed deletion is still recoverable");
+        if fault == Fault::Fail {
+            let hidden = fs::read_dir(&dir).unwrap().filter(|entry| entry.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp"));
+            assert_eq!(hidden.count(), 0, "{name}: a failed reopen removes its replacement");
+        }
+
+        // The retry after the stop archives the same journal once, not twice.
+        drop(reopen(&f, &saved).unwrap());
+        assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous, "{name}");
+        assert!(!dir.join("journal-2.jsonl").exists(), "{name}: the same journal was archived twice");
+        let resumed = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
+        assert_eq!(resumed.entries, deleted_a(), "{name}: the new attempt starts its own journal and the earlier deletion is kept");
+    }
+}
+
+/// The clean control: a reopen that runs to the end keeps the previous
+/// journal as `journal-1.jsonl` and publishes a new one holding only the
+/// fresh inventory, owner-only like every store file.
+#[test]
+fn a_completed_reopen_archives_the_previous_journal_and_publishes_a_new_one() {
+    let f = fixture();
+    let (saved, previous) = stopped_after_deleting_a(&f);
+    let mut op = reopen(&f, &saved).unwrap();
+    let dir = op.dir().to_path_buf();
+    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
+    #[cfg(unix)]
+    assert_eq!(mode(&dir.join("journal-1.jsonl")), 0o600);
+    op.journal().begin_batch(vec![file("d/a")]).unwrap();
+    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
+    drop(op);
+    let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
+    let deleted_d_a = JournalEntry { attempt: 2, batch: 1, path: NativeString::from("d/a"), kind: EntryKind::File, state: EntryState::Deleted };
+    assert_eq!(recovered.entries, [deleted_a(), vec![deleted_d_a]].concat());
+    let names: BTreeSet<String> = fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, BTreeSet::from([RECORD_FILE.into(), JOURNAL_FILE.into(), "journal-1.jsonl".into()]));
+}
+
+/// Every attempt's journal is replayed. An earlier attempt keeps what was
+/// gone when the next one began: its deletions, and an unconfirmed entry the
+/// next inventory no longer lists, as uncertain. What the next inventory
+/// lists (kept, or unconfirmed but still present) is left to the attempt
+/// that resolves it, so nothing is counted twice.
+#[test]
+fn earlier_attempts_keep_their_deletions_and_uncertainty_without_double_counting() {
+    let f = fixture();
+    let saved = record(&f, "wt1");
+    let mut op = begin(&f, saved.clone());
+    op.journal().begin_batch(vec![file("e/x")]).unwrap();
+    op.journal().finish_batch(&[ResultState::Kept]).unwrap();
+    op.journal().begin_batch(vec![file("a")]).unwrap();
+    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
+    // A crash between unlinking `d/a` and writing the batch's results.
+    op.journal().begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
+    drop(op);
+
+    let mut survivors = inventory_value();
+    survivors["entries"].as_array_mut().unwrap().retain(|entry| !["a", "d/a"].contains(&entry["path"]["display"].as_str().unwrap()));
+    let lock = f.store.lock(&saved.repository).unwrap();
+    let survivors: DeletionInventory = serde_json::from_value(survivors).unwrap();
+    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, Arc::new(survivors)).unwrap();
+    op.journal().begin_batch(vec![file("d/b")]).unwrap();
+    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
+
+    let entry = |attempt, batch, path: &str, state| JournalEntry { attempt, batch, path: NativeString::from(path), kind: EntryKind::File, state };
+    let expected = vec![
+        entry(1, 2, "a", EntryState::Deleted),
+        entry(1, 3, "d/a", EntryState::Uncertain),
+        entry(2, 1, "d/b", EntryState::Deleted),
+    ];
+    // The filesystem now says every path is gone; only the current attempt
+    // asks it.
+    assert_eq!(op.journal_entries(|_| Ok(false)).unwrap(), expected);
+    assert_eq!(f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap().entries, expected);
+
+    // Completion that could not list the entries keeps every journal.
+    let dir = op.dir().to_path_buf();
+    let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
+    assert_eq!(op.complete(&report, false).unwrap(), Vec::new());
+    assert!(dir.join(JOURNAL_FILE).exists() && dir.join("journal-1.jsonl").exists());
+}
+
+/// A discard renames the directory away before deleting it, so a crash
+/// part-way leaves a hidden directory that is no pending operation.
+#[test]
+fn a_discarded_operation_is_never_left_pending_without_its_journal() {
+    let f = fixture();
+    let saved = record(&f, "wt1");
+    let dir = begin(&f, saved.clone()).dir().to_path_buf();
+    // What a crash inside the deletion of the renamed directory leaves.
+    let doomed = f.store.root().join(format!(".{}.discarded", saved.operation_id));
+    fs::rename(&dir, &doomed).unwrap();
+    fs::remove_file(doomed.join(JOURNAL_FILE)).unwrap();
+    assert!(f.store.pending().unwrap().is_empty());
+    drop(begin(&f, record(&f, "wt1")));
+
+    let other = record(&f, "wt2");
+    let dir = begin(&f, other.clone()).dir().to_path_buf();
+    reopen(&f, &other).unwrap().discard().unwrap();
+    assert!(!dir.exists());
+    assert!(!f.store.root().join(format!(".{}.discarded", other.operation_id)).exists());
 }

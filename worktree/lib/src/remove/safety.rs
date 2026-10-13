@@ -114,7 +114,7 @@ pub struct SniffPrSource {
 impl SniffPrSource {
     /// The source for the repository's `origin`, or `None` without one.
     pub fn for_origin(base: &Path) -> Option<Self> {
-        let remote_url = git_from(base, base, &["remote", "get-url", "origin"]).ok()?;
+        let remote_url = super::remote::origin_url(base)?;
         Some(Self {
             remote_url,
             deadline: PR_DEADLINE,

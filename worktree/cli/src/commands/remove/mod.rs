@@ -22,6 +22,7 @@
 //! ([`resume`]); [`recovery`] renders what such a removal left. The rules
 //! are `2026-10-05-graceful-file-contention`.
 
+mod interrupt;
 mod policy;
 pub mod recovery;
 mod report;
@@ -37,7 +38,6 @@ use inquire::{Confirm, InquireError, Select};
 use worktree::{WorktreeCandidate, WorktreeError};
 use worktree::availability::{self, Availability, OtherCondition};
 use worktree::fork_origin::{ForkOriginStore, fork_origin_path};
-use worktree::git::git_command;
 use worktree::remove::handoff::{
     self, Approvals, BranchAction, HandoffError, HandoffRecord, HandoffRefusal, HandoffState,
     RemoteApproval, canonical, checkout_git_dir, is_within,
@@ -46,12 +46,12 @@ use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::lifecycle::{
     Approval, BranchActions, Environment, ExitClass, Finished, Inspection, LocalBranchDeletion, RecordApproval,
     Removal, RemovalRequest, RemoteBranchDeletion, Resolution, ResolveError, ResumeRequest, Target, inspect,
-    native_observation, release_unstarted, remove_checkout, resolve_target, resume,
+    native_observation, release_unstarted, remove_checkout, resolve_target, resolve_target_in, resume,
 };
 use worktree::remove::outcome::{BranchState, BranchTarget};
 use worktree::remove::recovery::record::BranchBinding;
 use worktree::remove::remote::{
-    Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion, remote_destination,
+    Reinterpretation, RemoteState, delete_remote_branch, origin_url, preflight_remote_deletion, remote_destination,
 };
 use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, Reconfirmation, SafetyInput, SniffPrSource, Tier, assess,
@@ -61,10 +61,10 @@ use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_
 use worktree::remove::repair::{self, RepairRefusal};
 use worktree::remove::usage::SniffUsage;
 use worktree::remove::{
-    CheckoutState, Inventory, PrepareRefusal, collect_inventory, prepare, remove_local_branch,
+    CheckoutState, Inventory, PrepareRefusal, branch_tip, collect_inventory, prepare, remove_local_branch,
 };
 use worktree::remove::included::classify_included;
-use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
+use worktree::worktree::{WorktreeEntry, default_branch, parse_worktree_list, resolve_worktree};
 
 use super::list_table::{shell_word, unavailable_reason};
 
@@ -169,7 +169,7 @@ impl Facts {
                 inventory.included =
                     classify_included(base, &entry.path, entry.branch.as_deref()).map_err(context)?;
                 let head = match &entry.branch {
-                    Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")]).map_err(context)?,
+                    Some(branch) => branch_tip(base, branch).map_err(context)?,
                     None => entry
                         .head_sha
                         .clone()
@@ -201,7 +201,7 @@ impl Facts {
     fn branch_only(base: &Path, entry: WorktreeEntry, approved_tip: &str) -> Self {
         let mut entry = entry;
         let head = match &entry.branch {
-            Some(branch) => match git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]) {
+            Some(branch) => match branch_tip(base, branch) {
                 Ok(tip) => tip,
                 Err(_) => {
                     entry.branch = None;
@@ -230,7 +230,7 @@ impl Facts {
     /// The first run's report facts: the branch's tier (PR lookup and live
     /// checks) and, with `--force-remote`, the remote preflight.
     fn assess(&mut self, force_remote: bool) {
-        self.has_origin = git_command(&["remote", "get-url", "origin"]).is_ok();
+        self.has_origin = origin_url(&self.base).is_some();
         let Some(branch) = self.entry.branch.clone() else {
             return;
         };
@@ -347,8 +347,10 @@ impl SafetyContext {
 pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
     let cwd = std::env::current_dir()?;
-    let base = find_worktree("base")?.path;
-    let (entry, retry) = resolve(&terminal, &base, name)?;
+    // One listing finds the base checkout and resolves the name.
+    let entries = worktree_entries()?;
+    let base = resolve_worktree(&entries, "base")?.path;
+    let (entry, retry) = resolve(&terminal, &base, entries, name)?;
     if entry.is_main {
         return Err(WorktreeError::GitCommand(format!(
             "refusing to remove the main checkout '{name}'. Use plain git for that."
@@ -455,8 +457,13 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
 /// removal with its inspection. A pending removal that changed nothing is
 /// closed first (a checkout moved but never re-associated is moved back) and
 /// the name resolved again.
-fn resolve(terminal: &Terminal, base: &Path, name: &str) -> Result<(WorktreeEntry, Option<Inspection>), WorktreeError> {
-    let target = match resolve_target(base, name) {
+fn resolve(
+    terminal: &Terminal,
+    base: &Path,
+    entries: Vec<WorktreeEntry>,
+    name: &str,
+) -> Result<(WorktreeEntry, Option<Inspection>), WorktreeError> {
+    let target = match resolve_target_in(base, entries, name) {
         Ok(Target::Pending(pending)) => {
             let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error.to_string()))?;
             match inspection.resolution {
@@ -749,7 +756,10 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     }
     let branches = branch_actions(facts, &actions);
     let usage = SniffUsage;
-    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation };
+    // Opened only now: an interrupt while asking keeps its default effect.
+    let window = interrupt::Window::open();
+    let interrupted = || window.interrupted();
+    let env = Environment { usage: &usage, interrupted: &interrupted, observe: &native_observation };
     let approval = facts.reported.clone().map(|fingerprint| Approval {
         inventory: facts.inventory.clone(),
         fingerprint,
@@ -785,6 +795,7 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
             resume(&request, &env)
         }
     };
+    drop(window);
     match removal {
         Removal::Refused(refusal) => Err(with_note(
             recovery::refusal_error(&refusal, &facts.display_name, &facts.requested_name),
@@ -1035,7 +1046,7 @@ fn landing_root(facts: &Facts, entries: &[WorktreeEntry]) -> (PathBuf, String) {
 }
 
 fn worktree_entries() -> Result<Vec<WorktreeEntry>, WorktreeError> {
-    Ok(parse_worktree_list(&git_command(&["worktree", "list", "--porcelain"])?))
+    Ok(parse_worktree_list(&worktree::git::worktree_list()?))
 }
 
 /// First run of a move-first removal: record the state and approvals, then
@@ -1254,7 +1265,9 @@ fn remote_changed(approval: &RemoteApproval, state: Option<&RemoteState>) -> Opt
 pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
     let cwd = std::env::current_dir()?;
-    let base = find_worktree("base")?.path;
+    // One listing finds the base checkout and the target.
+    let entries = worktree_entries()?;
+    let base = resolve_worktree(&entries, "base")?.path;
 
     let record = handoff::handoff_path(&base, token)
         .and_then(|path| handoff::consume(&path, now()))
@@ -1265,7 +1278,7 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
             }))
         })?;
 
-    let entry = worktree_entries()?
+    let entry = entries
         .into_iter()
         .find(|e| canonical(&e.path) == canonical(&record.state.target))
         .ok_or_else(|| {

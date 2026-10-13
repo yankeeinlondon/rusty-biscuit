@@ -30,7 +30,6 @@ use std::path::{Component, Path, PathBuf};
 use sniff::filesystem::query::FileIdentity;
 
 use crate::availability::{self, EntryKind};
-use crate::git::{git_from, git_from_bytes_with_env};
 use crate::remove::admin_entry::{
     self, AdminEntry, AssociationError, BackReferenceError, path_from_bytes, read_back_reference, same_location,
 };
@@ -418,7 +417,7 @@ fn check_no_submodules(base: &Path, admin: &AdminEntry) -> Result<(), MoveRefusa
         Ok(_) => return Err(MoveRefusal::Submodules { entry: modules }),
     }
     let index = admin.index();
-    let listing = git_from_bytes_with_env(base, base, &["ls-files", "--stage", "-z"], &[("GIT_INDEX_FILE", index.as_os_str())])
+    let listing = crate::git::staged_entries_of(base, &index)
         .map_err(|error| MoveRefusal::Uninspectable(format!("{}: {error}", index.display())))?;
     // Each record is `<mode> <object> <stage>\t<path>`.
     for record in listing.split(|&byte| byte == 0) {
@@ -432,7 +431,7 @@ fn check_no_submodules(base: &Path, admin: &AdminEntry) -> Result<(), MoveRefusa
 }
 
 fn worktree_list(base: &Path) -> Result<Vec<WorktreeEntry>, String> {
-    git_from(base, base, &["worktree", "list", "--porcelain"])
+    crate::git::worktree_list_from(base, base)
         .map(|listing| parse_worktree_list(&listing))
         .map_err(|error| format!("Git's worktree list could not be read: {error}"))
 }

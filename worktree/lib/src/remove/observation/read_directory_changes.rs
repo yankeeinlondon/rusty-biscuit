@@ -21,6 +21,11 @@
 //!   so each drain also compares their identity with what it was at start.
 //! - `FILE_ACTION_MODIFIED` covers content, attributes, and timestamps alike,
 //!   so every change in place is `Modified`, never `Metadata`.
+//! - Nothing in the watched trees is ever opened, not even to read an entry's
+//!   type: any handle inside the tree, however brief, makes the move fail
+//!   with `ERROR_ACCESS_DENIED`. The type comes from the extended
+//!   notification format's attributes; a volume that refuses that format is
+//!   read in the plain one, whose events carry no type.
 //! - Neither handle is inside the checkout, so a usage query of the checkout
 //!   does not report them and none is registered.
 
@@ -29,6 +34,7 @@ mod tests;
 
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::mem::offset_of;
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -39,17 +45,18 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sniff::filesystem::query::{EvidenceKind, FileIdentity};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INVALID_PARAMETER, ERROR_NOTIFY_ENUM_DIR, FALSE, HANDLE, INVALID_HANDLE_VALUE, TRUE,
+    CloseHandle, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_NOTIFY_ENUM_DIR, FALSE, HANDLE, INVALID_HANDLE_VALUE, TRUE,
     WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ACTION_ADDED, FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
+    CreateFileW, FILE_ACTION_ADDED, FILE_ATTRIBUTE_DIRECTORY, FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
     FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_DELETE_ON_CLOSE,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE,
     FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME,
     FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SECURITY,
-    FILE_NOTIFY_CHANGE_SIZE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    ReadDirectoryChangesW,
+    FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_EXTENDED_INFORMATION, FILE_NOTIFY_INFORMATION, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_DIRECTORY_NOTIFY_INFORMATION_CLASS, ReadDirectoryChangesExW,
+    ReadDirectoryNotifyExtendedInformation, ReadDirectoryNotifyInformation,
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Threading::{CreateEventW, INFINITE, ResetEvent, SetEvent, WaitForMultipleObjects};
@@ -157,24 +164,61 @@ fn completion(result: Result<u32, u32>) -> Completion {
     }
 }
 
-/// The notifications in a completed buffer, as `(action, name)` with the name
-/// relative to the watched directory; `Err` when an entry runs past the
+/// The layout a watch asks the system for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    /// `FILE_NOTIFY_EXTENDED_INFORMATION`: each entry carries the entry's
+    /// attributes, so its type is known without opening it.
+    Extended,
+    /// `FILE_NOTIFY_INFORMATION`, for a volume that refuses the extended
+    /// class (ReFS does); entries carry no type.
+    Plain,
+}
+
+impl Format {
+    fn class(self) -> READ_DIRECTORY_NOTIFY_INFORMATION_CLASS {
+        match self {
+            Self::Extended => ReadDirectoryNotifyExtendedInformation,
+            Self::Plain => ReadDirectoryNotifyInformation,
+        }
+    }
+
+    /// Byte offsets of the attributes (extended only), the name's length, and
+    /// the name in one entry.
+    fn offsets(self) -> (Option<usize>, usize, usize) {
+        match self {
+            Self::Extended => (
+                Some(offset_of!(FILE_NOTIFY_EXTENDED_INFORMATION, FileAttributes)),
+                offset_of!(FILE_NOTIFY_EXTENDED_INFORMATION, FileNameLength),
+                offset_of!(FILE_NOTIFY_EXTENDED_INFORMATION, FileName),
+            ),
+            Self::Plain => (None, offset_of!(FILE_NOTIFY_INFORMATION, FileNameLength), offset_of!(FILE_NOTIFY_INFORMATION, FileName)),
+        }
+    }
+}
+
+/// One parsed notification: the action, the entry's attributes when the
+/// format carries them, and its name relative to the watched directory.
+type Notification = (u32, Option<u32>, OsString);
+
+/// The notifications in a completed buffer; `Err` when an entry runs past the
 /// buffer.
-fn parse(buffer: &[u8]) -> Result<Vec<(u32, OsString)>, String> {
-    const HEADER: usize = 12;
+fn parse(buffer: &[u8], format: Format) -> Result<Vec<Notification>, String> {
+    let (attributes_at, length_at, name_at) = format.offsets();
     let word = |at: usize| u32::from_le_bytes(buffer[at..at + 4].try_into().expect("four bytes"));
     let mut entries = Vec::new();
     let mut offset = 0;
     loop {
-        if offset + HEADER > buffer.len() {
+        if offset + name_at > buffer.len() {
             return Err(format!("a notification at byte {offset} runs past the {} bytes read", buffer.len()));
         }
-        let (next, action, length) = (word(offset) as usize, word(offset + 4), word(offset + 8) as usize);
+        let (next, action, length) = (word(offset) as usize, word(offset + 4), word(offset + length_at) as usize);
+        let attributes = attributes_at.map(|at| word(offset + at));
         let name = buffer
-            .get(offset + HEADER..offset + HEADER + length)
+            .get(offset + name_at..offset + name_at + length)
             .ok_or_else(|| format!("a name at byte {offset} runs past the {} bytes read", buffer.len()))?;
         let units: Vec<u16> = name.as_chunks::<2>().0.iter().map(|pair| u16::from_le_bytes(*pair)).collect();
-        entries.push((action, OsString::from_wide(&units)));
+        entries.push((action, attributes, OsString::from_wide(&units)));
         if next == 0 {
             return Ok(entries);
         }
@@ -272,9 +316,10 @@ impl Shared {
         }
     }
 
-    /// Turns one notification from the handle on `root` (watching
-    /// `directory`) into a raw event, or records a marker.
-    fn deliver(&self, root: Root, directory: &Path, action: u32, name: &OsStr, received: SystemTime) {
+    /// Turns one notification from the handle on `root` into a raw event, or
+    /// records a marker. Nothing is opened: a handle on an entry inside the
+    /// tree, however brief, makes the move fail with `ERROR_ACCESS_DENIED`.
+    fn deliver(&self, root: Root, action: u32, attributes: Option<u32>, name: &OsStr, received: SystemTime) {
         if let Some(number) = self.marker(name) {
             if action == FILE_ACTION_ADDED {
                 let mut delivered = self.delivered();
@@ -289,11 +334,9 @@ impl Shared {
             return;
         };
         let kind = kind(action);
-        // The notification does not say; the entry is looked at while it
-        // still exists.
         let directory = match kind {
             EventKind::Removed | EventKind::MovedFrom => None,
-            _ => std::fs::symlink_metadata(directory.join(name)).ok().map(|metadata| metadata.is_dir()),
+            _ => attributes.map(|attributes| attributes & FILE_ATTRIBUTE_DIRECTORY != 0),
         };
         self.queue.push(RawEvent { root: located, path: relative, kind, directory, received });
     }
@@ -308,8 +351,9 @@ struct Watch {
     handle: OwnedHandle,
     event: OwnedHandle,
     overlapped: Box<OVERLAPPED>,
-    /// `u64` for the DWORD alignment the call requires.
+    /// `u64` for the alignment the extended entries require.
     buffer: Vec<u64>,
+    format: Format,
     pending: bool,
 }
 
@@ -330,6 +374,7 @@ impl Watch {
             // SAFETY: an all-zero `OVERLAPPED` is valid.
             overlapped: Box::new(unsafe { std::mem::zeroed() }),
             buffer: vec![0; buffer_bytes / size_of::<u64>()],
+            format: Format::Extended,
             pending: false,
         })
     }
@@ -342,7 +387,7 @@ impl Watch {
             *self.overlapped = std::mem::zeroed();
             self.overlapped.hEvent = self.event.0;
             ResetEvent(self.event.0);
-            let issued = ReadDirectoryChangesW(
+            let issued = ReadDirectoryChangesExW(
                 self.handle.0,
                 self.buffer.as_mut_ptr().cast(),
                 (self.buffer.len() * size_of::<u64>()) as u32,
@@ -351,6 +396,7 @@ impl Watch {
                 std::ptr::null_mut(),
                 &mut *self.overlapped,
                 None,
+                self.format.class(),
             );
             if issued == 0 {
                 return Err(io::Error::last_os_error());
@@ -360,19 +406,32 @@ impl Watch {
         Ok(())
     }
 
-    /// Issues the first read; a buffer too large for a network share falls
-    /// back to the share's limit.
+    /// Issues the first read. A volume that refuses the request is asked
+    /// again with a network share's buffer limit, then in the plain format:
+    /// a share refuses a larger buffer with `ERROR_INVALID_PARAMETER`, and
+    /// ReFS refuses the extended format with `ERROR_INVALID_FUNCTION`.
     fn start(&mut self) -> io::Result<()> {
-        match self.issue() {
-            Err(error)
-                if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32)
-                    && self.buffer.len() * size_of::<u64>() > NETWORK_BUFFER_BYTES =>
-            {
-                self.buffer = vec![0; NETWORK_BUFFER_BYTES / size_of::<u64>()];
-                self.issue()
+        let requested = self.buffer.len();
+        let network = NETWORK_BUFFER_BYTES / size_of::<u64>();
+        let lengths = if requested > network { vec![requested, network] } else { vec![requested] };
+        let refused = |error: &io::Error| {
+            [ERROR_INVALID_PARAMETER, ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED].iter().any(|code| error.raw_os_error() == Some(*code as i32))
+        };
+        let mut result = Ok(());
+        for format in [Format::Extended, Format::Plain] {
+            for &length in &lengths {
+                self.format = format;
+                if self.buffer.len() != length {
+                    self.buffer = vec![0; length];
+                }
+                result = self.issue();
+                match &result {
+                    Err(error) if refused(error) => {}
+                    _ => return result,
+                }
             }
-            result => result,
         }
+        result
     }
 
     /// Handles the signaled read and issues the next. `false` once the watch
@@ -397,10 +456,10 @@ impl Watch {
                 // SAFETY: the system wrote `length` bytes (at most the
                 // buffer's size) into the buffer.
                 let bytes = unsafe { std::slice::from_raw_parts(self.buffer.as_ptr().cast::<u8>(), length) };
-                match parse(bytes) {
+                match parse(bytes, self.format) {
                     Ok(entries) => {
-                        for (action, name) in entries {
-                            shared.deliver(self.root, &self.directory, action, &name, received);
+                        for (action, attributes, name) in entries {
+                            shared.deliver(self.root, action, attributes, &name, received);
                         }
                     }
                     Err(message) => shared.queue.lose(CoverageLost::ReadFailed { message }),

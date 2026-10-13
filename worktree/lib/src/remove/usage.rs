@@ -11,11 +11,20 @@
 //! refuses before anything is moved.
 //!
 //! The query uses Sniff's default options: one shared two-second budget, no
-//! retry. A missing checkout has nothing to query and is removed from its
-//! record alone; callers never send it here.
+//! retry, with one exception. When every holder is one of Windows Search's
+//! own processes, identified by its full image path in the system directory
+//! ([`is_windows_search`]), the check waits [`SEARCH_RECHECK_WAIT`] and
+//! queries once more; that second query decides, whatever it finds. Search
+//! opens freshly written files for a few milliseconds to index them, so a
+//! query that lands inside such a hold would otherwise refuse a removal no
+//! user process is involved in. The recheck is kept in [`SearchRecheck`] for
+//! the operation report. A missing checkout has nothing to query and is
+//! removed from its record alone; callers never send it here.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use sniff::filesystem::query::{
     CoverageStatus, Evidence, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome,
@@ -27,6 +36,47 @@ use sniff::filesystem::query::{
 /// running.
 pub trait UsageSource: Sync {
     fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError>;
+
+    /// The system directory (`%SystemRoot%\System32`) that a Windows Search
+    /// holder's image must be in for [`check_usage`] to recheck; `None`
+    /// never rechecks. The host's on Windows, `None` elsewhere.
+    fn system_directory(&self) -> Option<NativeString> {
+        host_system_directory()
+    }
+
+    /// Waits `wait` before the one recheck.
+    fn pause(&self, wait: Duration) {
+        std::thread::sleep(wait);
+    }
+}
+
+/// How long [`check_usage`] waits before its one recheck of a checkout that
+/// only Windows Search was holding. Measured on a Windows host on
+/// 2026-10-13: Search opened 253 of 3,200 freshly written files, and every
+/// hold was gone by the next poll (17 ms at most at 15 ms resolution).
+pub const SEARCH_RECHECK_WAIT: Duration = Duration::from_millis(500);
+
+/// Windows Search's processes, by image file name. Only an image in the
+/// system directory counts ([`is_windows_search`]).
+pub const WINDOWS_SEARCH_IMAGES: [&str; 3] = ["SearchProtocolHost.exe", "SearchFilterHost.exe", "SearchIndexer.exe"];
+
+#[cfg(windows)]
+fn host_system_directory() -> Option<NativeString> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+
+    let mut buffer = [0u16; 1024];
+    // SAFETY: the buffer is `buffer.len()` writable UTF-16 units.
+    let written = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    // 0 is a failure; a result as long as the buffer is the size it needs.
+    (written > 0 && written < buffer.len()).then(|| NativeString::from(OsString::from_wide(&buffer[..written])))
+}
+
+#[cfg(not(windows))]
+fn host_system_directory() -> Option<NativeString> {
+    None
 }
 
 /// [`UsageSource`] through Sniff with its default options.
@@ -113,6 +163,36 @@ pub struct UsageClearance {
     /// registered handles.
     pub own_handles_excluded: u64,
     pub coverage: CoverageSummary,
+    /// Set when the first query found only Windows Search; `report` is then
+    /// the recheck's.
+    pub search_recheck: Option<SearchRecheck>,
+}
+
+/// The one recheck [`check_usage`] made because only Windows Search was
+/// holding files in the checkout.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchRecheck {
+    /// The first query's report, which found only Windows Search.
+    pub first: PathUsageReport,
+    /// Evidence records Windows Search held in the first query, one per file
+    /// or directory.
+    pub held: u64,
+    pub waited: Duration,
+    /// When the recheck's query started.
+    pub rechecked_at: SystemTime,
+}
+
+impl SearchRecheck {
+    /// One line for the operation report's timeline: what was held, the
+    /// wait, and whether the recheck `released` the checkout.
+    pub fn summary(&self, released: bool) -> String {
+        format!(
+            "Windows Search held {} file(s); rechecked after {} ms; {}",
+            self.held,
+            self.waited.as_millis(),
+            if released { "released" } else { "still in use" }
+        )
+    }
 }
 
 /// Why the checkout was not moved. Nothing was changed.
@@ -136,6 +216,9 @@ pub struct InUse {
     pub holders: Vec<Holder>,
     pub coverage: CoverageSummary,
     pub report: PathUsageReport,
+    /// Set when this refusal is the recheck's, after a first query found
+    /// only Windows Search.
+    pub search_recheck: Option<SearchRecheck>,
 }
 
 /// One process lifetime using the checkout.
@@ -215,7 +298,10 @@ impl CoverageSummary {
     }
 }
 
-/// Queries `checkout` through `source` and applies [`assess`].
+/// Queries `checkout` through `source` and applies [`assess`]. When every
+/// holder [`is_windows_search`], it waits [`SEARCH_RECHECK_WAIT`] and
+/// queries exactly once more, and that query decides; any other holder in
+/// the first query refuses at once.
 ///
 /// ## Errors
 ///
@@ -223,7 +309,63 @@ impl CoverageSummary {
 /// [`UsageRefusal::InUse`] as [`assess`] decides.
 pub fn check_usage(source: &dyn UsageSource, checkout: &Path, own: &OwnedHandles) -> Result<UsageClearance, UsageRefusal> {
     let report = source.query(checkout).map_err(UsageRefusal::Unverified)?;
-    assess(report, own)
+    let in_use = match assess(report, own) {
+        Err(UsageRefusal::InUse(in_use)) => in_use,
+        decided => return decided,
+    };
+    let Some(held) = source.system_directory().and_then(|system| windows_search_only(&in_use.holders, &system)) else {
+        return Err(UsageRefusal::InUse(in_use));
+    };
+    source.pause(SEARCH_RECHECK_WAIT);
+    let recheck = SearchRecheck { first: in_use.report, held, waited: SEARCH_RECHECK_WAIT, rechecked_at: SystemTime::now() };
+    let report = source.query(checkout).map_err(UsageRefusal::Unverified)?;
+    match assess(report, own) {
+        Ok(mut clearance) => {
+            clearance.search_recheck = Some(recheck);
+            Ok(clearance)
+        }
+        Err(UsageRefusal::InUse(mut in_use)) => {
+            in_use.search_recheck = Some(recheck);
+            Err(UsageRefusal::InUse(in_use))
+        }
+        Err(unverified) => Err(unverified),
+    }
+}
+
+/// The evidence count when `holders` is not empty and every one
+/// [`is_windows_search`] in `system_directory`.
+fn windows_search_only(holders: &[Holder], system_directory: &NativeString) -> Option<u64> {
+    let all = !holders.is_empty() && holders.iter().all(|holder| is_windows_search(holder, system_directory));
+    all.then(|| holders.iter().map(|holder| holder.evidence.len() as u64).sum())
+}
+
+/// Whether `holder` is one of [`WINDOWS_SEARCH_IMAGES`] running from
+/// `system_directory` itself, by the full image path Sniff read from the
+/// process. A holder without an image path, one Sniff could not tie to one
+/// process lifetime, or a same-named image anywhere else is an ordinary
+/// holder. Compared ASCII-case-insensitively, as Windows spells the system
+/// directory in either case (`C:\WINDOWS\System32`).
+pub fn is_windows_search(holder: &Holder, system_directory: &NativeString) -> bool {
+    !holder.identity_uncertain
+        && holder.executable.as_ref().is_some_and(|image| is_search_image(image.as_os_str(), system_directory.as_os_str()))
+}
+
+fn is_search_image(image: &OsStr, system_directory: &OsStr) -> bool {
+    // A path that is not Unicode cannot be one of these images.
+    let (Some(image), Some(directory)) = (image.to_str(), system_directory.to_str()) else {
+        return false;
+    };
+    let directory = without_verbatim(directory).trim_end_matches('\\');
+    let Some((parent, file)) = without_verbatim(image).rsplit_once('\\') else {
+        return false;
+    };
+    !directory.is_empty()
+        && parent.eq_ignore_ascii_case(directory)
+        && WINDOWS_SEARCH_IMAGES.iter().any(|name| file.eq_ignore_ascii_case(name))
+}
+
+fn without_verbatim(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
 }
 
 /// The removal policy for one report: refuse on any evidence that is not one
@@ -258,13 +400,14 @@ pub fn assess(report: PathUsageReport, own: &OwnedHandles) -> Result<UsageCleara
     }
     let coverage = CoverageSummary::of(&report);
     if holders.is_empty() {
-        return Ok(UsageClearance { report, own_handles_excluded: excluded, coverage });
+        return Ok(UsageClearance { report, own_handles_excluded: excluded, coverage, search_recheck: None });
     }
     Err(UsageRefusal::InUse(Box::new(InUse {
         target: report.target.resolved.clone(),
         holders,
         coverage,
         report,
+        search_recheck: None,
     })))
 }
 

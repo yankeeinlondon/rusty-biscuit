@@ -5,11 +5,13 @@
 //! [`delete_content`](crate::remove::observation::deletion::delete_content)
 //! returned without a stop. It drains the observer one last time, confirms
 //! that neither the quarantine nor anything at the original path exists,
-//! re-binds the worktree's index (its bytes, and Git's reading of every entry,
-//! split index included) and HEAD to the state approved before the move, stops
-//! watching the admin directory, and removes exactly this registration through
-//! [`remove_missing_record`]: plain `git worktree remove`, never `--force`,
-//! never `prune` or `repair`.
+//! re-lists the worktree once, stops watching the admin directory, then
+//! requires the worktree's index (its bytes, and Git's reading of every
+//! entry, split index included) and HEAD to still be the state approved
+//! before the move, and removes exactly this registration as
+//! [`remove_missing_record`](crate::remove::missing::remove_missing_record)
+//! does: plain `git worktree remove`, never `--force`, never `prune` or
+//! `repair`.
 
 use std::io;
 use std::path::Path;
@@ -17,9 +19,10 @@ use std::time::SystemTime;
 
 use sniff::filesystem::query::NativeString;
 
-use crate::git::git_from;
 use crate::remove::admin_entry::same_location;
-use crate::remove::missing::{IndexBinding, MissingRefusal, inspect_missing, remove_missing_record};
+use crate::availability::{self, Availability};
+use crate::remove::admin_entry::AdminEntry;
+use crate::remove::missing::{IndexBinding, MissingRefusal, remove_listed_record};
 use crate::remove::observation::deletion::{DeletionOptions, own_move};
 use crate::remove::observation::{CoverageLost, EventKind, Observation, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, RemovalOutcome};
@@ -101,7 +104,7 @@ pub fn unregister_quarantine(
         return Err(UnregisterError::Activity(activities));
     }
 
-    let listing = git_from(base, base, &["worktree", "list", "--porcelain"])
+    let listing = crate::git::worktree_list_from(base, base)
         .map_err(|error| UnregisterError::Registration(format!("could not be read: {error}")))?;
     let listed: Vec<_> = parse_worktree_list(&listing)
         .into_iter()
@@ -110,13 +113,19 @@ pub fn unregister_quarantine(
     let [entry] = listed.as_slice() else {
         return Err(UnregisterError::Registration(format!("shows the quarantine {} times", listed.len())));
     };
-    let inspected = inspect_missing(base, entry).map_err(UnregisterError::Refused)?;
-    if !approved.matches(&inspected) {
-        return Err(UnregisterError::IndexChanged);
+    let availability = availability::classify(entry);
+    if availability != Availability::Missing {
+        return Err(UnregisterError::Refused(MissingRefusal::NotMissing(availability)));
     }
-    // After the last index check, before Git deletes the admin directory.
+    // Before Git deletes the admin directory. The index and HEAD are checked
+    // after this, once, against the approval; a write to the index in
+    // between changes its bytes, so it still refuses.
     observation.release_admin();
-    remove_missing_record(base, entry, &inspected).map_err(UnregisterError::Refused)
+    let admin = AdminEntry { dir: targets.admin().to_path_buf() };
+    remove_listed_record(base, entry, entry, &admin, approved).map_err(|refusal| match refusal {
+        MissingRefusal::IndexChanged(_) | MissingRefusal::HeadChanged { .. } => UnregisterError::IndexChanged,
+        refusal => UnregisterError::Refused(refusal),
+    })
 }
 
 fn absent(path: &Path) -> bool {

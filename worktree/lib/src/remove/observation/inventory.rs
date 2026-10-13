@@ -210,6 +210,12 @@ impl DeletionInventory {
         Ok(Self { root: root_identity, entries: walk.entries, index })
     }
 
+    /// An inventory of the checkout `root` that lists nothing: what a retry
+    /// approves when the checkout's content is already gone.
+    pub(crate) fn empty(root: FileIdentity) -> Self {
+        Self { root, entries: Vec::new(), index: HashMap::new() }
+    }
+
     /// The checkout directory's identity, which the move preserves.
     pub fn root(&self) -> &FileIdentity {
         &self.root

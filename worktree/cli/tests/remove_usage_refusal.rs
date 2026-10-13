@@ -1,10 +1,10 @@
 //! The refusal `wt remove` prints when another process is using the
 //! checkout, rendered from reports injected through the library's real
 //! policy ([`assess`]): the spec's example, every evidence location, untrusted
-//! text, the listing limits, the coverage notes, an unverified checkout, and
-//! the exit code.
+//! text, the listing limits, the coverage notes, an unverified checkout, a
+//! refusal after the Windows Search recheck, and the exit code.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
@@ -12,8 +12,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use serde_json::{Value, json};
-use sniff::filesystem::query::PathUsageError;
-use worktree::remove::usage::{CoverageSummary, OwnedHandles, UsageRefusal, assess};
+use sniff::filesystem::query::{NativeString, PathUsageError, PathUsageReport};
+use worktree::remove::usage::{CoverageSummary, OwnedHandles, UsageRefusal, UsageSource, assess, check_usage};
 use worktree_cli::commands::remove::usage::{coverage_note, refusal_markup, usage_refusal};
 
 const TARGET: &str = "/work/fix-path-spelling";
@@ -239,4 +239,42 @@ fn refusals_exit_3_and_offer_no_override() {
         let markup = refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling");
         assert!(!markup.contains("--force"), "{markup}");
     }
+}
+
+/// Answers every query with Windows Search holding a file, on a Windows host
+/// whose system directory is `C:\Windows\System32`; never sleeps.
+struct SearchStaysOpen;
+
+impl UsageSource for SearchStaysOpen {
+    fn query(&self, _path: &Path) -> Result<PathUsageReport, PathUsageError> {
+        let search = process(
+            6808,
+            Some("SearchProtocolHost.exe"),
+            Some(r"C:\Windows\System32\SearchProtocolHost.exe"),
+            vec![evidence("open_handle", "open_handles", &["/work/fix-path-spelling/notes.txt"])],
+        );
+        Ok(serde_json::from_value(report("usable", vec![search], &[], false)).expect("valid report"))
+    }
+
+    fn system_directory(&self) -> Option<NativeString> {
+        Some(NativeString::from(r"C:\Windows\System32"))
+    }
+
+    fn pause(&self, _wait: Duration) {}
+}
+
+/// A refusal that followed the one Windows Search recheck says so; an
+/// ordinary refusal does not.
+#[test]
+fn a_refusal_after_the_windows_search_recheck_says_so() {
+    let note = "The first check found only Windows Search, so wt waited 500 ms and checked once more";
+
+    let refusal = check_usage(&SearchStaysOpen, Path::new(TARGET), &OwnedHandles::default()).expect_err("still held");
+    let rechecked = render(refusal_markup(&refusal, "fix-path-spelling", "fix/path-spelling"));
+    let ordinary = refused(report("usable", vec![process(1, Some("x"), Some("x"), vec![evidence("open_handle", "open_handles", &[TARGET])])], &[], false));
+    let ordinary = render(refusal_markup(&ordinary, "fix-path-spelling", "fix/path-spelling"));
+
+    assert!(rechecked.replace('\n', " ").contains(note), "{rechecked}");
+    assert!(rechecked.contains("SearchProtocolHost.exe"), "{rechecked}");
+    assert!(!ordinary.contains("Windows Search"), "{ordinary}");
 }

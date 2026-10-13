@@ -136,7 +136,7 @@ impl Inventory {
         }
         // The whole index rather than a pathspec of the dirty paths, which
         // pathspec magic and command-line length limits make fragile.
-        let index = git_from_bytes(base, worktree, &["ls-files", "--stage", "-z"], None)?;
+        let index = crate::git::staged_entries_from(base, worktree)?;
         record.field(b"index").field(&index);
         Ok(record.digest())
     }

@@ -136,7 +136,8 @@ pub struct JournalLog {
 }
 
 /// Where a planned entry stands after recovery.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryState {
     Deleted,
     ExternallyAbsent,
@@ -148,9 +149,17 @@ pub enum EntryState {
     Uncertain,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One planned entry with its recovered state; listed in full in the
+/// operation report, so it outlives the journal it was read from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JournalEntry {
+    /// The attempt whose journal planned it: 1 for the first, then one more
+    /// for each retry that started a new journal.
+    pub attempt: u32,
+    /// The batch within that attempt's journal.
     pub batch: u64,
+    /// Relative to the quarantine.
     pub path: NativeString,
     pub kind: EntryKind,
     pub state: EntryState,
@@ -227,6 +236,8 @@ impl JournalLog {
     /// Every planned entry with its recovered state. `present` reports
     /// whether a quarantine-relative path still exists, without following
     /// links; it is asked only about entries whose batch has no results.
+    /// Every entry is of attempt 1; a caller reading a later generation
+    /// renumbers them.
     pub fn replay(&self, mut present: impl FnMut(&Path) -> io::Result<bool>) -> io::Result<Vec<JournalEntry>> {
         let mut entries = Vec::new();
         for batch in &self.batches {
@@ -239,6 +250,7 @@ impl JournalLog {
                     None => EntryState::Uncertain,
                 };
                 entries.push(JournalEntry {
+                    attempt: 1,
                     batch: batch.number,
                     path: planned.path.clone(),
                     kind: planned.kind,

@@ -87,6 +87,23 @@ pub fn prepare(base: &Path, entry: &WorktreeEntry, git: &dyn RepairGit) -> Resul
     }
 }
 
+/// The commit `refs/heads/<branch>` points at, as `git rev-parse --verify
+/// refs/heads/<branch>^{commit}` prints it. Read in-process and fresh on
+/// every call, so a recheck still sees a concurrent update; Git runs only
+/// when that read has no commit to give, so a missing branch fails with
+/// Git's own error.
+///
+/// ## Errors
+///
+/// Git's failure to resolve the branch to a commit.
+pub fn branch_tip(base: &Path, branch: &str) -> Result<String, WorktreeError> {
+    let refname = format!("refs/heads/{branch}");
+    if let Some(Some(tip)) = crate::git_metadata::commit_of(base, &refname) {
+        return Ok(tip);
+    }
+    git_from(base, base, &["rev-parse", "--verify", &format!("{refname}^{{commit}}")])
+}
+
 /// Deletes the local `branch` with `git branch -D`, only while its tip is
 /// still `expected_tip`. Whether it may be deleted is the caller's decision,
 /// made from the safety tiers for that tip; commits added since were never
@@ -97,7 +114,7 @@ pub fn prepare(base: &Path, entry: &WorktreeEntry, git: &dyn RepairGit) -> Resul
 /// [`WorktreeError::BranchMoved`] when the tip is no longer `expected_tip`
 /// (the branch is kept); otherwise git's failure.
 pub fn remove_local_branch(base: &Path, branch: &str, expected_tip: &str) -> Result<(), WorktreeError> {
-    let tip = git_from(base, base, &["rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")])?;
+    let tip = branch_tip(base, branch)?;
     if tip != expected_tip {
         return Err(WorktreeError::BranchMoved { branch: branch.to_string(), expected: expected_tip.to_string(), found: tip });
     }

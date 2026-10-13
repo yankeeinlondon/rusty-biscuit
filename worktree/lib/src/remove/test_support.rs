@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 pub struct TestRepo {
@@ -10,7 +11,7 @@ pub struct TestRepo {
 }
 
 fn run(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = crate::git::command()
         .current_dir(cwd)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -49,17 +50,26 @@ impl TestRepo {
         this
     }
 
-    /// [`TestRepo::new`] plus a bare `origin` holding `main`.
+    /// [`TestRepo::new`] plus a bare `origin` holding `main`, which `main`
+    /// tracks, as `git push -u origin main` leaves them.
     pub fn with_origin() -> Self {
         let this = Self::new();
         let origin = this.origin_path();
-        run(this.dir.path(), &["init", "--bare", "-b", "main", origin.to_str().unwrap()]).unwrap();
-        // What `git remote add origin <path>` writes.
+        // A local bare clone hardlinks the objects in one process; `init
+        // --bare` and a push start several (the push's receive-pack and
+        // pack-objects among them).
+        run(this.dir.path(), &["clone", "-q", "--bare", this.path().to_str().unwrap(), origin.to_str().unwrap()]).unwrap();
+        // What `git remote add origin <path>` and `push -u` write.
         crate::test_support::configure(
             &this.path(),
-            &[("remote.origin.url", origin.to_str().unwrap()), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
+            &[
+                ("remote.origin.url", origin.to_str().unwrap()),
+                ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+                ("branch.main.remote", "origin"),
+                ("branch.main.merge", "refs/heads/main"),
+            ],
         );
-        this.git(&["push", "-q", "-u", "origin", "main"]);
+        this.git(&["update-ref", "refs/remotes/origin/main", "main"]);
         this
     }
 
@@ -117,7 +127,29 @@ impl TestRepo {
 
     pub fn commit_in(&self, dir: &Path, file: &str) -> String {
         self.add_and_commit(dir, file);
-        self.git_in(dir, &["rev-parse", "HEAD"])
+        // In-process, as `rev-parse HEAD` would answer it (parity-tested in
+        // `git_metadata`): one process fewer per commit.
+        crate::git_metadata::reference_target(dir, "HEAD")
+            .flatten()
+            .unwrap_or_else(|| self.git_in(dir, &["rev-parse", "HEAD"]))
+    }
+
+    /// What `git push -q origin <branch>` leaves, without its processes
+    /// (`receive-pack` and its helpers, several on Windows): origin borrows
+    /// this repository's objects (an `alternates` entry) and gets the branch
+    /// at its local tip, and the tracking ref follows.
+    pub fn publish(&self, branch: &str) {
+        let refname = format!("refs/heads/{branch}");
+        let tip = crate::git_metadata::reference_target(&self.path(), &refname).flatten().unwrap_or_else(|| self.sha(&refname));
+        let alternates = self.origin_path().join("objects").join("info").join("alternates");
+        fs::create_dir_all(alternates.parent().unwrap()).unwrap();
+        let objects = self.path().join(".git").join("objects");
+        fs::write(&alternates, format!("{}\n", objects.to_str().unwrap().replace('\\', "/"))).unwrap();
+        for (git_dir, name) in [(self.origin_path(), format!("refs/heads/{branch}")), (self.path().join(".git"), format!("refs/remotes/origin/{branch}"))] {
+            let reference = git_dir.join(&name);
+            fs::create_dir_all(reference.parent().unwrap()).unwrap();
+            fs::write(reference, format!("{tip}\n")).unwrap();
+        }
     }
 
     /// [`TestRepo::commit_in`] without reading back the new SHA.
@@ -138,25 +170,12 @@ impl TestRepo {
     }
 
     /// Commits `file` onto `branch` in origin directly, as another person's
-    /// push would, without touching this repository's refs.
+    /// push would, without touching this repository's refs. A branch origin
+    /// does not have starts from its `main`. One `git fast-import`
+    /// ([`crate::test_support::commit_to_origin`]), where a clone, a commit,
+    /// and a push start about a dozen processes.
     pub fn push_commit_to_origin(&self, branch: &str, file: &str) -> String {
-        let pusher = self.dir.path().join("pusher");
-        if pusher.exists() {
-            self.git_in(&pusher, &["fetch", "-q", "origin"]);
-        } else {
-            let origin = self.origin_path();
-            run(self.dir.path(), &["clone", "-q", origin.to_str().unwrap(), "pusher"]).unwrap();
-            configure(&pusher);
-        }
-        let remote_ref = format!("origin/{branch}");
-        if run(&pusher, &["rev-parse", "--verify", "--quiet", &remote_ref]).is_ok() {
-            self.git_in(&pusher, &["checkout", "-q", "-B", branch, &remote_ref]);
-        } else {
-            self.git_in(&pusher, &["checkout", "-q", "-B", branch, "origin/main"]);
-        }
-        let sha = self.commit_in(&pusher, file);
-        self.git_in(&pusher, &["push", "-q", "origin", &format!("HEAD:refs/heads/{branch}")]);
-        sha
+        crate::test_support::commit_to_origin(&self.origin_path(), branch, file)
     }
 }
 

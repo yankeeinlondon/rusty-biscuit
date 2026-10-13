@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::availability::{self, Availability, EntryKind};
 use crate::copy_record;
 use crate::error::WorktreeError;
-use crate::git::{git_from, git_from_bytes_with_env, git_from_output};
+use crate::git::{git_from_bytes_with_env, git_from_output};
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
 
 use super::admin_entry::{AdminEntry, AssociationError, admin_entry_for, same_location};
@@ -93,7 +93,7 @@ pub enum MissingRefusal {
 /// branch's tip, or the recorded HEAD when detached. Reads no checkout.
 pub fn recorded_head(base: &Path, entry: &WorktreeEntry) -> Result<String, WorktreeError> {
     match &entry.branch {
-        Some(branch) => git_from(base, base, &["rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")]),
+        Some(branch) => super::branch_tip(base, branch),
         None => entry.head_sha.clone().ok_or_else(|| WorktreeError::GitParse("worktree has no HEAD".into())),
     }
 }
@@ -247,7 +247,7 @@ pub fn remove_missing_record(
     entry: &WorktreeEntry,
     inspected: &MissingCheckout,
 ) -> Result<Option<String>, MissingRefusal> {
-    let listing = git_from(base, base, &["worktree", "list", "--porcelain"]).map_err(|error| MissingRefusal::Changed(format!("could not be read: {error}")))?;
+    let listing = crate::git::worktree_list_from(base, base).map_err(|error| MissingRefusal::Changed(format!("could not be read: {error}")))?;
     let entries = parse_worktree_list(&listing);
     let found: Vec<&WorktreeEntry> = entries.iter().filter(|listed| same_location(&listed.path, &entry.path)).collect();
     let [listed] = found.as_slice() else {
@@ -256,22 +256,47 @@ pub fn remove_missing_record(
     if let Some(change) = identity_change(entry, listed) {
         return Err(MissingRefusal::Changed(change));
     }
-    let admin = admin_entry_for(base, &entry.path).map_err(MissingRefusal::Association)?;
-    if admin != inspected.admin {
-        return Err(MissingRefusal::Changed(format!("now associates this path with another record, {}", admin.dir.display())));
+    let approved = IndexBinding {
+        head: inspected.head.clone(),
+        index_digest: inspected.index_digest,
+        entries_digest: inspected.entries_digest,
+    };
+    remove_listed_record(base, entry, listed, &inspected.admin, &approved)
+}
+
+/// The rest of [`remove_missing_record`] once a fresh listing has shown
+/// `listed` (the same worktree as `entry`) exactly once at `entry.path`:
+/// `admin` still associated with the path, the recorded HEAD and the index
+/// still as `approved`, the path still absent, then `git worktree remove`.
+///
+/// The final unregister of a checked removal calls this directly with the
+/// binding taken before the move and its own listing, so nothing it checks
+/// is read twice.
+pub(crate) fn remove_listed_record(
+    base: &Path,
+    entry: &WorktreeEntry,
+    listed: &WorktreeEntry,
+    admin: &AdminEntry,
+    approved: &IndexBinding,
+) -> Result<Option<String>, MissingRefusal> {
+    let associated = admin_entry_for(base, &entry.path).map_err(MissingRefusal::Association)?;
+    // `admin` may come from a recovery record written by another run, so
+    // compare locations rather than spellings.
+    if !same_location(&associated.dir, &admin.dir) {
+        return Err(MissingRefusal::Changed(format!("now associates this path with another record, {}", associated.dir.display())));
     }
     let head = recorded_head(base, listed).map_err(MissingRefusal::Head)?;
-    if head != inspected.head {
-        return Err(MissingRefusal::HeadChanged { was: inspected.head.clone(), now: head });
+    if head != approved.head {
+        return Err(MissingRefusal::HeadChanged { was: approved.head.clone(), now: head });
     }
     match availability::inspect(&entry.path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(MissingRefusal::PathUninspectable(error.to_string())),
         Ok(kind) => return Err(MissingRefusal::Reappeared(kind)),
     }
-    let index = inspected.admin.index();
-    if biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?) != inspected.index_digest
-        || entries_digest(base, &index)? != inspected.entries_digest
+    let index = admin.index();
+    if biscuit_hash::blake3_hash_bytes(&index_bytes(&index)?) != approved.index_digest
+        || entries_digest(base, &index)? != approved.entries_digest
     {
         return Err(MissingRefusal::IndexChanged(index));
     }
@@ -635,11 +660,14 @@ mod tests {
     /// A split index's entries live in the shared file, not in `index`. Each
     /// edit to that file after inspection leaves `index` byte-identical, yet
     /// what Git would read (and removal discard) is no longer what was
-    /// reported, so removal refuses and keeps the record and branch.
-    #[test]
-    fn a_split_index_whose_shared_file_changes_after_inspection_refuses() {
+    /// reported, so removal refuses and keeps the record and branch. One test
+    /// per edit, with and without staged work (test-speed.md #2).
+    mod a_split_index_whose_shared_file_changes_after_inspection_refuses {
+        use super::*;
+
         type Edit = fn(&Path);
-        let edits: [(&str, Edit); 5] = [
+
+        const EDITS: [(&str, Edit); 5] = [
             ("corrupted", |shared| fs::write(shared, b"corrupt").unwrap()),
             ("removed", |shared| fs::remove_file(shared).unwrap()),
             ("emptied", |shared| fs::write(shared, b"").unwrap()),
@@ -653,24 +681,80 @@ mod tests {
                 fs::create_dir(shared).unwrap();
             }),
         ];
-        for stage in [false, true] {
-            for (shape, edit) in edits {
-                let repo = TestRepo::new();
-                let (entry, shared) = missing_with_a_split_index(&repo, "feat/split", "split", stage);
-                let inspected = inspect_missing(&repo.path(), &entry).unwrap();
-                let index = inspected.admin.index();
-                let primary = fs::read(&index).unwrap();
 
-                edit(&shared);
-                let result = remove_missing_record(&repo.path(), &entry, &inspected);
+        fn check(stage: bool, (shape, edit): (&str, Edit)) {
+            let repo = TestRepo::new();
+            let (entry, shared) = missing_with_a_split_index(&repo, "feat/split", "split", stage);
+            let inspected = inspect_missing(&repo.path(), &entry).unwrap();
+            let index = inspected.admin.index();
+            let primary = fs::read(&index).unwrap();
 
-                assert!(
-                    matches!(&result, Err(MissingRefusal::IndexUninspectable { path, .. }) if *path == index),
-                    "{shape} (staged: {stage}): {result:?}"
-                );
-                assert_eq!(fs::read(&index).unwrap(), primary, "{shape}: only the shared file changed");
-                assert_kept(&repo, &entry, &index, "feat/split");
-            }
+            edit(&shared);
+            let result = remove_missing_record(&repo.path(), &entry, &inspected);
+
+            assert!(
+                matches!(&result, Err(MissingRefusal::IndexUninspectable { path, .. }) if *path == index),
+                "{shape} (staged: {stage}): {result:?}"
+            );
+            assert_eq!(fs::read(&index).unwrap(), primary, "{shape}: only the shared file changed");
+            assert_kept(&repo, &entry, &index, "feat/split");
+        }
+
+        #[test]
+        fn corrupted() {
+            check(false, EDITS[0]);
+        }
+
+        #[test]
+        fn removed() {
+            check(false, EDITS[1]);
+        }
+
+        #[test]
+        fn emptied() {
+            check(false, EDITS[2]);
+        }
+
+        #[test]
+        fn given_trailing_garbage() {
+            check(false, EDITS[3]);
+        }
+
+        #[test]
+        fn replaced_by_a_directory() {
+            check(false, EDITS[4]);
+        }
+
+        #[test]
+        fn corrupted_with_staged_work() {
+            check(true, EDITS[0]);
+        }
+
+        #[test]
+        fn removed_with_staged_work() {
+            check(true, EDITS[1]);
+        }
+
+        #[test]
+        fn emptied_with_staged_work() {
+            check(true, EDITS[2]);
+        }
+
+        #[test]
+        fn given_trailing_garbage_with_staged_work() {
+            check(true, EDITS[3]);
+        }
+
+        #[test]
+        fn replaced_by_a_directory_with_staged_work() {
+            check(true, EDITS[4]);
+        }
+
+        /// Two tests per row of `EDITS`, so an edit added there fails here
+        /// until it has its own tests above.
+        #[test]
+        fn every_edit_has_a_test() {
+            assert_eq!(EDITS.len(), 5);
         }
     }
 
