@@ -129,7 +129,9 @@ fn one_root_in_two_transcluded_documents_warns_once_per_document() {
 
     let (content, report) = compose_file(&root);
 
-    let lines: Vec<&str> = content.lines().collect();
+    // An empty interpolation leaves its surrounding spaces, and cleanup no
+    // longer strips trailing whitespace, so `a.md` composes to `A  `.
+    let lines: Vec<&str> = content.lines().map(str::trim_end).collect();
     assert_eq!(lines.iter().filter(|line| **line == "A").count(), 2, "{content}");
     assert_eq!(lines.iter().filter(|line| **line == "B").count(), 1, "{content}");
     assert_eq!(unknown_context(&report).len(), 2, "{:?}", report.warnings);

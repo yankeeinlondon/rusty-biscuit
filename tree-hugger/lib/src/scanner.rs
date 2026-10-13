@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 
-use crate::{ProgrammingLanguage, TreeHuggerError};
+use crate::{ProgrammingLanguage, TreeHuggerError, file_identity};
 
 /// Directories that hold test *data* rather than compiled source. Diagnostics on
 /// these are meaningless (a fixture's unused import is the point), so a default
@@ -41,14 +41,31 @@ pub fn resolve_explicit_file(input: &str) -> Option<PathBuf> {
 ///   `None`, any supported programming language is eligible.
 ///
 /// Honors `.gitignore`, excludes fixture directories by default, and sorts the
-/// result deterministically.
+/// result deterministically. Every file is returned as its [`file_identity`],
+/// so a file named explicitly and also found by the walk, or named twice
+/// under different spellings, is listed once.
 pub fn collect_files(
     root: &Path,
     inputs: &[String],
     excluded_files: &[String],
     language: Option<ProgrammingLanguage>,
 ) -> Result<Vec<PathBuf>, TreeHuggerError> {
-    let mut files = Vec::new();
+    collect_selected_files(root, inputs, &[], excluded_files, language)
+}
+
+/// [`collect_files`] plus `explicit_files`: existing files the caller already
+/// resolved (such as `hug --file`). They are listed whatever their extension,
+/// `.gitignore` or the default fixture exclusions say, but `excluded_files`
+/// still removes them, and they never widen the scan: with no `inputs`, only
+/// they are listed.
+pub fn collect_selected_files(
+    root: &Path,
+    inputs: &[String],
+    explicit_files: &[PathBuf],
+    excluded_files: &[String],
+    language: Option<ProgrammingLanguage>,
+) -> Result<Vec<PathBuf>, TreeHuggerError> {
+    let mut files = explicit_files.to_vec();
     let mut glob_inputs = Vec::new();
 
     // A forced `--language` lets us parse an explicitly named file regardless of
@@ -83,9 +100,9 @@ pub fn collect_files(
         });
     }
 
-    // Walk the tree when scanning the whole package (no inputs) or when some
-    // inputs were glob patterns rather than concrete files.
-    if inputs.is_empty() || !glob_inputs.is_empty() {
+    // Walk the tree when scanning the whole package (no inputs and no explicit
+    // files) or when some inputs were glob patterns rather than concrete files.
+    if (inputs.is_empty() && explicit_files.is_empty()) || !glob_inputs.is_empty() {
         let mut overrides = OverrideBuilder::new(root);
         // Default excludes go first so a later explicit glob/path re-includes a
         // targeted fixture file (gitignore last-match-wins).
@@ -100,11 +117,18 @@ pub fn collect_files(
         }
 
         let overrides = overrides.build()?;
-        let walker = WalkBuilder::new(root)
-            .standard_filters(true)
-            .hidden(false)
-            .overrides(overrides)
-            .build();
+        let mut builder = WalkBuilder::new(root);
+        builder.standard_filters(true).hidden(false).overrides(overrides);
+        // The walker still decides every entry it reaches; literal targets
+        // only stop it entering directories no target lies under.
+        if let Some(targets) = literal_targets(&glob_inputs) {
+            let root = root.to_path_buf();
+            builder.filter_entry(move |entry| match entry.path().strip_prefix(&root) {
+                Ok(relative) => targets.iter().any(|target| target.starts_with(relative)),
+                Err(_) => true,
+            });
+        }
+        let walker = builder.build();
 
         for entry in walker {
             let entry = entry.map_err(TreeHuggerError::Ignore)?;
@@ -130,6 +154,7 @@ pub fn collect_files(
         }
     }
 
+    let mut files: Vec<PathBuf> = files.iter().map(|file| file_identity(file)).collect();
     files.sort();
     files.dedup();
 
@@ -140,4 +165,29 @@ pub fn collect_files(
     }
 
     Ok(files)
+}
+
+/// The root-relative paths `patterns` can whitelist, when every pattern is a
+/// literal one: such a pattern matches exactly the one path it spells, so no
+/// file the walker would select lies outside these paths.
+///
+/// `None` (walk everything) for no patterns, and for any pattern whose
+/// override meaning is wider or uncertain: glob syntax or escapes, negation,
+/// comments, anchoring, trailing slashes or whitespace, `.`/`..`/empty
+/// components, a drive colon, and a bare name (which matches at any depth).
+fn literal_targets(patterns: &[String]) -> Option<Vec<PathBuf>> {
+    if patterns.is_empty() {
+        return None;
+    }
+    patterns
+        .iter()
+        .map(|pattern| {
+            let literal = pattern.contains('/')
+                && !pattern.contains(['*', '?', '[', ']', '{', '}', '\\', ':'])
+                && !pattern.starts_with(['!', '#', '/'])
+                && pattern.trim() == pattern
+                && pattern.split('/').all(|part| !matches!(part, "" | "." | ".."));
+            literal.then(|| pattern.split('/').collect())
+        })
+        .collect()
 }

@@ -41,9 +41,18 @@ initialize:
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    message: "✅  implemented review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
-    say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented successfully"
-    effect: bong
+    stack:
+        - when: "ready == true"
+          action:
+              - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is already production ready; no repair was needed"
+        - when: "ready != true && frontmatter(review, 'implemented') == true"
+          action:
+              - message: "✅  implemented all review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}`; ready for independent verification (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
+              - say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented and are ready for review"
+              - effect: bong
+        - when: "ready != true && frontmatter(review, 'implemented') != true"
+          action:
+              - warn: "review #{{ file_index(review) }} repair of `{{ parent_dir(review) }}` ended with incomplete findings; see the disposition ledger in {{log}}"
 failure:
     message: "💥 implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
     effect: sad-trombone
@@ -97,7 +106,7 @@ In order to track progress of this task we are using the '{{log}}' as a log file
 - you should immediately create a section for your part of this log file:
     - add an H2 header section called `## Implementation of Review Findings #{{iteration}}`
     - then timestamp it with: `> **started at:** {{ctx.now}}`
-- when you write to this section you always write as a set of Markdown unordered list items 
+- write progress as Markdown unordered list items; use a table for the finding ledger
     - if you have structured sub-items for something then you can and should use a nested unordered list to represent this
 - now start this unordered list by mentioning some important metadata for this implementation:
     - `- this implementation is attempting to implement _all_ of the review findings found in '{{ review }}'`
@@ -106,8 +115,7 @@ In order to track progress of this task we are using the '{{log}}' as a log file
     - `- we are _retrying_ iteration #{{iteration}} because in our last attempt the agent failed before achieving it's objectives`
         - `- the only context we have about where we got to in this previous attempt is:\n\t{{retry}}`
         - `- this does mean that some of the findings from the review are already likely implemented (but not all)`
-        - `- to accommodate this, as you iterate over the different findings/suggestions, always first check if the work appears to be one before attempting to fix it`
-        - `- if you believe that the previous run did fix it then be sure to log an entry to the log file mentioning this`
+        - verify prior repairs before changing them and record their evidence as `already fixed`; an earlier completion claim is insufficient
     ::end-block
 
 > **Important:**
@@ -134,6 +142,37 @@ Now explain to the user the current state of this review/implement cycle and exi
 
 
 ::block when="!ready"
+
+### Inventory before implementation
+
+Read the entire review, including frontmatter findings, body findings, instance
+tables, required repairs, recurrence, robustness recommendations, and blockers.
+Set the review's `implemented` flag to `false` before starting repairs so a stale
+claim cannot make an incomplete retry look complete.
+Create a `### Finding Ledger` in this iteration's log section before editing code:
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+|---|---|---|---|
+| R{{iteration}}-F1 | Finding title | pending | |
+| R{{iteration}}-F1.1 | Required site/shape and expected behavior | pending | |
+
+- Retain review IDs. For legacy reviews without IDs, use the review filename plus
+  finding title and assign numbered child rows locally. Include one parent row
+  per finding and child rows for every required instance and consumer. Add rows
+  as the sweep discovers more work; never replace the inventory with a summary.
+- Reconcile frontmatter and body so nothing disappears. Include blocking issues
+  buried in recommendations; mark explicitly nonblocking follow-ups separately.
+- Record blockers and whether they have been removed by an accepted decision or
+  changed prerequisite. Complete all unblocked work while genuine blockers remain.
+- Finish each row as **fixed**, **already fixed**, **clean**, **blocked**,
+  **deferred**, **unresolved**, or **disputed**. `clean` is for checked sibling sites,
+  not a finding that requires repair. Record evidence for fixed/already-fixed/clean
+  rows and a concrete reason for every open row.
+- A parent finding is fixed only when every required child is verified and no
+  discovered defect remains open. Use already fixed only if no repair was needed
+  and all required checks passed. Any partial repair remains unresolved unless
+  the remaining work is explicitly blocked or deferred. Count parent findings
+  separately from instance rows.
 
 From this point on in the task be sure to log progress on the task:
 
@@ -168,15 +207,24 @@ For every finding, before any code changes:
   within the code this spec added or changed and the call sites that reach it
 - fix every instance you find in this cycle and add a test case for each,
   whether or not the review named it
-- log the sweep as one entry:
-  `- class sweep: {class}; sites checked: {list}; fixed here: {list}; clean: {list}`
+- trace changed identity, scope, category, arity, or other decision evidence
+  through collection, filtering, summaries, candidate selection, lookup stopping
+  conditions, and every downstream consumer; add a ledger row for each affected
+  decision instead of stopping after fixing the reader or grouping step
+- update the ledger with the checked sites, dispositions, and evidence
+
+A **clean** site requires a reproduction with independently stated expected
+results or a precise contract/invariant explanation tied to the code. Verify
+both incorrect extra results and missing required results. Calling a fallback
+"conservative" does not excuse losing a result the contract requires. Cache and
+uncached equivalence checks must also assert the independently expected facts.
 
 The following are not permitted for anything that is itself a defect against
 the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
-fix it in this cycle, list it as **deferred** under `### Successful
-Completion` with the reason, or **dispute** it (below). A deferred defect
-counts as deferred, not fixed.
+fix it in this cycle, or record it as blocked, deferred, unresolved, or disputed
+in the ledger and closing report with the reason. These outcomes do not count
+as fixed.
 
 ### Dispute a finding that has no authority
 
@@ -184,7 +232,7 @@ A high finding must cite its authority: a spec acceptance criterion, decision,
 or sentence it violates, or a regression from the base branch reached by an
 input a real call site, template, fixture, or user produces. When a finding
 cites neither, or its cited authority does not say what the finding claims,
-do not implement it. Log it under `### Successful Completion` as
+do not implement it. Record it in the ledger and closing report as
 **disputed**, with one sentence naming the authority it lacks; the next review
 must cite that authority or drop the finding.
 
@@ -222,42 +270,68 @@ Now your task is to:
 
 1. Act as an orchestrator and iterate over each suggestion (serially)
 2. For each suggestion call a subagent to:
+    - work from its parent finding and every child ledger row, including the
+      recurrence list; return a disposition and evidence for each row,
     - name the defect class and sweep every sibling site (see "Fix the class, not the instance" above),
     - implement the suggestion at every site the sweep found,
     - add and/or update tests to provide full test coverage for the suggestion,
-    - and make sure that the implementation passes all tests (just test)
-    - and has no lints (just lint)
+    - run focused regression checks for the repair,
     - tell the subagent to use the 'rust', 'rust-testing', and '{{ctx.area}}' agent skills
 
     > Note: 
     > 
-    > - Run testing and linting _only_ in the package areas which are directly impacted by the spec file ({{spec}})
-    > - often, but not always, the spec file will explicitly state the 
+    > - Run checks in the package areas directly affected by the implementation.
+    >   The spec ({{spec}}) helps identify scope; the actual changes determine it.
 
-3. Write the closing log entries to the log file ({{log}}):
+3. Reconcile every ledger row yourself after all subagents finish. Check their
+   evidence and inspect the combined changes; a subagent's success message is
+   insufficient. Run `just test` and `just lint` in each affected package area
+   after the final change, plus the verification tiers required by the behavior.
+   Account for unrelated failures explicitly; never claim checks passed when
+   they did not. Continue with remaining findings after a blocked repair.
 
-    - add a H3 heading of `### Successful Completion\n`
-    - then the following prose: `The implementation of review cycle {{iteration}} has completed successfully in {duration}. During this implementation all {#} review findings were evaluated to see if they could be fixed as a part of this implementation cycle: {fixed} were fixed, {deferred} were deferred, {disputed} were disputed (see reasons below):`
-        - `{duration}` is the duration that the task took to complete
-        - `{#}` is the number of findings/suggestions which the review contained
-        - now list each finding/suggestion that had to be deferred and describe WHY it was deferred, then each disputed finding with the authority it lacks
+4. Write the closing log entries to the log file ({{log}}):
 
-            > NOTE: the most common reason for deferring a suggestion is that a performance metric was required but the machine's CPU load did not allow for a legitimate measurement to take place. In this case we should log similarly how we would in any other situation but take two additional measures:
-            - set the `deferred_perf_measurement` to `true` on the log file's frontmatter
-            - create (or append to if already exists) the '{{perf}}' file full detail of the deferred performance test and be sure to indicate which finding this maps back to as well as the review file ({{review}})
+    - use `### Completion Report`; state **complete**, **partial**, or **blocked**
+      and the elapsed duration. Complete requires every finding repaired or
+      independently verified already fixed, or disputed with its missing authority
+      documented, and all required checks passing.
+      Blocked means all remaining work depends on unavailable prerequisites;
+      otherwise an incomplete cycle is partial.
+    - count parent findings: `total = fixed + already fixed + blocked + deferred
+      + unresolved + disputed`. No parent may remain pending, be counted twice, or be
+      reported fixed while any required instance/consumer remains open.
+    - summarize verified repairs and list every open finding/child ID, what
+      remains, its reason, and the next required action. An evaluated finding
+      is not necessarily implemented.
 
-    - `The files `
+    - if host load prevents a legitimate required performance measurement,
+      record the deferral, set `deferred_perf_measurement` to `true` on the log,
+      and create or append to `{{ dirname(spec) + '/deferred-performance.md' }}`
+      with the measurement details, finding ID, and review file ({{review}})
 
-4. When all suggestions have been implemented and you've reported your final log entries, you need to update metadata for the following files:
+    - list changed files and final verification commands/results, tied to the
+      findings they verify
+
+5. Write completion metadata before exiting, including for partial or blocked work:
 
     - update the review file's metadata ({{review}}):
         - set the `log` frontmatter to '{{log}}'
-        - set the `implemented` frontmatter to `true`
+        - set `implemented` to `true` only for a complete cycle as defined above;
+          otherwise set it to `false` so incomplete work remains selectable
         - set the `implemented_by` frontmatter to `{{ ctx.agent }}/{{ ctx.model }}`
+        - preserve the reviewer's readiness judgment, findings, and body; your
+          ledger is the repair claim and the next review verifies it independently
     - update the log file's metadata ({{log}}):
         - set the `implementation_{{iteration}}` frontmatter to "{{ ctx.now }}"
 
+Your final response must give the cycle outcome, reconciled finding counts,
+verification results, and every remaining finding ID. Use "implementation
+complete, ready for review" only for a complete cycle.
+
 ::end-block
+
+::file "../_finish-before-exit.md"
 
 ::file "../_os.md"
 

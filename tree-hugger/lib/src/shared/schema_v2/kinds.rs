@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::facets::{Attribute, SymbolRef, VisibilityLevel};
 
 /// Symbol kind taxonomy for schema v2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SymbolKindV2 {
     Function,
     Method,
@@ -24,6 +24,21 @@ pub enum SymbolKindV2 {
     EnumVariant,
     Macro,
     Unknown,
+}
+
+/// Where a declaration sits, for presentation: the nearest semantic
+/// declaration around it decides, not the nearest brace. Separate from the
+/// lexical scopes used to resolve names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum SymbolScope {
+    /// At file level, or in a namespace, package or module body.
+    Item,
+    /// In a type, trait, interface, object or `impl` body, or named on its
+    /// owner wherever written (a Go receiver method, a Lua `M.f`).
+    Member,
+    /// In a function body (nested functions and types included), or a
+    /// parameter.
+    Local,
 }
 
 /// Receiver classification for function-like symbols.

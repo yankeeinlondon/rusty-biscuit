@@ -299,10 +299,11 @@ _ci_build_verify dir artifact environment plan="":
         } >>"${GITHUB_OUTPUT}"
     fi
 
-# Worker budget: keep two slots for other host work, except on small CI
-# runners where reserving them would discard half or more of the capacity.
-# This limits test processes, not CPU affinity or Cargo build jobs.
-_test_threads:
+# Worker budget. L2 takes half the cores, rounded down, on every host, CI
+# runners included. Other tiers keep two slots for other host work, except on
+# small CI runners where reserving them would discard half or more of the
+# capacity. This limits test processes, not CPU affinity or Cargo build jobs.
+_test_threads tier="L1":
     #!/usr/bin/env bash
     set -euo pipefail
     cores=""
@@ -314,11 +315,21 @@ _test_threads:
         cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-1}")"
     fi
     [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
-    if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
+    if [[ "{{ tier }}" == "L2" ]]; then
+        echo "$(( cores > 1 ? cores / 2 : 1 ))"
+    elif [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
         echo "$cores"
     else
         echo "$(( cores > 2 ? cores - 2 : 1 ))"
     fi
+
+# Worker budget for parallel self-spawn L2: half the host's cores, rounded
+# down. Every worker starts a login shell and a terminal pane, the panes of
+# every concurrent run share one tmux server or WezTerm mux, and spawn and
+# capture deadlines are wall-clock, so overload fails tests instead of slowing
+# them. At 14 workers on a 16-core Mac, WezTerm spawns and captures timed out.
+_test_l2_threads:
+    @just _test_threads L2
 
 # Build the package
 _build package pkg_name *args="": _storage_preflight
@@ -352,38 +363,17 @@ _install path pkg_name binary="" *args="":
     fi
     just _play drop-4 || exit 0
 
-# commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-[arg("agent")]
-[arg("model")]
-[arg("yolo")]
-commit yolo="true" agent="opencode" model="":
+# commits all the staged changes with the agent and model set in prompts/commit.md
+commit *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    model=""
-    if [[ ! -z "{{ model }}" ]]; then
-        model="--model {{ model }}"
-    else
-        if [[ "{{ agent }}" == "opencode" ]]; then
-            if [[ -z "{{ model }}" ]]; then
-                model="--model minimax/MiniMax-M3"
-            fi
-        fi
-    fi
-    yolo=""
-    if [[ "{{ yolo }}" == "true" ]]; then
-        yolo="-y"
-    fi
     echo ""
     echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
-    if [[ -z "$model" ]]; then
-        echo -e "{{ dim }}  - using the {{ italic }}default{{ reset }}{{ dim }}model for the agent{{ reset }}"
-    else
-        echo -e "{{ dim }}  - using the {{ italic }}{{ blue }}${model}{{ reset }}{{ dim }}model{{ reset }}"
-    fi
     echo ""
     echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet ${yolo} ${model}
+    # `@` resolves from the repo root; a package area has no prompts/commit.md of its own
+    claudine compose "@prompts/commit.md" -y {{ args }}
     just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
@@ -1108,6 +1098,28 @@ _test_local_all specs *args="": _storage_preflight
         cargo test "${selected[@]}" ${forwarded[@]+"${forwarded[@]}"} -- \
             --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ --skip perf_
     fi
+
+# Report every test Nextest marks SLOW for this package area.
+#
+# Runs the area's own `test` recipe, so selection stays exactly what the area
+# gates on — the packages, feature flags, and `_tier_filter L1` expression are
+# not restated here and cannot drift from `test`. Nextest prints each test past
+# the configured `slow-timeout.period` (`.config/nextest.toml`) and repeats the
+# list in its final summary; `--no-fail-fast` keeps that list complete when a
+# test fails. The status flags are Nextest-only, so there is deliberately no
+# `cargo test` fallback: a fallback would have no slow report to print.
+_slow_tests *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        echo "slow-tests: cargo-nextest is required, but '${nextest_bin[*]} --version' failed." >&2
+        exit 1
+    fi
+    echo
+    echo -e "🐌 {{ bold }}Slow tests{{ reset }} — this area's tests past the configured slow-timeout"
+    echo
+    just test --no-fail-fast --status-level slow --final-status-level slow {{ args }}
 
 # Sanity tier across several packages, continuing past failures. See `_run_all`.
 _sanity_all specs *args="":
@@ -2055,12 +2067,13 @@ _check_tier_coverage *args="":
 # ---------------------------------------------------------------------------
 # Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
 #
-# Each package-area justfile exposes the canonical 12-recipe set
-# (sanity, test, test-l2, test-l3, test-browser, test-real, lint, bench,
-# coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
-# the shared `_*` recipes below. Tier filter expressions are documented in
-# `.config/nextest.toml`. Recipes that don't apply to a package are explicit
-# no-ops with an explanatory comment in the package's own justfile.
+# Each package-area justfile exposes the canonical 13-recipe set
+# (sanity, test, slow-tests, test-l2, test-l3, test-browser, test-real, lint,
+# bench, coverage, doctest, fuzz, all) and delegates the per-package
+# boilerplate to the shared `_*` recipes below. Tier filter expressions are
+# documented in `.config/nextest.toml`. Recipes that don't apply to a package
+# are explicit no-ops with an explanatory comment in the package's own
+# justfile.
 # ---------------------------------------------------------------------------
 
 # Sanity tier: fast-confidence subset (≤15s). Lib + bin tests only, with every
@@ -2159,13 +2172,15 @@ _sanity pkg *args="": _storage_preflight
 # dominated by self-isolating tests (each spawns its OWN tmux session /
 # PTY — e.g. claudine) pays a steep serial tax for no isolation benefit.
 #
-# Setting `BISCUIT_L2_THREADS` to a value other than `1` switches this
-# recipe into parallel self-spawn mode: it skips the broker entirely and
-# exports NO `BISCUIT_SHARED_*` var, so EVERY `shared_or_spawn()` call
-# takes its fallback branch and spawns an OWNED, `Drop`-cleaned pane of
-# its own. With no shared resource, nextest runs at `-j N` safely. The
-# default (`1`, or unset) preserves the shared-pane serial path verbatim
-# for every other package area.
+# Parallel self-spawn mode is the default: the recipe skips the broker
+# entirely and exports NO `BISCUIT_SHARED_*` var, so EVERY
+# `shared_or_spawn()` call takes its fallback branch and spawns an OWNED,
+# `Drop`-cleaned pane of its own. With no shared resource, nextest runs at
+# `-j N` (`_test_l2_threads`) safely. A package whose L2 tests cannot run
+# concurrently declares the `l2-serial` runner tool with an
+# `l2-serial-reason`, and gets the shared-pane serial path above.
+# `BISCUIT_L2_THREADS` overrides both: `1` forces serial, any other value
+# sets the worker count.
 _test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2260,7 +2275,21 @@ _test_l2 pkg *args="": _storage_preflight
     # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
     # test self-isolates via `shared_or_spawn()`'s owned fallback, so
     # there is nothing to contend for. See the recipe comment above.
-    l2_threads="${BISCUIT_L2_THREADS:-1}"
+    # Archive mode has no Cargo to read metadata with; its callers (the CI
+    # workflow) always export BISCUIT_L2_THREADS.
+    l2_threads="${BISCUIT_L2_THREADS:-}"
+    if [[ -z "${l2_threads}" ]]; then
+        l2_threads=1
+        if (( archive_mode == 0 )); then
+            package_meta="$(cargo metadata --no-deps --format-version 1)"
+            serial="$(jq -r --arg p '{{ pkg }}' '.packages[] | select(.name == $p) | .metadata.ci.tests["runner-tools"] // [] | index("l2-serial") != null' <<< "${package_meta}")"
+            if [[ "${serial}" != "true" ]]; then
+                # Not NEXTEST_TEST_THREADS: this recipe exported the uncapped
+                # L1 budget into it above.
+                l2_threads="$(just _test_l2_threads)"
+            fi
+        fi
+    fi
     if [[ "${l2_threads}" != "1" ]]; then
         echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
         echo
@@ -2696,7 +2725,7 @@ _all pkg:
 _check_canonical:
     #!/usr/bin/env bash
     set -euo pipefail
-    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    required=(sanity test slow-tests test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
     summary="$(just --summary 2>/dev/null | tr ' ' '\n')"
     missing=()
     for r in "${required[@]}"; do

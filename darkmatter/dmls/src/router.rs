@@ -24,7 +24,7 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestI
 use lsp_types::notification::{
     Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
     DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Initialized,
-    Notification as _, Progress,
+    Notification as _, Progress, ShowMessage,
 };
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentHighlightRequest, DocumentLinkRequest,
@@ -39,10 +39,12 @@ use lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileChangeType, FoldingRangeParams, GotoDefinitionParams,
-    GotoDefinitionResponse, HoverParams, InitializeParams, InitializeResult, NumberOrString,
+    GotoDefinitionResponse, HoverParams, InitializeParams, InitializeResult, MessageType,
+    NumberOrString,
     ProgressParams, ProgressParamsValue, ReferenceParams, RegistrationParams, RenameFilesParams,
     RenameParams, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
-    SemanticTokensResult, ServerInfo, TextDocumentPositionParams, Uri, WorkDoneProgress,
+    SemanticTokensResult, ServerInfo, ShowMessageParams, TextDocumentPositionParams, Uri,
+    WorkDoneProgress,
     WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
@@ -50,7 +52,7 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
-use crate::config::ConfigState;
+use crate::config::{ConfigSeverity, ConfigState};
 use crate::context::{DocumentResolution, RepositoryContexts};
 use crate::diagnostics::DiagnosticsScheduler;
 use crate::graph::{WorkspaceGraph, WorkspaceIndex};
@@ -129,6 +131,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
 
     let roots = workspace_roots(&params);
     let config = ConfigState::load(roots.clone(), options.config_path);
+    show_config_diagnostics(&connection.sender, &config);
 
     let wiki_roots = crate::workspace::resolve_wiki_roots(
         &roots,
@@ -991,17 +994,23 @@ impl Router {
         Response::new_ok(id, actions)
     }
 
+    /// Answers with the provider's edits after showing its warnings (a
+    /// declined or impossible format) as `Warning` messages, so the client
+    /// sees why nothing changed before the empty edit list arrives.
     fn formatting(&self, id: RequestId, params: serde_json::Value) -> Response {
         let Ok(params) = serde_json::from_value::<DocumentFormattingParams>(params) else {
             return invalid_params(id);
         };
-        let edits = self
+        let outcome = self
             .state
             .with_document(&params.text_document.uri, |ctx| {
                 crate::providers::formatting::formatting(ctx)
             })
             .unwrap_or_default();
-        Response::new_ok(id, edits)
+        for warning in outcome.warnings {
+            show_message(&self.connection.sender, MessageType::WARNING, warning);
+        }
+        Response::new_ok(id, outcome.edits)
     }
 
     fn prepare_rename(&self, id: RequestId, params: serde_json::Value) -> Response {
@@ -1130,7 +1139,9 @@ impl Router {
                     return;
                 };
                 tracing::debug!("didChangeConfiguration");
-                if self.state.reload_config(params.settings) {
+                let refresh = self.state.reload_config(params.settings);
+                show_config_diagnostics(&self.connection.sender, &self.state.config);
+                if refresh {
                     self.send_semantic_tokens_refresh();
                 }
             }
@@ -1282,6 +1293,31 @@ fn send_refresh_request(sender: &Sender<Message>, id: RequestId) {
     );
     if let Err(error) = sender.send(Message::Request(request)) {
         tracing::warn!("failed to request semantic-tokens refresh: {error}");
+    }
+}
+
+/// Sends one `window/showMessage` notification; a send failure (the client
+/// is gone) is logged.
+fn show_message(sender: &Sender<Message>, typ: MessageType, message: String) {
+    let Ok(params) = serde_json::to_value(ShowMessageParams { typ, message }) else {
+        return;
+    };
+    let notification = Notification::new(ShowMessage::METHOD.to_string(), params);
+    if let Err(error) = sender.send(Message::Notification(notification)) {
+        tracing::warn!("failed to show a message: {error}");
+    }
+}
+
+/// Shows every finding of the configuration just loaded or changed, one
+/// message each. The findings are recomputed on every load, so a migration
+/// warning appears once per load or change and never per request.
+fn show_config_diagnostics(sender: &Sender<Message>, config: &ConfigState) {
+    for diagnostic in config.diagnostics() {
+        let typ = match diagnostic.severity {
+            ConfigSeverity::Error => MessageType::ERROR,
+            ConfigSeverity::Warning => MessageType::WARNING,
+        };
+        show_message(sender, typ, format!("dmls: {diagnostic}"));
     }
 }
 

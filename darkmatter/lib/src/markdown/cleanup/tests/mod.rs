@@ -1,4 +1,5 @@
 use super::*;
+use super::rules::{Indentation, Leaf, ListItemPadding, MarkdownRuleOverrides, resolve};
 
 mod blockquote;
 mod brackets;
@@ -9,359 +10,222 @@ mod parse_count;
 mod reflow;
 mod tables;
 
-fn count_occurrences(haystack: &str, needle: &str) -> usize {
-    haystack.matches(needle).count()
+/// Cleans `content` with `set` applied over the runtime defaults (at CLI
+/// precedence), asserting the guard accepted the result and that a second run
+/// is a fixed point. Prefer this over [`cleanup_content_with`] in tests: that
+/// wrapper returns the input on refusal, so "output equals input" would also
+/// pass for a decline.
+#[track_caller]
+fn clean_with(content: &str, set: impl FnOnce(&mut MarkdownRuleOverrides)) -> String {
+    let mut overrides = MarkdownRuleOverrides::default();
+    set(&mut overrides);
+    let cleaned = body_support::clean_accepted(content, &resolve(&overrides, None, None));
+    assert_eq!(cleanup_content_with(content, &overrides), cleaned, "wrapper diverged from clean_body");
+    cleaned
 }
 
-    // ==================== Blank Line Tests ====================
+/// [`clean_with`] under the runtime defaults.
+#[track_caller]
+fn clean(content: &str) -> String {
+    let cleaned = clean_with(content, |_| {});
+    assert_eq!(cleanup_content(content), cleaned, "cleanup_content diverged from clean_body");
+    cleaned
+}
 
-    #[test]
-    fn test_cleanup_adds_blank_line_between_header_and_paragraph() {
-        // Input has no blank line between header and paragraph
-        let content = "# Title\nParagraph text";
-        let cleaned = cleanup_content(content);
+/// [`clean_with`] with `unwrap: true`, the old default soft-break stripping.
+#[track_caller]
+fn clean_unwrapped(content: &str) -> String {
+    clean_with(content, unwrap)
+}
 
-        // Should have exactly one blank line (two newlines) between header and paragraph
-        assert!(
-            cleaned.contains("# Title\n\nParagraph"),
-            "Expected blank line between header and paragraph, got:\n{}",
-            cleaned
-        );
-    }
+/// [`clean_with`] with `indentation` set to `spaces` per level.
+#[track_caller]
+fn clean_indent(content: &str, spaces: usize) -> String {
+    clean_with(content, |overrides| overrides.indentation = Leaf::Value(indentation(spaces)))
+}
 
-    #[test]
-    fn test_cleanup_adds_blank_line_between_consecutive_headers() {
-        let content = "# Header 1\n## Header 2";
-        let cleaned = cleanup_content(content);
+fn indentation(spaces: usize) -> Indentation {
+    Indentation::from_spaces(spaces).expect("2, 4, or 8")
+}
 
-        // Should have blank line between headers
-        assert!(
-            cleaned.contains("# Header 1\n\n## Header 2"),
-            "Expected blank line between headers, got:\n{}",
-            cleaned
-        );
-    }
+/// A named rule setting, for fixture tables.
+type SetRules = fn(&mut MarkdownRuleOverrides);
 
-    #[test]
-    fn test_cleanup_adds_blank_line_after_code_block() {
-        let content = "```rust\nfn main() {}\n```\nParagraph after";
-        let cleaned = cleanup_content(content);
+fn unwrap(overrides: &mut MarkdownRuleOverrides) {
+    overrides.unwrap = Leaf::Value(true);
+}
 
-        // Should have blank line after code block
-        assert!(
-            cleaned.contains("```\n\nParagraph"),
-            "Expected blank line after code block, got:\n{}",
-            cleaned
-        );
-    }
+/// The old `--compact` spacing.
+fn compact(overrides: &mut MarkdownRuleOverrides) {
+    overrides.list_item_padding = Leaf::Value(ListItemPadding::None);
+}
 
-    #[test]
-    fn test_cleanup_adds_blank_line_after_list() {
-        // Note: In CommonMark, "* Item\nParagraph" creates a "lazy" paragraph inside the list
-        // We need an explicit blank line in input to separate list from paragraph
-        let content = "* Item 1\n* Item 2\n\nParagraph after";
-        let cleaned = cleanup_content(content);
+/// The old `--loose` spacing.
+fn loose(overrides: &mut MarkdownRuleOverrides) {
+    overrides.list_item_padding = Leaf::Value(ListItemPadding::One);
+}
 
-        // Should have blank line after list
-        assert!(
-            cleaned.contains("Item 2\n\nParagraph"),
-            "Expected blank line after list, got:\n{}",
-            cleaned
-        );
-    }
+/// The standalone helpers chained the way the removed
+/// `cleanup_to_fixed_width` chained them.
+fn strip_then_reflow(content: &str, width: usize) -> String {
+    reflow_to_width(&strip_incidental_newlines(content), width)
+}
 
-    #[test]
-    fn test_cleanup_adds_blank_line_after_blockquote() {
-        // Note: In CommonMark, "> Quote\nParagraph" creates a "lazy" paragraph inside blockquote
-        // We need an explicit blank line in input to separate blockquote from paragraph
-        let content = "> Quote\n\nParagraph after";
-        let cleaned = cleanup_content(content);
+// ==================== Blank Lines ====================
+//
+// Cleanup no longer normalizes blank lines: it neither inserts one after a
+// heading, code block, or paragraph nor trims or collapses them.
 
-        // Should have blank line after blockquote
-        assert!(
-            cleaned.contains("Quote\n\nParagraph"),
-            "Expected blank line after blockquote, got:\n{}",
-            cleaned
-        );
-    }
+#[test]
+fn heading_directly_followed_by_paragraph_is_unchanged() {
+    let content = "# Title\nParagraph text";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_preserves_existing_blank_lines() {
-        let content = "# Header\n\nSome text\n\n## Subheader";
-        let cleaned = cleanup_content(content);
+#[test]
+fn consecutive_headings_are_unchanged() {
+    let content = "# Header 1\n## Header 2";
+    assert_eq!(clean(content), content);
+}
 
-        // Should preserve single blank lines (not double them up)
-        assert_eq!(
-            count_occurrences(&cleaned, "\n\n\n"),
-            0,
-            "Should not have triple newlines, got:\n{}",
-            cleaned
-        );
-        assert!(cleaned.contains("# Header\n\nSome text"));
-        assert!(cleaned.contains("Some text\n\n## Subheader"));
-    }
+#[test]
+fn paragraph_directly_after_code_block_is_unchanged() {
+    let content = "```rust\nfn main() {}\n```\nParagraph after";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_does_not_add_excessive_blank_lines() {
-        let content = "# Title\nParagraph 1\n\nParagraph 2";
-        let cleaned = cleanup_content(content);
+#[test]
+fn blank_line_after_list_is_kept() {
+    let content = "* Item 1\n* Item 2\n\nParagraph after";
+    assert_eq!(clean(content), content);
+}
 
-        // Count blank lines (consecutive \n\n)
-        let blank_line_count = count_occurrences(&cleaned, "\n\n");
+#[test]
+fn blank_line_after_blockquote_is_kept() {
+    let content = "> Quote\n\nParagraph after";
+    assert_eq!(clean(content), content);
+}
 
-        // Should have exactly 2 blank lines: after title and between paragraphs
-        assert_eq!(
-            blank_line_count, 2,
-            "Expected 2 blank lines, got {} in:\n{}",
-            blank_line_count, cleaned
-        );
-    }
+#[test]
+fn existing_single_blank_lines_are_kept() {
+    let content = "# Header\n\nSome text\n\n## Subheader";
+    assert_eq!(clean(content), content);
+}
 
-    // ==================== Edge Case Tests ====================
+#[test]
+fn mixed_blank_line_spacing_is_unchanged() {
+    let content = "# Title\nParagraph 1\n\nParagraph 2";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_handles_empty_content() {
-        let content = "";
-        let cleaned = cleanup_content(content);
-        assert_eq!(cleaned, "");
-    }
+// ==================== Edge Cases ====================
 
-    #[test]
-    fn test_cleanup_handles_plain_text() {
-        let content = "Just plain text";
-        let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Just plain text"));
-    }
+#[test]
+fn empty_content_is_unchanged() {
+    assert_eq!(clean(""), "");
+}
 
-    #[test]
-    fn test_cleanup_ensures_single_trailing_newline() {
-        let content = "# Title\n\nParagraph";
-        let cleaned = cleanup_content(content);
-        let trimmed = cleaned.trim_end_matches('\n');
-        let trailing_newlines = cleaned.len() - trimmed.len();
+#[test]
+fn plain_text_is_unchanged() {
+    assert_eq!(clean("Just plain text"), "Just plain text");
+}
 
-        assert_eq!(
-            trailing_newlines, 1,
-            "Expected exactly one trailing newline, got:\n{:?}",
-            cleaned
-        );
-    }
+#[test]
+fn missing_final_newline_is_not_added() {
+    let content = "# Title\n\nParagraph";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_collapses_multiple_trailing_newlines_to_one() {
-        let content = "# Title\n\nParagraph\n\n\n";
-        let cleaned = cleanup_content(content);
-        let trimmed = cleaned.trim_end_matches('\n');
-        let trailing_newlines = cleaned.len() - trimmed.len();
+#[test]
+fn multiple_trailing_newlines_are_kept() {
+    let content = "# Title\n\nParagraph\n\n\n";
+    assert_eq!(clean(content), content);
+}
 
-        assert_eq!(
-            trailing_newlines, 1,
-            "Expected trailing newlines to collapse to one, got:\n{:?}",
-            cleaned
-        );
-    }
+#[test]
+fn multiple_paragraphs_are_unchanged() {
+    let content = "Para 1\n\nPara 2\n\nPara 3";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_handles_multiple_paragraphs() {
-        let content = "Para 1\n\nPara 2\n\nPara 3";
-        let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Para 1"));
-        assert!(cleaned.contains("Para 2"));
-        assert!(cleaned.contains("Para 3"));
-    }
+#[test]
+fn code_block_content_is_unchanged() {
+    let content = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_preserves_code_block_content() {
-        let content = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
-        let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("fn main()"));
-        assert!(cleaned.contains("println!"));
-    }
+#[test]
+fn code_block_indentation_with_info_attributes_is_unchanged() {
+    let content = "```ts title=\"Greet Function\"\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_cleanup_preserves_code_block_indentation() {
-        // Regression test: indentation inside code blocks must be preserved
-        let content =
-            "```ts title=\"Greet Function\"\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
-        let cleaned = cleanup_content(content);
+#[test]
+fn code_block_indentation_is_unchanged() {
+    let content = "```ts\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
+    assert_eq!(clean(content), content);
+}
 
-        // The 4-space indentation before console.log must be preserved
-        assert!(
-            cleaned.contains("    console.log"),
-            "Indentation inside code block should be preserved, got:\n{}",
-            cleaned
-        );
-    }
+// ==================== Regressions ====================
 
-    #[test]
-    fn test_cleanup_preserves_code_block_indentation_simple() {
-        // Test without attributes - just language
-        let content = "```ts\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
-        let cleaned = cleanup_content(content);
+#[test]
+fn no_hard_break_is_introduced_between_blocks() {
+    let content = "# Header\n\nParagraph\n\n## Another Header";
+    assert_eq!(clean(content), content);
+}
 
-        assert!(
-            cleaned.contains("    console.log"),
-            "Indentation inside simple code block should be preserved, got:\n{}",
-            cleaned
-        );
-    }
+#[test]
+fn code_fence_length_is_unchanged() {
+    let content = "```rust\nfn main() {}\n```";
+    assert_eq!(clean(content), content);
+}
 
-    // ==================== Regression Tests ====================
+#[test]
+fn unlabeled_fence_gets_default_language() {
+    assert_eq!(clean("```\nsome code\n```"), "```text\nsome code\n```");
+}
 
-    #[test]
-    fn test_no_hardbreak_in_output() {
-        // This is the main regression test for the bug
-        let content = "# Header\n\nParagraph\n\n## Another Header";
-        let cleaned = cleanup_content(content);
+#[test]
+fn fence_language_is_kept() {
+    let content = "```rust\nfn main() {}\n```";
+    assert_eq!(clean(content), content);
+}
 
-        // HardBreak would render as `\` or `<br>` - neither should appear
-        assert!(
-            !cleaned.contains("\\"),
-            "Should not contain backslash (HardBreak), got:\n{}",
-            cleaned
-        );
-        assert!(
-            !cleaned.contains("<br"),
-            "Should not contain <br> (HardBreak), got:\n{}",
-            cleaned
-        );
-    }
+#[test]
+fn every_unlabeled_fence_gets_default_language() {
+    assert_eq!(
+        clean("```\nfirst\n```\n\n```\nsecond\n```"),
+        "```text\nfirst\n```\n\n```text\nsecond\n```"
+    );
+}
 
-    #[test]
-    fn test_code_block_uses_three_backticks() {
-        // Regression test: code blocks should use 3 backticks, not 4
-        // pulldown-cmark-to-cmark defaults to 4 backticks (code_block_token_count)
-        // which is non-standard and causes rendering issues
-        let content = "```rust\nfn main() {}\n```";
-        let cleaned = cleanup_content(content);
+#[test]
+fn indented_code_block_is_unchanged() {
+    let content = "    indented code\n    more code";
+    assert_eq!(clean(content), content);
+}
 
-        // Should use exactly 3 backticks for fence
-        assert!(
-            cleaned.contains("```rust"),
-            "Code blocks should start with 3 backticks, got:\n{}",
-            cleaned
-        );
-        // Should NOT have 4 backticks (the buggy default)
-        assert!(
-            !cleaned.contains("````"),
-            "Code blocks should not use 4 backticks, got:\n{}",
-            cleaned
-        );
-    }
+// ==================== Smart Quotes (Regression) ====================
 
-    #[test]
-    fn test_code_block_without_language_gets_text_language() {
-        // Regression test: code blocks without language should get "text" added
-        let content = "```\nsome code\n```";
-        let cleaned = cleanup_content(content);
+#[test]
+fn straight_double_quotes_are_unchanged() {
+    let content = r#"He said "hello" and "goodbye"."#;
+    assert_eq!(clean(content), content);
+}
 
-        // Should have "text" as language
-        assert!(
-            cleaned.starts_with("```text\n") || cleaned.contains("\n```text\n"),
-            "Code blocks without language should get 'text' as language, got:\n{}",
-            cleaned
-        );
-        // Should NOT have 4 backticks
-        assert!(
-            !cleaned.contains("````"),
-            "Code blocks should not use 4 backticks, got:\n{}",
-            cleaned
-        );
-    }
+#[test]
+fn straight_single_quotes_are_unchanged() {
+    let content = "It's a test and 'quoted text' here.";
+    assert_eq!(clean(content), content);
+}
 
-    #[test]
-    fn test_code_block_preserves_existing_language() {
-        // Ensure code blocks with language are not affected
-        let content = "```rust\nfn main() {}\n```";
-        let cleaned = cleanup_content(content);
-
-        assert!(
-            cleaned.contains("```rust\n"),
-            "Existing language should be preserved, got:\n{}",
-            cleaned
-        );
-    }
-
-    #[test]
-    fn test_multiple_code_blocks_without_language() {
-        // Multiple empty code blocks should all get "text" language
-        let content = "```\nfirst\n```\n\n```\nsecond\n```";
-        let cleaned = cleanup_content(content);
-
-        // Count occurrences of "```text"
-        let text_count = cleaned.matches("```text").count();
-        assert_eq!(
-            text_count, 2,
-            "Both code blocks should get 'text' language, got:\n{}",
-            cleaned
-        );
-    }
-
-    #[test]
-    fn test_indented_code_blocks_unchanged() {
-        // Indented code blocks should remain unchanged (they don't have language specifiers)
-        let content = "    indented code\n    more code";
-        let cleaned = cleanup_content(content);
-
-        // Should preserve indented code block
-        assert!(
-            cleaned.contains("indented code"),
-            "Indented code should be preserved, got:\n{}",
-            cleaned
-        );
-    }
-
-    // ==================== Smart Quotes Tests (Regression) ====================
-
-    #[test]
-    fn test_cleanup_preserves_straight_double_quotes() {
-        // Regression test: Normal quotes should NOT be converted to smart quotes
-        let content = r#"He said "hello" and "goodbye"."#;
-        let cleaned = cleanup_content(content);
-
-        // Should contain straight quotes (ASCII 0x22)
-        assert!(
-            cleaned.contains('"'),
-            "Straight double quotes should be preserved, got:\n{}",
-            cleaned
-        );
-        // Should NOT contain smart quotes (U+201C and U+201D - left and right double quotes)
-        assert!(
-            !cleaned.contains('\u{201C}') && !cleaned.contains('\u{201D}'),
-            "Should not contain smart/curly quotes, got:\n{}",
-            cleaned
-        );
-    }
-
-    #[test]
-    fn test_cleanup_preserves_straight_single_quotes() {
-        // Regression test: Single quotes/apostrophes should NOT be converted
-        let content = "It's a test and 'quoted text' here.";
-        let cleaned = cleanup_content(content);
-
-        // Should contain straight single quote (ASCII 0x27)
-        assert!(
-            cleaned.contains("'"),
-            "Straight single quotes should be preserved, got:\n{}",
-            cleaned
-        );
-        // Should NOT contain smart single quotes (U+2018 and U+2019)
-        assert!(
-            !cleaned.contains('\u{2018}') && !cleaned.contains('\u{2019}'),
-            "Should not contain smart/curly single quotes, got:\n{}",
-            cleaned
-        );
-    }
-
-    #[test]
-    fn test_cleanup_preserves_quotes_in_code() {
-        // Quotes inside code blocks should definitely be preserved
-        let content = "```\nlet s = \"hello\";\n```";
-        let cleaned = cleanup_content(content);
-
-        assert!(
-            cleaned.contains("\"hello\""),
-            "Quotes in code should be preserved, got:\n{}",
-            cleaned
-        );
-    }
+#[test]
+fn quotes_in_code_are_unchanged() {
+    assert_eq!(clean("```\nlet s = \"hello\";\n```"), "```text\nlet s = \"hello\";\n```");
+}
+mod body_support;
+mod fidelity_repro;
+mod directive_fixed_points;
+mod rules;
+mod guard;
+mod source_fidelity;

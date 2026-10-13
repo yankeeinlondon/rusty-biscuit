@@ -219,7 +219,14 @@ case "$(uname -s)" in
     Linux|Darwin) cargo fuzz --version >/dev/null ;;
 esac
 if [[ "$(uname -s)" == "Linux" ]]; then
-    cross --version >/dev/null
+    # Cross 0.2.5 inspects workspace metadata even for --version and may install
+    # an x86_64 container toolchain on ARM Linux. Probe outside any workspace.
+    (
+        probe_dir="$(mktemp -d)"
+        trap 'rm -rf "$probe_dir"' EXIT
+        cd "$probe_dir"
+        cross --version >/dev/null
+    )
     bencher --version >/dev/null
 fi
 

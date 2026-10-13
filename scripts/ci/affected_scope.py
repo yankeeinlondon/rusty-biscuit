@@ -263,12 +263,14 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_constraints.py",
             "test_cross_check.py",
             "test_evidence_reuse.py",
+            "test_hosted_observations.py",
             "test_local_evidence.py",
             "test_publish_gaps.py",
             "test_resolved_plan.py",
             "test_reuse_validation.py",
             "test_runner_loss.py",
             "test_schema.py",
+            "test_seed.py",
         )
     },
     # Lint-only on purpose, and the one entry with no `recipe`: a source-policy
@@ -475,7 +477,7 @@ KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
     "node-22",
     "pnpm-10",
-    "l2-parallel-self-spawn",
+    "l2-serial",
     "neovim",
     "zed-extension",
 }
@@ -528,6 +530,14 @@ CI_TEST_FIELDS = {
     #: out of that scan, so such a test runs only when its own package changes
     #: (see `test_input_references`).
     "source-inputs",
+    #: Why a package that is not built yet has no tests. While its source
+    #: holds none, it gets no test cell; the first test found schedules it
+    #: normally and reports the marker as stale (`package_has_tests`).
+    "unimplemented",
+    #: Why the package's L2 tier cannot run in parallel. Required with the
+    #: `l2-serial` runner tool and rejected without it: L2 runs in parallel
+    #: unless a package states why it must not.
+    "l2-serial-reason",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -1463,6 +1473,14 @@ def validate_package_ci(
             f"allowed: {sorted(CI_TEST_FIELDS)}"
         )
 
+    unimplemented = tests.get("unimplemented")
+    if unimplemented is not None and (
+        not isinstance(unimplemented, str) or not unimplemented.strip()
+    ):
+        raise RuntimeError(
+            f"{label}.tests field 'unimplemented' must be a non-empty reason"
+        )
+
     tiers = tests.get("tiers", ["L1"])
     if not isinstance(tiers, list) or not all(isinstance(t, str) for t in tiers):
         raise RuntimeError(f"{label}.tests field 'tiers' must be a list of tier names")
@@ -1530,6 +1548,20 @@ def validate_package_ci(
         raise RuntimeError(
             f"{label}.tests names unknown runner tool(s) {invalid_tools}; the "
             f"vocabulary is closed: {sorted(KNOWN_RUNNER_TOOLS)}"
+        )
+
+    serial_reason = tests.get("l2-serial-reason")
+    if "l2-serial" in tools:
+        if "L2" not in tiers:
+            raise RuntimeError(f"{label}.tests names the 'l2-serial' runner tool without the L2 tier")
+        if not isinstance(serial_reason, str) or not serial_reason.strip():
+            raise RuntimeError(
+                f"{label}.tests names the 'l2-serial' runner tool without 'l2-serial-reason'; "
+                "L2 runs in parallel unless the package states why it cannot"
+            )
+    elif serial_reason is not None:
+        raise RuntimeError(
+            f"{label}.tests sets 'l2-serial-reason' without the 'l2-serial' runner tool"
         )
 
     validate_archive_includes(label, tests.get("archive-includes", []))
@@ -1780,6 +1812,7 @@ def package_ci_policy(
             "archive_includes": tests.get("archive-includes", []),
             "sidecars": tests.get("sidecars", []),
             "source_inputs": tests.get("source-inputs", []),
+            "unimplemented": tests.get("unimplemented"),
         }
         for path in record["source_inputs"]:
             own = manifest_directory(root, package).as_posix()
@@ -1861,6 +1894,39 @@ def area_slug(area: str) -> str:
     ```
     """
     return area.replace("/", "--")
+
+
+#: A test the harness would run: `#[test]` and its path-qualified forms
+#: (`#[tokio::test]`), the attribute macros of `rstest`, `test-case`, and
+#: `wasm-bindgen-test`, and `proptest!` blocks.
+_TEST_MARKER = re.compile(
+    r"#\[\s*(?:[A-Za-z_][\w]*::)*(?:test|rstest|test_case|wasm_bindgen_test)\b"
+    r"|\bproptest!"
+)
+
+
+def package_has_tests(root: Path, package: dict[str, Any]) -> bool:
+    """Whether a package's own source declares any test.
+
+    Read only for a package declaring `unimplemented`, so a test this scan
+    cannot recognize never drops coverage from a package that made no such
+    declaration. Any Rust file under `tests/` counts as a test.
+    """
+    directory = root / manifest_directory(root, package)
+    for path in directory.rglob("*.rs"):
+        relative = path.relative_to(directory).parts
+        if "target" in relative:
+            continue
+        if relative[0] == "tests":
+            return True
+        try:
+            if _TEST_MARKER.search(path.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            # Unreadable source is assumed to hold tests: the safe direction
+            # schedules the cell rather than dropping it.
+            return True
+    return False
 
 
 def manifest_directory(root: Path, package: dict[str, Any]) -> PurePosixPath:
@@ -3443,9 +3509,11 @@ def policy_record(
     shaped = {
         "package": record["package"],
         "area": record["area"],
-        # A gating package always owns at least its lint cell, so an empty
-        # gate list is exactly `gates = false`.
-        "gates": bool(record["gates"]),
+        # Only a `gates = false` package carries an exclusion. A gating one
+        # can gate nothing this run (a fully proven push, or an
+        # `unimplemented` package off Linux), and the plan's cells, not this
+        # flag, then say it is expected to produce nothing.
+        "gates": "exclusion" not in record,
         "tiers": record["tiers"] if testing else [],
         "l2_backends": record["l2_backends"],
         # The rollup needs to know a companion suite was DECLARED: a green
@@ -3461,7 +3529,7 @@ def policy_record(
             )
         ],
     }
-    if not record["gates"]:
+    if "exclusion" in record:
         shaped["exclusion"] = record["exclusion"]
     return shaped
 
@@ -3863,6 +3931,313 @@ def producing_environments(
     return producing
 
 
+def merge_selections(selections: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """The union of several groups' selections, once per `{package, environment, gate}`.
+
+    Groups plan disjoint environments, so their cells never collide; a package
+    selected by two groups keeps one record whose gates cover both. The change
+    inventory and archive guard describe the diff, so they come from the first
+    group that has one (an incremental group), falling back to the first. A
+    plan is `full_scope` only when every group is: a full-scope environment
+    beside an incremental one must not relabel the incremental one's areas.
+    """
+    records: dict[str, dict[str, Any]] = {}
+    for selection in selections:
+        for record in selection["package_records"]:
+            existing = records.get(record["package"])
+            if existing is None:
+                records[record["package"]] = copy.deepcopy(record)
+                continue
+            if "dependent_seam" in record and "dependent_seam" not in existing:
+                existing["dependent_seam"] = copy.deepcopy(record["dependent_seam"])
+            existing["gates"] = [
+                gate for gate in schema.GATES if gate in existing["gates"] or gate in record["gates"]
+            ]
+    cells: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for selection in selections:
+        for cell in selection["cells"]:
+            key = (cell["package"], cell["environment"], cell["gate"])
+            if key not in seen:
+                seen.add(key)
+                cells.append(cell)
+    all_full = all(selection["full_scope"] for selection in selections)
+    described = next((s for s in selections if not s["full_scope"]), selections[0])
+    selected: set[str] = set()
+    for key in ("source_ids", "suite_ids", "input_ids"):
+        for selection in selections:
+            selected |= set(selection[key])
+    return {
+        "files": sorted({path for selection in selections for path in selection["files"]}),
+        "package_records": sorted(records.values(), key=lambda record: record["package"]),
+        "cells": cells,
+        "source_ids": set().union(*(s["source_ids"] for s in selections)),
+        "suite_ids": set().union(*(s["suite_ids"] for s in selections)),
+        "input_ids": set().union(*(s["input_ids"] for s in selections)),
+        "reverse_ids": set().union(*(s["reverse_ids"] for s in selections)) - selected,
+        "full_scope": all_full,
+        "full_gates": set(selections[0]["full_gates"]) if all_full else set(),
+        "inventory": described["inventory"],
+        "guard": described["guard"],
+    }
+
+
+def coverage_contract(cell: dict[str, Any], package: dict[str, Any]) -> str:
+    """The identity of what one pending cell must prove, beyond its name.
+
+    An anchor's certification records this per covered cell, and a later
+    nightly inherits the cell only while it is unchanged. Two cells with the
+    same `{package, environment, gate}` prove different things when the
+    backends, test features, target kinds, companion suites, test filter, or
+    slow-test inclusion differ, so each of those is part of the identity.
+    Selection reasons and execution plumbing are not: they change nothing a
+    passing run proved.
+
+    Read only from a pending cell of a full-scope selection, where `backends`
+    is still present (reuse strips it).
+    """
+    gate = cell["gate"]
+    terms: dict[str, Any] = {
+        "package": cell["package"],
+        "environment": cell["environment"],
+        "gate": gate,
+        "target_kinds": sorted(cell["target_kinds"]),
+        "test_filter": cell.get("test_filter", ""),
+        "companions": sorted(entry["name"] for entry in cell.get("companions", [])),
+        "dependents": sorted(cell.get("dependents", [])),
+    }
+    if gate in schema.BUILD_GATES:
+        terms["test_args"] = package["test_args"]
+    if gate == "L1":
+        terms["l1_include_slow"] = package["l1_include_slow"]
+    if gate == "L2":
+        # Both: the declaration, and the part of it this environment hosts.
+        terms["declared_backends"] = sorted(package["l2_backends"])
+        terms["backends"] = sorted(cell.get("backends", []))
+    if gate == "check":
+        terms["check_args"] = package["check_args"]
+    return schema.identity(schema.canonical(terms))
+
+
+def required_contracts(selection: dict[str, Any], environment: str) -> dict[tuple[str, str], str]:
+    """`{(package, gate): coverage_contract}` for every pending cell of `environment`."""
+    records = {record["package"]: record for record in selection["package_records"]}
+    return {
+        (cell["package"], cell["gate"]): coverage_contract(cell, records[cell["package"]])
+        for cell in selection["cells"]
+        if cell["environment"] == environment and cell["state"] == "pending"
+    }
+
+
+def contract_cells(contracts: dict[tuple[str, str], str]) -> list[dict[str, str]]:
+    return [
+        {"package": package, "gate": gate, "contract": contracts[(package, gate)]}
+        for package, gate in sorted(contracts)
+    ]
+
+
+def inherited_blockers(
+    cells: list[dict[str, Any]],
+    package_records: list[dict[str, Any]],
+    environments: list[dict[str, Any]],
+    root: Path,
+    head: str,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None,
+) -> dict[tuple[str, str, str], str]:
+    """The would-be inherited `cells` that published evidence requires to execute.
+
+    Asked of `local_evidence.blocking_evidence` over the plan these cells
+    would form if they were selected, builds included, so a result qualifies
+    for an inherited cell exactly as it would for a selected one: same tree or
+    gate-input equivalence, same backends and features, same supersession.
+    Notes are read from `root`'s repository.
+    """
+    if not cells:
+        return {}
+    import contextlib
+    import local_evidence  # local import: it imports this module
+
+    candidates = copy.deepcopy(cells)
+    builds = derive_build_records(candidates, package_records, environments, root, head)
+    with contextlib.chdir(root):
+        return local_evidence.blocking_evidence(
+            {"cells": candidates, "packages": package_records, "builds": builds},
+            head,
+            report_probe,
+        )
+
+
+def apply_policy_delta(
+    selection: dict[str, Any],
+    chosen: dict[str, Any],
+    required: dict[str, Any],
+    group: dict[str, Any],
+    coverage_anchors: list[dict[str, Any]],
+    blockers: Callable[
+        [list[dict[str, Any]], list[dict[str, Any]]], dict[tuple[str, str, str], str]
+    ],
+) -> None:
+    """Add what current policy requires beyond the diff, and record each anchor.
+
+    `required` is a full-scope selection of the group's environments evaluated
+    now. A pending cell there is inherited from the anchor only when the
+    anchor's certification covered it under the same `coverage_contract`; an
+    expired gap, a newly declared gate, or a newly required backend or test
+    feature inside an existing gate is selected whatever the source diff says,
+    and evidence verification then decides whether it executes. A legacy
+    anchor recorded no contracts, so it establishes none and every required
+    cell the diff does not reselect is selected.
+
+    A covered cell is still not inherited when `blockers(cells, records)`
+    reports that published evidence for it (a later failure, or results
+    nothing orders) requires execution: the certification proved the anchor,
+    not every commit since, and no later step verifies an inherited cell. It
+    is selected and listed in `reopened_cells`; the anchor and every other
+    inherited cell stand.
+    """
+    full_records = {record["package"]: record for record in required["package_records"]}
+    for name in group["environments"]:
+        entry = group["anchors"][name]
+        need = {
+            (cell["package"], cell["gate"]): cell
+            for cell in required["cells"]
+            if cell["environment"] == name and cell["state"] == "pending"
+        }
+        contracts = required_contracts(required, name)
+        selected = {
+            (cell["package"], cell["gate"])
+            for cell in chosen["cells"]
+            if cell["environment"] == name
+        }
+        covered = entry["covered_cells"]
+        held = {
+            (cell["package"], cell["gate"]): cell["contract"] for cell in covered or []
+        }
+        proven = {key for key in need if held.get(key) == contracts[key]}
+        delta = sorted(set(need) - proven - selected)
+        blocked = blockers(
+            [need[key] for key in sorted(proven - selected)],
+            [full_records[package] for package in sorted({p for p, _ in proven - selected})],
+        )
+        reopened = sorted(key for key in proven - selected if (key[0], name, key[1]) in blocked)
+        inherited = sorted(proven - selected - set(reopened))
+        for package, gate in reopened:
+            cell = copy.deepcopy(need[(package, gate)])
+            cell["selection_reason"] = (
+                f"the anchor's certification covers {gate} on {name}, but published "
+                f"evidence shows {blocked[(package, name, gate)]}"
+            )
+            selection["cells"].append(cell)
+            if not any(record["package"] == package for record in selection["package_records"]):
+                record = copy.deepcopy(full_records[package])
+                record["selection_reason"] = cell["selection_reason"]
+                selection["package_records"].append(record)
+        for package, gate in delta:
+            cell = copy.deepcopy(need[(package, gate)])
+            if covered is None:
+                cell["selection_reason"] = (
+                    f"current policy requires {gate} on {name}; the legacy anchor "
+                    "recorded no coverage contract that could prove it"
+                )
+            elif (package, gate) in held:
+                cell["selection_reason"] = (
+                    f"current policy changed what {gate} on {name} must prove since "
+                    "the anchor's certification"
+                )
+            else:
+                cell["selection_reason"] = (
+                    f"current policy requires {gate} on {name}, which the anchor's "
+                    "certification does not cover"
+                )
+            selection["cells"].append(cell)
+            if not any(record["package"] == package for record in selection["package_records"]):
+                record = copy.deepcopy(full_records[package])
+                record["selection_reason"] = cell["selection_reason"]
+                selection["package_records"].append(record)
+        coverage_anchors.append({
+            key: value for key, value in entry.items() if key != "covered_cells"
+        } | {
+            "policy_delta": [{"package": p, "gate": g} for p, g in delta],
+            "inherited_cells": [{"package": p, "gate": g} for p, g in inherited],
+            "reopened_cells": [{"package": p, "gate": g} for p, g in reopened],
+            "required_cells": contract_cells(contracts),
+        })
+    owned: dict[str, set[str]] = {}
+    for cell in selection["cells"]:
+        owned.setdefault(cell["package"], set()).add(cell["gate"])
+    for record in selection["package_records"]:
+        record["gates"] = [gate for gate in schema.GATES if gate in owned.get(record["package"], ())]
+    selection["package_records"].sort(key=lambda record: record["package"])
+
+
+def git_changes(anchor: str, head: str, root: Path) -> tuple[list[str], list[str], list[str]]:
+    """`(changed, deleted, renamed_from)` between two revisions, as the workflow's diff yields them.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when Git cannot produce the diff. An unreadable
+    anchor must stop planning: the caller never substitutes an empty change
+    list, which would claim nothing changed.
+    """
+    import diff_scope  # local import: only a nightly with anchors needs it
+
+    result = subprocess.run(
+        ["git", "diff", "--name-status", "-z", anchor, head],
+        cwd=root, capture_output=True, timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git diff {anchor[:9]}..{head[:9]} failed: "
+            f"{result.stderr.decode(errors='replace').strip()}"
+        )
+    changed, deleted, renamed_from = diff_scope.parse_name_status(result.stdout)
+    return (
+        [os.fsdecode(path) for path in changed],
+        [os.fsdecode(path) for path in deleted],
+        [os.fsdecode(path) for path in renamed_from],
+    )
+
+
+def coverage_anchor_groups(
+    document: Any,
+    head: str,
+    root: Path,
+    changes: Callable[[str, str, Path], tuple[list[str], list[str], list[str]]] = git_changes,
+) -> list[dict[str, Any]]:
+    """Group a validated anchor document by the comparison each environment shares.
+
+    Environments with the same incremental anchor share one diff and one
+    selection; every full-scope fallback shares one group with no diff.
+
+    ## Errors
+
+    Raises ``RuntimeError`` listing every reason `document` is invalid: a
+    malformed anchor document stops planning rather than producing a reduced
+    plan.
+    """
+    problems = schema.validate_anchor_input(document)
+    if problems:
+        raise RuntimeError("invalid anchor input: " + "; ".join(problems))
+    keyed: dict[tuple[str, str | None], dict[str, Any]] = {}
+    for entry in document["anchors"]:
+        group = keyed.setdefault(
+            (entry["mode"], entry["anchor"]),
+            {"environments": [], "anchors": {}, "full": entry["mode"] == "full"},
+        )
+        group["environments"].append(entry["environment"])
+        group["anchors"][entry["environment"]] = entry
+    groups: list[dict[str, Any]] = []
+    for (mode, anchor), group in sorted(keyed.items(), key=lambda item: (item[0][0], item[0][1] or "")):
+        group["environments"].sort()
+        if mode == "full":
+            group.update(files=[], deleted=[], renamed_from=[])
+        else:
+            files, deleted, renamed = changes(anchor, head, root)
+            group.update(files=files, deleted=deleted, renamed_from=renamed)
+        groups.append(group)
+    return groups
+
+
 def calculate_scope(
     files: list[str],
     root: Path,
@@ -3886,6 +4261,8 @@ def calculate_scope(
     deleted: Sequence[str] = (),
     renamed_from: Sequence[str] = (),
     input_reader: Callable[[str], str | None] | None = None,
+    coverage_groups: Sequence[dict[str, Any]] | None = None,
+    report_probe: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -3922,6 +4299,19 @@ def calculate_scope(
     only to find test inputs that moved away under a test still naming them.
     `input_reader` returns a repository file's text for that search, reading
     `root` when omitted.
+
+    `coverage_groups` is a nightly's per-environment comparison: one group per
+    distinct anchor, each naming its environments, the diff since that anchor,
+    and the anchor record (`coverage_anchor_groups` builds them). Each group
+    is selected on its own, the selections are unioned once per
+    `{package, environment, gate}`, and the plan records every environment's
+    anchor, the cells current policy adds beyond the diff, the cells the
+    anchor still covers, and the covered cells published evidence reopens
+    (`apply_policy_delta`). Those notes are read from `root`'s repository at
+    `head`; `report_probe` is the verifier's artifact probe
+    (`local_evidence.verify_cells`). Without groups the single
+    `files`/`force_all` selection applies to every scheduled environment,
+    exactly as before.
     """
     packages = workspace_packages(metadata)
     graph = member_dependency_graph(metadata)
@@ -3944,229 +4334,337 @@ def calculate_scope(
     planned_names = {environment["name"] for environment in cell_environments} | producing_names
     environments = [environment for environment in table if environment["name"] in planned_names]
 
-    full_gates = set(GATES) if force_all else set()
-    full_scope = bool(full_gates)
+    def select_group(
+        files: Sequence[str],
+        deleted: Sequence[str],
+        renamed_from: Sequence[str],
+        force_all: bool,
+        cell_environments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """One diff's selection over `cell_environments`: packages and cells.
 
-    source_paths = source_paths_by_package(list(files), root, packages)
-    references = (
-        []
-        if full_scope
-        else test_input_references(
-            [*files, *renamed_from],
-            root,
-            packages,
-            input_reader or worktree_reader(root),
-            frozenset(name for name, record in policy.items() if record.get("l1_include_slow")),
-            declared_source_inputs(policy),
-        )
-    )
-    # A changed file compiled into a package's shipped code IS that package's
-    # source, whatever its suffix: selecting it is the ordinary source path.
-    embedded_paths: dict[str, list[str]] = {}
-    ids_by_package_name = {entry["name"]: package_id for package_id, entry in packages.items()}
-    for reference in references:
-        if reference.product and ids_by_package_name[reference.package] not in source_paths:
-            embedded_paths.setdefault(ids_by_package_name[reference.package], []).append(
-                reference.path
+        Everything between the environment split and the plan's assembly: it
+        reads a change list and the environments it plans for, and decides
+        which packages are selected and which cells they own. A nightly whose
+        environments sit at different anchors runs this once per anchor.
+        """
+        full_gates = set(GATES) if force_all else set()
+        full_scope = bool(full_gates)
+
+        source_paths = source_paths_by_package(list(files), root, packages)
+        references = (
+            []
+            if full_scope
+            else test_input_references(
+                [*files, *renamed_from],
+                root,
+                packages,
+                input_reader or worktree_reader(root),
+                frozenset(name for name, record in policy.items() if record.get("l1_include_slow")),
+                declared_source_inputs(policy),
             )
-    source_ids = set(source_paths) | set(embedded_paths)
-    # A suite owner selected by a changed input rather than by its own source:
-    # its gates run, but the changed path says nothing about its public API, so
-    # it contributes no reverse-dependency seam below.
-    suite_paths = suite_owner_paths(list(files), packages)
-    suite_ids = set(suite_paths) - source_ids
-    reverse_map = reverse_dependency_map(graph, packages)
-    reverse_ids = (
-        direct_dependents(source_ids, graph, packages) - source_ids - suite_ids
-    )
+        )
+        # A changed file compiled into a package's shipped code IS that package's
+        # source, whatever its suffix: selecting it is the ordinary source path.
+        embedded_paths: dict[str, list[str]] = {}
+        ids_by_package_name = {entry["name"]: package_id for package_id, entry in packages.items()}
+        for reference in references:
+            if reference.product and ids_by_package_name[reference.package] not in source_paths:
+                embedded_paths.setdefault(ids_by_package_name[reference.package], []).append(
+                    reference.path
+                )
+        source_ids = set(source_paths) | set(embedded_paths)
+        # A suite owner selected by a changed input rather than by its own source:
+        # its gates run, but the changed path says nothing about its public API, so
+        # it contributes no reverse-dependency seam below.
+        suite_paths = suite_owner_paths(list(files), packages)
+        suite_ids = set(suite_paths) - source_ids
+        reverse_map = reverse_dependency_map(graph, packages)
+        reverse_ids = (
+            direct_dependents(source_ids, graph, packages) - source_ids - suite_ids
+        )
 
-    # AC1: an unchanged direct reverse dependent is *reported* here and
-    # selected nowhere — no area, no package record, no cell. Its seam is
-    # compiled inside the changed package's own check cell instead (Open
-    # Question 1, ruled Option B 2026-09-12): each source package's record and
-    # `DEPENDENTS_ENVIRONMENT` check cell list the unselected, gating
-    # dependents attributed to it. A dependent that is itself selected is
-    # excluded (its own gates cover it), and a full-scope run selects
-    # everything, so it attributes none.
-    affected_ids = set(packages) if full_scope else source_ids | suite_ids
-    packages_by_name = {package["name"]: package for package in packages.values()}
-    # A dependent a changed test input will select (`select_test_inputs`) builds
-    # its own test archive against the changed package, which is the seam; it
-    # must not be compiled a second time, or reported as selected nowhere.
-    input_reader_ids = (
-        {
-            ids_by_package_name[reference.package]
-            for reference in references
-            if not reference.product
-            and reference.unit is not None
-            and policy[reference.package]["gates"]
-            and "L1" in policy[reference.package]["tiers"]
+        # AC1: an unchanged direct reverse dependent is *reported* here and
+        # selected nowhere — no area, no package record, no cell. Its seam is
+        # compiled inside the changed package's own check cell instead (Open
+        # Question 1, ruled Option B 2026-09-12): each source package's record and
+        # `DEPENDENTS_ENVIRONMENT` check cell list the unselected, gating
+        # dependents attributed to it. A dependent that is itself selected is
+        # excluded (its own gates cover it), and a full-scope run selects
+        # everything, so it attributes none.
+        affected_ids = set(packages) if full_scope else source_ids | suite_ids
+        packages_by_name = {package["name"]: package for package in packages.values()}
+        # A dependent a changed test input will select (`select_test_inputs`) builds
+        # its own test archive against the changed package, which is the seam; it
+        # must not be compiled a second time, or reported as selected nowhere.
+        input_reader_ids = (
+            {
+                ids_by_package_name[reference.package]
+                for reference in references
+                if not reference.product
+                and reference.unit is not None
+                and policy[reference.package]["gates"]
+                and "L1" in policy[reference.package]["tiers"]
+            }
+            if any(entry["name"] == TEST_INPUT_ENVIRONMENT for entry in cell_environments)
+            else set()
+        )
+
+        def attributed_dependents(package_id: str) -> list[str]:
+            return sorted(
+                packages[dependent]["name"]
+                for dependent in reverse_map[package_id]
+                if dependent not in affected_ids
+                and dependent not in input_reader_ids
+                # A `gates = false` member is a governed "CI launches nothing for
+                # this package"; compiling it here would launch something.
+                and policy[packages[dependent]["name"]]["gates"]
+            )
+        impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
+        id_of = {packages[package_id]["name"]: package_id for package_id in affected_ids}
+
+        accepted = {
+            (entry["package"], entry["environment"], entry["gate"]): entry
+            for entry in (accepted_cells or [])
+            if entry.get("outcome") == "pass"
         }
-        if any(entry["name"] == TEST_INPUT_ENVIRONMENT for entry in cell_environments)
-        else set()
-    )
+        whole_environments = whole_environment_evidence(accepted_environments)
 
-    def attributed_dependents(package_id: str) -> list[str]:
-        return sorted(
-            packages[dependent]["name"]
-            for dependent in reverse_map[package_id]
-            if dependent not in affected_ids
-            and dependent not in input_reader_ids
-            # A `gates = false` member is a governed "CI launches nothing for
-            # this package"; compiling it here would launch something.
-            and policy[packages[dependent]["name"]]["gates"]
-        )
-    impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
-    id_of = {packages[package_id]["name"]: package_id for package_id in affected_ids}
+        package_records: list[dict[str, Any]] = []
+        cells: list[dict[str, Any]] = []
+        for name in impacted:
+            package_id = id_of[name]
+            record = policy[name]
+            area = package_area(manifest_directory(root, packages[package_id]))
+            if full_scope:
+                reason = "explicit full-scope request"
+            elif package_id in source_paths:
+                reason = f"source change in {source_paths[package_id][0]}"
+            elif package_id in embedded_paths:
+                reason = (
+                    f"embedded file {embedded_paths[package_id][0]} changed; "
+                    f"{name} compiles it into shipped code"
+                )
+            else:
+                reason = (
+                    f"suite input {suite_paths[package_id][0]} selects its "
+                    "registered owner"
+                )
+            if not record["gates"]:
+                package_records.append(
+                    non_gating_package_record(record, area, reason)
+                )
+                continue
 
-    accepted = {
-        (entry["package"], entry["environment"], entry["gate"]): entry
-        for entry in (accepted_cells or [])
-        if entry.get("outcome") == "pass"
-    }
-    whole_environments = whole_environment_evidence(accepted_environments)
-
-    package_records: list[dict[str, Any]] = []
-    cells: list[dict[str, Any]] = []
-    for name in impacted:
-        package_id = id_of[name]
-        record = policy[name]
-        area = package_area(manifest_directory(root, packages[package_id]))
-        if full_scope:
-            reason = "explicit full-scope request"
-        elif package_id in source_paths:
-            reason = f"source change in {source_paths[package_id][0]}"
-        elif package_id in embedded_paths:
-            reason = (
-                f"embedded file {embedded_paths[package_id][0]} changed; "
-                f"{name} compiles it into shipped code"
+            target_kinds = declared_target_kinds(packages[package_id])
+            seam = (
+                None
+                if package_id in suite_ids
+                else dependent_seam(attributed_dependents(package_id), packages_by_name)
             )
-        else:
-            reason = (
-                f"suite input {suite_paths[package_id][0]} selects its "
-                "registered owner"
+            unimplemented = None
+            if record["unimplemented"]:
+                tests_found = package_has_tests(root, packages[package_id])
+                unimplemented = {"reason": record["unimplemented"], "tests_found": tests_found}
+                if not tests_found:
+                    # No test cell: a run of zero tests is indistinguishable
+                    # from a broken filter and fails completion. Lint still
+                    # compiles every target.
+                    record = {**record, "tiers": []}
+            owned = package_cells(
+                record,
+                area,
+                target_kinds,
+                cell_environments,
+                accepted,
+                whole_environments,
+                prohibitions,
+                dependents=seam["dependents"] if seam else (),
             )
-        if not record["gates"]:
-            package_records.append(
-                non_gating_package_record(record, area, reason)
-            )
-            continue
-
-        target_kinds = declared_target_kinds(packages[package_id])
-        seam = (
-            None
-            if package_id in suite_ids
-            else dependent_seam(attributed_dependents(package_id), packages_by_name)
-        )
-        owned = package_cells(
-            record,
-            area,
-            target_kinds,
-            cell_environments,
-            accepted,
-            whole_environments,
-            prohibitions,
-            dependents=seam["dependents"] if seam else (),
-        )
-        cells.extend(owned)
-        features = feature_args(record, name)
-        package_record = {
-            "package": name,
-            "area": area,
-            "selection_reason": reason,
-            "gates": [
-                gate
-                for gate in schema.GATES
-                if any(cell["gate"] == gate for cell in owned)
-            ],
-            "targets": target_kinds,
-            "tiers": record["tiers"],
-            "test_args": features,
-            "check_args": check_arguments(name, target_kinds, features),
-            "l2_backends": record["l2_backends"],
-            "runner_tools": record["runner_tools"],
-            "companion_suites": record["companion_suites"],
-            "archive_includes": record["archive_includes"],
-            "sidecars": record["sidecars"],
-            "l1_include_slow": record["l1_include_slow"],
-            "requires_toolchain": record["requires_toolchain"],
-            "native": native_closure(package_id, graph, packages, policy),
-            "input_paths": closure_directories(
-                package_id, root, graph, packages
-            ),
-        }
-        if seam:
-            seam["native"] = sorted({
-                prerequisite
-                for dependent in seam["dependents"]
-                for prerequisite in native_closure(
-                    packages_by_name[dependent]["id"], graph, packages, policy
-                ).get(DEPENDENTS_ENVIRONMENT, [])
-            })
-            package_record["dependent_seam"] = seam
-        package_records.append(package_record)
-
-    inventory = change_inventory(files, full_scope, deleted)
-    guard = archive_guard_scope(
-        files,
-        full_scope,
-        deleted,
-        {environment["name"] for environment in cell_environments},
-        event,
-        inventory["diff_available"],
-    )
-    guard_owner = SUITE_REGISTRY[ARCHIVE_GUARD_SUITE]["owner"]
-    # Already-selected is the other half of the contract and needs no code: the
-    # owner's ordinary lint cell carries the guard because its manifest declares
-    # the suite, so nothing new is scheduled and `companions_only` stays absent.
-    # A workspace without the owner (a fixture) schedules nothing; a real one
-    # that lost it is caught by `validate_suite_registry`, which is where an
-    # unclaimed suite belongs.
-    if (
-        guard["selected"]
-        and guard_owner not in set(impacted)
-        and policy.get(guard_owner, {}).get("gates")
-    ):
-        owner_id = packages_by_name[guard_owner]["id"]
-        scanned = guard.get("paths") or []
-        trigger = f"changed path {scanned[0]}" if scanned else guard["reason"]
-        record, owned = archive_guard_only_selection(
-            policy[guard_owner],
-            package_area(manifest_directory(root, packages[owner_id])),
-            cell_environments,
-            prohibitions,
-            f"archive-path guard selected by {trigger}; this lint cell runs the "
-            f"guard alone and no other {guard_owner} work",
-            native_closure(owner_id, graph, packages, policy),
-            closure_directories(owner_id, root, graph, packages),
-        )
-        if owned:
-            package_records.append(record)
             cells.extend(owned)
-            # The area's selection reason must not claim a source change it
-            # never saw: what selected the guard was source in another area.
-            suite_ids = suite_ids | {owner_id}
-            # `reverse_ids` was settled before this selection existed. An owner
-            # that is also an unchanged direct dependent now holds a record, and
-            # a reported dependent is one selected nowhere.
-            reverse_ids = reverse_ids - {owner_id}
+            features = feature_args(record, name)
+            package_record = {
+                "package": name,
+                "area": area,
+                "selection_reason": reason,
+                "gates": [
+                    gate
+                    for gate in schema.GATES
+                    if any(cell["gate"] == gate for cell in owned)
+                ],
+                "targets": target_kinds,
+                "tiers": record["tiers"],
+                "test_args": features,
+                "check_args": check_arguments(name, target_kinds, features),
+                "l2_backends": record["l2_backends"],
+                "runner_tools": record["runner_tools"],
+                "companion_suites": record["companion_suites"],
+                "archive_includes": record["archive_includes"],
+                "sidecars": record["sidecars"],
+                "l1_include_slow": record["l1_include_slow"],
+                "requires_toolchain": record["requires_toolchain"],
+                "native": native_closure(package_id, graph, packages, policy),
+                "input_paths": closure_directories(
+                    package_id, root, graph, packages
+                ),
+            }
+            if unimplemented:
+                package_record["unimplemented"] = unimplemented
+            if seam:
+                seam["native"] = sorted({
+                    prerequisite
+                    for dependent in seam["dependents"]
+                    for prerequisite in native_closure(
+                        packages_by_name[dependent]["id"], graph, packages, policy
+                    ).get(DEPENDENTS_ENVIRONMENT, [])
+                })
+                package_record["dependent_seam"] = seam
+            package_records.append(package_record)
 
-    input_ids = select_test_inputs(
-        references,
-        package_records,
-        cells,
-        packages,
-        packages_by_name,
-        policy,
-        root,
-        cell_environments,
-        prohibitions,
-        graph,
-        accepted,
-    )
-    # As for the guard owner above: a package a changed test input selected now
-    # holds a record, so it is no longer an unchanged dependent reported nowhere.
-    reverse_ids = reverse_ids - input_ids
+        inventory = change_inventory(files, full_scope, deleted)
+        guard = archive_guard_scope(
+            files,
+            full_scope,
+            deleted,
+            {environment["name"] for environment in cell_environments},
+            event,
+            inventory["diff_available"],
+        )
+        guard_owner = SUITE_REGISTRY[ARCHIVE_GUARD_SUITE]["owner"]
+        # Already-selected is the other half of the contract and needs no code: the
+        # owner's ordinary lint cell carries the guard because its manifest declares
+        # the suite, so nothing new is scheduled and `companions_only` stays absent.
+        # A workspace without the owner (a fixture) schedules nothing; a real one
+        # that lost it is caught by `validate_suite_registry`, which is where an
+        # unclaimed suite belongs.
+        if (
+            guard["selected"]
+            and guard_owner not in set(impacted)
+            and policy.get(guard_owner, {}).get("gates")
+        ):
+            owner_id = packages_by_name[guard_owner]["id"]
+            scanned = guard.get("paths") or []
+            trigger = f"changed path {scanned[0]}" if scanned else guard["reason"]
+            record, owned = archive_guard_only_selection(
+                policy[guard_owner],
+                package_area(manifest_directory(root, packages[owner_id])),
+                cell_environments,
+                prohibitions,
+                f"archive-path guard selected by {trigger}; this lint cell runs the "
+                f"guard alone and no other {guard_owner} work",
+                native_closure(owner_id, graph, packages, policy),
+                closure_directories(owner_id, root, graph, packages),
+            )
+            if owned:
+                package_records.append(record)
+                cells.extend(owned)
+                # The area's selection reason must not claim a source change it
+                # never saw: what selected the guard was source in another area.
+                suite_ids = suite_ids | {owner_id}
+                # `reverse_ids` was settled before this selection existed. An owner
+                # that is also an unchanged direct dependent now holds a record, and
+                # a reported dependent is one selected nowhere.
+                reverse_ids = reverse_ids - {owner_id}
+
+        input_ids = select_test_inputs(
+            references,
+            package_records,
+            cells,
+            packages,
+            packages_by_name,
+            policy,
+            root,
+            cell_environments,
+            prohibitions,
+            graph,
+            accepted,
+        )
+        # As for the guard owner above: a package a changed test input selected now
+        # holds a record, so it is no longer an unchanged dependent reported nowhere.
+        reverse_ids = reverse_ids - input_ids
+        return {
+            "files": list(files),
+            "package_records": package_records,
+            "cells": cells,
+            "source_ids": source_ids,
+            "suite_ids": suite_ids,
+            "input_ids": input_ids,
+            "reverse_ids": reverse_ids,
+            "full_scope": full_scope,
+            "full_gates": full_gates,
+            "inventory": inventory,
+            "guard": guard,
+        }
+
+    by_name = {environment["name"]: environment for environment in cell_environments}
+    if coverage_groups is None:
+        groups: list[dict[str, Any]] = [{
+            "environments": [environment["name"] for environment in cell_environments],
+            "files": list(files),
+            "deleted": list(deleted),
+            "renamed_from": list(renamed_from),
+            "full": force_all,
+        }]
+    else:
+        groups = list(coverage_groups)
+        grouped = [name for group in groups for name in group["environments"]]
+        if sorted(grouped) != sorted(by_name):
+            raise RuntimeError(
+                f"coverage anchors name {sorted(grouped)}, but this event schedules "
+                f"{sorted(by_name)}; every scheduled environment needs exactly one anchor"
+            )
+    selections = [
+        select_group(
+            group["files"],
+            group["deleted"],
+            group["renamed_from"],
+            group["full"],
+            [by_name[name] for name in group["environments"]],
+        )
+        for group in groups
+    ]
+    coverage_anchors: list[dict[str, Any]] = []
+    if coverage_groups is None:
+        selection = selections[0]
+    else:
+        selection = merge_selections(selections)
+        # Required-now: what a full-scope selection would execute for the
+        # environments of every incremental group, evaluated at this run's
+        # date and policy. It is what the anchor's coverage is compared with.
+        for group, chosen in zip(groups, selections):
+            if group["full"]:
+                for name in group["environments"]:
+                    coverage_anchors.append({
+                        key: value
+                        for key, value in group["anchors"][name].items()
+                        if key != "covered_cells"
+                    } | {
+                        "policy_delta": [],
+                        "inherited_cells": [],
+                        "reopened_cells": [],
+                        "required_cells": contract_cells(required_contracts(chosen, name)),
+                    })
+                continue
+            required = select_group(
+                [], [], [], True, [by_name[name] for name in group["environments"]]
+            )
+            apply_policy_delta(
+                selection, chosen, required, group, coverage_anchors,
+                lambda cells, records: inherited_blockers(
+                    cells, records, environments, root, head, report_probe
+                ),
+            )
+    package_records = selection["package_records"]
+    cells = selection["cells"]
+    source_ids = selection["source_ids"]
+    suite_ids = selection["suite_ids"]
+    input_ids = selection["input_ids"]
+    reverse_ids = selection["reverse_ids"]
+    full_scope = selection["full_scope"]
+    full_gates = selection["full_gates"]
+    inventory = selection["inventory"]
+    guard = selection["guard"]
+    files = selection["files"]
 
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
@@ -4249,6 +4747,10 @@ def calculate_scope(
         plan["producing_environments"] = [
             {"name": environment["name"], "for": guests} for environment, guests in producing
         ]
+    if coverage_anchors:
+        plan["coverage_anchors"] = sorted(
+            coverage_anchors, key=lambda entry: entry["environment"]
+        )
     plan["rows"] = attach_rows(plan)
     return plan
 
@@ -5341,6 +5843,25 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="JSON list of coded reasons published evidence was refused",
     )
+    parser.add_argument(
+        "--anchors",
+        metavar="FILE",
+        help=(
+            "a nightly's per-environment comparison anchors "
+            "(`reuse_validation.py nightly-anchors`); each environment is "
+            "planned from the diff since its own anchor, or in full, and the "
+            "selections are unioned once per cell. Excludes --all and a file list"
+        ),
+    )
+    parser.add_argument(
+        "--artifact-repo",
+        metavar="OWNER/NAME",
+        help=(
+            "with --anchors: the repository whose workflow artifacts back hosted "
+            "observations, so a passing retry can supersede a failure on an "
+            "inherited cell (as `local_evidence.py verify --artifact-repo`)"
+        ),
+    )
     parser.add_argument("--base", default=NULL_OID, help="base revision under test")
     parser.add_argument("--head", default=NULL_OID, help="head revision under test")
     parser.add_argument(
@@ -5396,6 +5917,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args(expand_arguments_file(sys.argv[1:]))
+    if args.anchors and (
+        args.apply_to or args.all or args.files or args.deleted or args.renamed_from
+        or args.all_environments or args.proven_event
+    ):
+        parser.error(
+            "--anchors derives every diff itself: it cannot be combined with "
+            "--apply-to, --all, --all-environments, --proven-event, --deleted, "
+            "--renamed-from, or a file list"
+        )
+    if args.artifact_repo and not args.anchors:
+        parser.error("--artifact-repo probes inherited coverage and needs --anchors")
     if args.apply_to and (
         args.all or args.files or args.constraints or args.deleted or args.renamed_from
         or args.event or args.all_environments or args.proven_event
@@ -5421,7 +5953,7 @@ def read_accepted_cells(source: str | None) -> list[dict[str, Any]]:
     if not source:
         return []
     text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
-    document = json.loads(text)
+    document = schema.loads_strict(text)
     if not isinstance(document, list):
         raise RuntimeError(f"accepted cells must be a JSON list, got {type(document).__name__}")
     for entry in document:
@@ -5458,7 +5990,7 @@ def read_prohibitions(directory: str | None) -> dict[str, dict[str, Any]]:
 def read_evidence_rejections(source: str | None) -> list[str]:
     if not source:
         return []
-    document = json.loads(Path(source).read_text(encoding="utf-8"))
+    document = schema.loads_strict(Path(source).read_text(encoding="utf-8"))
     if not isinstance(document, list) or not all(isinstance(x, str) for x in document):
         raise RuntimeError("evidence rejections must be a JSON list of strings")
     return document
@@ -5472,7 +6004,7 @@ def main() -> None:
         # The carried plan is the selection. Nothing from the checkout is
         # consulted here, so a receipt CI accepted cannot be second-guessed.
         plan = apply_accepted_cells(
-            json.loads(Path(args.apply_to).read_text(encoding="utf-8")),
+            schema.loads_strict(Path(args.apply_to).read_text(encoding="utf-8")),
             accepted_cells,
             evidence_rejections,
             accepted_environments=args.accepted_environment,
@@ -5483,6 +6015,18 @@ def main() -> None:
         metadata = load_metadata(ROOT)
         validate_no_shadow_workspaces(metadata, ROOT)
         policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
+        groups = None
+        probe = None
+        if args.anchors:
+            groups = coverage_anchor_groups(
+                schema.loads_strict(Path(args.anchors).read_text(encoding="utf-8")),
+                args.head,
+                ROOT,
+            )
+            if args.artifact_repo:
+                import hosted_observations  # noqa: PLC0415  (only the nightly reaches the network)
+
+                probe = hosted_observations.gh_probe(args.artifact_repo)
         plan = calculate_scope(
             args.files,
             ROOT,
@@ -5501,6 +6045,8 @@ def main() -> None:
             proven_event=args.proven_event,
             deleted=args.deleted,
             renamed_from=args.renamed_from,
+            coverage_groups=groups,
+            report_probe=probe,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")

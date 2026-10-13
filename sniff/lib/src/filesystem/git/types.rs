@@ -559,6 +559,23 @@ fn extract_remote_host(url: &str) -> Option<&str> {
     None
 }
 
+/// Which committed base a [`GitRepo::changed_paths`] request compares the
+/// `HEAD` tip against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChangedBase {
+    /// No reference was supplied. The committed comparison contributes nothing
+    /// (an empty base), so an unborn `HEAD` is valid in this mode.
+    Omitted,
+    /// An explicit reference token, exactly as the caller wrote it.
+    ///
+    /// Must resolve locally — without any network access — to exactly one
+    /// commit; annotated tags peel to the commit they name, while a tree or
+    /// blob is rejected. `Reference("HEAD")` on an unborn repository is an
+    /// error, which is what distinguishes an explicit `HEAD` from
+    /// [`ChangedBase::Omitted`].
+    Reference(String),
+}
+
 /// Lightweight handle to a discovered git repository.
 ///
 /// Discovery, trust validation, identity queries (root, branch, HEAD, worktree
@@ -829,6 +846,88 @@ impl GitRepo {
         let (status, _changes) =
             super::status::get_repo_status_with_changes(&self.gix.borrow(), false)?;
         Ok(status)
+    }
+
+    /// Native repository-relative paths Git reports as changed, for the union
+    /// of the committed comparison and the working-tree status.
+    ///
+    /// The set unions: paths differing between the resolved base commit and
+    /// the `HEAD` commit — the two tips compared directly, not through a
+    /// merge-base, and only when the tips differ — plus staged, unstaged, and
+    /// nonignored untracked paths. A path in several categories appears once.
+    /// Renames surface as delete/add pairs, and absence is reported as Git
+    /// sees it: whether a path still exists on disk is the caller's concern,
+    /// not this method's.
+    ///
+    /// One status observation answers the working-tree half and conflict
+    /// detection. No line statistics, unified patches, rename similarity,
+    /// commit history, or package inventory is requested, and no network
+    /// access runs. Submodule entries are not descended into.
+    ///
+    /// With [`ChangedBase::Omitted`] the committed comparison contributes
+    /// nothing, so an unborn `HEAD` is valid. A [`ChangedBase::Reference`]
+    /// must resolve locally to a commit; against an unborn `HEAD` the base is
+    /// compared with the empty current tree, and an explicit `"HEAD"` on an
+    /// unborn repository is an error. A detached `HEAD` uses its commit.
+    ///
+    /// ## Returns
+    ///
+    /// Deduplicated native repository-relative paths, sorted by path bytes.
+    ///
+    /// ## Errors
+    ///
+    /// - [`SniffError::BareRepository`]: the repository is bare and has no
+    ///   working tree to select from.
+    /// - [`SniffError::MergeConflicts`]: any index entry is unmerged; the
+    ///   error names every conflicted path in the repository.
+    /// - [`SniffError::UnresolvedReference`] or [`SniffError::NonCommitReference`]:
+    ///   the base token names no object, or a non-commit object.
+    /// - [`SniffError::Git`]: unreadable or malformed index, status, rev-parse,
+    ///   peel, or tree-diff failure. Decoder panics are contained; absent and
+    ///   valid empty indexes remain valid.
+    pub fn changed_paths(&self, base: ChangedBase) -> Result<Vec<PathBuf>> {
+        use gix::bstr::ByteSlice;
+
+        if self.is_bare {
+            return Err(SniffError::BareRepository {
+                path: self.repo_root.clone(),
+            });
+        }
+        self.with_cached_gix(|repo| {
+            let observed = super::status::collect_path_status(repo)?;
+            if !observed.conflicted.is_empty() {
+                let mut conflicted: Vec<PathBuf> = observed
+                    .conflicted
+                    .iter()
+                    .map(|path| super::status::bstr_to_path(path.as_bstr()))
+                    .collect();
+                conflicted.sort();
+                return Err(SniffError::MergeConflicts {
+                    path: self.repo_root.clone(),
+                    paths: conflicted,
+                });
+            }
+
+            let mut union = observed.staged;
+            union.extend(observed.unstaged.iter().cloned());
+            union.extend(observed.untracked.iter().cloned());
+
+            let head = super::discovery::head_id_opt(repo)?;
+            if let ChangedBase::Reference(token) = &base {
+                let base_commit =
+                    super::discovery::resolve_commit_base(repo, token, &self.repo_root)?;
+                if Some(base_commit) != head {
+                    union.extend(super::discovery::tip_diff_paths(repo, base_commit, head)?);
+                }
+            }
+
+            let mut paths: Vec<gix::bstr::BString> = union.into_iter().collect();
+            paths.sort();
+            Ok(paths
+                .iter()
+                .map(|path| super::status::bstr_to_path(path.as_bstr()))
+                .collect())
+        })
     }
 
     /// Recent commits from HEAD.

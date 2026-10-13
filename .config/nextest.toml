@@ -44,6 +44,10 @@ sniff-windows-l1 = { max-threads = 1 }
 # child target directory. One at a time keeps them from queuing on Cargo's lock
 # inside each other's timeouts.
 schematic-fresh-output = { max-threads = 1 }
+# Apple Terminal has no background mode: each L2 test opens a visible window on
+# the developer's desktop. Parallel L2 runs them one at a time so at most one
+# window is open, while the rest of the tier keeps its parallel workers.
+apple-terminal-l2 = { max-threads = 1 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -133,14 +137,20 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# This real-terminal style test intentionally drives dozens of separate `bt`
-# commands and waits for WezTerm to expose a stable frame after each one. The
-# WezTerm CLI round trips complete more slowly on Linux and push a healthy run
-# past the default 30s termination ceiling. Keep the override test-specific so
-# other L2 tests still detect hangs at the default deadline.
+# Tree Hugger's generic-position boundary tests each analyze one generated
+# source whose generic list holds 65,536 or 65,537 parameters (about half a
+# megabyte): the `u16` boundary is the contract, so the source cannot shrink.
+# Each test runs one analysis; the C++ and C# readers, whose parameters are
+# records, take ~7s alone in a debug build and 15-20s when the 37 boundary
+# tests run together on a loaded macOS host (2026-10-05). Same 90s leash as
+# the other earned overrides; CI's profile default already allows it.
 [[profile.default.overrides]]
-filter = 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
+filter = 'package(tree-hugger) & test(/generic_boundary::|oversized_owner_warm_hits::|oversized_enclosing_generic|oversized_owner_impl/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'test(/(^|::)level2_apple_terminal_/)'
+test-group = 'apple-terminal-l2'
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) is the slowest
@@ -290,13 +300,6 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # allowance.
 [[profile.ci.overrides]]
 filter = 'test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-# See the default-profile note: WezTerm CLI capture round trips make this
-# command-dense real-terminal test exceed CI's 30s termination ceiling on
-# Linux.
-[[profile.ci.overrides]]
-filter = 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: Chrome teardown fits the global 5s window,

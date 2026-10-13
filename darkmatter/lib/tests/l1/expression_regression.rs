@@ -593,20 +593,11 @@ fn regression_terminal_in_interpolation() {
 Terminal: {{ terminal("<bold>x</bold>") }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
-    // Prose renders <bold>x</bold> with ANSI SGR sequences. In composed
-    // Markdown output the `[` metacharacter is escaped, so the bold open
-    // sequence appears as "\x1b\\[1m" rather than the raw "\x1b[1m".
+    // Prose renders <bold>x</bold> with ANSI SGR sequences, which compose's
+    // cleanup keeps byte for byte (it never re-serializes, so `[` is not
+    // escaped).
     let content = composed.content();
-    assert!(
-        content.contains("\x1b\\[1m"),
-        "terminal() output should contain an escaped bold SGR sequence, got: {:?}",
-        content
-    );
-    assert!(
-        content.contains("\x1b\\[0m"),
-        "terminal() output should contain an escaped reset SGR sequence, got: {:?}",
-        content
-    );
+    assert_eq!(content, "---\nTerminal: \x1b[1mx\x1b[0m", "terminal() output: {content:?}");
 }
 
 #[test]

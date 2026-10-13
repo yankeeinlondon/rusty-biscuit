@@ -41,7 +41,8 @@ use std::hint::black_box;
 use biscuit_file::analyze_yaml;
 use criterion::{Criterion, criterion_group, criterion_main};
 use darkmatter::markdown::{Markdown, extract_frontmatter_block};
-use darkmatter::markdown::cleanup::{cleanup_content, reflow_to_width};
+use darkmatter::markdown::cleanup::rules::{FixedWidth, Leaf, MarkdownRuleOverrides};
+use darkmatter::markdown::cleanup::{cleanup_content, cleanup_content_with};
 use darkmatter::markdown::schemas::CleanSchemaConfig;
 
 /// Representative no-frontmatter document: headings, prose, a nested list,
@@ -274,12 +275,16 @@ fn blockquoted_tasks_fixture() -> String {
 ///
 /// Narrower than the fixtures' natural line length so wrapping actually fires
 /// on all four classes, including the deepest nesting level.
-const FIXED_WIDTH: usize = 72;
+const FIXED_WIDTH: u16 = 72;
 
-/// The sequence `md clean --fixed-width` runs (`cli/src/commands/clean.rs`,
-/// `apply_cleanup`): full cleanup, then reflow of the cleaned text.
+/// Body cleanup as `md clean --fixed-width` runs it: the `fixed-width` rule at
+/// CLI precedence, which unwraps and re-wraps inside the guarded engine.
 fn fixed_width_pipeline(source: &str) -> String {
-    reflow_to_width(&cleanup_content(source), FIXED_WIDTH)
+    let overrides = MarkdownRuleOverrides {
+        fixed_width: Leaf::Value(FixedWidth::Columns(FIXED_WIDTH)),
+        ..MarkdownRuleOverrides::default()
+    };
+    cleanup_content_with(source, &overrides)
 }
 
 /// The three specification budgets this group measures:
@@ -289,7 +294,7 @@ fn fixed_width_pipeline(source: &str) -> String {
 ///   fixtures; and
 /// * fixed-width cleanup below 2x default cleanup on the same fixture.
 ///
-/// Cases time `cleanup_content` and `reflow_to_width` directly rather than the
+/// Cases time `cleanup_content` and `cleanup_content_with` directly rather than the
 /// `Markdown` wrapper used by `clean_hot_paths`, because frontmatter parsing and
 /// re-serialization are constant costs shared by both modes and would compress
 /// the 2x ratio toward 1.

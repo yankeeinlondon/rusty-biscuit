@@ -12,4 +12,10 @@
   property: [
     (property_identifier)
     (private_property_identifier)
+    (number)
   ] @local.definition.field) @local.definition.field.context
+
+; A quoted name is reported without its quotes.
+(field_definition
+  property: (string
+    (string_fragment) @local.definition.field)) @local.definition.field.context

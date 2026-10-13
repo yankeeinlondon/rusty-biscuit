@@ -12,23 +12,30 @@
 //!
 //! Each backend test renders two separate reports on its shared pane — a
 //! high-risk fixture and a moderate-risk fixture — so both risk bands' styling
-//! is exercised. They are kept as two short reports rather than one combined
-//! report because WezTerm's `get-text` capture grabs only the visible viewport:
-//! a single report tall enough to carry both bands plus a truncated block list
-//! scrolls the top band's heading and color off-screen. Two short reports each
-//! fit the viewport on every backend.
+//! is exercised. Each report runs between its own begin and end markers and is
+//! checked on only the rows between them, captured from the pane's whole
+//! history (`support/terminal_report.rs`): the pane still holds the other
+//! report, other tests' output and a colored shell prompt, any of which could
+//! otherwise supply a matching color or word.
 //!
 //! Skip-clean: when no terminal harness is available each test prints a skip
 //! notice and passes, so GitHub-hosted CI (which lacks the tooling) stays green.
 
+// Shared with the other terminal binaries; each uses only part of it.
+#[allow(dead_code)]
+#[path = "support/terminal_report.rs"]
+mod terminal_report;
+
 use std::path::Path;
+use std::time::Duration;
 
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
+use terminal_report::{Report, run_scoped};
 use test_toolkit::{Backend, Level, require_level};
 
 /// Absolute path to the built `hug` binary. Driving the real binary keeps the
@@ -44,6 +51,10 @@ fn hug() -> &'static str {
 
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
+
+/// Scrollback rows read from WezTerm: far more than one report and the
+/// commands around it.
+const WEZTERM_HISTORY_ROWS: u32 = 1000;
 
 /// Write a high-risk fixture tree under `dir`: a single Python file with
 /// 14 top-level functions, each large enough to rank as a block. This produces
@@ -94,24 +105,31 @@ fn shell_word(path: &Path) -> String {
 }
 
 /// Drive `hug god-files <dir>` in the pane (forcing color + OSC8 via
-/// `CLICOLOR_FORCE`) and capture the rendered frame.
-fn run_god_files<H: TerminalHarness>(harness: &mut H, dir: &Path) -> CapturedFrame {
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-
-    let cmd = format!(
-        "{} god-files {}",
+/// `CLICOLOR_FORCE`) and return only the rows it printed. `capture` returns
+/// the pane's whole history with escapes.
+fn run_god_files<H: TerminalHarness>(
+    harness: &mut H,
+    dir: &Path,
+    capture: fn(&mut H) -> String,
+) -> Report {
+    let command = format!(
+        "CLICOLOR_FORCE=1 {} god-files {}",
         shell_word(Path::new(hug())),
         shell_word(dir)
     );
-    harness
-        .send_command_with_env(&cmd, &[("CLICOLOR_FORCE", "1")])
-        .expect("send_command_with_env failed");
+    run_scoped(harness, &command, Duration::from_secs(20), capture)
+}
 
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    harness.capture().expect("capture failed")
+/// tmux's whole history (`-S -`) on the harness's own server, soft-wrapped
+/// rows rejoined (`-J`).
+fn tmux_history(harness: &mut TmuxHarness) -> String {
+    let output = biscuit_test_harness::tmux::tmux_command()
+        .args(["capture-pane", "-p", "-e", "-J", "-S", "-"])
+        .args(["-t", harness.session_name()])
+        .output()
+        .expect("run tmux capture-pane");
+    assert!(output.status.success(), "tmux capture-pane failed");
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 /// Tolerant SGR-fragment checks. Multiplexers may merge attributes into a
@@ -146,7 +164,8 @@ mod sgr {
 
 /// Assert the captured frame carries the styled, glyph-bearing high-risk report.
 /// `expect_osc8` is gated to backends that preserve OSC8 through capture.
-fn assert_styled_report(frame: &CapturedFrame, expect_osc8: bool) {
+fn assert_styled_report(report: &Report, expect_osc8: bool) {
+    let (plain, raw) = (report.plain(), report.raw());
     // Visible text: the high-risk heading, the linked file name, the SLOC
     // call-out, a block symbol, and the three Unicode report glyphs (middle
     // dot, en dash, ellipsis) plus the truncation count.
@@ -161,42 +180,36 @@ fn assert_styled_report(frame: &CapturedFrame, expect_osc8: bool) {
         "and 6 more",
     ] {
         assert!(
-            frame.plain.contains(needle),
-            "expected '{needle}' in captured pane.\nplain:\n{}",
-            frame.plain,
+            plain.contains(needle),
+            "expected '{needle}' in the report.\nplain:\n{plain}",
         );
     }
 
     // High-risk count and SLOC render red (SGR 31).
     assert!(
-        frame.raw.contains("31m"),
-        "expected a red SGR (high-risk band) in raw capture.\nraw:\n{}",
-        frame.raw,
+        raw.contains("31m"),
+        "expected a red SGR (high-risk band) in the report.\nraw:\n{raw}",
     );
     // The `<b>high risk</b>` heading phrase and bold SLOC render bold (SGR 1).
     assert!(
-        sgr::bold(&frame.raw),
-        "expected a bold SGR (heading/SLOC) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::bold(&raw),
+        "expected a bold SGR (heading/SLOC) in the report.\nraw:\n{raw}",
     );
     // The `High risk` section heading (`<b><uu>…</uu></b>`) renders underlined.
     assert!(
-        sgr::underline(&frame.raw),
-        "expected an underline SGR (section heading) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::underline(&raw),
+        "expected an underline SGR (section heading) in the report.\nraw:\n{raw}",
     );
     // Signal and refactor-hint lines render dim (SGR 2).
     assert!(
-        sgr::dim(&frame.raw),
-        "expected a dim SGR (signals/hints) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::dim(&raw),
+        "expected a dim SGR (signals/hints) in the report.\nraw:\n{raw}",
     );
 
     if expect_osc8 {
         assert!(
-            frame.raw.contains("\x1b]8;;file://"),
-            "expected an OSC8 file hyperlink in raw capture.\nraw:\n{}",
-            frame.raw,
+            raw.contains("\x1b]8;;file://"),
+            "expected an OSC8 file hyperlink in the report.\nraw:\n{raw}",
         );
     }
 }
@@ -205,45 +218,40 @@ fn assert_styled_report(frame: &CapturedFrame, expect_osc8: bool) {
 /// whose styling Level 1 alone cannot verify: the `Moderate risk` section
 /// heading (bold + underlined) and the moderate file's `<yellow>` SLOC.
 /// `expect_osc8` is gated to backends that preserve OSC8 through capture.
-fn assert_moderate_report(frame: &CapturedFrame, expect_osc8: bool) {
+fn assert_moderate_report(report: &Report, expect_osc8: bool) {
+    let (plain, raw) = (report.plain(), report.raw());
     for needle in ["Moderate risk", "god_moderate.py", "lines of code"] {
         assert!(
-            frame.plain.contains(needle),
-            "expected '{needle}' in captured pane.\nplain:\n{}",
-            frame.plain,
+            plain.contains(needle),
+            "expected '{needle}' in the report.\nplain:\n{plain}",
         );
     }
 
     // The moderate count and the moderate file SLOC render yellow (SGR 33).
     assert!(
-        frame.raw.contains("33m"),
-        "expected a yellow SGR (moderate-risk band) in raw capture.\nraw:\n{}",
-        frame.raw,
+        raw.contains("33m"),
+        "expected a yellow SGR (moderate-risk band) in the report.\nraw:\n{raw}",
     );
     // The moderate file SLOC (`<b><yellow>…`) renders bold (SGR 1).
     assert!(
-        sgr::bold(&frame.raw),
-        "expected a bold SGR (heading/SLOC) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::bold(&raw),
+        "expected a bold SGR (heading/SLOC) in the report.\nraw:\n{raw}",
     );
     // The `Moderate risk` section heading (`<b><uu>…</uu></b>`) renders underlined.
     assert!(
-        sgr::underline(&frame.raw),
-        "expected an underline SGR (section heading) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::underline(&raw),
+        "expected an underline SGR (section heading) in the report.\nraw:\n{raw}",
     );
     // Signal and refactor-hint lines render dim (SGR 2).
     assert!(
-        sgr::dim(&frame.raw),
-        "expected a dim SGR (signals/hints) in raw capture.\nraw:\n{}",
-        frame.raw,
+        sgr::dim(&raw),
+        "expected a dim SGR (signals/hints) in the report.\nraw:\n{raw}",
     );
 
     if expect_osc8 {
         assert!(
-            frame.raw.contains("\x1b]8;;file://"),
-            "expected an OSC8 file hyperlink in raw capture.\nraw:\n{}",
-            frame.raw,
+            raw.contains("\x1b]8;;file://"),
+            "expected an OSC8 file hyperlink in the report.\nraw:\n{raw}",
         );
     }
 }
@@ -261,13 +269,13 @@ fn level2_god_files_pretty_report_in_tmux() {
     write_god_fixture(dir.path());
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
-    let frame = run_god_files(&mut harness, dir.path());
-    assert_styled_report(&frame, false);
+    let report = run_god_files(&mut harness, dir.path(), tmux_history);
+    assert_styled_report(&report, false);
 
     let moderate_dir = tempfile::TempDir::new().unwrap();
     write_moderate_fixture(moderate_dir.path());
-    let moderate_frame = run_god_files(&mut harness, moderate_dir.path());
-    assert_moderate_report(&moderate_frame, false);
+    let moderate_report = run_god_files(&mut harness, moderate_dir.path(), tmux_history);
+    assert_moderate_report(&moderate_report, false);
 }
 
 // ------------------------------------------------------------------
@@ -285,13 +293,13 @@ fn level2_god_files_pretty_report_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    let frame = run_god_files(harness, dir.path());
-    assert_styled_report(&frame, true);
+    let report = run_god_files(harness, dir.path(), wezterm_history);
+    assert_styled_report(&report, true);
 
     let moderate_dir = tempfile::TempDir::new().unwrap();
     write_moderate_fixture(moderate_dir.path());
-    let moderate_frame = run_god_files(harness, moderate_dir.path());
-    assert_moderate_report(&moderate_frame, true);
+    let moderate_report = run_god_files(harness, moderate_dir.path(), wezterm_history);
+    assert_moderate_report(&moderate_report, true);
 }
 
 // ------------------------------------------------------------------
@@ -309,11 +317,23 @@ fn level2_god_files_pretty_report_in_kitty() {
     let mut guard =
         SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn Kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    let frame = run_god_files(harness, dir.path());
-    assert_styled_report(&frame, true);
+    let report = run_god_files(harness, dir.path(), kitty_history);
+    assert_styled_report(&report, true);
 
     let moderate_dir = tempfile::TempDir::new().unwrap();
     write_moderate_fixture(moderate_dir.path());
-    let moderate_frame = run_god_files(harness, moderate_dir.path());
-    assert_moderate_report(&moderate_frame, true);
+    let moderate_report = run_god_files(harness, moderate_dir.path(), kitty_history);
+    assert_moderate_report(&moderate_report, true);
+}
+
+fn wezterm_history(harness: &mut WezTermHarness) -> String {
+    harness
+        .capture_scrollback(WEZTERM_HISTORY_ROWS)
+        .expect("capture failed")
+        .raw
+}
+
+/// Kitty's screen plus scrollback; `get-text` returns soft-wrapped rows whole.
+fn kitty_history(harness: &mut KittyHarness) -> String {
+    harness.capture_extent("all").expect("capture failed").raw
 }

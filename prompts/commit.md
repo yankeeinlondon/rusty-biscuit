@@ -29,7 +29,7 @@ initialize:
               - skip
 start:
     message: |-
-        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
         🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git**
@@ -95,6 +95,7 @@ you may also want to consider using the Agent Skill's associated with given pack
 staged files exist.
 
 > **Note:** not all package areas have a corresponding Agent Skill but many of them do
+
 ::end-block
 ::block when="!ctx.current_package_area || !has_skill(ctx.current_package_area)"
 
@@ -143,13 +144,15 @@ Step 5 says when, and how rarely, an entry may be added.
 
 Your task is to:
 
-1. evaluate all the _staged_ files in this monorepo,
+1.  evaluate all the _staged_ files in this monorepo
 ::block when="message"
-    - also remembering that the caller has provided this additional context:
 
-        > {{message}}
+- also remember that the caller has provided this additional context:
 
-    - this context may help us contextualize the changes of some or all of the staged files you are responsible for
+    > {{message}}
+
+- this context may help us contextualize the changes of some or all of the staged files you are responsible for
+
 ::end-block
 2.  Look for files that have been _moved_ and make sure they are captured into groups first so that we can correctly commit these commits correctly
 3.  Then organize the remaining staged files into **semantic groups**

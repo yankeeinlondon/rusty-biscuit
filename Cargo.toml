@@ -91,6 +91,18 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = 0
 
+# Isolated test processes compile cold queries and traverse large syntax trees.
+# Keep the native parser optimized for cold query compilation and tree walks.
+[profile.test.package.tree-sitter]
+opt-level = 2
+
+# The generic-position boundary requires 65,536 real AST entries. Optimize
+# their analysis while preserving debug assertions and checked arithmetic.
+[profile.test.package.tree-hugger]
+opt-level = 1
+debug-assertions = true
+overflow-checks = true
+
 [profile.profiling]
 inherits = "release"
 debug = true

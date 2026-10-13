@@ -1,0 +1,3441 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "C",
+  "files": [
+    {
+      "file": "c.c",
+      "language": "C",
+      "hash": "8c1a581b31433e23",
+      "symbols": [
+        {
+          "name": "FIXTURE_MACRO",
+          "kind": "Macro",
+          "range": {
+            "start_line": 4,
+            "start_column": 9,
+            "end_line": 4,
+            "end_column": 22,
+            "start_byte": 94,
+            "end_byte": 107
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "NamedTag",
+          "kind": "Type",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 9,
+            "end_column": 2,
+            "start_byte": 111,
+            "end_byte": 175
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tag_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 7,
+            "start_column": 9,
+            "end_line": 7,
+            "end_column": 18,
+            "start_byte": 137,
+            "end_byte": 146
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedTag"
+        },
+        {
+          "name": "AliasedTag",
+          "kind": "Type",
+          "range": {
+            "start_line": 11,
+            "start_column": 9,
+            "end_line": 13,
+            "end_column": 2,
+            "start_byte": 186,
+            "end_byte": 234
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "aliased_tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "aliased_tag_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 9,
+            "end_line": 12,
+            "end_column": 26,
+            "start_byte": 214,
+            "end_byte": 231
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "AliasedTag"
+        },
+        {
+          "name": "TagAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 11,
+            "start_column": 1,
+            "end_line": 13,
+            "end_column": 12,
+            "start_byte": 178,
+            "end_byte": 244
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "aliased_tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "anonymous_struct_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 16,
+            "start_column": 9,
+            "end_line": 16,
+            "end_column": 31,
+            "start_byte": 271,
+            "end_byte": 293
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "AnonymousStructAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 15,
+            "start_column": 1,
+            "end_line": 17,
+            "end_column": 24,
+            "start_byte": 246,
+            "end_byte": 318
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "anonymous_struct_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "SameName",
+          "kind": "Type",
+          "range": {
+            "start_line": 19,
+            "start_column": 9,
+            "end_line": 21,
+            "end_column": 2,
+            "start_byte": 328,
+            "end_byte": 372
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "same_name_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "same_name_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 20,
+            "start_column": 9,
+            "end_line": 20,
+            "end_column": 24,
+            "start_byte": 354,
+            "end_byte": 369
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "SameName"
+        },
+        {
+          "name": "SameName",
+          "kind": "Type",
+          "range": {
+            "start_line": 19,
+            "start_column": 1,
+            "end_line": 21,
+            "end_column": 12,
+            "start_byte": 320,
+            "end_byte": 382
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "same_name_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "CountAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 23,
+            "start_column": 1,
+            "end_line": 23,
+            "end_column": 34,
+            "start_byte": 384,
+            "end_byte": 417
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "NamedColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 25,
+            "start_column": 1,
+            "end_line": 28,
+            "end_column": 2,
+            "start_byte": 419,
+            "end_byte": 470
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "COLOR_RED"
+              },
+              {
+                "name": "COLOR_GREEN"
+              }
+            ]
+          }
+        },
+        {
+          "name": "COLOR_RED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 14,
+            "start_byte": 441,
+            "end_byte": 450
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedColor"
+        },
+        {
+          "name": "COLOR_GREEN",
+          "kind": "Variable",
+          "range": {
+            "start_line": 27,
+            "start_column": 5,
+            "end_line": 27,
+            "end_column": 16,
+            "start_byte": 456,
+            "end_byte": 467
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedColor"
+        },
+        {
+          "name": "union_int_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 31,
+            "start_column": 9,
+            "end_line": 31,
+            "end_column": 24,
+            "start_byte": 500,
+            "end_byte": 515
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "union_float_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 32,
+            "start_column": 11,
+            "end_line": 32,
+            "end_column": 28,
+            "start_byte": 527,
+            "end_byte": 544
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "public_global_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 35,
+            "start_column": 5,
+            "end_line": 35,
+            "end_column": 27,
+            "start_byte": 554,
+            "end_byte": 576
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "file_static_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 37,
+            "start_column": 12,
+            "end_line": 37,
+            "end_column": 32,
+            "start_byte": 594,
+            "end_byte": 614
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "extern_declared_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 39,
+            "start_column": 12,
+            "end_line": 39,
+            "end_column": 36,
+            "start_byte": 632,
+            "end_byte": 656
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "public_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 41,
+            "start_column": 5,
+            "end_line": 41,
+            "end_column": 41,
+            "start_byte": 663,
+            "end_byte": 699
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameter_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameter_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 41,
+            "start_column": 25,
+            "end_line": 41,
+            "end_column": 40,
+            "start_byte": 683,
+            "end_byte": 698
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 9,
+            "end_line": 42,
+            "end_column": 20,
+            "start_byte": 710,
+            "end_byte": 721
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "file_static_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 46,
+            "start_column": 12,
+            "end_line": 46,
+            "end_column": 38,
+            "start_byte": 783,
+            "end_byte": 809
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "prototyped_helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 50,
+            "start_column": 12,
+            "end_line": 50,
+            "end_column": 34,
+            "start_byte": 840,
+            "end_byte": 862
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "prototyped_helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 40,
+            "start_byte": 869,
+            "end_byte": 904
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helper_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helper_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 52,
+            "start_column": 27,
+            "end_line": 52,
+            "end_column": 39,
+            "start_byte": 891,
+            "end_byte": 903
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "function_with_local_static",
+          "kind": "Function",
+          "range": {
+            "start_line": 56,
+            "start_column": 5,
+            "end_line": 56,
+            "end_column": 37,
+            "start_byte": 939,
+            "end_byte": 971
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "local_static_counter",
+          "kind": "Variable",
+          "range": {
+            "start_line": 57,
+            "start_column": 16,
+            "end_line": 57,
+            "end_column": 36,
+            "start_byte": 989,
+            "end_byte": 1009
+          },
+          "language": "C",
+          "file": "c.c"
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "FIXTURE_MACRO",
+          "kind": "Macro",
+          "range": {
+            "start_line": 4,
+            "start_column": 9,
+            "end_line": 4,
+            "end_column": 22,
+            "start_byte": 94,
+            "end_byte": 107
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "NamedTag",
+          "kind": "Type",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 9,
+            "end_column": 2,
+            "start_byte": 111,
+            "end_byte": 175
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tag_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 7,
+            "start_column": 9,
+            "end_line": 7,
+            "end_column": 18,
+            "start_byte": 137,
+            "end_byte": 146
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedTag"
+        },
+        {
+          "name": "AliasedTag",
+          "kind": "Type",
+          "range": {
+            "start_line": 11,
+            "start_column": 9,
+            "end_line": 13,
+            "end_column": 2,
+            "start_byte": 186,
+            "end_byte": 234
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "aliased_tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "aliased_tag_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 9,
+            "end_line": 12,
+            "end_column": 26,
+            "start_byte": 214,
+            "end_byte": 231
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "AliasedTag"
+        },
+        {
+          "name": "TagAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 11,
+            "start_column": 1,
+            "end_line": 13,
+            "end_column": 12,
+            "start_byte": 178,
+            "end_byte": 244
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "aliased_tag_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "anonymous_struct_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 16,
+            "start_column": 9,
+            "end_line": 16,
+            "end_column": 31,
+            "start_byte": 271,
+            "end_byte": 293
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "AnonymousStructAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 15,
+            "start_column": 1,
+            "end_line": 17,
+            "end_column": 24,
+            "start_byte": 246,
+            "end_byte": 318
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "anonymous_struct_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "SameName",
+          "kind": "Type",
+          "range": {
+            "start_line": 19,
+            "start_column": 9,
+            "end_line": 21,
+            "end_column": 2,
+            "start_byte": 328,
+            "end_byte": 372
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "same_name_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "same_name_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 20,
+            "start_column": 9,
+            "end_line": 20,
+            "end_column": 24,
+            "start_byte": 354,
+            "end_byte": 369
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "SameName"
+        },
+        {
+          "name": "SameName",
+          "kind": "Type",
+          "range": {
+            "start_line": 19,
+            "start_column": 1,
+            "end_line": 21,
+            "end_column": 12,
+            "start_byte": 320,
+            "end_byte": 382
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "same_name_field",
+                "type_annotation": "int"
+              }
+            ]
+          }
+        },
+        {
+          "name": "CountAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 23,
+            "start_column": 1,
+            "end_line": 23,
+            "end_column": 34,
+            "start_byte": 384,
+            "end_byte": 417
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "NamedColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 25,
+            "start_column": 1,
+            "end_line": 28,
+            "end_column": 2,
+            "start_byte": 419,
+            "end_byte": 470
+          },
+          "language": "C",
+          "file": "c.c",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "COLOR_RED"
+              },
+              {
+                "name": "COLOR_GREEN"
+              }
+            ]
+          }
+        },
+        {
+          "name": "COLOR_RED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 26,
+            "start_column": 5,
+            "end_line": 26,
+            "end_column": 14,
+            "start_byte": 441,
+            "end_byte": 450
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedColor"
+        },
+        {
+          "name": "COLOR_GREEN",
+          "kind": "Variable",
+          "range": {
+            "start_line": 27,
+            "start_column": 5,
+            "end_line": 27,
+            "end_column": 16,
+            "start_byte": 456,
+            "end_byte": 467
+          },
+          "language": "C",
+          "file": "c.c",
+          "container_name": "NamedColor"
+        },
+        {
+          "name": "union_int_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 31,
+            "start_column": 9,
+            "end_line": 31,
+            "end_column": 24,
+            "start_byte": 500,
+            "end_byte": 515
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "union_float_field",
+          "kind": "Field",
+          "range": {
+            "start_line": 32,
+            "start_column": 11,
+            "end_line": 32,
+            "end_column": 28,
+            "start_byte": 527,
+            "end_byte": 544
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "public_global_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 35,
+            "start_column": 5,
+            "end_line": 35,
+            "end_column": 27,
+            "start_byte": 554,
+            "end_byte": 576
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "file_static_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 37,
+            "start_column": 12,
+            "end_line": 37,
+            "end_column": 32,
+            "start_byte": 594,
+            "end_byte": 614
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "extern_declared_variable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 39,
+            "start_column": 12,
+            "end_line": 39,
+            "end_column": 36,
+            "start_byte": 632,
+            "end_byte": 656
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "public_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 41,
+            "start_column": 5,
+            "end_line": 41,
+            "end_column": 41,
+            "start_byte": 663,
+            "end_byte": 699
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameter_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameter_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 41,
+            "start_column": 25,
+            "end_line": 41,
+            "end_column": 40,
+            "start_byte": 683,
+            "end_byte": 698
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "local_value",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 9,
+            "end_line": 42,
+            "end_column": 20,
+            "start_byte": 710,
+            "end_byte": 721
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "file_static_function",
+          "kind": "Function",
+          "range": {
+            "start_line": 46,
+            "start_column": 12,
+            "end_line": 46,
+            "end_column": 38,
+            "start_byte": 783,
+            "end_byte": 809
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "prototyped_helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 50,
+            "start_column": 12,
+            "end_line": 50,
+            "end_column": 34,
+            "start_byte": 840,
+            "end_byte": 862
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "prototyped_helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 52,
+            "start_column": 5,
+            "end_line": 52,
+            "end_column": 40,
+            "start_byte": 869,
+            "end_byte": 904
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helper_value",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helper_value",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 52,
+            "start_column": 27,
+            "end_line": 52,
+            "end_column": 39,
+            "start_byte": 891,
+            "end_byte": 903
+          },
+          "language": "C",
+          "file": "c.c"
+        },
+        {
+          "name": "function_with_local_static",
+          "kind": "Function",
+          "range": {
+            "start_line": 56,
+            "start_column": 5,
+            "end_line": 56,
+            "end_column": 37,
+            "start_byte": 939,
+            "end_byte": 971
+          },
+          "language": "C",
+          "file": "c.c",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "local_static_counter",
+          "kind": "Variable",
+          "range": {
+            "start_line": 57,
+            "start_column": 16,
+            "end_line": 57,
+            "end_column": 36,
+            "start_byte": 989,
+            "end_byte": 1009
+          },
+          "language": "C",
+          "file": "c.c"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "c.c",
+      "language": "C",
+      "file_hash": "8c1a581b31433e23",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "53bbfa857921a2483c51f00cd81851ef5bb9a85f9f20896a411eab83f9d2a764",
+          "language": "C",
+          "kind": "Macro",
+          "identity": {
+            "name": "FIXTURE_MACRO",
+            "display_name": "FIXTURE_MACRO",
+            "stable_key": "c::c.c::Macro::FIXTURE_MACRO::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 4,
+                "column": 9
+              },
+              "end": {
+                "line": 4,
+                "column": 22
+              },
+              "start_byte": 94,
+              "end_byte": 107
+            },
+            "name_span": {
+              "start": {
+                "line": 4,
+                "column": 9
+              },
+              "end": {
+                "line": 4,
+                "column": 22
+              },
+              "start_byte": 94,
+              "end_byte": 107
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286187,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8e0918df11f4a6b904df845a9bd2ae99b0cae813c7fd26824b8f8a7896ec655d",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "NamedTag",
+            "display_name": "NamedTag",
+            "stable_key": "c::c.c::Type::NamedTag::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 1
+              },
+              "end": {
+                "line": 9,
+                "column": 2
+              },
+              "start_byte": 111,
+              "end_byte": 175
+            },
+            "body_span": {
+              "start": {
+                "line": 6,
+                "column": 17
+              },
+              "end": {
+                "line": 9,
+                "column": 2
+              },
+              "start_byte": 127,
+              "end_byte": 175
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 8
+              },
+              "end": {
+                "line": 6,
+                "column": 16
+              },
+              "start_byte": 118,
+              "end_byte": 126
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "f178859d351dd4c8b15dbaf429dd800845d348b7d38b0ca3d47b275ce9cc0ca9",
+                "name": "tag_field",
+                "qualified_name": "NamedTag::tag_field"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "tag_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f178859d351dd4c8b15dbaf429dd800845d348b7d38b0ca3d47b275ce9cc0ca9",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "tag_field",
+            "display_name": "tag_field",
+            "qualified_name": "NamedTag::tag_field",
+            "module_path": "NamedTag",
+            "stable_key": "c::c.c::Field::NamedTag::tag_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 9
+              },
+              "end": {
+                "line": 7,
+                "column": 18
+              },
+              "start_byte": 137,
+              "end_byte": 146
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 9
+              },
+              "end": {
+                "line": 7,
+                "column": 18
+              },
+              "start_byte": 137,
+              "end_byte": 146
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "8e0918df11f4a6b904df845a9bd2ae99b0cae813c7fd26824b8f8a7896ec655d",
+              "name": "NamedTag"
+            },
+            "container": {
+              "id": "8e0918df11f4a6b904df845a9bd2ae99b0cae813c7fd26824b8f8a7896ec655d",
+              "name": "NamedTag"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "tag_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "dff133f440d53a011b010c2c7b6e04a7c91997e6c086da0bc812343b3f697383",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "AliasedTag",
+            "display_name": "AliasedTag",
+            "stable_key": "c::c.c::Type::AliasedTag::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 11,
+                "column": 9
+              },
+              "end": {
+                "line": 13,
+                "column": 2
+              },
+              "start_byte": 186,
+              "end_byte": 234
+            },
+            "body_span": {
+              "start": {
+                "line": 11,
+                "column": 27
+              },
+              "end": {
+                "line": 13,
+                "column": 2
+              },
+              "start_byte": 204,
+              "end_byte": 234
+            },
+            "name_span": {
+              "start": {
+                "line": 11,
+                "column": 16
+              },
+              "end": {
+                "line": 11,
+                "column": 26
+              },
+              "start_byte": 193,
+              "end_byte": 203
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "1a8a5b577832a4ee7d6e6239864210c317325e52b74f5dc2448c4f91a9c39952",
+                "name": "aliased_tag_field",
+                "qualified_name": "AliasedTag::aliased_tag_field"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "aliased_tag_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1a8a5b577832a4ee7d6e6239864210c317325e52b74f5dc2448c4f91a9c39952",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "aliased_tag_field",
+            "display_name": "aliased_tag_field",
+            "qualified_name": "AliasedTag::aliased_tag_field",
+            "module_path": "AliasedTag",
+            "stable_key": "c::c.c::Field::AliasedTag::aliased_tag_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 9
+              },
+              "end": {
+                "line": 12,
+                "column": 26
+              },
+              "start_byte": 214,
+              "end_byte": 231
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 9
+              },
+              "end": {
+                "line": 12,
+                "column": 26
+              },
+              "start_byte": 214,
+              "end_byte": 231
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "dff133f440d53a011b010c2c7b6e04a7c91997e6c086da0bc812343b3f697383",
+              "name": "AliasedTag"
+            },
+            "container": {
+              "id": "dff133f440d53a011b010c2c7b6e04a7c91997e6c086da0bc812343b3f697383",
+              "name": "AliasedTag"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "aliased_tag_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c0da2b22f46a87521cb7e39a99ce763a66319ff2ca31304c2905022254e564fa",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "TagAlias",
+            "display_name": "TagAlias",
+            "stable_key": "c::c.c::Type::TagAlias::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 11,
+                "column": 1
+              },
+              "end": {
+                "line": 13,
+                "column": 12
+              },
+              "start_byte": 178,
+              "end_byte": 244
+            },
+            "name_span": {
+              "start": {
+                "line": 13,
+                "column": 3
+              },
+              "end": {
+                "line": 13,
+                "column": 11
+              },
+              "start_byte": 235,
+              "end_byte": 243
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "aliased_tag_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "2e9c0e24da2c6cb41d888b978616b8bd919f44c5026b6200405a66d70724edd6",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "anonymous_struct_field",
+            "display_name": "anonymous_struct_field",
+            "stable_key": "c::c.c::Field::anonymous_struct_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 16,
+                "column": 9
+              },
+              "end": {
+                "line": 16,
+                "column": 31
+              },
+              "start_byte": 271,
+              "end_byte": 293
+            },
+            "name_span": {
+              "start": {
+                "line": 16,
+                "column": 9
+              },
+              "end": {
+                "line": 16,
+                "column": 31
+              },
+              "start_byte": 271,
+              "end_byte": 293
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "anonymous_struct_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "032aef6f4a03f13f1a8f6f4b87990172152997906ae495151d60a702bd5b26e8",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "AnonymousStructAlias",
+            "display_name": "AnonymousStructAlias",
+            "stable_key": "c::c.c::Type::AnonymousStructAlias::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 15,
+                "column": 1
+              },
+              "end": {
+                "line": 17,
+                "column": 24
+              },
+              "start_byte": 246,
+              "end_byte": 318
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 3
+              },
+              "end": {
+                "line": 17,
+                "column": 23
+              },
+              "start_byte": 297,
+              "end_byte": 317
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "anonymous_struct_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f2238b83a378b6b667d7d28ef2bd1a1e33cc7e93730e4eabbbdf80cdf8057e1f",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "SameName",
+            "display_name": "SameName",
+            "stable_key": "c::c.c::Type::SameName::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 19,
+                "column": 9
+              },
+              "end": {
+                "line": 21,
+                "column": 2
+              },
+              "start_byte": 328,
+              "end_byte": 372
+            },
+            "body_span": {
+              "start": {
+                "line": 19,
+                "column": 25
+              },
+              "end": {
+                "line": 21,
+                "column": 2
+              },
+              "start_byte": 344,
+              "end_byte": 372
+            },
+            "name_span": {
+              "start": {
+                "line": 19,
+                "column": 16
+              },
+              "end": {
+                "line": 19,
+                "column": 24
+              },
+              "start_byte": 335,
+              "end_byte": 343
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "915b048cef3d46ebd0c0349cc5baa487b9d01ed8f8c24a814188dfde073d2caa",
+                "name": "same_name_field",
+                "qualified_name": "SameName::same_name_field"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "same_name_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "915b048cef3d46ebd0c0349cc5baa487b9d01ed8f8c24a814188dfde073d2caa",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "same_name_field",
+            "display_name": "same_name_field",
+            "qualified_name": "SameName::same_name_field",
+            "module_path": "SameName",
+            "stable_key": "c::c.c::Field::SameName::same_name_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 20,
+                "column": 9
+              },
+              "end": {
+                "line": 20,
+                "column": 24
+              },
+              "start_byte": 354,
+              "end_byte": 369
+            },
+            "name_span": {
+              "start": {
+                "line": 20,
+                "column": 9
+              },
+              "end": {
+                "line": 20,
+                "column": 24
+              },
+              "start_byte": 354,
+              "end_byte": 369
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "f2238b83a378b6b667d7d28ef2bd1a1e33cc7e93730e4eabbbdf80cdf8057e1f",
+              "name": "SameName"
+            },
+            "container": {
+              "id": "f2238b83a378b6b667d7d28ef2bd1a1e33cc7e93730e4eabbbdf80cdf8057e1f",
+              "name": "SameName"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "same_name_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f41038a0a9994ee2306bbf9acb3f43e880c089df170d9168e9924e9c065c25c7",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "SameName",
+            "display_name": "SameName",
+            "stable_key": "c::c.c::Type::SameName::1"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 19,
+                "column": 1
+              },
+              "end": {
+                "line": 21,
+                "column": 12
+              },
+              "start_byte": 320,
+              "end_byte": 382
+            },
+            "name_span": {
+              "start": {
+                "line": 21,
+                "column": 3
+              },
+              "end": {
+                "line": 21,
+                "column": 11
+              },
+              "start_byte": 373,
+              "end_byte": 381
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "same_name_field",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d39ae255c0b45c5daa8e0f1962e6894e44b2408959e5b447dd19e7684dc313da",
+          "language": "C",
+          "kind": "Type",
+          "identity": {
+            "name": "CountAlias",
+            "display_name": "CountAlias",
+            "stable_key": "c::c.c::Type::CountAlias::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 23,
+                "column": 1
+              },
+              "end": {
+                "line": 23,
+                "column": 34
+              },
+              "start_byte": 384,
+              "end_byte": 417
+            },
+            "name_span": {
+              "start": {
+                "line": 23,
+                "column": 23
+              },
+              "end": {
+                "line": 23,
+                "column": 33
+              },
+              "start_byte": 406,
+              "end_byte": 416
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "829bd5d61d341f7b97f979ffcae05f72cd3323b1482521b889c1e3f20959ca8a",
+          "language": "C",
+          "kind": "Enum",
+          "identity": {
+            "name": "NamedColor",
+            "display_name": "NamedColor",
+            "stable_key": "c::c.c::Enum::NamedColor::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 25,
+                "column": 1
+              },
+              "end": {
+                "line": 28,
+                "column": 2
+              },
+              "start_byte": 419,
+              "end_byte": 470
+            },
+            "body_span": {
+              "start": {
+                "line": 25,
+                "column": 17
+              },
+              "end": {
+                "line": 28,
+                "column": 2
+              },
+              "start_byte": 435,
+              "end_byte": 470
+            },
+            "name_span": {
+              "start": {
+                "line": 25,
+                "column": 6
+              },
+              "end": {
+                "line": 25,
+                "column": 16
+              },
+              "start_byte": 424,
+              "end_byte": 434
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "6691c8b5387b5d4155328439f88799d409a3096f4e451820d4ade4223e57e702",
+                "name": "COLOR_RED",
+                "qualified_name": "NamedColor::COLOR_RED"
+              },
+              {
+                "id": "7973c27f85a93ae91ae53f282cf18a0057b670e81193b3c58a1c75dd8f3aef3f",
+                "name": "COLOR_GREEN",
+                "qualified_name": "NamedColor::COLOR_GREEN"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "COLOR_RED"
+                },
+                {
+                  "name": "COLOR_GREEN"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "6691c8b5387b5d4155328439f88799d409a3096f4e451820d4ade4223e57e702",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "COLOR_RED",
+            "display_name": "COLOR_RED",
+            "qualified_name": "NamedColor::COLOR_RED",
+            "module_path": "NamedColor",
+            "stable_key": "c::c.c::Variable::NamedColor::COLOR_RED::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 14
+              },
+              "start_byte": 441,
+              "end_byte": 450
+            },
+            "name_span": {
+              "start": {
+                "line": 26,
+                "column": 5
+              },
+              "end": {
+                "line": 26,
+                "column": 14
+              },
+              "start_byte": 441,
+              "end_byte": 450
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "829bd5d61d341f7b97f979ffcae05f72cd3323b1482521b889c1e3f20959ca8a",
+              "name": "NamedColor"
+            },
+            "container": {
+              "id": "829bd5d61d341f7b97f979ffcae05f72cd3323b1482521b889c1e3f20959ca8a",
+              "name": "NamedColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "7973c27f85a93ae91ae53f282cf18a0057b670e81193b3c58a1c75dd8f3aef3f",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "COLOR_GREEN",
+            "display_name": "COLOR_GREEN",
+            "qualified_name": "NamedColor::COLOR_GREEN",
+            "module_path": "NamedColor",
+            "stable_key": "c::c.c::Variable::NamedColor::COLOR_GREEN::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 27,
+                "column": 5
+              },
+              "end": {
+                "line": 27,
+                "column": 16
+              },
+              "start_byte": 456,
+              "end_byte": 467
+            },
+            "name_span": {
+              "start": {
+                "line": 27,
+                "column": 5
+              },
+              "end": {
+                "line": 27,
+                "column": 16
+              },
+              "start_byte": 456,
+              "end_byte": 467
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "829bd5d61d341f7b97f979ffcae05f72cd3323b1482521b889c1e3f20959ca8a",
+              "name": "NamedColor"
+            },
+            "container": {
+              "id": "829bd5d61d341f7b97f979ffcae05f72cd3323b1482521b889c1e3f20959ca8a",
+              "name": "NamedColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "58190c5c750bc98bca99fcdec80007d76553f418750ffb8e71d79bc63c97e184",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "union_int_field",
+            "display_name": "union_int_field",
+            "stable_key": "c::c.c::Field::union_int_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 31,
+                "column": 9
+              },
+              "end": {
+                "line": 31,
+                "column": 24
+              },
+              "start_byte": 500,
+              "end_byte": 515
+            },
+            "name_span": {
+              "start": {
+                "line": 31,
+                "column": 9
+              },
+              "end": {
+                "line": 31,
+                "column": 24
+              },
+              "start_byte": 500,
+              "end_byte": 515
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "union_int_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "d185d580d9fb0a88980f582ee60ec29b4ebbfdd16bb25058936860326595474c",
+          "language": "C",
+          "kind": "Field",
+          "identity": {
+            "name": "union_float_field",
+            "display_name": "union_float_field",
+            "stable_key": "c::c.c::Field::union_float_field::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 32,
+                "column": 11
+              },
+              "end": {
+                "line": 32,
+                "column": 28
+              },
+              "start_byte": 527,
+              "end_byte": 544
+            },
+            "name_span": {
+              "start": {
+                "line": 32,
+                "column": 11
+              },
+              "end": {
+                "line": 32,
+                "column": 28
+              },
+              "start_byte": 527,
+              "end_byte": 544
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "union_float_field",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "f7ef489a5ab3bae9c60e9e397c5e79ad4e82688434919bc1e4ab2049caa732a1",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "public_global_variable",
+            "display_name": "public_global_variable",
+            "stable_key": "c::c.c::Variable::public_global_variable::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 35,
+                "column": 5
+              },
+              "end": {
+                "line": 35,
+                "column": 27
+              },
+              "start_byte": 554,
+              "end_byte": 576
+            },
+            "name_span": {
+              "start": {
+                "line": 35,
+                "column": 5
+              },
+              "end": {
+                "line": 35,
+                "column": 27
+              },
+              "start_byte": 554,
+              "end_byte": 576
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "56ae7c6f42fd13ea2bf2f70e793732684827b9cac89f5d4038ba944b0f4865b5",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "file_static_variable",
+            "display_name": "file_static_variable",
+            "stable_key": "c::c.c::Variable::file_static_variable::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 37,
+                "column": 12
+              },
+              "end": {
+                "line": 37,
+                "column": 32
+              },
+              "start_byte": 594,
+              "end_byte": 614
+            },
+            "name_span": {
+              "start": {
+                "line": 37,
+                "column": 12
+              },
+              "end": {
+                "line": 37,
+                "column": 32
+              },
+              "start_byte": 594,
+              "end_byte": 614
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "09a8c44e2d5f0b762852e73aa009e93af4b9a793932a797a31c35f2b0eca996b",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "extern_declared_variable",
+            "display_name": "extern_declared_variable",
+            "stable_key": "c::c.c::Variable::extern_declared_variable::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 39,
+                "column": 12
+              },
+              "end": {
+                "line": 39,
+                "column": 36
+              },
+              "start_byte": 632,
+              "end_byte": 656
+            },
+            "name_span": {
+              "start": {
+                "line": 39,
+                "column": 12
+              },
+              "end": {
+                "line": 39,
+                "column": 36
+              },
+              "start_byte": 632,
+              "end_byte": 656
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "5a3ed350b92b4e2b5854ef4a7cc44940a9d24a9f138039dbefcfadf0079f1b6a",
+          "language": "C",
+          "kind": "Function",
+          "identity": {
+            "name": "public_function",
+            "display_name": "public_function",
+            "stable_key": "c::c.c::Function::public_function::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 41,
+                "column": 5
+              },
+              "end": {
+                "line": 41,
+                "column": 41
+              },
+              "start_byte": 663,
+              "end_byte": 699
+            },
+            "name_span": {
+              "start": {
+                "line": 41,
+                "column": 5
+              },
+              "end": {
+                "line": 41,
+                "column": 20
+              },
+              "start_byte": 663,
+              "end_byte": 678
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameter_value",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a12585e7dc47aada0a2a1b5f9248fb967fd40649399eb9a53fd418a528cd85e3",
+          "language": "C",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameter_value",
+            "display_name": "parameter_value",
+            "stable_key": "c::c.c::Parameter::parameter_value::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 41,
+                "column": 25
+              },
+              "end": {
+                "line": 41,
+                "column": 40
+              },
+              "start_byte": 683,
+              "end_byte": 698
+            },
+            "name_span": {
+              "start": {
+                "line": 41,
+                "column": 25
+              },
+              "end": {
+                "line": 41,
+                "column": 40
+              },
+              "start_byte": 683,
+              "end_byte": 698
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameter_value",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fee53079bbf1c247ed23c10a7e1014435dff0ccc57f477f857e8c45e17f5493a",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "local_value",
+            "display_name": "local_value",
+            "stable_key": "c::c.c::Variable::local_value::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 42,
+                "column": 9
+              },
+              "end": {
+                "line": 42,
+                "column": 20
+              },
+              "start_byte": 710,
+              "end_byte": 721
+            },
+            "name_span": {
+              "start": {
+                "line": 42,
+                "column": 9
+              },
+              "end": {
+                "line": 42,
+                "column": 20
+              },
+              "start_byte": 710,
+              "end_byte": 721
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e87f88db3a884582d9e1b705b79bdf3d8b6a50f7af121f9a91144938e8f724e2",
+          "language": "C",
+          "kind": "Function",
+          "identity": {
+            "name": "file_static_function",
+            "display_name": "file_static_function",
+            "stable_key": "c::c.c::Function::file_static_function::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 46,
+                "column": 12
+              },
+              "end": {
+                "line": 46,
+                "column": 38
+              },
+              "start_byte": 783,
+              "end_byte": 809
+            },
+            "name_span": {
+              "start": {
+                "line": 46,
+                "column": 12
+              },
+              "end": {
+                "line": 46,
+                "column": 32
+              },
+              "start_byte": 783,
+              "end_byte": 803
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "dbb01f1c9edc68c5e773221c275f45d9cb273870d5357c7ee457b6827be1dfb9",
+          "language": "C",
+          "kind": "Function",
+          "identity": {
+            "name": "prototyped_helper",
+            "display_name": "prototyped_helper",
+            "stable_key": "c::c.c::Function::prototyped_helper::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 12
+              },
+              "end": {
+                "line": 50,
+                "column": 34
+              },
+              "start_byte": 840,
+              "end_byte": 862
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 12
+              },
+              "end": {
+                "line": 50,
+                "column": 29
+              },
+              "start_byte": 840,
+              "end_byte": 857
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "23de64a91b847a2c6db82335ab7e1f5a4ba8c385828c589eccabe9dbe3ed42d6",
+          "language": "C",
+          "kind": "Function",
+          "identity": {
+            "name": "prototyped_helper",
+            "display_name": "prototyped_helper",
+            "stable_key": "c::c.c::Function::prototyped_helper::1"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 52,
+                "column": 5
+              },
+              "end": {
+                "line": 52,
+                "column": 40
+              },
+              "start_byte": 869,
+              "end_byte": 904
+            },
+            "name_span": {
+              "start": {
+                "line": 52,
+                "column": 5
+              },
+              "end": {
+                "line": 52,
+                "column": 22
+              },
+              "start_byte": 869,
+              "end_byte": 886
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "helper_value",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "17dd65cf9269f113deaa041d921d7ad1e104195324fdc2fa71309c491b4e0c7a",
+          "language": "C",
+          "kind": "Parameter",
+          "identity": {
+            "name": "helper_value",
+            "display_name": "helper_value",
+            "stable_key": "c::c.c::Parameter::helper_value::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 52,
+                "column": 27
+              },
+              "end": {
+                "line": 52,
+                "column": 39
+              },
+              "start_byte": 891,
+              "end_byte": 903
+            },
+            "name_span": {
+              "start": {
+                "line": 52,
+                "column": 27
+              },
+              "end": {
+                "line": 52,
+                "column": 39
+              },
+              "start_byte": 891,
+              "end_byte": 903
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "helper_value",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ce4fd6eeaca43f873af9e3ba038616ee3643c9d141db7dbfc08774cd1b9a9dea",
+          "language": "C",
+          "kind": "Function",
+          "identity": {
+            "name": "function_with_local_static",
+            "display_name": "function_with_local_static",
+            "stable_key": "c::c.c::Function::function_with_local_static::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 56,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 37
+              },
+              "start_byte": 939,
+              "end_byte": 971
+            },
+            "name_span": {
+              "start": {
+                "line": 56,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 31
+              },
+              "start_byte": 939,
+              "end_byte": 965
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "9c16b63ba54f8a84543ab5632400c0577eba2a704520f86105b1f15a507946c3",
+          "language": "C",
+          "kind": "Variable",
+          "identity": {
+            "name": "local_static_counter",
+            "display_name": "local_static_counter",
+            "stable_key": "c::c.c::Variable::local_static_counter::0"
+          },
+          "source": {
+            "file_path": "c.c",
+            "declaration_span": {
+              "start": {
+                "line": 57,
+                "column": 16
+              },
+              "end": {
+                "line": 57,
+                "column": 36
+              },
+              "start_byte": 989,
+              "end_byte": 1009
+            },
+            "name_span": {
+              "start": {
+                "line": 57,
+                "column": 16
+              },
+              "end": {
+                "line": 57,
+                "column": 36
+              },
+              "start_byte": 989,
+              "end_byte": 1009
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069286188,
+            "updated_at_epoch_ms": 1791069286298
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

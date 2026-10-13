@@ -1427,6 +1427,7 @@ mod tests {
             relative: format!("{area}/{name}"),
             package_area: area.to_string(),
             name: name.to_string(),
+            name_source: sniff::filesystem::repo::PackageNameSource::PathFallback,
             ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
             standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
             provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,

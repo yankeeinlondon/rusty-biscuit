@@ -583,6 +583,7 @@ fn expected_json(
                 "relative": relative,
                 "package_area": package_area,
                 "name": name,
+                "name_source": "manifest",
                 "ecosystem": shape.ecosystem,
                 "standard": shape.standard,
                 "provenance": provenance,
@@ -939,6 +940,9 @@ fn package_json(
         "primary_language": null,
         "package_managers": [],
     });
+    if matches!(ecosystem, "node" | "go") {
+        package["name_source"] = serde_json::Value::from("manifest");
+    }
     if let Some(version) = version {
         package["version"] = serde_json::Value::from(version);
     }

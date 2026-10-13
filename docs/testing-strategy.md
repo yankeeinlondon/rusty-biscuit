@@ -297,7 +297,7 @@ the page source.
 
 ### The canonical recipe set
 
-Every area in the curated list exposes the same twelve recipes. When a recipe
+Every area in the curated list exposes the same thirteen recipes. When a recipe
 does not apply to an area it is still present, as a one-line no-op that
 explains why, so root-level orchestration can iterate every area without
 special cases.
@@ -306,6 +306,7 @@ special cases.
 | --- | --- |
 | `sanity` | Fast Level 1 subset, library and binary crates only. About fifteen seconds. |
 | `test` | Full Level 1 suite for the area. Slow-tagged tests excluded locally. |
+| `slow-tests` | Runs `test`'s selection and lists every test Nextest marks `SLOW`. A local diagnostic; not part of `all`. |
 | `test-l2` | Real-terminal tests. |
 | `test-l3` | OS keyboard and mouse tests. Needs `RUN_LEVEL3=1`. |
 | `test-browser` | Headless browser tests. |
@@ -324,7 +325,7 @@ an explicit opt-in: a quiet CPU, a nightly toolchain, window focus, or a
 device.
 
 `just check-canonical` from the root verifies that every curated area exposes
-all twelve recipes and names any that are missing. CI runs the same check. A
+all thirteen recipes and names any that are missing. CI runs the same check. A
 new area must pass it before it joins the curated list.
 
 ### Root-level commands
@@ -401,14 +402,32 @@ whose `Cargo.toml` asks for it:
 l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
 ```
 
-Suites marked `l2-parallel-self-spawn` use isolated per-test resources instead
-of shared panes and can run concurrently. Their default worker count is
-`max(1, logical_cores - 2)` locally. CI uses all logical cores on runners with
-four or fewer, and `logical_cores - 2` on larger runners. This leaves capacity
-for developer work and larger shared hosts without crippling small CI runners;
-it controls test workers, not CPU affinity or a guaranteed reservation.
-`BISCUIT_L2_THREADS` can override the default. Suites that share terminal or
-other global resources remain serial.
+L2 suites run in parallel by default. Each test spawns its own terminal
+session, so tests do not share a pane and can run side by side. The worker
+count is half the host's logical cores, rounded down, with a minimum of one,
+on every host, CI runners included: each worker drives a real terminal, and a
+single WezTerm mux server serves every WezTerm test, so more workers make its
+spawn and capture calls time out rather than finish sooner. A 16-core Mac, for
+example, runs claudine-cli's L2 suite with 8 workers, not 14; a GitHub-hosted
+`ubuntu-latest` runner (4 cores) runs 2 and `macos-latest` (3 cores) runs 1. The count controls test workers, not CPU affinity or a
+guaranteed reservation.
+
+Serial L2 is a rare, declared exception. A package whose tests truly contend
+for one resource, such as a single visible GUI window, says so, and the CI
+planner rejects the marker without a reason:
+
+```toml
+[package.metadata.ci.tests]
+runner-tools = ["l2-serial"]
+l2-serial-reason = "every test reads and writes the one system clipboard"
+```
+
+Prefer serializing only the tests that contend over serializing a whole
+package. Apple Terminal tests, which each open a visible window, share the
+`apple-terminal-l2` nextest test group (one at a time) in
+`.config/nextest.toml`, while the rest of their package stays parallel.
+
+`BISCUIT_L2_THREADS` overrides the choice for one run (`1` forces serial).
 
 ## Linting and formatting
 

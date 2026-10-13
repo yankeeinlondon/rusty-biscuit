@@ -62,6 +62,10 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} --all-features {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # not applicable: biscuit-visualized has no real-terminal (Level-2) tests —
 # biscuit-terminal owns the terminal rendering of the artifacts produced here.
 test-l2:

@@ -33,8 +33,58 @@ packages:
     - dmls
 related:
     - 2026-08-27-preserve-backslash-escapes
-human_review: false
-implemented: false
+human_review: true
+human_review_items:
+    - |-
+        **Your prompt commit on this branch makes CI red for reasons that have nothing to do with this fix.**
+
+        **Why this needs a decision before merge:** this branch carries your commit `c5ad95142`
+        ("chore: update commit and review prompts"), which is not on `main`. Tests in Darkmatter and
+        Claudine read the shipped prompts, so CI will run them on this pull request and the merge gate
+        (`ci-gate`) will block. The clean-fidelity work itself is green on macOS, Linux, Windows and WSL2.
+
+        What fails, and why:
+
+        - `prompts/_reviews/feature-review.md` no longer parses. In its `finalize.stack` list, a bare
+          `stop` line (line 112, and again at line 143) sits inside a mapping, which is not valid YAML.
+          This fails 5 Darkmatter tests (`dasherized_identifier_corpus` x2, `feature_review_incident` x3)
+          and 4 Claudine CLI tests (`shipped_prompts`/`shipped_prompt_contract`).
+        - `prompts/_implement/implement-plan.md` changed, but Claudine's copy of it in
+          `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md` did not. This
+          fails `shipped_prompt_route_drift` x2 and
+          `shipped_prompts::shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+
+        Options:
+
+        - **A. You fix the two prompts in a small separate commit before merging (recommended).** Decide
+          what `stop` should be (for example `stop: true`, or an `action:` list ending in `- stop`, like the
+          `initialize` stack already uses), then copy the new `implement-plan.md` body into the Claudine
+          fixture.
+          *Pro:* only you know what `stop` was meant to do, and the fix stays out of this cleanup change.
+          *Con:* one more small commit for you.
+        - **B. Let an agent guess the `stop` syntax and refresh the fixture.**
+          *Pro:* no work for you.
+          *Con:* a wrong guess changes how the review loop ends, a much worse failure than a red test.
+        - **C. Take `c5ad95142` off this branch and land it separately.**
+          *Pro:* this pull request becomes green on its own.
+          *Con:* history rewrite, and the prompt is still broken wherever it lands.
+
+        **Recommendation: A.** The defect is in prompt intent, not code. A one-line fix by the author is
+        safer than a guess, and it unblocks this pull request without mixing scopes.
+implemented: true
+message_to_agent: |-
+    All six phases are implemented; the fix is ready for review. Read implementation-log.md "## Phase 6"
+    first: it has the criterion-to-test map for AC 1-14 and the cross-OS evidence table.
+    - The 5 failing darkmatter L1 tests and 16 of the 17 failing claudine-cli tests trace to the author's
+      branch-only prompt commit c5ad95142 (unparseable feature-review.md frontmatter, implement-plan.md
+      drift from Claudine's fixture) or to the unbuilt claudine-fake-codex binary. None involve cleanup.
+      The 17th, steering::automatic::tests::three_warnings_send_three_helper_messages_then_nothing,
+      failed once under load and passed 3/3 alone. human_review covers c5ad95142.
+    - Open follow-ups are recorded as observations in the Phase 4-6 logs, not fixed: biscuit-file's
+      yaml.line-ending repair leaves CRLF delimiter lines around LF YAML; Markdown's frontmatter split
+      drops the body's final newline; an empty interpolation leaves its surrounding spaces; a repair
+      respells a valid `area: {{ ctx.area }}` as `{{ctx.area}}`; the frontmatter schema tier is slow on some
+      large documents (pre-existing); dmls/docs/editors/README.md links to a DMLS feature spec.
 ---
 
 # Clean Fidelity and Formatting Rules

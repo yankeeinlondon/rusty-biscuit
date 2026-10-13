@@ -10,6 +10,14 @@ conditions that masquerade as repository defects.
   "Illegal byte sequence". Git metadata can still record a missing path
   containing it. Exercise such renderer inputs through a real Git record's
   `gitdir` text or the public rendering API rather than creating that filename.
+  The rejection is broader than that codepoint: any filename whose bytes are
+  not valid UTF-8 fails at the syscall level with `EILSEQ` ("Illegal byte
+  sequence"), so a fixture cannot create a genuinely non-UTF-8 path on the
+  worktree here (Linux can). To test that a code path preserves non-UTF-8 Git
+  paths byte-exactly on macOS, build the path through the index and commit
+  trees (e.g. `git2::Index::add_frombuffer` with raw path bytes) and compare
+  committed-tree output, never a worktree file; sniff's
+  `filesystem::git::changed_paths_tests` does exactly this split.
 - `/var` and `/tmp` are symlinks into `/private`. A test that compares a
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.
@@ -236,7 +244,12 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   stays unfocused, has exactly the cells asked for, and can be screenshotted
   with `screencapture -x -o -l <platform_window_id from kitty @ ls>`. That is
   `biscuit_test_harness::kitty::KittyInstance`. A hidden instance's
-  screenshot is black (never drawn). Stop an instance with `kitty @ --to …
+  screenshot is black (never drawn). On 2026-10-12, Kitty 0.49.2 in hidden
+  mode also delayed OSC 10/11 and device-attribute replies until after `hug`
+  exited: the replies entered Bash's next command line and broke its begin
+  marker. A normal unfocused instance eliminated that delay. Use the normal
+  instance for text captures that run terminal-capability probes too.
+  Stop an instance with `kitty @ --to …
   action quit`; without `confirm_os_window_close=0` that opens a "Quit
   kitty?" window instead.
   An *occluded* instance's screenshot is empty too (2026-09-28): Kitty does
@@ -271,6 +284,23 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
   send error now carries tmux's own message and the live session list. If
   it recurs, read that list before blaming the test.
+- **WezTerm L2 tests time out at `attach/spawn WezTerm` or `initial capture`
+  with `command timed out after 10s`/`15s`, or fail `WezTerm not available`,
+  different tests each run.** Too many concurrent `wezterm cli` clients for
+  the process behind `WEZTERM_UNIX_SOCKET`; from inside WezTerm that is the
+  GUI (`gui-sock-<pid>`), not a `wezterm-mux-server`. The GUI serves every
+  client on its main thread and pushes each connected client the render
+  changes of every busy pane, so the cost is clients × busy panes, and a
+  slow answer keeps clients connected longer. `sample <gui-pid> 5` during a
+  stall shows the main thread in `GetPaneRenderChangesResponse` encoding,
+  and an unrelated `wezterm cli list` stalls too. On 2026-10-08 claudine-cli
+  at 14 workers failed three then four different WezTerm tests; on
+  2026-10-10, 16 concurrent clients took 13–40 s each. The harness now lets
+  only two clients per mux run at once across all processes (see the
+  `biscuit-test-harness` skill), and biscuit-terminal-cli's 653-test L2 run
+  passed at 14 workers. `_test_l2_threads` still gives parallel L2 half the
+  host's cores (8 here). If it recurs, look for something driving
+  `wezterm cli` outside the harness before blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` spawns `defaults read
   com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,
@@ -306,6 +336,15 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   recipes. Re-sign kache ad hoc (`just install-kache` does this and gates on
   `scripts/kache-host.sh probe-passthrough`). Measured 2026-09-23; details in
   the `kache` skill's `installation.md`.
+
+- **Concurrent tree-hugger corpus checks and Clippy can exhaust L1 budgets.** On 2026-10-07, the default-worker full suite ran beside sniff tests and Clippy; two unchanged CLI cache-robustness corpus tests exceeded 30 seconds. The same pair passed in isolation at two workers in 6.6 and 7.0 seconds. Finish competing compiles and verify the full suite with bounded workers before changing test timeouts or treating the result as a Git-index defect.
+- **Concurrent Sniff host probes can exceed the L1 timeout.** On 2026-10-07,
+  a default-concurrency `just test` timed out four unchanged CoreAudio/audio
+  hardware tests at 30 s while network-interface probes approached 29 s.
+  `just test detect_audio_devices_on_macos --test-threads 1` passed in 9.875 s;
+  `just test --test-threads 4` then passed all 3,154 L1 tests. Suspect host-probe
+  contention when these unrelated probes slow together; verify with bounded
+  workers before changing timeout policy or treating the result as a Git defect.
 
 ## Diagnosing a slow host
 
@@ -353,6 +392,13 @@ different artifact.
 
 ## CI shell and runtime inspection (2026-09-15)
 
+Kache passthrough fixtures must explicitly unset `DYLD_FALLBACK_LIBRARY_PATH`
+when modeling a stripping wrapper. A Bash script that merely executes its
+arguments can preserve it on hosted macOS, so relying on shell startup to
+strip it makes the negative probe pass and skips the expected re-sign step.
+The shared fake's `strip` mode and the standalone negative probe both remove
+the variable explicitly; `forward` mode supplies the probe's sentinel.
+
 `/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
 empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
 cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
@@ -374,3 +420,11 @@ When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
 `/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
 rejects valid programs. Traverse required dependencies and preserve the weak
 import distinction.
+
+### Non-UTF-8 filename fixtures
+
+APFS on this macOS host rejects invalid UTF-8 directory names with error 92,
+`Illegal byte sequence`. Gate tests requiring actual byte-named files to an OS
+whose filesystem supports them. Native-path lookup tests can instead build a
+catalog of nonexistent paths under a canonicalized temporary root; this proves
+byte identity without asking APFS to create an unsupported filename.

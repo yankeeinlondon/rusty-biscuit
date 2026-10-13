@@ -1,232 +1,43 @@
 # Tree Hugger CLI
 
-Tree Hugger provides the `hug` CLI for exploring symbols, imports, and diagnostics across multiple
-languages.
+`hug` explores the declarations, imports, references and diagnostics in
+source files across 16 languages, using Tree-sitter, and points out files
+that have grown too large.
 
-## Installation
+> **Full documentation:** [Using the `hug` CLI](../docs/cli.md) is the
+> reference for every command and option. This README is only an overview.
+
+## Install
 
 ```bash
 cargo install --path tree-hugger/cli
 ```
 
-## Usage
+## At a glance
 
 ```bash
-hug symbols
-hug functions --language rust src/main.rs greet
-hug imports --json "tests/fixtures/**/*.js"
+hug symbols                                   # every declaration in the nearest package
+hug functions --in Widget --undocumented      # undocumented members of Widget
+hug types --changed=main --json               # types in files changed since main, as JSON
+hug symbols --format ctags > tags             # a tags file for your editor
+hug refs parse --callers 'src/**'             # who calls `parse`
+hug lint 'src/**/*.rs'                        # lint and syntax diagnostics
+hug god-files --high-risk                     # files that most need splitting
 ```
 
-## Commands
+| Command | What it does |
+|---------|--------------|
+| `functions`, `types`, `symbols`, `classes` | List declarations, with filters, sorting, JSON, stats and export formats |
+| `refs` | References to one declaration, its callers or its callees |
+| `imports` | Imported symbols |
+| `lint` | Lint and syntax diagnostics |
+| `god-files` | Oversized files that are refactoring candidates |
+| `completions` | Shell completions |
 
-- `functions` - List function and method definitions
-- `types` - List type definitions (structs, enums, classes, interfaces, traits)
-- `symbols` - List all discovered symbols
-- `imports` - List imported symbols
-- `classes` - List classes with members partitioned by static/instance
-- `lint` - Run lint and syntax diagnostics
+## Learn more
 
-## Options
-
-- `--language <LANG>` - Override language detection (`js`/`javascript`, `ts`/`typescript`, `cpp`/`c++`, `c-sharp`/`c#`)
-- `--exclude-files <GLOB>` - Exclude files matching glob patterns (in addition to the defaults below)
-- `--exclude-symbols <GLOB>` - Exclude symbol names matching glob patterns
-- `--json` - Output as JSON
-- `--plain` - Disable colors and hyperlinks
-- `--group-by-file` - Group symbol output by file
-- `--group-by-module` - Group symbol output by module
-- `--sort-by-kind` - Sort symbols by kind then name
-- `--sort-by-module` - Sort symbols by module then other sort keys
-
-## Default Scan Exclusions
-
-A whole-package scan (no path/glob argument) honors `.gitignore` and additionally
-skips test *data* directories, whose contents are inputs rather than compiled
-source: `**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`.
-Naming such a file explicitly (e.g. `hug lint tests/fixtures/sample.rs`) overrides
-the exclusion. Normal test code (`tests/*.rs`) is still scanned.
-
-For `lint`, a multi-file scan only prints files that have diagnostics; if every
-file is clean it prints a single `No lint diagnostics in N files.` line. A
-single-file lint still prints `(no diagnostics)` as explicit confirmation.
-
-## Output Format
-
-### Pretty Output (default)
-
-The default output shows symbols with their kind, metadata, and location:
-
-```
-/path/to/file.rs (Rust)
-  - type Cli { exclude_files: Vec<String>, exclude_symbols: Vec<String>, json: bool, command: Command } [21:8]
-  - type CommonArgs { inputs: Vec<String> } [57:8]
-  - enum Command { Functions(CommonArgs), Types(CommonArgs), Symbols(CommonArgs) } [64:6]
-  - enum OutputFormat { Pretty, Plain, Json } [112:6]
-  - type OutputConfig { use_colors: bool, use_hyperlinks: bool } [122:8]
-```
-
-Note how `type` (structs) and `enum` are clearly distinguished.
-
-### JSON Output
-
-With `--json`, output includes full symbol metadata:
-
-```json
-{
-  "root_dir": "/path/to/project",
-  "language": "Rust",
-  "files": [
-    {
-      "file": "/path/to/types.rs",
-      "symbols": [
-        {
-          "name": "Point",
-          "kind": "Type",
-          "range": { "start_line": 2, "start_column": 12 },
-          "doc_comment": "A tuple struct representing a 2D point.",
-          "type_metadata": {
-            "fields": [
-              { "name": "0", "type_annotation": "i32" },
-              { "name": "1", "type_annotation": "i32" }
-            ]
-          }
-        },
-        {
-          "name": "Message",
-          "kind": "Enum",
-          "range": { "start_line": 11, "start_column": 10 },
-          "doc_comment": "Message types for the application.",
-          "type_metadata": {
-            "variants": [
-              { "name": "Quit" },
-              { "name": "Write", "tuple_fields": ["String"] },
-              { "name": "Move", "struct_fields": [{ "name": "x" }, { "name": "y" }] }
-            ]
-          }
-        }
-      ]
-    }
-  ]
-}
-```
-
-## Symbol Kinds
-
-The CLI displays different symbol kinds with distinct labels:
-
-| Kind | Display | Color |
-|------|---------|-------|
-| Function | `function` | Green |
-| Method | `method` | Green |
-| Type | `type` | Magenta |
-| Class | `class` | Magenta |
-| Interface | `interface` | Magenta |
-| Enum | `enum` | Cyan |
-| Trait | `trait` | Yellow |
-| Module | `module` | Yellow |
-
-## Examples
-
-```bash
-# List all types in the nearest package (default all-file scan)
-hug types
-
-# List functions in TypeScript files, excluding tests
-hug functions "src/**/*.ts" --exclude-files "**/test/**"
-
-# List symbols while excluding generated helper names
-hug symbols "src/**/*.rs" --exclude-symbols "*_generated*"
-
-# Export all symbols as JSON for tooling
-hug symbols "lib/**/*.rs" --json > symbols.json
-
-# Check imports in JavaScript files
-hug imports "src/**/*.js" --plain
-
-# List classes with their members
-hug classes "src/**/*.ts"
-
-# Filter classes by name
-hug classes "src/**/*.java" --name Controller
-
-# Show only static members
-hug classes "src/**/*.ts" --static-only
-
-# Run lint diagnostics
-hug lint "src/**/*.rs"
-
-# Run only lint rules (skip syntax errors)
-hug lint "src/**/*.rs" --lint-only
-
-# Run only syntax diagnostics
-hug lint "src/**/*.rs" --syntax-only
-
-# List registered lint rules
-hug lint --list-rules
-```
-
-## Classes Command
-
-The `classes` command provides structured class inspection:
-
-```bash
-hug classes "src/**/*.ts"
-```
-
-Output shows classes with members partitioned:
-
-```
-src/service.ts (TypeScript)
-  class UserService [5:1]
-    Static Methods (2)
-      - public getInstance() [7:3]
-      - private validateConfig(config: Config) [12:3]
-    Instance Methods (3)
-      - public getUser(id: string): User [20:3]
-      - private fetchData() [25:3]
-    Static Fields (1)
-      - private instance: UserService
-    Instance Fields (2)
-      - private cache: Map<string, User>
-      - public readonly config: Config
-```
-
-Options:
-- `--name <FILTER>` - Filter classes by name (substring match)
-- `--static-only` - Show only static members
-- `--instance-only` - Show only instance members
-
-## Lint Command
-
-The `lint` command runs pattern-based and semantic diagnostics:
-
-```bash
-hug lint "src/**/*.rs"
-```
-
-Output shows categorized diagnostics:
-
-```
-src/main.rs (Rust)
-[lint] warning [unwrap-call]: Explicit `.unwrap()` call
-  --> src/main.rs:42:15
-    |
- 42 |     let value = result.unwrap();
-    |                        ^^^^^^
-
-[semantic] error [undefined-symbol]: Reference to undefined symbol `foo`
-  --> src/main.rs:50:5
-
-[syntax] error: Missing semicolon
-  --> src/main.rs:60:20
-```
-
-Options:
-- `--lint-only` - Show only lint diagnostics (pattern rules and semantic analysis)
-- `--syntax-only` - Show only syntax diagnostics (parse errors)
-- `--deny <RULE|CATEGORY>` - Treat matching lint rules as errors
-- `--warn <RULE|CATEGORY>` - Treat matching lint rules as warnings
-- `--allow <RULE|CATEGORY>` - Treat matching lint rules as info
-- `--strict` - Promote warnings to errors
-- `--experimental-semantics` - Enable experimental semantic diagnostics
-- `--list-rules` - Print registered rule metadata and exit
+- [Tree Hugger Overview](../docs/overview.md): what Tree Hugger does and where to read next
+- [Using the `hug` CLI](../docs/cli.md): every command, option, output format and exit status
+- [Symbol Reports](../docs/symbol-reports.md): the declaration commands in depth
+- [Scope-Aware References](../docs/references.md): how `hug refs` resolves names
+- [Tree Hugger](../README.md): the library and the package as a whole

@@ -1,0 +1,102 @@
+
+
+
+  - DEFAULT_TARGET bash.sh:4:1
+  - build_target() bash.sh:6:1
+  - function clean_target bash.sh:11:1
+  - struct point c.c:3:1
+  - int x [in type point] c.c:4:9
+  - int y [in type point] c.c:5:9
+  - typedef struct point point_t c.c:8:1
+  - static int origin_count c.c:10:12
+  - int point_sum(struct point p) c.c:12:5
+  - void reset_origin(void) c.c:16:6
+  - namespace Multi c_sharp.cs:3:1
+  - public class Ledger c_sharp.cs:5:5
+  - private int total [in class Ledger] c_sharp.cs:7:21
+  - public int Total [in class Ledger] c_sharp.cs:9:9
+  - public void Add(int amount) [in class Ledger] c_sharp.cs:11:9
+  - public static Ledger Empty() [in class Ledger] c_sharp.cs:16:9
+  - public interface IAuditable c_sharp.cs:22:5
+  - void Audit() [in interface IAuditable] c_sharp.cs:24:9
+  - namespace geometry cpp.cpp:3:11
+  - class Vector cpp.cpp:5:1
+  - Vector(int x, int y) : x_(x), y_(y) [in class Vector] cpp.cpp:7:5
+  - int length() const [in class Vector] cpp.cpp:9:5
+  - int x_ [in class Vector] cpp.cpp:12:9
+  - int y_ [in class Vector] cpp.cpp:13:9
+  - int dot(const Vector &a, const Vector &b) [in namespace geometry] cpp.cpp:16:5
+  - public class Counter java.java:3:1
+  - private int count [in class Counter] java.java:4:17
+  - public Counter(int start) [in class Counter] java.java:6:5
+  - public void increment() [in class Counter] java.java:10:5
+  - public static Counter zero() [in class Counter] java.java:14:5
+  - interface Resettable java.java:19:1
+  - void reset() [in interface Resettable] java.java:20:5
+  - class Button javascript.js:3:8
+  - constructor(label) [in class Button] javascript.js:4:3
+  - press() [in class Button] javascript.js:8:3
+  - function buildButton() javascript.js:13:8
+  - const DEFAULT_LABEL javascript.js:17:14
+  - M lua.lua:3:7
+  - default_size lua.lua:5:7
+  - function M.new_bag(size) [in variable M] lua.lua:7:1
+  - function M:describe() [in variable M] lua.lua:11:1
+  - local function helper() lua.lua:15:1
+  - package Multi::Queue perl.pl:2:1
+  - my $default_size perl.pl:4:4
+  - sub new_queue [in module Multi::Queue] perl.pl:6:1
+  - sub queue_size [in module Multi::Queue] perl.pl:11:1
+  - class Account php.php:4:1
+  - private int $balance [in class Account] php.php:6:18
+  - public function deposit(int $amount): void [in class Account] php.php:8:5
+  - public static function open(): Account [in class Account] php.php:13:5
+  - function open_account(): Account php.php:19:1
+  - pub struct Widget rust.rs:4:1
+  - pub size: u32 [in type Widget] rust.rs:5:9
+  - pub fn new(size: u32) -> Self [in type Widget] rust.rs:9:5
+  - pub fn grow(&mut self, amount: u32) [in type Widget] rust.rs:13:5
+  - pub enum Shape rust.rs:18:1
+  - Circle [in enum Shape] rust.rs:19:5
+  - Square [in enum Shape] rust.rs:20:5
+  - pub const MAX_SIZE: u32 rust.rs:23:11
+  - pub fn build_widget() -> Widget rust.rs:25:1
+  - trait Named scala.scala:5:1
+  - def name: String [in trait Named] scala.scala:6:3
+  - class Tag(val name: String) extends Named scala.scala:9:1
+  - def upper(): String [in class Tag] scala.scala:10:3
+  - object Tag scala.scala:13:1
+  - def empty(): Tag [in module Tag] scala.scala:14:3
+  - struct Meter swift.swift:3:1
+  - var reading: Int [in type Meter] swift.swift:4:9
+  - func doubled() -> Int [in type Meter] swift.swift:6:5
+  - protocol Readable swift.swift:11:1
+  - func read() -> Int [in interface Readable] swift.swift:12:5
+  - func buildMeter() -> Meter swift.swift:15:1
+  - interface Sized typescript.ts:3:8
+  - size: number [in interface Sized] typescript.ts:4:3
+  - type Size typescript.ts:7:8
+  - class Panel implements Sized typescript.ts:9:8
+  - size: Size [in class Panel] typescript.ts:10:3
+  - constructor(size: Size) [in class Panel] typescript.ts:12:3
+  - grow(amount: number): void [in class Panel] typescript.ts:16:3
+  - function buildPanel(): Panel typescript.ts:21:8
+  - PROMPT_STYLE zsh.zsh:4:12
+  - render_prompt() zsh.zsh:6:1
+  - function reset_prompt zsh.zsh:11:1
+
+
+nested
+
+  - package nested nested/go.go:2:9
+  - type Widget struct nested/go.go:5:1
+  - Size int [in type Widget] nested/go.go:6:2
+  - func (w *Widget) Grow(amount int) [in type Widget] nested/go.go:9:1
+  - MaxSize nested/go.go:13:7
+  - func BuildWidget() Widget nested/go.go:15:1
+  - MAX_SIZE nested/python.py:3:1
+  - class Gadget nested/python.py:6:1
+  - def __init__(self, size) [in class Gadget] nested/python.py:9:5
+  - def grow(self, amount) [in class Gadget] nested/python.py:12:5
+  - def build_gadget() nested/python.py:16:1
+

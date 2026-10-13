@@ -535,7 +535,9 @@ ci-local *args="":
     # `test_consolidation.py` runs here and nowhere else: its toolkit is
     # local-only by ruling, so it is deliberately absent from `SUITE_REGISTRY`
     # (`2026-09-21-consolidated-test-binaries`, R1).
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py test_consolidation.py; do
+    # `test_evidence_index.py` covers `just ci-evidence`, which reads the store
+    # this recipe's hook writes; it is local-only for the same reason.
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py test_consolidation.py test_evidence_index.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
@@ -688,10 +690,10 @@ ci-local *args="":
                 if [[ " ${backends} " == *" kitty "* ]] && command -v kitty > /dev/null 2>&1 && [[ -n "${KITTY_LISTEN_ON:-}" ]]; then
                     required+=(kitty)
                 fi
-                l2_threads="${BISCUIT_L2_THREADS:-1}"
-                parallel_l2="$(jq -r '(.runner_tools // []) | index("l2-parallel-self-spawn") != null' <<< "${record}")"
-                if [[ "${parallel_l2}" == "true" ]]; then
-                    l2_threads="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
+                l2_threads="${BISCUIT_L2_THREADS:-$(just _test_l2_threads)}"
+                serial_l2="$(jq -r '(.runner_tools // []) | index("l2-serial") != null' <<< "${record}")"
+                if [[ "${serial_l2}" == "true" ]]; then
+                    l2_threads="${BISCUIT_L2_THREADS:-1}"
                 fi
                 required_csv="$(IFS=,; echo "${required[*]}")"
                 if (( ${#required[@]} == 0 )); then
@@ -728,3 +730,15 @@ ci-local *args="":
     fi
     echo
     echo -e "{{ green }}All ${#passed[@]} gate(s) passed for this host and scope.{{ reset }}"
+
+# List the local evidence store readably: one row per pushed commit, newest
+# first, with its branch, environments, cell count, result, total cell time and
+# subject. The store stays keyed by commit SHA because each receipt (a git note
+# on that commit) names its directory; this only joins it with Git history.
+#
+# Usage:
+#   just ci-evidence                 every run
+#   just ci-evidence --limit 10      the ten most recent runs
+#   just ci-evidence --json          machine-readable, with full paths
+ci-evidence *args="":
+    @python3 scripts/ci/evidence_index.py {{ args }}

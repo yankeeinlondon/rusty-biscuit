@@ -11,6 +11,7 @@ implementation_10: "2026-10-04T02:08:50-07:00"
 implementation_11: "2026-10-04T03:10:37-07:00"
 implementation_12: "2026-10-04T03:34:42-07:00"
 implementation_13: "2026-10-04T07:22:12-07:00"
+implementation_14: "2026-10-10T16:54:46-07:00"
 ---
 
 # Inline Prose — Implementation Log
@@ -830,3 +831,58 @@ The files changed in this cycle are:
 - this implementation is attempting to implement _all_ of the review findings found in 'biscuit-terminal/features/2026-10-02-inline-prose/review-14.md'
 - this is iteration 14 of the review-to-implement cycle
 - starting the work on 'Link destinations change across prose parsing and expression composition' at 08:04:30
+
+## Implementation of Review Findings #14
+
+> **started at:** 2026-10-10T16:54:46-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'biscuit-terminal/features/2026-10-02-inline-prose/review-14.md'
+- this is iteration 14 of the review-to-implement cycle 
+- the earlier "Implementation of Review Findings #14" section (started 2026-10-04T08:04:03-07:00) stopped after its first entry and left no change in the working tree; this section restarts the cycle from the committed branch state
+- scope is bounded by the spec's 2026-10-04 decisions: criterion 32 ("A Markdown link destination is never lifted as code or comment") is the required repair; other destination-spelling defects are repaired only where they regress from the base branch, and pre-existing darkmatter destination escaping is out of scope (spec Scope section)
+- starting the work on 'Link destinations change across prose parsing and expression composition' at 16:55:30
+        - class: a link destination goes through an earlier opaque-content lifting pass (or another inline-syntax pass), so syntax inside it is replaced or interpreted instead of being kept as literal destination text
+        - class sweep: link destination passed through an earlier lifting or inline-syntax pass; sites checked: `lift_opaque` code-span/comment/`<code-block>` lifting, the paragraph splitter's tag-scope tracking, `convert_links`/`try_parse_link`, bold/italics phases, `restore_hrefs`, the `tokens.rs` attribute reader, explicit `<a href>` quoted attributes, image syntax, autolinks, `Prose::escape_text_outside_code_spans`; fixed here: `lift_opaque` (code spans, every completed comment spelling, and `<code-block>` bodies inside a destination), paragraph-splitter tag scope inside a destination; clean: explicit `<a href>` via `Prose::quoted_attr` (tested with every payload), bold/italics (already guarded by the href placeholder), `restore_hrefs` and the attribute reader (they now receive only resolved values), image syntax (Prose has none; `![x](d)` takes the link path), autolinks (not part of the Prose grammar), `escape_text_outside_code_spans` (an escaper, not a destination reader)
+        - fix: `lift_opaque` lifts a whole destination, meaning the `(…)` immediately after a `]` that closes an open `[` label and ending at the same `)` the link reader stops at, as one opaque `Lifted::Destination { href, source }` region. This happens before any code span, comment, or `<code-block>` inside it can be recognized. Link conversion resolves that region into the link's href, and labels are processed as before
+                - `Prose` ends an open label at a blank line or fence; `InlineProse` does not (it has no paragraphs). A new `paragraphs` flag on `lift_opaque` carries this difference
+                - a lifted destination that no link uses renders as its original source text
+                - comments are not removed globally, code opacity elsewhere is unchanged, and the raw-HTML policy is unchanged
+        - conditional shapes (spec decision: fixed only when a regression from the base branch). A probe built at `2d59ffd2f^` showed that all four behave the same on the base branch, so they are pre-existing and were left unchanged:
+                - balanced/nested parentheses: base truncates at the first `)` (`https://e.io/a(b(c` plus visible `d)e) tail`)
+                - angle-bracket delimiters: base keeps `<…>` in the destination
+                - double quote: base truncates at the generated `href="` boundary
+                - shared-writer `\&amp;`: base keeps the protective backslash
+                - control: the same base probe keeps ``https://x.io/a`y`b`` and `https://x.io/a<!-- -->b`, which confirms that criterion 32 was a regression this feature introduced
+        - darkmatter destination formatter, cleanup reserialization, and the pull-request and CI-job helpers were not changed; the spec's Scope section puts pre-existing darkmatter destination escaping out of scope
+        - tests: `biscuit-terminal/lib/tests/l1/prose_destination_syntax.rs` (new, declared in `l1/main.rs`), 35 L1 tests:
+                - 13 payloads × 2 routes (Markdown link, explicit anchor via `Prose::quoted_attr`). Each case checks both components for the tree destination and label, decoded HTML `href`, a `pulldown-cmark` read-back of the Markdown destination, label, and trailing text, and the OSC 8 target, with no `\u{1}`/`\u{2}` in any output
+                - the two criterion-32 inputs verbatim, an escaped-`\)` destination, a code span in the label (still `InlineCode`), a comment in the label, an unclosed comment, Prose-vs-InlineProse blank-line labels, a `](…)` with no open label, and the fallback for a destination no link uses
+                - 15 of the new tests fail with the fix disabled; the controls pass either way
+        - docs: corrected the `markdown.rs` module, function, and phase docs (the old claim that URL contents are protected from Markdown phases left out the earlier lifting pass); `biscuit-terminal/docs/components/prose.md` (Markdown-subset row, opaque-regions row, new destination paragraph with examples); `.claude/skills/biscuit-terminal/styling.md`
+        - documented limitation (not repaired): if an unrecognized `<…>` in a label hides a `]` from the link reader, the scan can lift a `(…)` that is not a destination. That text renders literally, so a code span inside it keeps its backticks. No real call site produces this shape
+        - verification:
+                - biscuit-terminal `just test`: 3602 passed, 57 skipped, 0 failed
+                - `just lint`: clean
+                - `just check-tier-coverage biscuit-terminal`: 0 stranded
+                - darkmatter `just test code_link`: 16 passed
+                - orchestrator rerun of `prose_destination_syntax`: 35/35 passed
+                - `bt prose '[x](https://x.io/a<!-- -->b) tail' --html` and the backtick form emit the exact destination with no sentinel characters
+                - no cross-OS run: the change is pure string parsing with no OS-dependent path or I/O
+        - files changed: `biscuit-terminal/lib/src/components/prose/markdown.rs`, `blocks.rs`, `tokens.rs`, `biscuit-terminal/lib/tests/l1/prose_destination_syntax.rs` (new), `biscuit-terminal/lib/tests/l1/main.rs`, `biscuit-terminal/docs/components/prose.md`, `.claude/skills/biscuit-terminal/styling.md`
+- work completed for 'Link destinations change across prose parsing and expression composition' at 17:15:15
+
+### Successful Completion
+
+The implementation of review cycle 14 has completed successfully in about 21 minutes (16:54:46 to 17:15:15). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred, 0 were disputed (see reasons below):
+
+- no finding was deferred or disputed. The single finding was fixed within the scope the spec's 2026-10-04 decisions set for it:
+        - fixed: criterion 32. A Markdown link destination is never lifted as code or comment in `Prose` or `InlineProse`, on every target
+        - not repaired, as the spec directs: the parts of the finding that describe pre-existing behavior
+                - four prose destination shapes (parentheses, angle delimiters, double quotes, escaped entities) were shown, by a base-branch probe, to behave identically before this feature. They are not regressions, and the 2026-10-04 decision repairs a destination-spelling defect here only when it is one
+                - darkmatter's expression destination formatter, cleanup reserialization, and the pull-request and CI-job helpers are named out of scope in the spec's Scope section
+
+The files changed in this cycle are:
+
+- `biscuit-terminal/lib/src/components/prose/markdown.rs`, `blocks.rs`, `tokens.rs`
+- `biscuit-terminal/lib/tests/l1/prose_destination_syntax.rs`: new; `biscuit-terminal/lib/tests/l1/main.rs`
+- `biscuit-terminal/docs/components/prose.md`, `.claude/skills/biscuit-terminal/styling.md`

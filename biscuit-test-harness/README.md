@@ -139,10 +139,12 @@ exit marker timed out. Consequences for test authors:
   rc file guards behind `$-` containing `i` (which is how prompt hooks
   and pickers guard themselves) never reaches the pane.
   `level2_tmux_pane_shell_skips_the_interactive_rc` holds this line.
-- Terminal.app has a third shell in front of both: macOS starts the
-  window's own login shell before AppleScript can say anything, and
-  `do script` is delivered to *that* shell. The harness's line `exec`s it
-  away, so the shell it drives is still the rc-suppressed one.
+- Terminal.app would put a third shell in front of both: a window made
+  with `do script` first starts the profile's login shell, rc files
+  included (1.5–2.5 s on a development Mac), and only then types the
+  command into it. The harness avoids it by opening a transient
+  `.terminal` settings file whose `CommandString` runs the invocation as
+  the window's shell, so the profile's shell never starts.
 
 The invocation is built once — `login_shell_script`, `login_shell_argv`,
 and `login_shell_command_line` in `lib.rs` — so no backend can drift from
@@ -156,6 +158,7 @@ against an already-running server), a shell command line for Terminal.app.
 | Channel | Use it for |
 |---------|-----------|
 | `send_command_with_env(cmd, env)` | The normal case: run a command, optionally with env vars scoped to just that command. |
+| `send_command_settled(&mut harness, cmd, env)` | The same line, when the test then reads the output: returns the settled frame once the pane has shown the line and the prompt is back, instead of sleeping a fixed `settle()` interval first. |
 | `send_text(&[u8])` | Raw escape sequences / kitty keyboard-protocol bytes — anything that must reach the pane's stdin un-interpreted. |
 | `TmuxHarness::send_key("C-space")` | Symbolic chord names routed through tmux's key-translation layer. Needed for chords containing bytes (NUL) that `Command::arg` rejects. tmux-only. |
 | `KittyHarness::send_key("ctrl+c")` | A key press encoded by kitty's own key encoder for the program's current keyboard mode, as a physical press is once it reaches kitty. Never raises or focuses the window, so it works on an unfocused `KittyInstance`. The OS input layer is not involved: an OS-level event posted to an unfocused kitty (`CGEventPostToPid`) is dropped, so this is the closest a no-focus test gets to a keypress. |
@@ -185,6 +188,54 @@ truecolor display nuances, Kitty keyboard-protocol bytes, or a
 Tests that require those capabilities should document the dependency
 inline. Use `AppleTerminalHarness` exclusively for graceful-degradation
 checks on a deliberately low-capability terminal.
+
+### The harness's own tmux server
+
+Every harness session lives on a private tmux server,
+`tmux -L biscuit-test-harness -f /dev/null`, never on the developer's
+default one. It reads no `tmux.conf`, so a developer's host runs the same
+tmux defaults CI does. A configuration that loads a plugin manager cost
+2.1 s per server start (18 ms with none), and each test whose session was
+the last one paid it again. A test that runs its own `tmux` command against
+a harness session must build it with `tmux::tmux_command()`; a bare
+`tmux display-message -t <session>` asks the default server, which has
+no such session.
+
+### WezTerm clients take turns
+
+Every `WezTermHarness` operation is one short-lived `wezterm cli` process,
+and the WezTerm GUI serves all of them on its main thread. While a client is
+connected, the GUI also pushes it the render changes of every pane that is
+producing output. Many clients at once therefore cost far more than the same
+clients one after another: 16 parallel tests' clients took 13–40 s each, and
+a `wezterm cli list` from outside the tests stalled with them. Tests then
+failed with `WezTerm not available` or a 15 s spawn timeout. One at a time,
+a client answers in 10–50 ms.
+
+So the harness limits itself, across every process and worktree on the host:
+
+- **Two clients per mux at a time, first come first served.** Before
+  running a client, a process takes one of two lock files in the temporary
+  directory, named after `WEZTERM_UNIX_SOCKET`. Two, not one, because about
+  8 ms of a 12 ms client is process startup, which does not touch the mux.
+  Waiters line up as timestamped files in a `-queue` directory beside the
+  locks, and only the two oldest may take a lock: in random order the
+  occasional 1–2 s wait pushed whichever test drew it past 5 s. Each waiter
+  holds an OS lock on its own entry while it waits; an entry whose lock
+  another process can take belongs to a process that died (a crash, a
+  nextest timeout kill), and is removed. The OS drops a dead process's locks
+  on every platform, so no pid or age check is involved.
+- **No developer config.** Every client runs as `wezterm --skip-config`.
+  The GUI exports `WEZTERM_CONFIG_FILE` into its panes, so without the flag a
+  suite started from WezTerm evaluated the developer's whole `wezterm.lua` on
+  every `spawn`.
+- **One `list` probe per test.** `WezTermHarness::available()` reuses an
+  answer from the same socket for 2 s, which covers a test's gate followed
+  by `shared_or_spawn()`.
+- **One stale-pane sweep per 30 s.** See *Defensive cleanup*.
+
+A test that runs `wezterm cli` itself bypasses all of this; go through the
+harness instead.
 
 ## Harness variants — when to use which
 
@@ -232,8 +283,8 @@ let harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreg
 
 `TmuxHarness` has no `SpawnVisibility` — tmux sessions are detached, so
 visibility is irrelevant. `AppleTerminalHarness` always spawns behind
-the developer's frontmost app (it snapshots and restores focus around
-the `do script` call).
+the developer's frontmost app (it opens the window with `open -g` and
+restores focus if the spawn displaced it).
 
 ## Sharing a harness across tests — `SharedHarness<T>`
 
@@ -271,8 +322,12 @@ test runs are left alone.
 
 `cleanup_stale_terminal_harness_resources()` is available for explicit
 suite setup or local maintenance. Backend spawns also call their own
-cleanup path once per process. For historical WezTerm leaks created
-before tagging existed, the WezTerm cleanup sweeps untagged panes in the
+cleanup path once per process; for WezTerm, only when no process has swept
+the same mux in the last 30 s, because the sweep's `wezterm cli list` is the
+heaviest client call. Untagged WezTerm panes come from harness versions that
+predate tagging, and from a `spawn` client that timed out after the GUI had
+already created the pane, so the harness never learned its id. The WezTerm
+cleanup sweeps untagged panes in the
 `biscuit-bg` workspace when that workspace grows past a conservative
 limit, or when `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM=1` is set.
 
@@ -303,10 +358,11 @@ backend. Several issues bite anyone editing `apple_terminal.rs`:
 3. **`do script` reuses the idle front window.** `do script "cmd"` with no
    target nondeterministically runs in the frontmost idle window instead of
    creating a new one. A self-spawning test (`level2_apple_terminal_harness_lifecycle`)
-   could thereby capture and close the *shared* test window. **Fixed** (focus-free):
-   `spawn_shell` reports whether the window was genuinely new (id-diff) and
-   clears `owned` on reuse so `Drop` never closes a reused window; the
-   self-spawning lifecycle test skips when a shared broker window is present.
+   could thereby capture and close the *shared* test window. **Fixed**:
+   `spawn_shell` no longer uses `do script` to create a window. It opens a
+   `.terminal` settings file named after the window tag with `open -g`, which
+   always makes a new window, and finds that window by its settings-set name.
+   The lifecycle test still skips when a shared broker window is present.
 4. **`close` cannot destroy a window — it leaves an invisible husk.** On
    current macOS, `close … saving no` does not remove a Terminal.app window;
    it leaves a `visible false`, zero-tab **husk** that no further `close`
@@ -317,8 +373,26 @@ backend. Several issues bite anyone editing `apple_terminal.rs`:
 
 Two **invariants** any spawn change must preserve: spawning must **never
 steal foreground focus** (no `activate` / `System Events keystroke`), and
-the harness must **never close a window it did not create** (track
-ownership by window-id diff, not by `id of front window`).
+the harness must **never close a window it did not create** (identify the
+spawned window by its own settings-set name, never by `id of front window`).
+
+Every harness AppleScript runs through one long-lived `osascript` helper per
+process (`osa_helper`), because each fresh `osascript` spends about 100 ms
+loading Terminal.app's scripting dictionary; a call through the helper takes
+10–20 ms. The helper exits when the test process does.
+
+The spawn's settings file has two consequences to keep in mind:
+
+- **It briefly adds a settings set.** Opening the file imports it into
+  Terminal's profile list under the window tag. The spawn deletes it as
+  soon as the window exists (the window falls back to the default
+  settings), and the stale-window cleanup deletes any set whose owning
+  process died first. No existing profile, and never the default, changes.
+- **The command must name the shell.** Terminal counts a tab as idle only
+  while its process carries the command's name, so the settings file runs
+  `/bin/bash <launcher>`, not the launcher itself. A tab that reports
+  `busy` raises a "terminate running processes?" sheet on close, which
+  Terminal's own scripting cannot dismiss, and the reaper skips it.
 
 #### Self-healing cleanup (sweep + quit-relaunch)
 
@@ -586,6 +660,8 @@ Re-exported from the crate root:
 | `cargo_bin_dir(name)` | Locate the directory of a built cargo binary, for `PATH` augmentation. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |
 | `wait_for_prompt(&mut harness)` | Poll `capture()` until a shell prompt (`$`/`#`/`%`) appears (5 s cap). |
+| `capture_settled(&mut harness)` | Poll `capture()` until two consecutive frames match and end at a prompt (20 s cap). Call it only once the command is known to have reached the pane. |
+| `send_command_settled(&mut harness, cmd, env)` | Type a command as `send_command_with_env` does, wait until the frame changes, then `capture_settled`. |
 | `run_with_timeout` / `run_with_stdin_timeout` | Run a `Command` with a wall-clock timeout and pipe-deadlock-safe draining. |
 | `SPAWN_TIMEOUT`, `SEND_TIMEOUT`, `CAPTURE_TIMEOUT`, `QUERY_TIMEOUT`, `CLEANUP_TIMEOUT` | Default timeout constants. |
 

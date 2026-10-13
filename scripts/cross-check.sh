@@ -30,9 +30,11 @@
 # resolved over SSH before anything is shipped. Separate checkouts therefore
 # never share a clone or its target dir.
 #
-# Stale clones: before any leg starts, each selected host drops the clones this
-# origin host left there for worktrees that no longer exist here; see
-# `prepare_host`.
+# Clone pruning: before any leg starts, each selected host retires the clones
+# that are no longer needed: this host's clones whose worktree no longer exists
+# here, and any clone with no run in CROSS_CHECK_MAX_AGE_DAYS (default 3) days.
+# The rules live in `cross-check-hosts.sh`; `just cross-check-refresh` applies
+# them to every declared host on demand, with a before/after space report.
 #
 # Concurrency: two runs from the same checkout still share a clone. Each remote
 # run holds that clone's lock (`<clone dir>/.cross-check.lock`, a directory
@@ -81,14 +83,30 @@
 # sets the UTF-8 locale hosted CI runs with (`LANG=C.UTF-8`, `LC_ALL` unset),
 # since a `LANG=C` host selects ASCII glyph fallbacks in terminal output.
 #
-# A WSL run whose tested tree IS the outgoing head's tree, on a clean remote
-# worktree, with no test filter, becomes a published `wsl2-ubuntu` validation
-# receipt — so "prior WSL evidence" is an ordinary receipt CI can reuse rather
-# than a log someone remembers. Every other run publishes nothing and prints
-# the reason: this script ships the developer's LOCAL tree, uncommitted work
-# included, so most of its runs test something no head names. A qualifying
-# receipt records the build key and realized digest the remote actually ran, so
-# the evidence names the program it came from.
+# A finished `--os wsl` or `--os windows` archive-mode leg becomes a published
+# `rig` observation for that leg's own environment (`wsl2-ubuntu` or
+# `windows-latest`) the moment the leg ends, before the next leg starts, so
+# proof from an earlier leg survives a later failure or interruption. Each host
+# builds the expected-test manifest (`just _expected_manifest`) before the
+# tests, exactly as CI's producers do, and keeps its staging directory until
+# this script has fetched it. The judging runs HERE, over the fetched files,
+# because the native Windows rig has no usable `python3`: `completion.py` must
+# find every expected test reported, and the observation is recorded by
+# `observation_notes.py publish-receipt --kind rig` with the per-run proof
+# directory (`$BISCUIT_CI_EVIDENCE_DIR`, default
+# `~/.rusty-biscuit/ci-evidence/<head>/<environment>/<package>-L1-<run id>/`) as
+# its `report_dir`. A completed failure is published as a failing observation;
+# an incomplete or interrupted leg publishes nothing. Every run that does not
+# qualify — a tree that is not the outgoing head's, a dirty remote, a filter, a
+# native-mode run, a failed manifest — prints the reason and publishes nothing:
+# this script ships the developer's LOCAL tree, uncommitted work included, so
+# most of its runs test something no head names. A qualifying observation
+# records the build key and realized digest the remote actually ran.
+#
+# Exit status: 0 only when every selected leg passed; 75 from a host means its
+# rig lock is held (reported as BUSY, nothing ran); an interrupt (Ctrl-C, TERM)
+# ends the script nonzero, records nothing for the interrupted leg, and leaves
+# every observation already published in place.
 #
 # BISCUIT_TEST_REQUIRED_BACKENDS is forwarded from the caller's environment to
 # every remote run when set. Without it a Level 2 test whose backend is absent
@@ -98,21 +116,21 @@
 # --features terminal-tests level2_`) and the skip becomes a failure.
 #
 # The standing clones and their target dirs persist between runs so compile
-# caches are warm. Nothing sweeps them; see the `os` skill's build-hosts notes.
+# caches are warm, until the pruning rules above retire them.
 #
 # Usage:
 #   scripts/cross-check.sh [--os linux|windows|wsl|macos|all] <package> [nextest args...]
 set -euo pipefail
 
 LOCK_WAIT_SECS=1800
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=15)
 SCP=(scp -q -o BatchMode=yes -o ConnectTimeout=15)
+SCP_TREE=(scp -q -r -o BatchMode=yes -o ConnectTimeout=15)
 
-# Bash 3.2 (macOS /bin/bash) supports indexed arrays only.
-readonly linux=0 windows=1 wsl=2 macos=3
-ORDER=(linux windows wsl macos)
-declare -a HOST=([linux]="${BUILD_LINUX:-}" [windows]="${BUILD_WIN:-}" [wsl]="${BUILD_WSL:-}" [macos]="${BUILD_MACOS:-}")
-declare -a VAR=([linux]=BUILD_LINUX [windows]=BUILD_WIN [wsl]=BUILD_WSL [macos]=BUILD_MACOS)
+# The host table (HOST, VAR, ORDER, SSH), the calling host's identity, host
+# selection, and the clone-pruning rules `cross-check-refresh.sh` shares.
+# shellcheck source=cross-check-hosts.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cross-check-hosts.sh"
+
 # Which plan environment each host IS, and which native producer owns its
 # archive. Mirrors `.github/ci/environments.json`: only the WSL2 guest consumes
 # another environment's record.
@@ -126,10 +144,6 @@ shell_args() {
     for arg in "$@"; do printf '%q ' "$arg"; done
 }
 
-powershell_quote() {
-    printf "'%s'" "${1//\'/\'\'}"
-}
-
 powershell_args() {
     local arg
     for arg in "$@"; do
@@ -138,13 +152,10 @@ powershell_args() {
     done
 }
 
-local_os() {
-    case "$(uname -s)" in
-        Darwin) echo macos ;;
-        Linux) if grep -qi microsoft /proc/version 2> /dev/null; then echo wsl; else echo linux; fi ;;
-        MINGW* | MSYS* | CYGWIN*) echo windows ;;
-        *) echo unknown ;;
-    esac
+# The OSes whose finished legs are recorded as `rig` observations: WSL2 and
+# native Windows. Linux and macOS legs prove nothing for the nightly's cells.
+is_rig() {
+    [[ "$1" == "wsl" || "$1" == "windows" ]]
 }
 
 os_sel="all"
@@ -179,35 +190,7 @@ if [[ -z "${package}" ]]; then
     echo "cross-check: a package name is required (e.g. 'just cross-check biscuit-file')" >&2
     exit 2
 fi
-case "${os_sel}" in linux | windows | wsl | macos | all) ;; *)
-    echo "cross-check: --os must be linux, windows, wsl, macos, or all" >&2
-    exit 2
-    ;;
-esac
-
-# Resolve the requested OSes against what this machine declares available.
-# An explicit --os for an undeclared host is an error; `all` narrows to the
-# declared set minus the local OS and only errors when that set is empty.
-here="$(local_os)"
-declare -a want=("" "" "" "")
-skipped_local=""
-if [[ "${os_sel}" == "all" ]]; then
-    for os in "${ORDER[@]}"; do
-        [[ -n "${HOST[${os}]}" ]] || continue
-        if [[ "${os}" == "${here}" ]]; then skipped_local="${os}"; continue; fi
-        want[${os}]=1
-    done
-    if [[ -z "${want[*]// /}" ]]; then
-        echo "cross-check: no build host for an OS other than this one (${here}) is declared (set BUILD_LINUX, BUILD_WIN, BUILD_WSL, and/or BUILD_MACOS)" >&2
-        exit 2
-    fi
-else
-    if [[ -z "${HOST[${os_sel}]}" ]]; then
-        echo "cross-check: --os ${os_sel} requested but ${VAR[${os_sel}]} is not set" >&2
-        exit 2
-    fi
-    want[${os_sel}]=1
-fi
+select_hosts cross-check "${os_sel}"
 
 # Cargo build flags are what decides the mode. In archive mode the plan's
 # declared feature arguments are already baked into the archive and honoring an
@@ -260,48 +243,9 @@ base_sha="$(git rev-parse "${base_ref}")"
 
 # Per-run identity: names the shipped files on the host (unique, so two runs
 # can stage concurrently before one of them wins the lock) and labels the lock.
-short_host="$(hostname)"; short_host="${short_host%%.*}"
-# The id also names a Git ref below, and a host whose name carries `~`, `:`, or
-# a space would make `git update-ref` reject it.
-short_host="${short_host//[^A-Za-z0-9-]/-}"
+calling_host_identity
 run_id="${short_host}-$$-$(date +%s)"
-# One component of a clone directory's name. Lowercased: the Windows host's
-# file system is case-insensitive, and two spellings of one checkout must not
-# become two clones elsewhere.
-offset_part() {
-    local value="${1//[^A-Za-z0-9._-]/-}"
-    printf '%s' "${value}" | tr '[:upper:]' '[:lower:]'
-}
-if [[ "$(git rev-parse --path-format=absolute --git-dir)" \
-    == "$(git rev-parse --path-format=absolute --git-common-dir)" ]]; then
-    worktree="main"
-else
-    worktree="$(offset_part "$(basename "$(git rev-parse --show-toplevel)")")"
-fi
-# Runs of `-` collapse so the host part never contains `--`: the first `--` in
-# a clone directory's name is always the host/worktree separator, even for a
-# worktree whose own name contains one.
-origin_host="$(offset_part "${short_host}" | tr -s '-')"
 clone_offset="${origin_host}--${worktree}"
-# Every worktree of this repository that still exists here, spelled as its
-# clone directory's `<worktree>` part. The main checkout is listed first; an
-# entry git calls `prunable` has lost its directory and is gone.
-live_worktrees=()
-first_entry=1
-pending=""
-while IFS= read -r line; do
-    case "${line}" in
-        "worktree "*)
-            if ((first_entry)); then pending="main"; first_entry=0
-            else pending="$(offset_part "$(basename "${line#worktree }")")"; fi
-            ;;
-        prunable*) pending="" ;;
-        "")
-            [[ -n "${pending}" ]] && live_worktrees+=("${pending}")
-            pending=""
-            ;;
-    esac
-done < <(git worktree list --porcelain; echo)
 owner="${USER:-unknown}@${short_host} ${branch} ${base_sha:0:9} started $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # THE TESTED REVISION
@@ -369,6 +313,7 @@ echo "os: ${resolved}  extra nextest args: ${extra_args[*]:-<none>}"
 plan_file="${work_dir}/cross-check-${run_id}-plan.json"
 declare -a BUILD_KEY=("" "" "" "")
 declare -a BUILD_ARTIFACT=("" "" "" "")
+declare -a RETRY_OF=("" "" "" "")
 if [[ "${mode}" == "archive" ]]; then
     if ! python3 scripts/ci/affected_scope.py --all --resolved-plan \
         --base "${base_sha}" --head "${tested_revision}" > "${plan_file}"; then
@@ -401,107 +346,13 @@ else
     echo "  archive can carry the key this run would report; nothing here is publishable."
 fi
 
-# Prepare one host before any leg does work: remove the clones this origin host
-# left there for worktrees that no longer exist, then resolve (and create) this
-# checkout's clone directory and record it in CLONE_DIR.
-#
-# The coding dir is the host's own setting, so it is read on the host: a login
-# shell on Unix (the same environment the run itself gets) and the user
-# environment on Windows.
-#
-# Only `<this host>--*` directories are candidates, and one is removed only
-# when its worktree is not live here and its lock is not held. Removal is a
-# rename to `.cross-check-trash--<this host>--…` (instant, and the clone's name
-# is free at once) followed by a detached delete, because a Rust clone's
-# `target/` takes minutes to delete and no leg should wait on it. Nothing
-# reports whether that delete finishes, so every preparation also re-deletes
-# this origin's leftover trash. A rename that fails is reported and does not
-# stop the run.
-unix_prepare_script() {
-    cat <<EOF
-set -u
-coding="\${CODING_DIR:-\$HOME/coding}"
-mkdir -p "\$coding" && cd "\$coding" || exit 1
-coding="\$(pwd)"
-live=' ${live_worktrees[*]} '
-for dir in "\$coding"/'${origin_host}'--*/; do
-    [ -d "\$dir" ] || continue
-    dir="\${dir%/}"
-    tree="\${dir##*/}"
-    tree="\${tree#'${origin_host}'--}"
-    case "\$live" in *" \$tree "*) continue ;; esac
-    if [ -d "\$dir/.cross-check.lock" ]; then echo "stale-locked: \$dir"; continue; fi
-    if mv "\$dir" "\$coding/.cross-check-trash--\${dir##*/}-\$\$-\$(date +%s)"; then
-        echo "stale-removed: \$dir"
-    else
-        echo "stale-failed: \$dir"
-    fi
-done
-# Detached, so the SSH session ends without waiting for it.
-for trash in "\$coding"/.cross-check-trash--'${origin_host}'--*/; do
-    [ -d "\$trash" ] || continue
-    nohup rm -rf "\${trash%/}" < /dev/null > /dev/null 2>&1 &
-done
-dir="\$coding/${clone_offset}"
-mkdir -p "\$dir" || exit 1
-echo "clone-dir: \$dir"
-EOF
-}
-
-# The trash delete is started through WMI rather than as a child: Windows
-# OpenSSH ends a session's child processes with it. `\\?\` lifts the
-# 260-character path limit a deep `target\` exceeds.
-windows_prepare_script() {
-    local live="" name
-    for name in ${live_worktrees[@]+"${live_worktrees[@]}"}; do live+="'${name}',"; done
-    cat <<EOF
-\$ProgressPreference = 'SilentlyContinue'
-\$coding = if (\$env:CODING_DIR) { \$env:CODING_DIR } else { Join-Path \$env:USERPROFILE 'coding' }
-New-Item -ItemType Directory -Force -Path \$coding -ErrorAction Stop | Out-Null
-\$coding = (Resolve-Path -LiteralPath \$coding).Path
-\$live = @(${live%,})
-\$prefix = '${origin_host}--'
-foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory) {
-    if (-not \$entry.Name.StartsWith(\$prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
-    \$dir = \$entry.FullName
-    if (\$live -contains \$entry.Name.Substring(\$prefix.Length)) { continue }
-    if (Test-Path -LiteralPath (Join-Path \$dir '.cross-check.lock')) { Write-Output "stale-locked: \$dir"; continue }
-    \$trash = ".cross-check-trash--\$(\$entry.Name)-\$PID-\$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-    try { Rename-Item -LiteralPath \$dir -NewName \$trash -ErrorAction Stop; Write-Output "stale-removed: \$dir" }
-    catch { Write-Output "stale-failed: \$dir" }
-}
-foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory -Force) {
-    if (-not \$entry.Name.StartsWith(".cross-check-trash--\$prefix", [StringComparison]::OrdinalIgnoreCase)) { continue }
-    \$line = 'cmd.exe /c rd /s /q "\\\\?\\' + \$entry.FullName + '"'
-    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = \$line } | Out-Null
-}
-\$dir = Join-Path \$coding '${clone_offset}'
-New-Item -ItemType Directory -Force -Path \$dir -ErrorAction Stop | Out-Null
-Write-Output "clone-dir: \$dir"
-EOF
-}
-
+# Prepare one host before any leg does work: apply the clone-pruning rules
+# (`cross-check-hosts.sh`), then resolve and create this checkout's
+# clone directory and record it in CLONE_DIR.
 prepare_host() {
-    local os="$1" host="${HOST[$1]}" output dir line
-    if [[ "${os}" == "windows" ]]; then
-        # Encoded rather than inline: the command crosses the remote shell once
-        # more, and `$` does not reliably survive that on this host.
-        local encoded
-        encoded="$(windows_prepare_script | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
-        output="$("${SSH[@]}" "${host}" "powershell -NoProfile -EncodedCommand ${encoded}")" || return 1
-    else
-        output="$(unix_prepare_script | "${SSH[@]}" "${host}" "bash -ls")" || return 1
-    fi
-    output="$(printf '%s\n' "${output}" | tr -d '\r')"
-    while IFS= read -r line; do
-        case "${line}" in
-            "stale-removed: "*) echo "cross-check: removing stale clone ${host}:${line#stale-removed: } in the background (its worktree no longer exists here)" ;;
-            "stale-locked: "*) echo "cross-check: kept stale clone ${host}:${line#stale-locked: } — its lock is held" ;;
-            "stale-failed: "*) echo "cross-check: could not fully remove stale clone ${host}:${line#stale-failed: }; remove it by hand" >&2 ;;
-        esac
-    done <<< "${output}"
-    # The last marker line wins, so a chatty login profile cannot corrupt it.
-    dir="$(printf '%s\n' "${output}" | sed -n 's/^clone-dir: //p' | tail -n1)"
+    local os="$1" host="${HOST[$1]}" dir
+    prune_host cross-check "${os}" prepare "${clone_offset}" 0 || return 1
+    dir="${PRUNED_CLONE_DIR}"
     if [[ "${os}" == "windows" && ! "${dir}" =~ ^[A-Za-z]:\\ ]] || [[ "${os}" != "windows" && "${dir}" != /* ]]; then
         echo "cross-check: could not resolve the clone directory on ${host} (got: '${dir}')" >&2
         return 1
@@ -599,8 +450,10 @@ out="\$base/cross-check-${run_id}-build"
 consume="\$base/cross-check-${run_id}-consume"
 src="\$consume/src"
 reports="\$consume/reports"
-report="\$base/cross-check-${run_id}-report.xml"
-rm -rf "\$out" "\$consume"
+# Outlives the cleanup below so the orchestrating host can fetch it; it removes
+# it afterwards.
+reports_out="\$base/cross-check-${run_id}-reports"
+rm -rf "\$out" "\$consume" "\$reports_out"
 mkdir -p "\$out" "\$consume" "\$reports"
 # Hide the producer's target dir so a compile-time build-host path cannot
 # resolve; restore it on every exit so the cache survives. The second checkout
@@ -612,9 +465,9 @@ extra_cleanup() {
     if [ -d target.hold ]; then rm -rf target; mv target.hold target; fi
     rm -rf "\$consume" "\$out"
 }
-# What the remote actually tested. Printed rather than assumed: a receipt for
-# this run is only publishable when this tree IS the outgoing head's tree and
-# the worktree was clean (spec section 3.8).
+# What the remote actually tested. Printed rather than assumed: an observation
+# for this run is only publishable when this tree IS the outgoing head's tree
+# and the worktree was clean (spec section 3.8).
 echo "cross-check-tree: \$(git rev-parse HEAD^{tree})"
 echo "cross-check-dirty: \$(git status --porcelain | wc -l | tr -d ' ')"
 export NEXTEST_PROFILE="\${NEXTEST_PROFILE:-ci}"
@@ -656,9 +509,8 @@ archive_file="\$consume/build/\$(jq -r '.archive.file' "\$manifest")"
 echo "cross-check-key: \$(jq -r '.key' "\$manifest")"
 echo "cross-check-digest: \$(jq -r '.digest' "\$manifest")"
 
-# 7. The canonical tier recipe, in archive mode, with the same bindings CI's
-#    consumer steps export. \`cargo-nextest nextest\` is the standalone driver:
-#    a consumer that reached \`cargo\` would be compiling.
+# 7. The bindings CI's consumer steps export. \`cargo-nextest nextest\` is the
+#    standalone driver: a consumer that reached \`cargo\` would be compiling.
 export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
 export BISCUIT_JUNIT_WORKSPACE_ROOT="\$src"
 export BISCUIT_JUNIT_TARGET_DIR="\$src/target"
@@ -670,6 +522,18 @@ sidecar_dir="\$consume/build/${artifact}-sidecars"
 if [ -d "\$sidecar_dir" ]; then
     export PATH="\$sidecar_dir:\$PATH"
 fi
+
+# 8. What the tier is expected to run, listed the way CI's producers list it,
+#    BEFORE the tests. A failure here must not stop the tests (a smoke run is
+#    still useful); it is reported, and publication declines for that reason.
+set +e
+just _expected_manifest L1 '${package}' \\
+    --archive-file "\$archive_file" --workspace-remap "\$src" $(shell_args ${run_args[@]+"${run_args[@]}"})
+manifest_code=\$?
+set -e
+echo "cross-check-manifest-exit: \$manifest_code"
+
+# 9. The canonical tier recipe, in archive mode.
 set +e
 just _test '${package}' --no-fail-fast \\
     --archive-file "\$archive_file" --workspace-remap "\$src" $(shell_args ${run_args[@]+"${run_args[@]}"})
@@ -677,10 +541,11 @@ run_code=\$?
 set -e
 echo "cross-check-exit: \$run_code"
 echo "cross-check-duration: \$(( \$(date +%s) - started ))"
-# Staged by the tier recipe itself, at a path this run owns. If it is absent the
-# run publishes nothing and says so locally — it never invents a measurement.
-if [ -f "\$reports/L1/${package}.xml" ]; then
-    cp "\$reports/L1/${package}.xml" "\$report"
+# The whole staging directory (manifest.jsonl, L1/<package>.xml, expected-L1.json):
+# the orchestrating host judges it. Absent staging is reported by the host as a
+# run that produced no report, never invented here.
+if [ -d "\$reports" ]; then
+    cp -R "\$reports" "\$reports_out"
 fi
 exit \$run_code
 EOF
@@ -715,96 +580,113 @@ run_unix() {
     # skill recorded on 2026-09-15; diagnosed 2026-09-22). `bash -lc` does not
     # do this, and the inner shell inherits the exported PATH.
     #
-    # The WSL leg's output is teed so its `cross-check-*:` markers can be read
-    # afterwards without hiding the run from the terminal.
-    if [[ "${os}" == "wsl" ]]; then
+    # Every rig leg's output is teed so its `cross-check-*:` markers can be read
+    # afterwards without hiding the run from the terminal. `set -e` is off
+    # around the pipeline so a failing remote still reaches PIPESTATUS.
+    if is_rig "${os}"; then
+        local status=0
+        set +e
         "${SSH[@]}" "${host}" "bash -lc 'bash \"\$0\"' ${remote_script}" \
-            2>&1 | tee "${work_dir}/wsl.log"
-        return "${PIPESTATUS[0]}"
+            2>&1 | tee "${work_dir}/${os}.log"
+        status="${PIPESTATUS[0]}"
+        set -e
+        return "${status}"
     fi
-    local status=0
-    "${SSH[@]}" "${host}" "bash -lc 'bash \"\$0\"' ${remote_script}" || status=$?
-    # The staged JUnit report outlives the remote run on purpose — only the WSL
-    # leg's receipt fetches one — so every other host has to be told to drop it,
-    # or a shared rig accumulates one per run forever.
-    discard_remote_report "${os}"
-    return "${status}"
+    "${SSH[@]}" "${host}" "bash -lc 'bash \"\$0\"' ${remote_script}"
 }
 
-# Remove this run's staged JUnit report from a Unix host.
-discard_remote_report() {
-    "${SSH[@]}" "${HOST[$1]}" "rm -f $(printf '%q' "${CLONE_DIR[$1]}/cross-check-${run_id}-report.xml")" \
-        > /dev/null 2>&1 || true
+# Remove this run's staged reports directory from a host. A shared rig would
+# otherwise accumulate one per run forever, so every archive-mode leg drops it
+# once the orchestrating host has fetched (or declined to fetch) it.
+discard_remote_reports() {
+    local os="$1"
+    [[ "${mode}" == "archive" ]] || return 0
+    if [[ "${os}" == "windows" ]]; then
+        "${SSH[@]}" "${HOST[windows]}" "Remove-Item -Recurse -Force $(powershell_quote "${CLONE_DIR[windows]}\\cross-check-${run_id}-reports") -ErrorAction SilentlyContinue" \
+            > /dev/null 2>&1 || true
+    else
+        "${SSH[@]}" "${HOST[${os}]}" "rm -rf $(printf '%q' "${CLONE_DIR[${os}]}/cross-check-${run_id}-reports")" \
+            > /dev/null 2>&1 || true
+    fi
 }
 
-# Turn a qualifying WSL archive run into a `wsl2-ubuntu` validation receipt.
+# Turn one finished rig leg into a published `rig` observation for that leg's
+# own environment, or print why it cannot be one.
 #
-# "Qualifying" is `local_evidence.py cross-check`'s decision, not this script's:
-# exact outgoing tree, clean remote worktree, unfiltered run, and a real report.
-# Anything else prints the reason and publishes nothing (spec section 3.8).
-publish_wsl_receipt() {
-    local log="${work_dir}/wsl.log"
-    [[ -f "${log}" ]] || return 0
-    local tested_tree dirty exit_code duration build_key build_digest
-    tested_tree="$(sed -n 's/^cross-check-tree: //p' "${log}" | tail -n1)"
-    dirty="$(sed -n 's/^cross-check-dirty: //p' "${log}" | tail -n1)"
-    exit_code="$(sed -n 's/^cross-check-exit: //p' "${log}" | tail -n1)"
-    duration="$(sed -n 's/^cross-check-duration: //p' "${log}" | tail -n1)"
-    # The remote's own manifest, not the local plan's expectation: a receipt
+# "Qualifying" is `observation_notes.py publish-receipt --kind rig`'s decision,
+# not this script's: exact outgoing tree, clean remote worktree, unfiltered
+# run, a real expected-test manifest, and a `completion.py` verdict over the
+# fetched staging directory. Anything else prints the reason and publishes
+# nothing (spec section 3.8). A native-mode run never gets here.
+publish_rig_observation() {
+    local os="$1" environment="${ENVIRONMENT[$1]}"
+    local raw="${work_dir}/${os}.log" log="${work_dir}/${os}.clean.log"
+    if [[ ! -f "${raw}" ]]; then
+        echo "cross-check: publishing no ${environment} observation - the leg produced no output"
+        return 0
+    fi
+    # PowerShell and `jq.exe` end lines with CRLF; a marker must not keep the CR.
+    tr -d '\r' < "${raw}" > "${log}"
+    marker() { sed -n "s/^cross-check-$1: //p" "${log}" | tail -n1; }
+    local tested_tree dirty exit_code duration build_key build_digest manifest_exit
+    tested_tree="$(marker tree)"
+    dirty="$(marker dirty)"
+    exit_code="$(marker exit)"
+    duration="$(marker duration)"
+    manifest_exit="$(marker manifest-exit)"
+    # The remote's own manifest, not the local plan's expectation: an observation
     # that named a key nothing verified would be a claim rather than evidence.
-    build_key="$(sed -n 's/^cross-check-key: //p' "${log}" | tail -n1)"
-    build_digest="$(sed -n 's/^cross-check-digest: //p' "${log}" | tail -n1)"
-
-    local report="${work_dir}/wsl-report.xml"
-    local fetched=0
-    "${SCP[@]}" "${HOST[wsl]}:${CLONE_DIR[wsl]}/cross-check-${run_id}-report.xml" \
-        "${report}" 2> /dev/null && fetched=1
-    # Dropped here, not on each exit path below: the local copy is made, and
-    # every reason this function declines to publish leaves the same litter.
-    discard_remote_report wsl
-    if (( fetched == 0 )); then
-        echo "cross-check: publishing no receipt — the remote run produced no JUnit report"
+    build_key="$(marker key)"
+    build_digest="$(marker digest)"
+    if [[ -z "${exit_code}" ]]; then
+        echo "cross-check: publishing no ${environment} observation - the run never reached its tests (no cross-check-exit marker)"
+        return 0
+    fi
+    if [[ "${manifest_exit:-missing}" != "0" ]]; then
+        echo "cross-check: publishing no ${environment} observation - the expected-test manifest step reported '${manifest_exit:-nothing}' (cross-check-manifest-exit), so nothing says what should have run"
         return 0
     fi
 
-    local plan="${work_dir}/plan.json" receipt="${work_dir}/receipt.json"
+    local remote_reports="${CLONE_DIR[${os}]}/cross-check-${run_id}-reports"
+    [[ "${os}" == "windows" ]] && remote_reports="${remote_reports//\\//}"
+    local fetch="${work_dir}/${os}-fetch"
+    mkdir -p "${fetch}"
+    if ! "${SCP_TREE[@]}" "${HOST[${os}]}:${remote_reports}" "${fetch}/" 2> /dev/null \
+        || [[ ! -d "${fetch}/cross-check-${run_id}-reports" ]]; then
+        echo "cross-check: publishing no ${environment} observation - the remote run left no staged reports to fetch"
+        return 0
+    fi
+
     local head_sha merge_base
     head_sha="$(git rev-parse HEAD)"
     if ! merge_base="$(git merge-base origin/main "${head_sha}" 2> /dev/null)"; then
-        echo "cross-check: publishing no receipt — no merge base with origin/main"
+        echo "cross-check: publishing no ${environment} observation - no merge base with origin/main"
         return 0
     fi
-    local -a changed=()
-    while IFS= read -r changed_path; do
-        [[ -n "${changed_path}" ]] && changed+=("${changed_path}")
-    done < <(git diff --name-only "${merge_base}")
-    if ! python3 scripts/ci/affected_scope.py --resolved-plan \
-        --base "${merge_base}" --head "${head_sha}" \
-        "${changed[@]}" > "${plan}" 2> /dev/null; then
-        echo "cross-check: publishing no receipt — the resolved plan could not be calculated"
-        return 0
-    fi
-
     local -a extra=()
-    [[ -n "${run_args[*]:-}" ]] && extra=(--run-filters "${run_args[*]}")
+    [[ -n "${run_args[*]:-}" ]] && extra+=(--run-filters "${run_args[*]}")
     [[ "${dirty:-1}" != "0" ]] && extra+=(--remote-dirty)
     [[ -n "${build_key}" ]] && extra+=(--build-key "${build_key}")
     [[ -n "${build_digest}" ]] && extra+=(--build-digest "${build_digest}")
-    if ! python3 scripts/ci/local_evidence.py cross-check \
-        --plan "${plan}" --package "${package}" --report "${report}" \
-        --exit-code "${exit_code:-1}" --duration "${duration:-0}" \
-        --tested-tree "${tested_tree:-}" --base "${merge_base}" --head "${head_sha}" \
-        --host-label "WSL2 (${HOST[wsl]}, cross-check archive mode)" \
-        "${extra[@]}" > "${receipt}"; then
-        return 0
-    fi
-    git notes --ref refs/notes/ci-local/wsl2-ubuntu add -f -F "${receipt}" "${head_sha}"
-    if git push --no-verify origin \
-        refs/notes/ci-local/wsl2-ubuntu:refs/notes/ci-local/wsl2-ubuntu > /dev/null 2>&1; then
-        echo "cross-check: published a wsl2-ubuntu receipt for ${package} at ${head_sha:0:9}."
-    else
-        echo "cross-check: recorded a wsl2-ubuntu receipt locally; it could not be pushed."
-    fi
+    [[ -n "${RETRY_OF[${os}]}" ]] && extra+=(--retry-of "${RETRY_OF[${os}]}")
+    # The work directory is deleted when this script exits, so the proof the
+    # observation cites is retained in the durable evidence directory the
+    # pre-push hook also uses; the publisher creates the per-run directory.
+    local status=0 rig_label="WSL2"
+    [[ "${os}" == "windows" ]] && rig_label="native Windows"
+    python3 scripts/ci/observation_notes.py publish-receipt --kind rig \
+        --plan "${plan_file}" --package "${package}" --environment "${environment}" \
+        --reports-dir "${fetch}/cross-check-${run_id}-reports" \
+        --evidence-dir "${BISCUIT_CI_EVIDENCE_DIR:-${HOME}/.rusty-biscuit/ci-evidence}" \
+        --run-id "${run_id}" --head "${head_sha}" --base "${merge_base}" \
+        --tested-tree "${tested_tree:-}" \
+        --exit-code "${exit_code}" --duration "${duration:-0}" \
+        --host-label "${rig_label} (${HOST[${os}]}, cross-check archive mode)" \
+        --remote origin "${extra[@]+"${extra[@]}"}" || status=$?
+    case "${status}" in
+        0 | 4 | 3) ;; # the publisher printed which
+        *) echo "cross-check: publishing no ${environment} observation - the publisher failed (exit ${status})" ;;
+    esac
 }
 
 # The native-Windows body of `Invoke-CrossCheck`: the same seven steps the Unix
@@ -869,12 +751,20 @@ windows_run_archive() {
     \$env:BISCUIT_CI_ENVIRONMENT = '${environment}'
     \$sidecarDir = "\$consume\\build\\${artifact}-sidecars"
     if (Test-Path \$sidecarDir) { \$env:PATH = "\$sidecarDir;\$env:PATH" }
+
+    # What the tier is expected to run, listed the way CI's producers list it,
+    # BEFORE the tests. A failure here must not stop the tests; it is reported,
+    # and publication declines for that reason.
+    just _expected_manifest L1 '${package}' --archive-file \$archiveFile --workspace-remap \$nativeSrc $(powershell_args ${run_args[@]+"${run_args[@]}"})
+    Write-Host "cross-check-manifest-exit: \$LASTEXITCODE"
+
     just _test '${package}' --no-fail-fast --archive-file \$archiveFile --workspace-remap \$nativeSrc $(powershell_args ${run_args[@]+"${run_args[@]}"})
     \$runCode = \$LASTEXITCODE
     Write-Host "cross-check-exit: \$runCode"
     Write-Host "cross-check-duration: \$([int][double]::Parse((Get-Date -UFormat %s)) - \$started)"
-    if (Test-Path "\$reports\\L1\\${package}.xml") {
-        Copy-Item "\$reports\\L1\\${package}.xml" \$report -Force
+    # The whole staging directory, for the orchestrating host to fetch and judge.
+    if (Test-Path \$reports) {
+        Copy-Item \$reports \$reportsOut -Recurse -Force
     }
     \$script:code = \$runCode
 EOF
@@ -920,8 +810,9 @@ ${min_free_gib:+\$env:BISCUIT_BUILD_MIN_FREE_GIB = '${min_free_gib}'}
 \$consume = "\$base\\cross-check-${run_id}-consume"
 \$src = "\$consume\\src"
 \$reports = "\$consume\\reports"
-\$report = "\$base\\cross-check-${run_id}-report.xml"
+\$reportsOut = "\$base\\cross-check-${run_id}-reports"
 \$self = "\$base\\cross-check-${run_id}.ps1"
+Remove-Item -Recurse -Force \$reportsOut -ErrorAction SilentlyContinue
 \$waited = 0
 while (\$true) {
     try { New-Item -ItemType Directory -Path \$lock -ErrorAction Stop | Out-Null; break }
@@ -996,15 +887,56 @@ EOF
         echo "cross-check: could not upload the run script to ${host}:${base} (is the volume full?)" >&2
         return 1
     }
+    # Teed like every rig leg so the `cross-check-*:` markers can be read
+    # afterwards; `set -e` is off so a failing remote still reaches PIPESTATUS.
     local status=0
-    "${SSH[@]}" "${host}" "powershell -NoProfile -ExecutionPolicy Bypass -File $(powershell_quote "${base}\\cross-check-${run_id}.ps1"); exit \$LASTEXITCODE" || status=$?
-    # Nothing fetches a Windows report; see `discard_remote_report`.
-    "${SSH[@]}" "${host}" "Remove-Item -Force $(powershell_quote "${base}\\cross-check-${run_id}-report.xml") -ErrorAction SilentlyContinue" \
-        > /dev/null 2>&1 || true
+    set +e
+    "${SSH[@]}" "${host}" "powershell -NoProfile -ExecutionPolicy Bypass -File $(powershell_quote "${base}\\cross-check-${run_id}.ps1"); exit \$LASTEXITCODE" \
+        2>&1 | tee "${work_dir}/windows.log"
+    status="${PIPESTATUS[0]}"
+    set -e
     return "${status}"
 }
 
 declare -a results=("" "" "" "")
+current_os=""
+phase=""
+
+print_summary() {
+    local os
+    echo
+    echo "cross-check summary for ${package}:"
+    summary_status=0
+    for os in "${ORDER[@]}"; do
+        [[ -n "${results[${os}]:-}" ]] || continue
+        printf '  %-8s %s\n' "${os}" "${results[${os}]}"
+        [[ "${results[${os}]}" == "pass" ]] || summary_status=1
+    done
+}
+
+# Ctrl-C or TERM: the interrupted leg earns nothing, so no observation is
+# recorded for it; every observation published by an earlier leg stays where it
+# is. Bash runs this once the foreground ssh has ended, which is before the
+# publication step could start, so a leg interrupted while running never
+# reaches it. The EXIT trap still removes the work directory and synthetic ref.
+on_interrupt() {
+    trap '' INT TERM
+    if [[ -n "${current_os}" ]]; then
+        results[${current_os}]="INTERRUPTED"
+        if [[ "${phase}" == "leg" ]]; then
+            echo "cross-check: ${current_os} interrupted; no observation recorded" >&2
+        else
+            echo "cross-check: ${current_os} interrupted while recording its observation; the local notes ref may or may not hold it, and it was not reported as published" >&2
+        fi
+    else
+        echo "cross-check: interrupted between legs; observations already published are unchanged" >&2
+    fi
+    print_summary
+    exit "$1"
+}
+trap 'on_interrupt 130' INT
+trap 'on_interrupt 143' TERM
+
 # Every selected host is pruned and prepared before any leg starts; a host that
 # cannot be prepared fails its leg without running it.
 echo
@@ -1020,23 +952,42 @@ for os in "${ORDER[@]}"; do
     else
         echo "== ${os} (${HOST[${os}]}, native) =="
     fi
-    if [[ "${os}" == "windows" ]]; then
-        if run_windows; then results[windows]="pass"; else results[windows]="FAIL"; fi
-    else
-        if run_unix "${os}"; then results[${os}]="pass"; else results[${os}]="FAIL"; fi
+    # A leg retries only an observation that exists before it starts; naming one
+    # after the run would let a delayed publication pose as its predecessor.
+    if [[ "${mode}" == "archive" ]] && is_rig "${os}"; then
+        RETRY_OF[${os}]="$(python3 scripts/ci/observation_notes.py retry-predecessor \
+            --head HEAD --environment "${ENVIRONMENT[${os}]}" --package "${package}" 2> /dev/null || true)"
     fi
+    current_os="${os}"
+    phase="leg"
+    leg_status=0
+    if [[ "${os}" == "windows" ]]; then
+        run_windows || leg_status=$?
+    else
+        run_unix "${os}" || leg_status=$?
+    fi
+    phase="record"
+    case "${leg_status}" in
+        0) results[${os}]="pass" ;;
+        75)
+            results[${os}]="BUSY"
+            echo "cross-check: ${os} rig busy - its lock is still held by another run (exit 75); nothing ran and nothing is recorded" >&2
+            ;;
+        255)
+            results[${os}]="UNREACHABLE"
+            echo "cross-check: ${os} (${HOST[${os}]}) was unreachable over SSH (exit 255); nothing ran and nothing is recorded" >&2
+            ;;
+        *) results[${os}]="FAIL" ;;
+    esac
+    # The leg is recorded the moment it finishes, before the next one starts. A
+    # lock-busy or unreachable rig ran nothing, so there is nothing to record.
+    if [[ "${mode}" == "archive" ]] && is_rig "${os}" && [[ "${leg_status}" != 75 && "${leg_status}" != 255 ]]; then
+        publish_rig_observation "${os}" || true
+    fi
+    discard_remote_reports "${os}"
+    current_os=""
+    phase=""
 done
 
-if [[ -n "${want[wsl]:-}" ]]; then
-    publish_wsl_receipt || true
-fi
-
-echo
-echo "cross-check summary for ${package}:"
-status=0
-for os in "${ORDER[@]}"; do
-    [[ -n "${results[${os}]:-}" ]] || continue
-    printf '  %-8s %s\n' "${os}" "${results[${os}]}"
-    [[ "${results[${os}]}" == "pass" ]] || status=1
-done
-exit "${status}"
+print_summary
+exit "${summary_status}"

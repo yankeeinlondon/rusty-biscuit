@@ -17,9 +17,8 @@ use biscuit_test_harness::manifest_dir;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use common::{bt_command, capture_until};
+use common::{bt_command, capture_until, clear_to_row, run_to_end_marker};
 use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows};
-use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
@@ -27,10 +26,9 @@ use unicode_width::UnicodeWidthStr;
 
 /// Process-shared WezTerm pane reused across the cursor / hygiene tests.
 /// Every test drives this single pane sequentially, clearing it before each
-/// command so a capture reflects only that command's output. Per-test
-/// spawning costs ~8 s per pane, so spawning three panes in one test blows
-/// the 30 s nextest timeout — the "no orphan save/restore" test therefore
-/// runs its three command flavours on this shared pane too.
+/// command so a capture reflects only that command's output. The "no orphan
+/// save/restore" test runs its three command flavours on this one pane too,
+/// rather than paying a pane spawn per flavour.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
@@ -40,14 +38,6 @@ fn fixture_path(name: &str) -> String {
         .join(name)
         .display()
         .to_string()
-}
-
-/// Positions the cursor at a known row using `tput` so that image
-/// rendering starts from a predictable position.
-fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
-    let cmd = format!("tput cup {} 0\n", row);
-    harness.send_text(cmd.as_bytes()).expect("tput failed");
-    harness.settle();
 }
 
 // ------------------------------------------------------------------
@@ -67,9 +57,7 @@ fn level2_cursor_lands_below_rendered_image() {
     // image renders without triggering scroll-margin compensation. The
     // scroll-margin path is exercised by
     // `level2_image_scroll_compensation_at_bottom_margin`.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    position_cursor(harness, 5);
+    clear_to_row(harness, 5);
 
     // Force a tiny render width so the image occupies only ~1 row —
     // this keeps the entire bt invocation + image + debug block inside
@@ -174,19 +162,15 @@ fn level2_no_orphan_save_restore_sequences() {
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
-    // Each command flavour is exercised on the shared pane, cleared first so
-    // the capture holds only that command's output. Three independent spawns
-    // would each cost ~8 s and blow the nextest timeout.
+    // Each command flavour is exercised on the shared pane, cleared on the
+    // command's own line so the capture holds only that command's output.
     let path = fixture_path("tiny.png");
     for command in [
         format!("image --debug {path}"), // image rendering uses save/restore
         "prose \"<red>hello</red>\"".to_string(), // prose must not orphan either
         "columns \"left\" \"right\"".to_string(), // two-column layout uses save/restore
     ] {
-        harness.send_text(b"clear\n").expect("send_text failed");
-        harness.settle();
-        send_bt_command(harness, &command);
-        let frame = harness.capture().expect("capture failed");
+        let frame = run_to_end_marker(harness, &format!("clear; {}", bt_command(&command)));
         assert_balanced_save_restore(&frame.raw);
     }
 }
@@ -203,15 +187,13 @@ fn level2_dir_command_unicode_widths_in_capture() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    // Reset the pane so prior tests' rendered output cannot leak into
-    // this run's capture window.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-
+    // The `clear` on the command's own line resets the pane so prior
+    // tests' rendered output cannot leak into this run's capture window.
     let dir_path = fixture_path("unicode_dir");
-    send_bt_command(harness, &format!("dir {dir_path}"));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_to_end_marker(
+        harness,
+        &format!("clear; {}", bt_command(&format!("dir {dir_path}"))),
+    );
     let plain = &frame.plain;
 
     // Verify that the fixture filenames appear in the output.
