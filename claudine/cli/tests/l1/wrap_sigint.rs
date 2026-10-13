@@ -777,6 +777,78 @@ fn signalled_run_reports_a_wrapper_killed_by_a_signal() {
     assert_eq!(exit.status.code(), None);
 }
 
+/// Kills a provider stub's process group on drop. The provider leads its own
+/// group, which [`SignalledRun`]'s drop does not reach, so without this a
+/// failing assertion would leave the stub looping forever.
+#[cfg(unix)]
+struct ProviderGroup(i32);
+
+#[cfg(unix)]
+impl Drop for ProviderGroup {
+    fn drop(&mut self) {
+        // SAFETY: `kill(2)` on the group the stub leads; ESRCH means it is gone.
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
+    }
+}
+
+/// A hangup or termination aimed at the wrapper must end its provider too:
+/// the provider leads its own process group, so neither signal reaches it
+/// unless the wrapper forwards it, and an unforwarded one orphaned the
+/// provider for good. The wrapper then ends from the same signal.
+#[cfg(unix)]
+fn ending_the_wrapper_ends_its_provider(signal: i32) {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let fixture = CliProcessFixture::named("wrap-end-signal");
+    fixture.seed_user_config();
+    let md_file = fixture.cwd().join("run.md");
+    write(&md_file, "---\ntitle: test\nmodel: llamacpp/test-model\n---\nBody\n");
+    let started = fixture.cwd().join("provider-pid");
+    write_executable(
+        &fixture.bin_dir().join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"end-signal","model":"test-model"}'
+echo $$ > "$CLAUDINE_PROVIDER_PID.tmp" && mv "$CLAUDINE_PROVIDER_PID.tmp" "$CLAUDINE_PROVIDER_PID"
+while :; do /bin/sleep 1; done
+"#,
+    );
+    let mut command = fixture.command_std();
+    command
+        .env("CLAUDINE_PROVIDER_PID", &started)
+        .env("CLAUDINE_STEP_TIMEOUT", "0s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()]);
+    let mut run = SignalledRun::spawn(command, fixture.workspace_path());
+
+    run.wait_for_path(&started, READY_TIMEOUT);
+    let provider = ProviderGroup(recorded_pid(&started));
+    // SAFETY: `kill(2)` on the wrapper this test spawned and has not reaped.
+    assert_eq!(unsafe { libc::kill(run.pid(), signal) }, 0);
+
+    let exit = run.wait_for_exit(EXIT_TIMEOUT);
+    assert_eq!(exit.status.signal(), Some(signal), "stderr:\n{}", exit.stderr);
+    assert_gone(provider.0);
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_sighup_ends_the_provider_and_then_the_wrapper() {
+    ending_the_wrapper_ends_its_provider(libc::SIGHUP);
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_sigterm_ends_the_provider_and_then_the_wrapper() {
+    ending_the_wrapper_ends_its_provider(libc::SIGTERM);
+}
+
 #[cfg(unix)]
 fn recorded_pid(reached: &std::path::Path) -> i32 {
     let pid = std::fs::read_to_string(reached).expect("read barrier pid");
