@@ -51,6 +51,41 @@ skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-speaks/SKILL.md
     - .claude/skills/biscuit-speaks/configuration.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - biscuit-speaks/lib/src/detached.rs
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/host/mod.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+docs_updated_during_phase_4:
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-speaks/SKILL.md
+source_files_during_phase_5:
+    - biscuit-speaks/lib/src/audio_cache.rs
+    - biscuit-speaks/lib/src/cache.rs
+    - biscuit-speaks/lib/src/lib.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+docs_updated_during_phase_5:
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-speaks/SKILL.md
+    - .claude/skills/biscuit-speaks/api-reference.md
+    - .claude/skills/biscuit-speaks/providers.md
+    - .claude/skills/biscuit-speaks/configuration.md
 ---
 # Speak Prepare — Implementation Plan
 
@@ -333,31 +368,31 @@ as a concurrent task in Wave 7.
 
 ### Wave 7 (concurrent)
 
-- [ ] **Task: `play` / `play_with_result` with retained settings.** Try the
+- [x] **Task: `play` / `play_with_result` with retained settings.** Try the
   prepared provider with the retained settings first, built from its
   `ResolvedSynthesis`; metadata (`SpeakResult`) names the actual provider and
   voice. On failure continue the existing failover using the **original**
   `TtsConfig` for other providers; `SpecificProvider` never switches. A missing
   cache file is re-synthesized through the correct path.
-- [ ] **Task: `play_detached` with retained settings.** Cache hit ⇒ ready job;
+- [x] **Task: `play_detached` with retained settings.** Cache hit ⇒ ready job;
   miss ⇒ today's ordered reservation + helper, unchanged. Extend
   `PreparationRecord` with the optional `(provider, ResolvedSynthesis)`
   (backward-compatible: absent decodes as none) so the helper synthesizes with
   the retained settings if the file vanished. Synthesis must not move into the
   requesting process.
-- [ ] **Task: volume/speed rules.** Volume never in keys; prepared file plays at
+- [x] **Task: volume/speed rules.** Volume never in keys; prepared file plays at
   playback-time volume; baked-speed providers (Echogarden, ElevenLabs) do not
   re-apply speed; Kokoro/gTTS apply requested speed at playback (table in
   spec §Cache and playback behavior gets one test row per provider).
 
 ### Wave 8 (after Wave 7): behavior tests
 
-- [ ] Acceptance 3 (returned vs fresh object across `play`,
+- [x] Acceptance 3 (returned vs fresh object across `play`,
   `play_with_result`, `play_detached`), 6 (failure propagation, fallback with
   original config, missing file, handoff), 9 (injected failure/cancellation
   leaves no partial entry or child; concurrent publication leaves a complete
   file; duplicates permitted, not asserted away).
-- [ ] Detached tests use `test_toolkit::LockedAudioSpool`; no terminal/browser
+- [x] Detached tests use `test_toolkit::LockedAudioSpool`; no terminal/browser
   window gains focus.
 
 **Checkpoint 4:** all acceptance criteria except docs (10) and final gates (12)
@@ -368,18 +403,18 @@ pass in both feature configurations.
 Concurrent tasks (disjoint files), Wave 9. Audience: a developer new to the
 repo; lead with what the reader can do; mark nothing "planned" (code landed).
 
-- [ ] `biscuit-speaks/README.md`: preparation, returned-vs-fresh example.
-- [ ] `biscuit-speaks/docs/tts-caching.md` and the provider/API topic pages:
+- [x] `biscuit-speaks/README.md`: preparation, returned-vs-fresh example.
+- [x] `biscuit-speaks/docs/tts-caching.md` and the provider/API topic pages:
   retained settings, no-op cases, cache reuse, dry run, the ElevenLabs snapshot
   and its 24-hour trust window, Say lookup; include one Mermaid diagram of the
   prepare → retain → fresh-object-hit flow. Docs must not link to or name the
   feature directory.
-- [ ] `.claude/skills/biscuit-speaks/` (`SKILL.md`, `api-reference.md`,
+- [x] `.claude/skills/biscuit-speaks/` (`SKILL.md`, `api-reference.md`,
   `providers.md`, `configuration.md`): same facts, kept compact.
-- [ ] Source-doc pass over every symbol whose behavior changed: `Speak`,
+- [x] Source-doc pass over every symbol whose behavior changed: `Speak`,
   `is_prepared`, `prepare`, `play`, `audio_cache.rs` module table, trait docs,
   provider module docs (drift rule: code wins; report drift found).
-- [ ] Add the comment-quality check: no HOW-narration or format-string quoting.
+- [x] Add the comment-quality check: no HOW-narration or format-string quoting.
 
 ## Phase 6: Final Validation
 

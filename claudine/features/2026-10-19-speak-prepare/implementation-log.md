@@ -32,20 +32,6 @@ skills_files_updated_during_phase_2:
 packages:
     - biscuit-speaks
 human_review: false
-message_to_agent: |-
-    Phase 3 is in; read the "## Phase 3" log section, especially "Departures" and "Regressions found and fixed".
-
-    - All five file producers now have `prepare_resolved`, and `Speak::prepare_provider` calls each of them. The retained `ResolvedSynthesis` variants map to these entry points for Phase 4:
-        - `Say{voice, rate_wpm}`: `SayProvider::synthesize(text, &Resolution { voice: Some(voice), rate_wpm: Some(rate) })`. It returns `Synthesized::Cached` and re-synthesizes into the cache if the file vanished.
-        - `ElevenLabs{voice, model, speed}`: `generate_to_cache(text, &voice, &model, speed)`.
-        - Play both through their `playback_config` (speed `Normal`).
-    - ElevenLabs no longer applies speed twice: `speak`, `speak_with_result`, and both detached paths use `playback_config`. Phase 4's per-provider speed test should still cover it.
-    - The Say system rate is unresolved by design (the author's rate question went unanswered; ruling 8 fallback). Normal-speed Say never prepares, and Phase 4 must not "fix" that. The system voice does resolve, through `osascript`.
-    - Say `speak_with_result` now speaks with the resolved voice (a gender gives Alex/Samantha). It keeps the old best-listed-voice choice only when nothing resolves.
-    - ElevenLabs records: `cached_path` (no network) backs `cached_detached_job`, and `select_and_record` runs in every synthesis path. In-crate tests need `with_transport(...).with_account_context(Some(..))` plus the `RecordFixture` pattern.
-    - Any test fixture that isolates the audio cache must set TMPDIR, TMP, and TEMP. On Windows, `temp_dir()` ignores TMPDIR, and that leaked into the build host in this phase.
-    - Fake `say` scripts must write bytes to `-o`: Say now rejects empty output.
-    - Run gates with absolute paths; a cross-check can abort if Claudine's tests are writing temp files at the same moment.
 source_files_during_phase_3:
     - biscuit-speaks/lib/src/cache.rs
     - biscuit-speaks/lib/src/prepared.rs
@@ -65,6 +51,47 @@ skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-speaks/SKILL.md
     - .claude/skills/biscuit-speaks/configuration.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - biscuit-speaks/lib/src/detached.rs
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/host/mod.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+docs_updated_during_phase_4:
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-speaks/SKILL.md
+source_files_during_phase_5:
+    - biscuit-speaks/lib/src/audio_cache.rs
+    - biscuit-speaks/lib/src/cache.rs
+    - biscuit-speaks/lib/src/lib.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+docs_updated_during_phase_5:
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/tts-caching.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-speaks/SKILL.md
+    - .claude/skills/biscuit-speaks/api-reference.md
+    - .claude/skills/biscuit-speaks/providers.md
+    - .claude/skills/biscuit-speaks/configuration.md
+message_to_agent: |-
+    Phase 5 changed docs and comments only. The phase's tests are unchanged and still pass.
+
+    - Read the "## Phase 5" log section for the drift found and fixed, including two rustdoc warnings. `RUSTDOCFLAGS="-D warnings" cargo doc -p biscuit-speaks --no-deps` is clean now, so keep it clean.
+    - The Phase 3/4 open items are unchanged. The unread Say system rate and the ElevenLabs account-context limit are now documented in `biscuit-speaks/docs/tts-caching.md`. Playa's last-wins duplicate keys remain only an author item in the log.
+    - Phase 6 still has to run `just ci-local --plan` and the smell grep. Nothing in Phase 5 adds a test, a target, or a CI input.
 ---
 # Implementation Log for 2026-10-19-speak-prepare (6 phases)
 
@@ -550,3 +577,272 @@ lookup matrices belong to Phase 3. Smell grep on the new paths: the only
    Claudine's pre-warm.
 2. Ruling 5's known limit stands: two API keys under the same variable name
    share records unless `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` tells them apart.
+
+## Phase 4
+
+### What landed
+
+- **Resolved entry points per provider.** Kokoro, gTTS, Echogarden, Say,
+  and ElevenLabs each gained crate-private `speak_resolved`,
+  `speak_resolved_with_result`, `resolved_job`, and `cached_resolved_job`.
+  They take settings that are already resolved. Each trait method
+  (`speak`, `speak_with_result`, `detached_job`, `cached_detached_job`) now
+  resolves once and delegates to them, so the public paths keep their
+  behavior and share one body with retained playback. Echogarden's and Say's
+  entry points still accept an unresolved request, which plays uncached as
+  before. Say's `Resolution` became `pub(crate)`, with a
+  `Resolution::retained(voice, rate)` constructor.
+- **`ResolvedSynthesis` dispatch** (`prepared.rs`): `provider()`, `speak`,
+  `speak_with_result`, `job` (helper only), and `cached_job` (no subprocess
+  or request). Each goes straight to the provider that resolved the
+  settings: an `EchogardenProvider` with the retained engine, or
+  `ElevenLabsProvider::new()?` with no voice-list request.
+- **`Speak::play` / `play_with_result`** try the retained settings first.
+  On failure they run the strategy's *other* providers with the original
+  config (`fallback_providers` removes the prepared provider). An empty
+  strategy with no preparation is still `NoProvidersAvailable`.
+  `SpecificProvider` therefore ends with one error and never switches.
+- **`Speak::play_detached`**: a retained cache hit enqueues a ready job.
+  On a miss, it reserves a slot whose record carries the retained settings.
+  Synthesis never runs in the requesting process.
+- **`PreparationRecord.prepared: Option<ResolvedSynthesis>`**
+  (`detached.rs`):
+    - The record uses `deny_unknown_fields`, `skip_serializing_if = none`,
+      and a `present` deserializer, so an absent key decodes as `None` (an
+      older or unprepared record) and an explicit `null` is an error.
+    - The helper (`prepare_job`) tries the retained settings first, then the
+      strategy's other providers with the record's config.
+- **`run_preparation` fails an undecodable record's slot immediately**
+  (`invalid_preparation_record`). Before, it returned without publishing,
+  which left the slot `preparing` until the 10-minute deadline held up the
+  queue.
+
+### Departures from the plan (spec unchanged)
+
+1. **`Speak` stores `Option<ResolvedSynthesis>`, not ruling 1's
+   `Option<(TtsProvider, ResolvedSynthesis)>`.** Each variant already names
+   its provider (`ResolvedSynthesis::provider()`), so the pair was redundant.
+   Carrying the pair in the helper record would have added a "provider and
+   settings disagree" shape to reject. The retained state and its
+   clear/keep rules are unchanged.
+2. **Test-only spawn capture.** `spawn_preparation` records the record path
+   instead of spawning while a `#[cfg(test)]` static is armed. In a test,
+   `current_exe()` is the libtest binary, which would rerun its whole suite
+   as the "helper". The seam is compiled out of every non-test build.
+3. **Pre-existing flaky test fixed.** `prepare::fakes_record_each_tool_argument_shape`
+   (Phase 1) wrote the text to every fake's stdin, but only `say` reads it.
+   On Linux a fake could exit first, and the write failed with `EPIPE`. This
+   happened on 2 of 6 cross-check runs; the error was captured from one. It
+   now pipes stdin only to `say`.
+
+### Requirement-to-test map (Phase 4)
+
+| Requirement | Test(s) |
+| --- | --- |
+| Acceptance 3: returned **and** fresh objects reuse the file through `play`, `play_with_result` (provider, voice, `cache_hit`, path), and `play_detached` (ready job), with no further synthesis | `prepare::{kokoro,gtts,echogarden}_prepared_file_is_reused` (helper extended to the returned object's `play_with_result` and `play_detached`) |
+| Acceptance 5: the returned object keeps its settings after the default changes (no lookup, cache hit, ready detached job); a fresh object follows the new default and misses | `prepare::a_prepared_say_object_keeps_its_settings_after_the_system_voice_changes` (macOS, since `Speak` selects Say only there); `elevenlabs::tests::retained_settings_skip_the_voice_list_and_apply_speed_once` (changed account voice list: retained `f1` still used, zero list requests) |
+| Acceptance 5: speed applied once, one row per provider (Kokoro and gTTS at the player; Echogarden baked into synthesis, player at 1) | `prepare::retained_playback_applies_speed_exactly_once_per_provider`; ElevenLabs row: `retained_settings_skip_the_voice_list_and_apply_speed_once` (API gets 1.2, job plays at 1.0); Say row: `a_prepared_say_object_keeps_its_settings…` (`-r 219`, player `--speed=1`) |
+| Acceptance 5: volume stays out of the key, and a prepared file plays at playback volume | existing `prepare::synthesis_settings_change_the_key_and_volume_does_not` (now through retained playback) |
+| Acceptance 6: fallback uses the original config, never the retained voice, and does not retry the prepared provider; metadata names the fallback | `prepare::a_failed_prepared_provider_falls_back_with_the_original_configuration` (Echogarden gets `--voice=Michael`, never `am_adam`; both feature configs) |
+| Acceptance 6: `SpecificProvider` never switches | `prepare::a_specific_provider_does_not_fall_back_after_a_failed_retained_attempt`; helper side in `detached::tests::handoff::the_helper_prefers_retained_settings_and_falls_back_with_the_original_configuration` |
+| Acceptance 6: a missing file is synthesized again through the correct path | `prepare::a_missing_prepared_file_is_synthesized_again_with_the_retained_settings`; `elevenlabs::tests::retained_settings_skip_the_voice_list…` |
+| Acceptance 6: retained settings survive the helper handoff; the requester does not synthesize | `detached::tests::handoff::a_prepared_object_whose_file_vanished_hands_its_settings_to_the_helper` (record holds `{"kokoro":{"voice":"am_adam"}}`, slot `preparing` → `ready`); `…the_helper_prefers_retained_settings…` (helper synthesizes the retained `bf_emma`, not the configured `af_heart`) |
+| Acceptance 9: cancellation during retained resynthesis kills the child and publishes nothing; concurrent playback leaves one complete file, duplicates allowed | `prepare::retained_resynthesis_is_cancellable_and_concurrent_publication_is_complete` |
+| Acceptance 9: a failed retained or fallback attempt leaves no partial entry | the fallback test (one complete Echogarden entry) and the specific-provider test (temp directory empty) |
+| Record compatibility and robustness | `detached::tests::prepared_settings_round_trip_and_an_old_record_decodes_as_unprepared`, `every_malformed_prepared_shape_is_rejected`, `handoff::an_undecodable_record_fails_its_slot` |
+| `provider()` mapping | `prepared::tests::each_variant_names_the_provider_that_resolved_it` |
+
+Detached tests own a `test_toolkit::LockedAudioSpool`, so nothing plays,
+and every pending job is cleared. No test opens a terminal or browser
+window.
+
+**Mutation check.** I disabled the three retained-first branches in
+`Speak::play`/`play_with_result`/`play_detached` and the helper (files
+restored afterward). Ten of the new or extended tests failed, including the
+Say retention, handoff, helper-preference, specific-provider, and speed-row
+tests. The fallback test also passes under the old behavior, because Kokoro's
+resolution is deterministic; it is a contract test, not a discriminator.
+
+#### Input Robustness Matrix: `PreparationRecord.prepared`
+
+The control row (`{"kokoro":{"voice":"am_adam"}}`) decodes. Every other row
+must be rejected, and a rejected record fails its slot.
+
+| Shape | Outcome |
+| --- | --- |
+| absent | decodes as `None`; the format defines this as an unprepared or older record |
+| explicit `null` | rejected |
+| wrong type, whole field (`"kokoro"`, `7`, the pair as an array) | rejected |
+| wrong type, one element (`voice: 7`, `voice: null`) | rejected |
+| wrong type, every element (`say` with `voice: 1`, `rate_wpm: "fast"`) | rejected |
+| missing field (`say` with no `rate_wpm`) | rejected |
+| empty (`{}`, `[]`) | rejected |
+| unknown field, unknown provider, two providers | rejected |
+| misspelled sibling key (`retained`) | rejected (`deny_unknown_fields`); not read as absent |
+| duplicate key / trailing content | **not reachable at this layer.** Playa's `read_preparation_record` parses the private spool file and passes back a `serde_json::Map`, which keeps only the last of a duplicate key. The file is written by the same binary into a per-user private spool. Rejecting duplicates would be a Playa reader change and is out of this phase's scope. |
+
+Smell grep on the new paths: one `#[serde(default)]` on `prepared`, which is
+intentional and paired with the `present` deserializer, so only an absent key
+defaults. No `unwrap_or_default`, `.ok()`, or `filter_map` was added to a
+decode path.
+
+### Gates run
+
+- `just test` in `biscuit-speaks/` (with `playa`): 571 passed, 20 skipped.
+- `cargo nextest run -p biscuit-speaks -E 'not test(/real_/)'` (without
+  `playa`): 418 passed, 15 skipped.
+- `just lint` in `biscuit-speaks/`, and `cargo clippy -p biscuit-speaks
+  --all-targets -D warnings` with and without `playa`: clean.
+- `just test` in `claudine/`: 8738 passed, 9 skipped.
+- `just cross-check biscuit-speaks --os linux`:
+    - Before the stdin fix, it failed twice in six runs on the pre-existing
+      broken-pipe race above.
+    - After the fix, 11 test runs passed (451 tests each).
+    - Two more attempts never ran tests: `build-linux` timed out reaching
+      github.com over SSH.
+- `--os windows`: pass (416).
+- WSL was not cross-checked; nothing in this phase is WSL-specific.
+- The new tests each run in 0.25 s or less. The slow L1 tests (over 5 s
+  under full-suite load) are the existing real-`say` listing tests and
+  `cache::tests::test_populate_cache_for_all_providers_runs_without_panic`;
+  none is new.
+
+### Docs and skills touched
+
+- `biscuit-speaks/docs/tts-caching.md`: retained-first playback, the helper
+  handoff of retained settings, the immediate failure of an undecodable
+  record, and a returned-vs-fresh example. The example uses an explicit speed,
+  because normal-speed Say never prepares. The full preparation write-up
+  remains Phase 5.
+- `.claude/skills/biscuit-speaks/SKILL.md`: the same facts, compactly, plus
+  how to test the helper (the `#[cfg(test)]` capture and in-process
+  `run_preparation`).
+- Source docs: `Speak::play`, `play_with_result`, `play_detached`, the
+  `prepared` field, `PreparationRecord`, and the new entry points.
+- No change to the `claudine` skill was needed; Claudine's code is untouched.
+
+### Open items for the author (not blocking Phase 5)
+
+- The two Phase 3 items still stand: Say's system rate is unresolved, and
+  ruling 5's account-context limit applies.
+- Duplicate keys in a spool record are last-wins in Playa's reader (see the
+  matrix). This is pre-existing Playa behavior, recorded here so a reviewer
+  can decide whether Playa should reject them.
+
+## Phase 5
+
+### What landed
+
+- **`biscuit-speaks/README.md`**: a new "Preparing speech ahead of time"
+  section. It has a compact returned-vs-fresh example (explicit speed, with the
+  caveat that normal-speed Say never prepares) and covers first-provider-only
+  errors, no-op cases and `is_prepared`, which setters keep or clear
+  preparation, fallback with the original config, dry run, and the ElevenLabs
+  24-hour default-voice record. The environment table gains
+  `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` and the full `PLAYA_DRY_RUN` value list.
+- **`biscuit-speaks/docs/tts-caching.md`**: a new "Preparing Speech" section
+  replaces the short Phase 4 passage under "Playback Flow". It covers:
+    - a Mermaid flowchart of prepare → resolve → publish/reuse → retain, and a
+      fresh object's hit or miss;
+    - the returned object versus a fresh object, `is_prepared`, and the
+      setter rules;
+    - a table of every no-op case;
+    - dry run, including direct `TtsExecutor::prepare`, with and without
+      `playa`;
+    - concurrency and billing;
+    - playback after preparation (retained first, fallback with the original
+      config, helper handoff, speed applied once);
+    - Say's system-default lookup and the unread rate;
+    - the ElevenLabs default-voice record: location, contents, account
+      context, 24-hour trust window, refresh on every `prepare`, and no
+      credential.
+
+  `blast_radius` now lists the files that carry this behavior. Neither doc
+  names or links the feature directory.
+- **Skills**: the four files below hold the same facts, kept compact.
+    - `SKILL.md`: a Preparation block under Caching, `prepare` in the trait
+      sketch, and a `prepare` line in Quick Start.
+    - `api-reference.md`: the private preparation state, setter rules, and the
+      `TtsExecutor::prepare` default.
+    - `providers.md`: caching and `prepare` for Say, and the ElevenLabs
+      default-voice record.
+    - `configuration.md`: volume is never in a key, and unresolved defaults are
+      never cached.
+
+### Drift found and fixed (code wins)
+
+1. **`audio_cache.rs`** module table had no Say row. Added; it notes that
+   Say's WPM rate is carried in the voice ID rather than the speed field.
+2. **`Speak::prepare` doc example** asserted `prepared.is_prepared()`. That is
+   false after a no-op (eSpeak, an unresolved default), so the example now
+   says so instead of asserting.
+3. **Say and Echogarden module docs** said nothing about caching. Each gets
+   one paragraph on its key, and on the unresolved default that is never
+   cached and makes `prepare` a no-op.
+4. **README**: "Temporary synthesis files are removed before handoff" was
+   false for Say's unresolved detached audio, which keeps its uncached
+   temporary file for Playa. Reworded.
+5. **Skills documented `Speak::with_speed`, which does not exist.** Speed is
+   set on `TtsConfig`. This drift predates the feature. Fixed in `SKILL.md`
+   Quick Start, `api-reference.md`, and `configuration.md`'s speed examples.
+6. **Rustdoc warnings** (`RUSTDOCFLAGS="-D warnings" cargo doc`):
+    - `cache.rs` linked to `cache_file_path`, which Phase 3 made
+      `pub(crate)`. That is a public-to-private link, now plain code.
+    - `lib.rs` had an ambiguous `[speak]` link (both a module and a function)
+      that predates the feature. It is now `mod@speak`.
+
+   No gate runs rustdoc with `-D warnings`. Both were one-token fixes.
+
+The stub TODO and the stale `is_prepared` doc were already gone; earlier phases
+removed them.
+
+### Comment-quality check
+
+- I scanned every comment line the feature added under `biscuit-speaks/lib/src`
+  (diff against `2a1e0270f`) for HOW-narration and quoted format strings.
+- No format-string or glyph narration was found.
+- The new `speak_resolved*` bodies carried narration comments that moved with
+  the code: "Generate to cache (or get cached file)", "Play the audio file",
+  "Find the voice with this ID", "Ensure the voice has its identifier set",
+  and "Return the result with model info…". I deleted 10 such lines in
+  `gtts.rs`, `kokoro.rs`, `echogarden.rs`, and `elevenlabs.rs`.
+- I left untouched the same style of comment in `is_ready` bodies the feature
+  did not change (Rule 3).
+
+These are comment-only edits; no rendering, constant, or logic line changed.
+
+### Requirement-to-test map (Phase 5)
+
+Phase 5 is acceptance criterion 10 (docs). It changes no behavior, so it adds
+no tests. Verification is by review, plus these checks:
+
+| Requirement | Evidence |
+| --- | --- |
+| README, caching topic page, and skills describe preparation, retained settings, no-op behavior, cache reuse, the ElevenLabs record and its 24-hour window | The sections listed above; facts checked against `speak.rs`, `prepared.rs`, `snapshot.rs`, `say.rs`, and `say/system_defaults.rs` |
+| Compact returned-vs-fresh example | README "Preparing speech ahead of time"; tts-caching "Preparing Speech" |
+| One Mermaid diagram of the prepare → retain → fresh-hit flow | tts-caching "The returned object and a fresh object" |
+| Docs never name the feature directory | `grep -n "2026-10-19\|speak-prepare" biscuit-speaks/README.md biscuit-speaks/docs/tts-caching.md .claude/skills/biscuit-speaks/*.md` finds nothing |
+| Source docs agree with code | Drift list above; rustdoc `-D warnings` clean with default features and with `--no-default-features` |
+
+### Gates run
+
+- `just lint` in `biscuit-speaks/`: clean.
+- `cargo clippy -p biscuit-speaks --all-targets --no-default-features -D warnings`:
+  clean.
+- `just test` in `biscuit-speaks/`: 571 passed, 20 skipped.
+- `just lint` in `claudine/`: clean. The only warning is the existing macOS
+  linker note about `__eh_frame` size.
+- `just test` in `claudine/`: 8738 passed, 9 skipped. One test is slow,
+  `error_guards::production_sources_pass_every_scan_backed_guard` (more than
+  5 s). It predates this phase and is not a `biscuit-speaks` test.
+- No cross-OS run: Phase 5 changes only comments and Markdown, so nothing
+  OS-specific changed.
+
+### Notes
+
+- `SKILL.md` is 217 lines. It was already 201 before this phase, over the
+  200-line guideline for skill entry points. The new Preparation block is one
+  paragraph; moving more content into `api-reference.md` would be a separate
+  cleanup.
+- No change to the `claudine` skill was needed: Claudine's code and behavior
+  are untouched.
