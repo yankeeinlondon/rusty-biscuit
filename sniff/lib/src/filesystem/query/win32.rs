@@ -91,6 +91,13 @@ pub(crate) trait Source {
     /// the list was read.
     fn modules(&mut self, process: &Self::Process, capacity: usize) -> Result<(Vec<Module>, usize), Fault>;
     fn module_path(&mut self, process: &Self::Process, module: Module) -> Result<PathBuf, Fault>;
+    /// The path of every module in the process's loader list, read in one
+    /// pass and keyed by module: the strings [`Source::module_path`] reads
+    /// with one pass per module. A module missing here is read through
+    /// [`Source::module_path`]; `None` reads every module that way.
+    fn loader_paths(&mut self, _process: &Self::Process) -> Option<HashMap<Module, PathBuf>> {
+        None
+    }
     /// Image path and account SID, read through the handle.
     fn details(&mut self, process: &Self::Process) -> Result<ProcessDetails, String>;
 }
@@ -388,12 +395,17 @@ impl<S: Source> ModuleBackend<S> {
             }
             Err(fault) => return whole(tally, fault),
         };
+        let loader_paths = self.source.loader_paths(process);
         for module in modules {
             if context.budget.expired() {
                 return tally.problem(LimitationKind::BudgetExhausted, BUDGET_EXPIRED, None);
             }
             performance::increment_counter(counters::QUERY_MODULE_INSPECTIONS, 1);
-            let path = match self.source.module_path(process, module) {
+            let read = match loader_paths.as_ref().and_then(|paths| paths.get(&module)) {
+                Some(path) => Ok(path.clone()),
+                None => self.source.module_path(process, module),
+            };
+            let path = match read {
                 Ok(path) => path,
                 // Unloaded since the listing: no longer usage.
                 Err(Fault::Gone) => continue,
@@ -467,6 +479,10 @@ pub(crate) mod ffi {
     use windows::Win32::System::ProcessStatus::{
         EnumProcessModulesEx, EnumProcesses, GetModuleFileNameExW, LIST_MODULES_ALL,
     };
+    use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows::Win32::System::Threading::{PEB, PEB_LDR_DATA, PROCESS_BASIC_INFORMATION};
+    use windows::Win32::System::WindowsProgramming::LDR_DATA_TABLE_ENTRY;
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_ACCESS_RIGHTS,
         PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
@@ -478,6 +494,98 @@ pub(crate) mod ffi {
     const MAX_PATH_UNITS: usize = 32_768;
 
     pub(crate) struct Win32;
+
+
+    /// `T` read whole from `address` in `process`.
+    fn read<T: Copy + Default>(process: HANDLE, address: usize) -> Option<T> {
+        let mut value = T::default();
+        let mut read = 0usize;
+        // SAFETY: `value` is a plain `repr(C)` struct of the size passed.
+        unsafe {
+            ReadProcessMemory(
+                process,
+                address as *const core::ffi::c_void,
+                (&raw mut value).cast(),
+                size_of::<T>(),
+                Some(&mut read),
+            )
+        }
+        .ok()?;
+        (read == size_of::<T>()).then_some(value)
+    }
+
+    /// The `FullDllName` of every entry in `process`'s loader list, by
+    /// `DllBase`: what `GetModuleFileNameExW` returns for that module, which
+    /// walks the same list from its head for every single module (about
+    /// 130 µs each on Windows; most of a usage query). Reads only the
+    /// `winternl.h` fields (`PEB.Ldr`, `PEB_LDR_DATA.InMemoryOrderModuleList`,
+    /// `LDR_DATA_TABLE_ENTRY`'s `InMemoryOrderLinks`, `DllBase`, and
+    /// `FullDllName`). `None` on any failed read: a process still starting,
+    /// one whose list changes during the walk, or one this build cannot read.
+    /// A 32-bit (WOW64) process's own modules are not in this list; the
+    /// caller reads those one at a time.
+    #[cfg(target_pointer_width = "64")]
+    fn loader_paths(process: HANDLE) -> Option<std::collections::HashMap<Module, PathBuf>> {
+        let mut basic = PROCESS_BASIC_INFORMATION::default();
+        let mut length = 0u32;
+        // SAFETY: `basic` is the documented output of this class, of the size passed.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                process,
+                ProcessBasicInformation,
+                (&raw mut basic).cast(),
+                size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                &mut length,
+            )
+        };
+        if status.is_err() || basic.PebBaseAddress.is_null() {
+            return None;
+        }
+        let peb: PEB = read(process, basic.PebBaseAddress as usize)?;
+        if peb.Ldr.is_null() {
+            return None;
+        }
+        let loader: PEB_LDR_DATA = read(process, peb.Ldr as usize)?;
+        let head = peb.Ldr as usize + std::mem::offset_of!(PEB_LDR_DATA, InMemoryOrderModuleList);
+        let mut link = loader.InMemoryOrderModuleList.Flink as usize;
+        let mut paths = std::collections::HashMap::new();
+        while link != head {
+            // A list that does not return to its head is changing under us.
+            if paths.len() > super::MAX_MODULE_CAPACITY {
+                return None;
+            }
+            let entry: LDR_DATA_TABLE_ENTRY =
+                read(process, link.checked_sub(std::mem::offset_of!(LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks))?)?;
+            let name = entry.FullDllName;
+            let units = usize::from(name.Length) / 2;
+            if !name.Buffer.is_null() && units > 0 {
+                let mut buffer = vec![0u16; units];
+                let mut read = 0usize;
+                // SAFETY: `buffer` holds `units` UTF-16 units, the size passed.
+                unsafe {
+                    ReadProcessMemory(
+                        process,
+                        name.Buffer.0 as *const core::ffi::c_void,
+                        buffer.as_mut_ptr().cast(),
+                        units * 2,
+                        Some(&mut read),
+                    )
+                }
+                .ok()?;
+                if read != units * 2 {
+                    return None;
+                }
+                paths.insert(Module(entry.DllBase as usize), PathBuf::from(OsString::from_wide(&buffer)));
+            }
+            link = entry.InMemoryOrderLinks.Flink as usize;
+        }
+        Some(paths)
+    }
+
+    #[cfg(not(target_pointer_width = "64"))]
+    fn loader_paths(_process: HANDLE) -> Option<std::collections::HashMap<Module, PathBuf>> {
+        None
+    }
 
     /// Closes the handle when the backend drops it.
     pub(crate) struct ProcessHandle(HANDLE);
@@ -626,6 +734,10 @@ pub(crate) mod ffi {
                 user: Some(user),
                 start_time: creation_time(process.0).ok().and_then(super::filetime_to_utc),
             })
+        }
+
+        fn loader_paths(&mut self, process: &ProcessHandle) -> Option<std::collections::HashMap<Module, PathBuf>> {
+            loader_paths(process.0)
         }
 
         fn module_path(&mut self, process: &ProcessHandle, module: Module) -> Result<PathBuf, Fault> {

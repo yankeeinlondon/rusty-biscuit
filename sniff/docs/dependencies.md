@@ -47,7 +47,12 @@ loaded-module backend; with `Win32_System_Threading` (`OpenProcess`,
 `GetProcessTimes`, `QueryFullProcessImageNameW`, `GetExitCodeProcess`) it
 reads each process's creation time, image, and modules, and the
 `Win32_Security` token calls above read the account of a process holding
-something in the queried tree.
+something in the queried tree. `Wdk_System_Threading`
+(`NtQueryInformationProcess`), `Win32_System_Diagnostics_Debug`
+(`ReadProcessMemory`), `Win32_System_Kernel`, and
+`Win32_System_WindowsProgramming` (the `winternl.h` `PEB`, `PEB_LDR_DATA`,
+and `LDR_DATA_TABLE_ENTRY` layouts) let the backend read a process's whole
+loader list once instead of calling `GetModuleFileNameExW` per module.
 
 Note that the Rendezvous daemon declares its **own** `windows` features for the
 DACL work (`Win32_Storage_FileSystem`, and `Win32_Security_Authorization` for

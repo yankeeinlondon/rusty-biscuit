@@ -318,6 +318,18 @@ flowchart LR
   larger than the buffer is read again at the reported size, so no module is
   dropped; a list that keeps outgrowing its buffer, or reports more than
   65,536 modules, fails that process instead.
+- **Module paths** are the loader's own record of each module, the string
+  `GetModuleFileNameExW` returns. That call walks the process's loader list
+  from its head for every module, about 130 µs each, which was 90% of a
+  query on a host with 130 processes and 5,300 modules (750 ms). Sniff reads
+  the list once per process instead (`PEB.Ldr`, then each entry's
+  `FullDllName`, the documented `winternl.h` fields): about 70 ms for the
+  same host. A module the walk does not cover is read with
+  `GetModuleFileNameExW` as before: a 32-bit process's own modules (only its
+  64-bit loader list is walked), or every module of a process whose list
+  could not be read whole (one still starting, or one loading a module
+  during the walk). A module unloaded between the walk and its turn is still
+  matched by the path the walk read, so evidence can only grow.
 - **Unsupported mechanisms.** A working directory and a
   `ReadDirectoryChangesW` subscription are directory handles that cannot
   be distinguished from other directory handles, so those two mechanisms

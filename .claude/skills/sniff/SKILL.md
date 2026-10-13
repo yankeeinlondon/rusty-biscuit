@@ -84,7 +84,10 @@ so the `fdinfo` matrix runs on every Unix host, while live controlled children
 Unix host, and only `macos::ffi` and `macos_tests::live` are macOS-only.
 The Windows backend (`filesystem/query/win32.rs`, module `win32` so it does not
 shadow the `windows` crate) reports `open_handles` through a file-side scan and `loaded_modules`: modules are
-path-only observations, so its scripted-`Source` tests run on every host,
+path-only observations (read in one pass over each process's loader list,
+`Source::loader_paths`, falling back to `GetModuleFileNameExW` per module;
+never by the kernel's mapped-file name, which names a hard-linked image by
+whichever link was mapped first), so its scripted-`Source` tests run on every host,
 and only `win32::ffi`, `win32_tests::spellings`, and `win32_tests::live` are
 Windows-only. It keeps each process handle from enumeration through
 enrichment (closing it early when nothing is in scope) and reads `details`

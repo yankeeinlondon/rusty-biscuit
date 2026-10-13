@@ -121,6 +121,10 @@ struct Fake {
     capacities: Vec<usize>,
     /// PIDs whose handle was closed, in order.
     closed: Rc<RefCell<Vec<u32>>>,
+    /// Every module whose path was read one at a time, by PID and index.
+    path_reads: Vec<(u32, usize)>,
+    /// [`Source::loader_paths`] by PID: the indexes the one-pass read covers.
+    walked: HashMap<u32, Option<Vec<usize>>>,
 }
 
 /// Records its own close.
@@ -212,7 +216,19 @@ impl Source for &mut Fake {
         })
     }
 
+    fn loader_paths(&mut self, process: &FakeHandle) -> Option<HashMap<Module, PathBuf>> {
+        let covered = self.walked.get(&process.pid).cloned().flatten()?;
+        let modules = self.process(process.pid).ok()?.modules.clone().ok()?;
+        Some(
+            covered
+                .into_iter()
+                .filter_map(|index| Some((Module(index), modules.get(index)?.clone().ok()?)))
+                .collect(),
+        )
+    }
+
     fn module_path(&mut self, process: &FakeHandle, module: Module) -> Result<PathBuf, Fault> {
+        self.path_reads.push((process.pid, module.0));
         let modules = self.process(process.pid)?.modules.clone()?;
         modules.get(module.0).cloned().unwrap_or(Err(Fault::Gone))
     }
@@ -304,6 +320,39 @@ fn modules_loaded_from_the_tree_are_evidence_and_others_are_not() {
     assert_eq!(counts.get(counters::QUERY_MODULE_INSPECTIONS), 4);
     assert_eq!(counts.get(counters::QUERY_PATH_LOOKUPS), 2);
     assert_eq!(counts.get(counters::QUERY_DESCRIPTOR_INSPECTIONS), 0);
+}
+
+/// The scene's image and helper (inside the tree) and a system module
+/// (outside), with the one-pass loader read covering `walked`.
+fn walked_scene(walked: Option<Vec<usize>>) -> (Scene, Fake) {
+    let scene = scene();
+    let mut fake = Fake::default().with(
+        PID,
+        Scripted::new()
+            .image(&scene.root.join("bin").join("tool.exe"))
+            .module(&scene.root.join("bin").join("helper.dll"))
+            .module(&scene.base.join("system.dll")),
+    );
+    fake.walked.insert(PID, walked);
+    (scene, fake)
+}
+
+#[test]
+fn modules_the_loader_walk_covers_are_not_read_again_and_match_the_same() {
+    let (scene, mut unwalked) = walked_scene(None);
+    let expected = unwalked.query(&scene.root, &PathUsageOptions::default());
+    assert_eq!(unwalked.path_reads, vec![(PID, 0), (PID, 1), (PID, 2)], "without a walk every module is read");
+
+    // The walk misses module 2 (as it misses a 32-bit module of a WOW64
+    // process): only that one is read on its own.
+    let (scene, mut walked) = walked_scene(Some(vec![0, 1]));
+    let report = walked.query(&scene.root, &PathUsageOptions::default());
+
+    assert_eq!(walked.path_reads, vec![(PID, 2)]);
+    let paths = |report: &PathUsageReport| module_paths(&report.processes[0]).iter().map(|p| p.file_name().unwrap().to_owned()).collect::<Vec<_>>();
+    assert_eq!(paths(&report), paths(&expected));
+    assert_eq!(paths(&report), vec![std::ffi::OsString::from("helper.dll"), "tool.exe".into()]);
+    assert_eq!(coverage(&report, Mechanism::LoadedModules).status, CoverageStatus::Complete);
 }
 
 #[test]
@@ -1084,6 +1133,47 @@ mod live {
     #[test]
     fn handle_owners_are_found_while_a_child_waits_in_read_directory_changes() {
         assert_file_and_directory_holders("watch");
+    }
+
+    #[test]
+    fn a_child_running_through_a_junction_is_found_by_the_spelling_it_was_asked_for() {
+        // The query asks for `link`, the loader recorded `link\bin\…`,
+        // and the tree is indexed under `app`.
+        let scene = scene();
+        let link = scene.base.join("link");
+        let status = Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(&scene.root)
+            .stdout(Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+        let image = link.join("bin").join("usage-child.exe");
+        let child = spawn_child(&image);
+
+        let report = live_query(&link);
+
+        let record = report.processes.iter().find(|p| p.pid == child.0.id()).unwrap_or_else(|| panic!("{report:#?}"));
+        assert_eq!(module_paths(record), vec![indexed(&scene.root.join("bin").join("usage-child.exe"))]);
+        drop(child);
+    }
+
+    #[test]
+    fn the_loader_walk_reads_exactly_what_get_module_file_name_ex_reads() {
+        // This test process is 64-bit, so the walk covers every module.
+        let mut source = super::super::win32::ffi::Win32;
+        let opened = source.open(std::process::id()).expect("open this process");
+        let (modules, count) = source.modules(&opened.process, 4096).expect("list modules");
+        assert_eq!(modules.len(), count);
+        let walked = source.loader_paths(&opened.process).expect("walk the loader list");
+        assert!(modules.len() > 5, "{modules:?}");
+        for module in modules {
+            let one = source.module_path(&opened.process, module).expect("module path");
+            assert_eq!(walked.get(&module), Some(&one), "module at {:#x}", module.0);
+        }
     }
 
     #[test]
