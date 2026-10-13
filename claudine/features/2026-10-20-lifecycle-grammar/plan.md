@@ -4,6 +4,13 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine-cli
 ---
 # Lifecycle Grammar Implementation Plan
 
@@ -31,14 +38,14 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 1 — Readiness and inventory
 
-- [ ] **Confirm prerequisite**
+- [x] **Confirm prerequisite**
   - Verify the `fm` namespace, captured environment, reserved-root precedence, and host-binding APIs using the prerequisite's acceptance evidence and actual code. If absent, record the blocking dependency; do not implement it implicitly in this feature.
   - Read package instructions and the Claudine, rust-testing, and just skills. Load the OS skill before platform-specific edits or claims about unavailable OS evidence; load the terminal harness skill before changing L2 fixtures.
-- [ ] **Map migration**
+- [x] **Map migration**
   - Re-take AC16's inventory across root/Claudine/Darkmatter prompts, docs, library/CLI/DMLS Rust, fixtures, and Claudine skills. Also inspect structured `action` discriminator maps and communication parameter aliases; exclude legitimate loop `action`/`actions`, message verbs, and `resume.message`.
   - Create `implementation-log.md` beside this plan with the baseline inventory, file ownership, chosen diagnostic names, dependency evidence, and AC-to-test locations. Preserve spec/review snapshots, historical timeline entries, and provider-hook tables.
   - Trace consumers of `LifecycleStackItem`, notification fields, expression surfaces/source maps, `StackControl`/`ControlDispatch`, active-document refresh, and loop lookups. Assign shared error definitions and test registration files to one integration owner.
-- [ ] **Freeze contracts**
+- [x] **Freeze contracts**
   - Record the node model, dictionary canonicalization, conditional depth accounting, effect-catalog injection boundary, authored-path representation, host binding surface, and retry-overlay transport/consumption seam.
   - Keep one executor path and reuse current expression parsing, overlay resolution, approval, and error-routing mechanisms. Do not add a separate interpreter or YAML decoder.
 
