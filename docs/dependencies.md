@@ -260,13 +260,22 @@
   `FSEventStreamFlushSync`) on macOS only; both are the crates `notify` builds
   on. On Windows it calls `ReadDirectoryChangesW` through the same
   `windows-sys`, adding `Win32_Security`, `Win32_System_IO`, and
-  `Win32_System_Threading` for overlapped reads and their events. `notify` itself is not used: it hides overflow and lost watches on
+  `Win32_System_Threading` for overlapped reads and their events. The usage
+  check adds `Win32_System_SystemInformation` for `GetSystemDirectoryW`, the
+  directory Windows Search's processes must run from for its one recheck. `notify` itself is not used: it hides overflow and lost watches on
   Windows, drops the watch on a directory `wt` moves on Linux, and offers no
   flush on macOS, so it cannot report lost coverage.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
-  only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
-  URL, the default branch, branch-name validity, `core.sshCommand`, and ref
-  targets. Each read replaced a git process, which costs ~47 ms on Windows.
+  `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
+  read repository metadata in-process: `origin`'s URL, the default branch,
+  branch-name validity, `core.sshCommand`, ref targets, every branch tip, and
+  the `wt list` graph's commit history (shared by the gather's threads, hence
+  `parallel`). Each read replaced a git process, which costs ~47 ms on Windows.
+- `worktree/cli` uses `ctrlc` 3.4 (already built for `repo-deps`), with its
+  `termination` feature, so Ctrl-C, Ctrl-Break, `SIGTERM`, or `SIGHUP` stops
+  `wt remove` at the next deletion entry boundary with a saved
+  report instead of killing it. `signal-hook` (used by `claudine-cli`) was
+  not chosen because it does not handle Windows console control events.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
@@ -785,6 +794,12 @@ This is a Rust workspace with the following modules:
     _Build beautiful terminal tables with automatic content wrapping, ANSI styling, and customizable borders._
 
     _Tags: table, terminal, formatting_
+
+- [ctrlc](https://github.com/Detegr/rust-ctrlc) _v3.4_ [📄](https://docs.rs/ctrlc)
+
+    _Cross-platform Ctrl-C handler (one per process, run on its own thread). `worktree-cli` enables `termination` so `SIGTERM` and `SIGHUP` are caught too, and installs it only when `wt remove` starts its destructive steps; `repo-deps` uses it in its local tools._
+
+    _Tags: cli, signals, cross-platform_
 
 - [crossterm](https://github.com/crossterm-rs/crossterm) _v0.29_ [📄](https://docs.rs/crossterm)
 
