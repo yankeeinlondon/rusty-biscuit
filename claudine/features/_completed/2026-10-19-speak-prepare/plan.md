@@ -86,6 +86,36 @@ skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-speaks/api-reference.md
     - .claude/skills/biscuit-speaks/providers.md
     - .claude/skills/biscuit-speaks/configuration.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - biscuit-speaks/lib/src/audio_cache.rs
+    - biscuit-speaks/lib/src/cache.rs
+    - biscuit-speaks/lib/src/detached.rs
+    - biscuit-speaks/lib/src/lib.rs
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/host/mod.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/say/system_defaults.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/test_support.rs
+    - biscuit-speaks/lib/src/traits.rs
+    - biscuit-speaks/lib/tests/common/mod.rs
+    - biscuit-speaks/lib/tests/detached_phase4.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+    - biscuit-speaks/lib/tests/volume_control.rs
+documentation:
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/tts-caching.md
+completed_phase: 6
+implemented: true
 ---
 # Speak Prepare — Implementation Plan
 
@@ -116,10 +146,10 @@ The work has four hard parts, in order of risk:
 
 Done means all of these hold:
 
-- [ ] Every acceptance criterion 1–12 in the spec has a passing L1 test (map in "Validation Checkpoints").
-- [ ] `just test` and `just lint` pass in `biscuit-speaks/` with and without `playa`; `just test` passes in `claudine/`.
-- [ ] Docs, README, and `.claude/skills/biscuit-speaks/` describe the shipped behavior; the stub TODO and stale `is_prepared` doc are gone.
-- [ ] No new CI matrix cell or gate (verified with `just ci-local --plan`).
+- [x] Every acceptance criterion 1–12 in the spec has a passing L1 test (map in "Validation Checkpoints").
+- [x] `just test` and `just lint` pass in `biscuit-speaks/` with and without `playa`; `just test` passes in `claudine/`.
+- [x] Docs, README, and `.claude/skills/biscuit-speaks/` describe the shipped behavior; the stub TODO and stale `is_prepared` doc are gone.
+- [x] No new CI matrix cell or gate (verified with `just ci-local --plan`).
 
 Out of scope (do not build): tts-prewarm, cache eviction, a CLI flag,
 background execution, benchmarks.
@@ -418,15 +448,15 @@ repo; lead with what the reader can do; mark nothing "planned" (code landed).
 
 ## Phase 6: Final Validation
 
-- [ ] `just test`, `just test-l2` (if the area defines L2 for speaks), and `just lint` in `biscuit-speaks/`.
-- [ ] Compile the library with `--no-default-features` / without `playa`; run its tests.
-- [ ] `just test` in `claudine/`.
-- [ ] `just ci-local --plan`: confirm no new cell or gate; platform-gated
+- [x] `just test`, `just test-l2` (if the area defines L2 for speaks), and `just lint` in `biscuit-speaks/`.
+- [x] Compile the library with `--no-default-features` / without `playa`; run its tests.
+- [x] `just test` in `claudine/`.
+- [x] `just ci-local --plan`: confirm no new cell or gate; platform-gated
   tests (`Say` → macOS, `Sapi` → Windows) compile on all targets (load the
   `os` skill before any `#[cfg(windows)]` or path-comparison work).
-- [ ] Grep the smell list: `#[serde(default)]`, `unwrap_or_default`, `.ok()` on
+- [x] Grep the smell list: `#[serde(default)]`, `unwrap_or_default`, `.ok()` on
   the snapshot and Say-lookup parse paths.
-- [ ] Implementation log written (departures from spec, Spike A result, ruling
+- [x] Implementation log written (departures from spec, Spike A result, ruling
   outcomes). Terminal state: "implementation complete, ready for review"; do
   not move the feature to `_completed`.
 

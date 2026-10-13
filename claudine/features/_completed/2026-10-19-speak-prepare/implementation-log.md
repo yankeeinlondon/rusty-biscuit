@@ -86,12 +86,36 @@ skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-speaks/api-reference.md
     - .claude/skills/biscuit-speaks/providers.md
     - .claude/skills/biscuit-speaks/configuration.md
-message_to_agent: |-
-    Phase 5 changed docs and comments only. The phase's tests are unchanged and still pass.
-
-    - Read the "## Phase 5" log section for the drift found and fixed, including two rustdoc warnings. `RUSTDOCFLAGS="-D warnings" cargo doc -p biscuit-speaks --no-deps` is clean now, so keep it clean.
-    - The Phase 3/4 open items are unchanged. The unread Say system rate and the ElevenLabs account-context limit are now documented in `biscuit-speaks/docs/tts-caching.md`. Playa's last-wins duplicate keys remain only an author item in the log.
-    - Phase 6 still has to run `just ci-local --plan` and the smell grep. Nothing in Phase 5 adds a test, a target, or a CI input.
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - biscuit-speaks/lib/src/audio_cache.rs
+    - biscuit-speaks/lib/src/cache.rs
+    - biscuit-speaks/lib/src/detached.rs
+    - biscuit-speaks/lib/src/lib.rs
+    - biscuit-speaks/lib/src/prepared.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+    - biscuit-speaks/lib/src/providers/host/echogarden.rs
+    - biscuit-speaks/lib/src/providers/host/gtts.rs
+    - biscuit-speaks/lib/src/providers/host/kokoro.rs
+    - biscuit-speaks/lib/src/providers/host/mod.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/say/system_defaults.rs
+    - biscuit-speaks/lib/src/speak.rs
+    - biscuit-speaks/lib/src/test_support.rs
+    - biscuit-speaks/lib/src/traits.rs
+    - biscuit-speaks/lib/tests/common/mod.rs
+    - biscuit-speaks/lib/tests/detached_phase4.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+    - biscuit-speaks/lib/tests/volume_control.rs
+documentation:
+    - biscuit-speaks/README.md
+    - biscuit-speaks/docs/tts-caching.md
+completed_phase: 6
+implemented: true
 ---
 # Implementation Log for 2026-10-19-speak-prepare (6 phases)
 
@@ -846,3 +870,170 @@ no tests. Verification is by review, plus these checks:
   cleanup.
 - No change to the `claudine` skill was needed: Claudine's code and behavior
   are untouched.
+
+## Phase 6
+
+Final validation. No source, docs, or skill file changed in this phase; every
+gate below ran against the tree Phases 1–5 left.
+
+### Gates run
+
+| Gate | Result |
+| --- | --- |
+| `just test` in `biscuit-speaks/` (L1, `--features playa` + CLI) | 571 passed, 20 skipped |
+| `just test-l2` in `biscuit-speaks/` | "not applicable" stub; the area has no L2 tier |
+| `just lint` in `biscuit-speaks/` | clean |
+| `cargo clippy -p biscuit-speaks --all-targets --no-default-features -- -D warnings` (no `playa`; `default = []`) | clean |
+| `cargo nextest run -p biscuit-speaks --no-default-features` (no tier filter, so `real_` Say tests ran too) | 423 passed, 10 skipped |
+| `RUSTDOCFLAGS="-D warnings" cargo doc -p biscuit-speaks --no-deps` | clean |
+| `just doctest` in `biscuit-speaks/` (covers the Phase 5 `Speak::prepare` doc example edit) | all pass |
+| `just test` in `claudine/` | 8738 passed, 9 skipped |
+| `just lint` in `claudine/` | clean apart from the existing macOS linker note about `__eh_frame` size |
+| `just cross-check biscuit-speaks --os linux` | pass, 451 tests |
+| `just cross-check biscuit-speaks --os windows` | pass, 416 tests |
+| `just check-tier-coverage biscuit-speaks` | 0 stranded, 0 stubbed tiers with tests |
+
+WSL was not cross-checked: no code in this feature is WSL-specific, and the
+Linux run covers the same `cfg(unix)` paths.
+
+### `just ci-local --plan`
+
+- The plan is computed for the whole branch against `origin/main`. It includes
+  601 changed paths, most of them from other work on this branch
+  (darkmatter, claudine, CI scripts).
+- The rows for `biscuit-speaks` are its standard set: `lint` and `check` on
+  ubuntu-latest, and `L1` on all four environments. The `check` row exists
+  because of the area's existing example target, and it also compiles
+  `biscuit-speaks-cli`, `research`, and `research-cli`.
+- The feature adds no new cell, tier, gate, or target:
+    - `git diff origin/main..HEAD -- biscuit-speaks/lib/Cargo.toml biscuit-speaks/cli/Cargo.toml`
+      is empty.
+    - The new `lib/tests/prepare.rs` is auto-discovered (the lib does not set
+      `autotests = false`).
+    - `cargo nextest list` shows all 29 `prepare` tests selected by L1.
+- One row comes from this feature's files without being part of the feature:
+  `test-toolkit/ubuntu-latest/lint` runs the archive-path guard because
+  `biscuit-speaks/lib/src/audio_cache.rs` changed. That file's only change was
+  a Phase 5 doc row. The guard runs alone and is cheap.
+- The `biscuit-speaks/justfile` diff against `origin/main` (a `slow-tests`
+  recipe) was not made on this branch; `main` added it after the branch point.
+- Platform gates: Say's tests are `cfg(target_os = "macos")` and ran locally.
+  The Linux and Windows cross-checks compiled every target with those gates
+  off. The feature adds no SAPI code.
+
+### Smell grep (snapshot and Say-lookup parse paths)
+
+I grepped `snapshot.rs`, `say/system_defaults.rs`, `prepared.rs`, and
+`detached.rs` for `#[serde(default)]`, `unwrap_or_default`, `.ok()`, and
+`filter_map`. There are no `#[serde(default)]` or `filter_map` hits. Every
+other hit is outside the record and lookup parsing:
+
+| Site | Why it is acceptable |
+| --- | --- |
+| `snapshot.rs` `account_context`: `env::var(ACCOUNT_LABEL_ENV).unwrap_or_default()` | An unset label and an empty label give the same context. This is an environment variable, not a field of the record. |
+| `snapshot.rs` `snapshot_path`: `serde_json::to_string(..).ok()?` | Serializing two plain structs cannot fail, and `None` only means "no record location". |
+| `snapshot.rs` `load_trusted`: `fs::read(..).ok()?` | A record that is missing or unreadable is a cache miss. The bytes themselves go through `parse`, which is strict: `deny_unknown_fields`, object-only, `end()`, and no defaults. |
+| `system_defaults.rs`: `list_voices().await.ok()?` | A failed voice listing leaves the default voice unresolved, so preparation does nothing. That is the outcome the spec requires. |
+| `prepared.rs` `staging_file`: `extension().unwrap_or_default()` | Builds a temp-file suffix and has nothing to do with parsing. |
+
+Phase 3 recorded the Input Robustness Matrix for both parse paths
+(`elevenlabs::tests::every_malformed_record_shape_is_a_miss`,
+`say::system_defaults::tests::only_the_exact_lookup_shape_resolves_a_voice`).
+Phase 4 recorded it for `PreparationRecord.prepared`. Nothing has changed
+since then, so the matrix stands.
+
+### Closing summary for review
+
+**Spike A result.** AppKit's `NSSpeechSynthesizer`, called through JXA,
+returns the voice that `say` uses with no `-v`. The proof is a byte-identical
+comparison on macOS 27.2. It is the only lookup trusted, and only when its
+output has exactly the expected shape and the voice is in `say -v '?'`. The
+lookup also reports a rate, but that rate is not trusted: on the test host it
+equaled the library's built-in 175 WPM, so it could not be shown to follow
+the user's setting.
+
+**Ruling outcomes.**
+
+- Rulings 1–11 were adopted.
+- Ruling 8 (Say rate): the plan's fallback, Option B, applies. The voice is
+  resolved and the system rate is left unresolved, so normal-speed Say is
+  never prepared.
+- Ruling 5 (ElevenLabs account context): implemented as written. It is the
+  API base URL, plus the name of the key's environment variable, plus the
+  optional `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` label.
+
+**Departures from the plan.** The spec was left unchanged; the full entries
+are in the earlier phases.
+
+- Phase 1: a single async system-defaults lookup. Phase 3 changed it back to
+  separate `voice()` and `rate_wpm()` methods.
+- Phase 2:
+    - no `Resolution` enum;
+    - Kokoro and Echogarden voice resolution is unified across entry points;
+    - Echogarden's unresolved audio is uncached;
+    - Echogarden no longer applies speed a second time.
+- Phase 3:
+    - Say's `speak_with_result` speaks with the resolved voice;
+    - record file names hash the selection inputs and the account context;
+    - `generate_audio` writes no record;
+    - the ElevenLabs speed fix was pulled forward from Phase 4.
+- Phase 4:
+    - `Speak` stores `Option<ResolvedSynthesis>` rather than a pair with the
+      provider;
+    - a test-only seam captures the helper spawn instead of running it;
+    - a pre-existing broken-pipe flake in the Phase 1 harness was fixed.
+
+**Open items for the reviewer.** None of these blocks review.
+
+1. Say's system rate stays unresolved until someone checks, on a Mac, that
+   changing the Spoken Content rate changes what the lookup reports. The
+   steps are in the Phase 1 section. Enabling it then is a one-line change in
+   `OsSpeechDefaults::rate_wpm`, plus a test.
+2. Ruling 5's known limit: two ElevenLabs keys read from the same variable
+   name share default-voice records unless the account label tells them
+   apart. The 24-hour trust window and the refresh on every `prepare` limit
+   the effect.
+3. Playa's spool-record reader keeps the last value of a duplicate key. This
+   predates the feature; whether Playa should reject duplicates is a separate
+   decision.
+
+### Requirement-to-test map (Phase 6)
+
+Phase 6 covers acceptance criterion 12 (gates) and the "compile both
+configurations" half of criterion 1. It changes no behavior, so it adds no
+tests. The evidence is the gate table above. Criteria 1–11 map to the tests
+listed in the Phase 2–4 requirement tables.
+
+### Skills
+
+No skill changes. Claudine's code is untouched, so the `claudine` skill does
+not need an update. Phase 5 already brought the `biscuit-speaks` skill in line
+with the code.
+
+**Terminal state: implementation complete, ready for review.** The feature
+directory stays where it is; moving it to `_completed` is the author's step.
+
+### Definition of Done
+
+I checked off the plan's four Definition-of-Done boxes. One caveat on the
+first: criteria 10 (docs) and 12 (gates) have no L1 test. Criterion 10 is
+shown by the Phase 5 review and the clean rustdoc run, and criterion 12 by the
+gate table above. Criteria 1–9 and 11 have passing L1 tests, mapped in the
+Phase 2–4 tables. The stub TODO and the stale `is_prepared` doc are gone; a
+grep of `speak.rs` and `prepared.rs` for TODO/FIXME finds nothing.
+
+## Review cycle 1 departure from the spec
+
+The spec requires the ElevenLabs snapshot to carry "the account context needed
+to tell callers apart". The non-secret context from the original
+implementation (API address, key variable name, optional label) could not tell
+two keys stored under the same variable apart. A record could not be keyed on
+the key itself either, because the spec forbids persisting or hashing
+credentials. The context is now `None` unless
+`BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` holds a non-blank label. `None` counts as
+uncertainty under the spec's snapshot rules: no record is written, and a fresh
+detached default-voice lookup misses, so the helper resolves the voice through
+the API. The audio cache still avoids a second synthesis once the voice is
+resolved. Network-free default-voice reuse (criteria 4 and 11) therefore needs
+that label. The docs and the `biscuit-speaks` skill state this. The spec is
+left as decided.
