@@ -23,7 +23,7 @@ use union_fixtures::{
     OVERLAPPING_TYPES, TAGGED_TYPES, content_policy_union_schema,
 };
 
-fn initialize_params(root: &Path) -> Value {
+pub(crate) fn initialize_params(root: &Path) -> Value {
     let root_uri = url::Url::from_directory_path(root).unwrap();
     json!({
         "processId": null,
@@ -34,9 +34,9 @@ fn initialize_params(root: &Path) -> Value {
 }
 
 /// An open document and its URI.
-struct Document {
-    uri: String,
-    text: String,
+pub(crate) struct Document {
+    pub(crate) uri: String,
+    pub(crate) text: String,
 }
 
 /// A session over a workspace holding the Content Policy acceptance fixture
@@ -65,7 +65,7 @@ fn open(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, name: &str, fron
     open_text(fixture, workspace, name, &text)
 }
 
-fn open_text(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, name: &str, text: &str) -> (Document, Vec<Value>) {
+pub(crate) fn open_text(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, name: &str, text: &str) -> (Document, Vec<Value>) {
     let path = workspace.path().join(name);
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(&path).unwrap().to_string();
@@ -78,7 +78,7 @@ fn open_text(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, name: &str,
 }
 
 /// The `(line, character)` of byte `offset` in ASCII `text`.
-fn position(text: &str, offset: usize) -> Value {
+pub(crate) fn position(text: &str, offset: usize) -> Value {
     let before = &text[..offset];
     let line = before.matches('\n').count();
     let character = offset - before.rfind('\n').map_or(0, |index| index + 1);
@@ -86,12 +86,12 @@ fn position(text: &str, offset: usize) -> Value {
 }
 
 /// The byte offset of the first `needle`: just past it when `after`, else at its start.
-fn offset_of(text: &str, needle: &str, after: bool) -> usize {
+pub(crate) fn offset_of(text: &str, needle: &str, after: bool) -> usize {
     let start = text.find(needle).unwrap_or_else(|| panic!("`{needle}` in {text:?}"));
     if after { start + needle.len() } else { start }
 }
 
-fn request(fixture: &mut LspFixture<'_>, method: &str, document: &Document, offset: usize) -> Value {
+pub(crate) fn request(fixture: &mut LspFixture<'_>, method: &str, document: &Document, offset: usize) -> Value {
     fixture
         .request(
             method,
@@ -105,7 +105,7 @@ fn request(fixture: &mut LspFixture<'_>, method: &str, document: &Document, offs
 }
 
 /// The hover Markdown at the start of `needle`.
-fn hover(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -> String {
+pub(crate) fn hover(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -> String {
     let hover = request(fixture, "textDocument/hover", document, offset_of(&document.text, needle, false));
     hover["contents"]["value"]
         .as_str()
@@ -114,7 +114,7 @@ fn hover(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -> Str
 }
 
 /// `(label, kind, detail)` of every completion item just past `needle`.
-fn completion(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -> Vec<(String, u64, Option<String>)> {
+pub(crate) fn completion(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -> Vec<(String, u64, Option<String>)> {
     let items = request(fixture, "textDocument/completion", document, offset_of(&document.text, needle, true));
     let items = items.as_array().cloned().unwrap_or_else(|| items["items"].as_array().cloned().unwrap_or_default());
     items
@@ -129,12 +129,12 @@ fn completion(fixture: &mut LspFixture<'_>, document: &Document, needle: &str) -
         .collect()
 }
 
-fn labels(items: &[(String, u64, Option<String>)]) -> Vec<&str> {
+pub(crate) fn labels(items: &[(String, u64, Option<String>)]) -> Vec<&str> {
     items.iter().map(|(label, _, _)| label.as_str()).collect()
 }
 
-const FIELD: u64 = 5;
-const VALUE: u64 = 12;
+pub(crate) const FIELD: u64 = 5;
+pub(crate) const VALUE: u64 = 12;
 
 #[test]
 fn the_overlay_prepares_an_array_of_a_union_and_hover_lists_its_alternatives() {

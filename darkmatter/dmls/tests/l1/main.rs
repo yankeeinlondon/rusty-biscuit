@@ -9,6 +9,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod content_policy_baseline;
 mod context_construction_guard;
 mod core_schema_types;
 mod entry_point_parity;
@@ -23,6 +24,7 @@ mod repository_contexts;
 mod schema_roots_parity;
 mod schema_yaml_spellings;
 mod shell_suffixes;
+mod standalone_stdio;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;
 mod suggest_constraint_phase1;
