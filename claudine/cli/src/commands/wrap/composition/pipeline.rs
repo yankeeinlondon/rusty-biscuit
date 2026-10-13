@@ -1882,8 +1882,8 @@ pub(super) struct InitializeCatchSurface<'a> {
     pub launch_area: &'a Path,
     pub context: &'a darkmatter::markdown::compose::ComposeContext,
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
-    /// The invocation's refresh authority for the lazy `current`/`current_env`
-    /// roots; `None` when there is no invocation, so every read fails closed.
+    /// The invocation's refresh authority for the lazy `current` root; `None`
+    /// when there is no invocation, so every read fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     pub frontmatter: &'a serde_json::Map<String, serde_json::Value>,
     pub document_start: Instant,

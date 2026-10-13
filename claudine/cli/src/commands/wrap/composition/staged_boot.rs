@@ -180,9 +180,9 @@ pub(crate) struct StagedDocument<'a> {
     pub term: &'a Terminal,
     pub repo_root: Option<&'a Path>,
     pub launch_area: &'a Path,
-    /// The invocation's refresh authority for the lazy `current`/`current_env`
-    /// roots, resolved once by the caller; `None` when there is no invocation,
-    /// so every `current.*` read in the staged boot fails closed.
+    /// The invocation's refresh authority for the lazy `current` root, resolved
+    /// once by the caller; `None` when there is no invocation, so every
+    /// `current.*` read in the staged boot fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     pub document_start: Instant,
 }
