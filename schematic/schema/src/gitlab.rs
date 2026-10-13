@@ -39,7 +39,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = GitLab::new()?;
+//!     let client = GitLab::new();
 //!     let response = client.send(ListRepositoryTreeRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -51,24 +51,27 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = GitLab::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = GitLab::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::gitlab::*;
 use crate::shared::Paginated;
 /// The GitLab API: GitLab REST API v4 for repository, MR, issue, and release workflows
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum GitLab {}
-/// A client for the [`GitLab`] API.
-pub type GitLabClient = schematic_runtime::Client<GitLab>;
-impl schematic_runtime::Api for GitLab {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct GitLab(schematic_runtime::Client<GitLabApi>);
+/// The tag of the [`GitLab`] API: each of its request types names it as `EndpointSpec::Api`, so that [`GitLab`] sends only this API's requests. Callers never write it.
+pub enum GitLabApi {}
+impl schematic_runtime::Api for GitLabApi {
     const NAME: &'static str = "GitLab";
 }
+schematic_runtime::api_client!(GitLab, GitLabApi);
 impl GitLab {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://gitlab.com/api/v4";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some("https://docs.gitlab.com/api/rest/");
@@ -94,20 +97,19 @@ impl GitLab {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
-            .default_header("User-Agent", "schematic-gitlab-client")
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(
+            schematic_runtime::Client::new(Self::definition())
+                .default_header("User-Agent", "schematic-gitlab-client"),
+        )
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<GitLabClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for GitLab {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `ListRepositoryTree` endpoint.
@@ -203,7 +205,7 @@ impl From<String> for ListRepositoryTreeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListRepositoryTreeRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<TreeItem>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<TreeItem>>;
@@ -275,7 +277,7 @@ impl GetRepositoryFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryFileRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = FileContent;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FileContent>;
@@ -332,7 +334,7 @@ impl From<String> for GetProjectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetProjectRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Project;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Project>;
@@ -468,7 +470,7 @@ impl From<String> for ListGroupProjectsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListGroupProjectsRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Project>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Project>>;
@@ -539,7 +541,7 @@ impl GetBranchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetBranchRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Branch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Branch>;
@@ -634,7 +636,7 @@ impl From<String> for ListMergeRequestsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListMergeRequestsRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<MergeRequest>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<MergeRequest>>;
@@ -693,7 +695,7 @@ impl GetMergeRequestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetMergeRequestRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = MergeRequest;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MergeRequest>;
@@ -762,7 +764,7 @@ impl ListMergeRequestCommitsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListMergeRequestCommitsRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Commit>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Commit>>;
@@ -819,7 +821,7 @@ impl ListMergeRequestChangesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListMergeRequestChangesRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = MergeRequestChanges;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MergeRequestChanges>;
@@ -914,7 +916,7 @@ impl From<String> for ListIssuesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Issue>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Issue>>;
@@ -973,7 +975,7 @@ impl GetIssueRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Issue;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Issue>;
@@ -1042,7 +1044,7 @@ impl ListIssueNotesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueNotesRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Note>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Note>>;
@@ -1099,7 +1101,7 @@ impl ListIssueParticipantsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueParticipantsRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<User>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<User>>;
@@ -1183,7 +1185,7 @@ impl From<String> for ListTagsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Tag>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Tag>>;
@@ -1239,7 +1241,7 @@ impl GetTagRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetTagRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Tag;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Tag>;
@@ -1323,7 +1325,7 @@ impl From<String> for ListReleasesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Release>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Release>>;
@@ -1379,7 +1381,7 @@ impl GetReleaseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetReleaseRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Release;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Release>;
@@ -1435,7 +1437,7 @@ impl From<String> for GetLatestReleaseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetLatestReleaseRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Release;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Release>;
@@ -1563,7 +1565,7 @@ impl From<String> for ListProjectPipelinesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectPipelinesRequest {
-    type Api = GitLab;
+    type Api = GitLabApi;
     type Success = Vec<Pipeline>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Pipeline>>;

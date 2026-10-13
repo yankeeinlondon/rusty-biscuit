@@ -36,7 +36,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = GitHub::new()?;
+//!     let client = GitHub::new();
 //!     let response = client.send(GetRepositoryRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -48,24 +48,27 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = GitHub::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = GitHub::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::github::*;
 use crate::shared::Paginated;
 /// The GitHub API: GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum GitHub {}
-/// A client for the [`GitHub`] API.
-pub type GitHubClient = schematic_runtime::Client<GitHub>;
-impl schematic_runtime::Api for GitHub {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct GitHub(schematic_runtime::Client<GitHubApi>);
+/// The tag of the [`GitHub`] API: each of its request types names it as `EndpointSpec::Api`, so that [`GitHub`] sends only this API's requests. Callers never write it.
+pub enum GitHubApi {}
+impl schematic_runtime::Api for GitHubApi {
     const NAME: &'static str = "GitHub";
 }
+schematic_runtime::api_client!(GitHub, GitHubApi);
 impl GitHub {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://api.github.com";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some("https://docs.github.com/en/rest");
@@ -90,22 +93,21 @@ impl GitHub {
             )
             .request_id_header("x-github-request-id")
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
-            .default_header("Accept", "application/vnd.github+json")
-            .default_header("X-GitHub-Api-Version", "2022-11-28")
-            .default_header("User-Agent", "schematic-github-client")
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(
+            schematic_runtime::Client::new(Self::definition())
+                .default_header("Accept", "application/vnd.github+json")
+                .default_header("X-GitHub-Api-Version", "2022-11-28")
+                .default_header("User-Agent", "schematic-github-client"),
+        )
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<GitHubClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for GitHub {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `GetRepository` endpoint.
@@ -135,7 +137,7 @@ impl GetRepositoryRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = RepositoryInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RepositoryInfo>;
@@ -202,7 +204,7 @@ impl GetGitTreeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = GitTreeResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GitTreeResponse>;
@@ -264,7 +266,7 @@ impl GetRepositoryContentRawRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -362,7 +364,7 @@ impl ListPullRequestsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<PullRequestSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<PullRequestSummary>>;
@@ -453,7 +455,7 @@ impl ListPullRequestFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<PullRequestFile>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<PullRequestFile>>;
@@ -556,7 +558,7 @@ impl ListIssuesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<IssueSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<IssueSummary>>;
@@ -629,7 +631,7 @@ impl GetIssueRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = IssueSummary;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<IssueSummary>;
@@ -706,7 +708,7 @@ impl ListIssueCommentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<IssueComment>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<IssueComment>>;
@@ -789,7 +791,7 @@ impl ListIssueTimelineRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<TimelineEvent>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<TimelineEvent>>;
@@ -865,7 +867,7 @@ impl ListTagsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<RepoTag>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoTag>>;
@@ -940,7 +942,7 @@ impl ListReleasesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<Release>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Release>>;
@@ -1004,7 +1006,7 @@ impl GetTagReferenceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GitRef>;
@@ -1063,7 +1065,7 @@ impl GetBranchReferenceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GitRef>;
@@ -1122,7 +1124,7 @@ impl GetAnnotatedTagRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = AnnotatedTagObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AnnotatedTagObject>;
@@ -1219,7 +1221,7 @@ impl ListWorkflowRunsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = WorkflowRunsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<WorkflowRunsResponse>;
@@ -1351,7 +1353,7 @@ impl From<String> for ListOrgReposRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
-    type Api = GitHub;
+    type Api = GitHubApi;
     type Success = Vec<RepositoryInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepositoryInfo>>;

@@ -2,10 +2,9 @@
 
 //! Generated REST API clients and WebSocket API definition helpers.
 //!
-//! Each REST API module holds the API's marker type with its
-//! constructors, a `{Name}Client` alias for its
-//! [`schematic_runtime::Client`], its request types, and its response
-//! types re-exported from the definitions. Sending, credentials,
+//! Each REST API module holds the API's client struct, named after the
+//! API and wrapping a [`schematic_runtime::Client`], its request types,
+//! and its response types re-exported from the definitions. Sending, credentials,
 //! redirects, deadlines, and the response envelope belong to
 //! [`schematic_runtime`].
 //!
@@ -50,7 +49,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Anthropic::new()?;
+//!     let client = Anthropic::new();
 //!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     let data = response.into_result()?;
@@ -65,10 +64,10 @@
 //! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
 //! arrived.
 /// The `schematic-runtime` ABI this crate was generated against.
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 2;
 const _: () = assert!(
     schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI,
-    "schematic-schema was generated for schematic-runtime ABI 1, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
+    "schematic-schema was generated for schematic-runtime ABI 2, but the schematic-runtime it is built against has another ABI; regenerate the crate with the schematic-gen of that runtime (`just generate` in schematic/)"
 );
 /// The runtime that sends this crate's requests.
 pub use schematic_runtime;

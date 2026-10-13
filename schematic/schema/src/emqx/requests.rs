@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::{EmqxBasic, EmqxBearer};
+use super::{EmqxBasicApi, EmqxBearerApi};
 /// Request for `ListNodes` endpoint.
 ///
 /// ## Example
@@ -16,7 +16,7 @@ use super::{EmqxBasic, EmqxBearer};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListNodesBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListNodesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListNodesResponse>;
@@ -69,7 +69,7 @@ impl From<String> for GetNodeBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetNodeBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = NodeInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<NodeInfo>;
@@ -103,7 +103,7 @@ impl schematic_runtime::EndpointSpec for GetNodeBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBasicRequest {}
 impl schematic_runtime::EndpointSpec for GetClusterBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ClusterStatus;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ClusterStatus>;
@@ -137,7 +137,7 @@ impl schematic_runtime::EndpointSpec for GetClusterBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListListenersBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListListenersResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListListenersResponse>;
@@ -190,7 +190,7 @@ impl From<String> for GetListenerBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetListenerBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListenerInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListenerInfo>;
@@ -224,7 +224,7 @@ impl schematic_runtime::EndpointSpec for GetListenerBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListMetricsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListMetricsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListMetricsResponse>;
@@ -258,7 +258,7 @@ impl schematic_runtime::EndpointSpec for ListMetricsBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListStatsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListStatsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListStatsResponse>;
@@ -292,7 +292,7 @@ impl schematic_runtime::EndpointSpec for ListStatsBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBasicRequest {}
 impl schematic_runtime::EndpointSpec for GetPrometheusBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -326,7 +326,7 @@ impl schematic_runtime::EndpointSpec for GetPrometheusBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListAlarmsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListAlarmsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAlarmsResponse>;
@@ -360,7 +360,7 @@ impl schematic_runtime::EndpointSpec for ListAlarmsBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListClientsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListClientsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListClientsResponse>;
@@ -415,7 +415,7 @@ impl From<String> for GetClientBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetClientBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ClientInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ClientInfo>;
@@ -472,7 +472,7 @@ impl From<String> for DisconnectClientBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DisconnectClientBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -526,7 +526,7 @@ impl SubscribeClientBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SubscribeClientBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -587,7 +587,7 @@ impl UnsubscribeClientBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnsubscribeClientBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -630,7 +630,7 @@ impl schematic_runtime::EndpointSpec for UnsubscribeClientBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListSubscriptionsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListSubscriptionsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListSubscriptionsResponse>;
@@ -682,7 +682,7 @@ impl From<PublishBody> for PublishBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PublishBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -741,7 +741,7 @@ impl From<PublishBatchBody> for PublishBulkBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PublishBulkBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -782,7 +782,7 @@ impl schematic_runtime::EndpointSpec for PublishBulkBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListTopicsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListTopicsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListTopicsResponse>;
@@ -816,7 +816,7 @@ impl schematic_runtime::EndpointSpec for ListTopicsBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListRetainedBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListRetainedResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListRetainedResponse>;
@@ -869,7 +869,7 @@ impl From<String> for GetRetainedBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRetainedBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = RetainedMessage;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RetainedMessage>;
@@ -924,7 +924,7 @@ impl From<String> for DeleteRetainedBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRetainedBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -960,7 +960,7 @@ impl schematic_runtime::EndpointSpec for DeleteRetainedBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListRulesBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListRulesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListRulesResponse>;
@@ -1012,7 +1012,7 @@ impl From<CreateRuleBody> for CreateRuleBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRuleBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -1072,7 +1072,7 @@ impl From<String> for GetRuleBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRuleBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -1121,7 +1121,7 @@ impl UpdateRuleBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateRuleBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -1181,7 +1181,7 @@ impl From<String> for DeleteRuleBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRuleBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -1230,7 +1230,7 @@ impl TestRuleBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for TestRuleBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = TestRuleResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<TestRuleResponse>;
@@ -1271,7 +1271,7 @@ impl schematic_runtime::EndpointSpec for TestRuleBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListAuthenticatorsBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListAuthenticatorsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAuthenticatorsResponse>;
@@ -1324,7 +1324,7 @@ impl From<String> for GetAuthenticatorBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetAuthenticatorBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = AuthenticatorInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AuthenticatorInfo>;
@@ -1379,7 +1379,7 @@ impl From<String> for ListAuthUsersBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListAuthUsersBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = Vec<AuthUser>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<AuthUser>>;
@@ -1430,7 +1430,7 @@ impl CreateAuthUserBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateAuthUserBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = AuthUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AuthUser>;
@@ -1487,7 +1487,7 @@ impl DeleteAuthUserBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteAuthUserBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -1524,7 +1524,7 @@ impl schematic_runtime::EndpointSpec for DeleteAuthUserBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListAuthzSourcesBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListAuthzSourcesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAuthzSourcesResponse>;
@@ -1558,7 +1558,7 @@ impl schematic_runtime::EndpointSpec for ListAuthzSourcesBasicRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBasicRequest {}
 impl schematic_runtime::EndpointSpec for ListBannedBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ListBannedResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListBannedResponse>;
@@ -1610,7 +1610,7 @@ impl From<CreateBanBody> for CreateBanBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateBanBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = BanInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BanInfo>;
@@ -1665,7 +1665,7 @@ impl DeleteBanBasicRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteBanBasicRequest {
-    type Api = EmqxBasic;
+    type Api = EmqxBasicApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -1720,7 +1720,7 @@ impl From<LoginBody> for LoginBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for LoginBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = LoginResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<LoginResponse>;
@@ -1761,7 +1761,7 @@ impl schematic_runtime::EndpointSpec for LoginBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutBearerRequest {}
 impl schematic_runtime::EndpointSpec for LogoutBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -1795,7 +1795,7 @@ impl schematic_runtime::EndpointSpec for LogoutBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListNodesBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListNodesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListNodesResponse>;
@@ -1848,7 +1848,7 @@ impl From<String> for GetNodeBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetNodeBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = NodeInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<NodeInfo>;
@@ -1882,7 +1882,7 @@ impl schematic_runtime::EndpointSpec for GetNodeBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBearerRequest {}
 impl schematic_runtime::EndpointSpec for GetClusterBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ClusterStatus;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ClusterStatus>;
@@ -1916,7 +1916,7 @@ impl schematic_runtime::EndpointSpec for GetClusterBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListListenersBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListListenersResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListListenersResponse>;
@@ -1969,7 +1969,7 @@ impl From<String> for GetListenerBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetListenerBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListenerInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListenerInfo>;
@@ -2003,7 +2003,7 @@ impl schematic_runtime::EndpointSpec for GetListenerBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListMetricsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListMetricsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListMetricsResponse>;
@@ -2037,7 +2037,7 @@ impl schematic_runtime::EndpointSpec for ListMetricsBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListStatsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListStatsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListStatsResponse>;
@@ -2071,7 +2071,7 @@ impl schematic_runtime::EndpointSpec for ListStatsBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBearerRequest {}
 impl schematic_runtime::EndpointSpec for GetPrometheusBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -2105,7 +2105,7 @@ impl schematic_runtime::EndpointSpec for GetPrometheusBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListAlarmsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListAlarmsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAlarmsResponse>;
@@ -2139,7 +2139,7 @@ impl schematic_runtime::EndpointSpec for ListAlarmsBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListClientsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListClientsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListClientsResponse>;
@@ -2194,7 +2194,7 @@ impl From<String> for GetClientBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetClientBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ClientInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ClientInfo>;
@@ -2251,7 +2251,7 @@ impl From<String> for DisconnectClientBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DisconnectClientBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2305,7 +2305,7 @@ impl SubscribeClientBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SubscribeClientBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2366,7 +2366,7 @@ impl UnsubscribeClientBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnsubscribeClientBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2409,7 +2409,7 @@ impl schematic_runtime::EndpointSpec for UnsubscribeClientBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListSubscriptionsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListSubscriptionsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListSubscriptionsResponse>;
@@ -2461,7 +2461,7 @@ impl From<PublishBody> for PublishBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PublishBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2520,7 +2520,7 @@ impl From<PublishBatchBody> for PublishBulkBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PublishBulkBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2561,7 +2561,7 @@ impl schematic_runtime::EndpointSpec for PublishBulkBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListTopicsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListTopicsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListTopicsResponse>;
@@ -2595,7 +2595,7 @@ impl schematic_runtime::EndpointSpec for ListTopicsBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListRetainedBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListRetainedResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListRetainedResponse>;
@@ -2648,7 +2648,7 @@ impl From<String> for GetRetainedBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRetainedBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = RetainedMessage;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RetainedMessage>;
@@ -2703,7 +2703,7 @@ impl From<String> for DeleteRetainedBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRetainedBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2739,7 +2739,7 @@ impl schematic_runtime::EndpointSpec for DeleteRetainedBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListRulesBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListRulesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListRulesResponse>;
@@ -2791,7 +2791,7 @@ impl From<CreateRuleBody> for CreateRuleBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRuleBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -2851,7 +2851,7 @@ impl From<String> for GetRuleBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRuleBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -2900,7 +2900,7 @@ impl UpdateRuleBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateRuleBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = RuleInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RuleInfo>;
@@ -2960,7 +2960,7 @@ impl From<String> for DeleteRuleBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRuleBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -3009,7 +3009,7 @@ impl TestRuleBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for TestRuleBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = TestRuleResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<TestRuleResponse>;
@@ -3050,7 +3050,7 @@ impl schematic_runtime::EndpointSpec for TestRuleBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListAuthenticatorsBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListAuthenticatorsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAuthenticatorsResponse>;
@@ -3103,7 +3103,7 @@ impl From<String> for GetAuthenticatorBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetAuthenticatorBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = AuthenticatorInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AuthenticatorInfo>;
@@ -3158,7 +3158,7 @@ impl From<String> for ListAuthUsersBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListAuthUsersBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = Vec<AuthUser>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<AuthUser>>;
@@ -3209,7 +3209,7 @@ impl CreateAuthUserBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateAuthUserBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = AuthUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AuthUser>;
@@ -3266,7 +3266,7 @@ impl DeleteAuthUserBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteAuthUserBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -3303,7 +3303,7 @@ impl schematic_runtime::EndpointSpec for DeleteAuthUserBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListAuthzSourcesBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListAuthzSourcesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAuthzSourcesResponse>;
@@ -3337,7 +3337,7 @@ impl schematic_runtime::EndpointSpec for ListAuthzSourcesBearerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBearerRequest {}
 impl schematic_runtime::EndpointSpec for ListBannedBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ListBannedResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListBannedResponse>;
@@ -3389,7 +3389,7 @@ impl From<CreateBanBody> for CreateBanBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateBanBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = BanInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BanInfo>;
@@ -3444,7 +3444,7 @@ impl DeleteBanBearerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteBanBearerRequest {
-    type Api = EmqxBearer;
+    type Api = EmqxBearerApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;

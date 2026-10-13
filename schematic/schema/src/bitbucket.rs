@@ -35,7 +35,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Bitbucket::new()?;
+//!     let client = Bitbucket::new();
 //!     let response = client.send(GetRepositoryRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -47,24 +47,27 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = Bitbucket::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = Bitbucket::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::bitbucket::*;
 use crate::shared::Paginated;
 /// The Bitbucket API: Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum Bitbucket {}
-/// A client for the [`Bitbucket`] API.
-pub type BitbucketClient = schematic_runtime::Client<Bitbucket>;
-impl schematic_runtime::Api for Bitbucket {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct Bitbucket(schematic_runtime::Client<BitbucketApi>);
+/// The tag of the [`Bitbucket`] API: each of its request types names it as `EndpointSpec::Api`, so that [`Bitbucket`] sends only this API's requests. Callers never write it.
+pub enum BitbucketApi {}
+impl schematic_runtime::Api for BitbucketApi {
     const NAME: &'static str = "Bitbucket";
 }
+schematic_runtime::api_client!(Bitbucket, BitbucketApi);
 impl Bitbucket {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://api.bitbucket.org/2.0";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -87,19 +90,27 @@ impl Bitbucket {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<BitbucketClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+    /// Sends HTTP Basic `username` and `password` when a call
+    /// supplies no credential, replacing any credential set
+    /// before.
+    #[must_use]
+    pub fn basic_auth(
+        self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        self.credentials(schematic_runtime::Credential::basic(username, password))
+    }
+}
+impl Default for Bitbucket {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `GetRepository` endpoint.
@@ -129,7 +140,7 @@ impl GetRepositoryRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = Repository;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Repository>;
@@ -209,7 +220,7 @@ impl GetSourceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSourceRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -295,7 +306,7 @@ impl ListPullRequestsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<PullRequest>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequest>>;
@@ -362,7 +373,7 @@ impl GetPullRequestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PullRequest;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PullRequest>;
@@ -439,7 +450,7 @@ impl ListPullRequestCommentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<PullRequestComment>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequestComment>>;
@@ -515,7 +526,7 @@ impl ListIssuesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<Issue>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<Issue>>;
@@ -579,7 +590,7 @@ impl GetIssueRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = Issue;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Issue>;
@@ -656,7 +667,7 @@ impl ListIssueCommentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<IssueComment>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<IssueComment>>;
@@ -739,7 +750,7 @@ impl ListIssueChangesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<IssueChange>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<IssueChange>>;
@@ -804,7 +815,7 @@ impl GetBranchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetBranchRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = Branch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Branch>;
@@ -874,7 +885,7 @@ impl ListTagsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<Tag>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<Tag>>;
@@ -938,7 +949,7 @@ impl GetTagRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetTagRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = Tag;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Tag>;
@@ -1008,7 +1019,7 @@ impl ListDownloadsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<Download>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<Download>>;
@@ -1072,7 +1083,7 @@ impl GetDownloadRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetDownloadRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -1157,7 +1168,7 @@ impl From<String> for ListWorkspaceReposRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
-    type Api = Bitbucket;
+    type Api = BitbucketApi;
     type Success = PaginatedResponse<Repository>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PaginatedResponse<Repository>>;

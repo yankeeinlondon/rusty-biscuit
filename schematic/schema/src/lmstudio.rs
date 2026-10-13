@@ -28,7 +28,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = LmStudio::new()?;
+//!     let client = LmStudio::new();
 //!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -40,23 +40,26 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = LmStudio::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = LmStudio::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::lmstudio::*;
 /// The LmStudio API: LM Studio v1 native REST API for local LLM inference and model management
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum LmStudio {}
-/// A client for the [`LmStudio`] API.
-pub type LmStudioClient = schematic_runtime::Client<LmStudio>;
-impl schematic_runtime::Api for LmStudio {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct LmStudio(schematic_runtime::Client<LmStudioApi>);
+/// The tag of the [`LmStudio`] API: each of its request types names it as `EndpointSpec::Api`, so that [`LmStudio`] sends only this API's requests. Callers never write it.
+pub enum LmStudioApi {}
+impl schematic_runtime::Api for LmStudioApi {
     const NAME: &'static str = "LmStudio";
 }
+schematic_runtime::api_client!(LmStudio, LmStudioApi);
 impl LmStudio {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://localhost:1234";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -74,19 +77,16 @@ impl LmStudio {
                     }),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<LmStudioClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for LmStudio {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `Chat` endpoint.
@@ -120,7 +120,7 @@ impl From<ChatBody> for ChatRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ChatRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -161,7 +161,7 @@ impl schematic_runtime::EndpointSpec for ChatRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListModelsResponse>;
@@ -213,7 +213,7 @@ impl From<LoadModelBody> for LoadModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for LoadModelRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = LoadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<LoadModelResponse>;
@@ -272,7 +272,7 @@ impl From<UnloadModelBody> for UnloadModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnloadModelRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = UnloadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UnloadModelResponse>;
@@ -331,7 +331,7 @@ impl From<DownloadModelBody> for DownloadModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DownloadModelRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -390,7 +390,7 @@ impl From<DownloadStatusBody> for GetDownloadStatusRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetDownloadStatusRequest {
-    type Api = LmStudio;
+    type Api = LmStudioApi;
     type Success = DownloadStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DownloadStatusResponse>;

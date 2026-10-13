@@ -68,7 +68,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = ElevenLabs::new()?;
+//!     let client = ElevenLabs::new();
 //!     let response = client.send(ListVoicesRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -80,7 +80,7 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = ElevenLabs::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = ElevenLabs::new().base_url("https://staging.example.com/v1");
 //! ```
 pub mod requests;
 pub mod responses;
@@ -88,17 +88,20 @@ pub use requests::*;
 pub use responses::*;
 /// The ElevenLabs API: ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum ElevenLabs {}
-/// A client for the [`ElevenLabs`] API.
-pub type ElevenLabsClient = schematic_runtime::Client<ElevenLabs>;
-impl schematic_runtime::Api for ElevenLabs {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct ElevenLabs(schematic_runtime::Client<ElevenLabsApi>);
+/// The tag of the [`ElevenLabs`] API: each of its request types names it as `EndpointSpec::Api`, so that [`ElevenLabs`] sends only this API's requests. Callers never write it.
+pub enum ElevenLabsApi {}
+impl schematic_runtime::Api for ElevenLabsApi {
     const NAME: &'static str = "ElevenLabs";
 }
+schematic_runtime::api_client!(ElevenLabs, ElevenLabsApi);
 impl ElevenLabs {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://api.elevenlabs.io";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -126,18 +129,15 @@ impl ElevenLabs {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<ElevenLabsClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for ElevenLabs {
+    fn default() -> Self {
+        Self::new()
     }
 }

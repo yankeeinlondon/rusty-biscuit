@@ -36,7 +36,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Gitea::new()?;
+//!     let client = Gitea::new();
 //!     let response = client.send(GetRepositoryRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -48,24 +48,27 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = Gitea::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = Gitea::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::gitea::*;
 use crate::shared::Paginated;
 /// The Gitea API: Gitea REST API v1.25+ for repository, PR, issue, and release workflows
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum Gitea {}
-/// A client for the [`Gitea`] API.
-pub type GiteaClient = schematic_runtime::Client<Gitea>;
-impl schematic_runtime::Api for Gitea {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct Gitea(schematic_runtime::Client<GiteaApi>);
+/// The tag of the [`Gitea`] API: each of its request types names it as `EndpointSpec::Api`, so that [`Gitea`] sends only this API's requests. Callers never write it.
+pub enum GiteaApi {}
+impl schematic_runtime::Api for GiteaApi {
     const NAME: &'static str = "Gitea";
 }
+schematic_runtime::api_client!(Gitea, GiteaApi);
 impl Gitea {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://gitea.example.com/api/v1";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some("https://docs.gitea.com/api/1.25/");
@@ -91,20 +94,19 @@ impl Gitea {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
-            .default_header("Accept", "application/json")
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(
+            schematic_runtime::Client::new(Self::definition())
+                .default_header("Accept", "application/json"),
+        )
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<GiteaClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for Gitea {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `GetRepository` endpoint.
@@ -134,7 +136,7 @@ impl GetRepositoryRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = RepositoryInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RepositoryInfo>;
@@ -192,7 +194,7 @@ impl GetGitTreeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = GitTreeResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GitTreeResponse>;
@@ -251,7 +253,7 @@ impl GetGitTreeRecursiveRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetGitTreeRecursiveRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = GitTreeResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GitTreeResponse>;
@@ -310,7 +312,7 @@ impl GetRepositoryContentRawRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -397,7 +399,7 @@ impl ListPullRequestsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<PullRequestSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<PullRequestSummary>>;
@@ -485,7 +487,7 @@ impl ListPullRequestFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<PullRequestFile>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<PullRequestFile>>;
@@ -579,7 +581,7 @@ impl ListIssuesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<IssueSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<IssueSummary>>;
@@ -649,7 +651,7 @@ impl GetIssueRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = IssueSummary;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<IssueSummary>;
@@ -726,7 +728,7 @@ impl ListIssueCommentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<IssueComment>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<IssueComment>>;
@@ -809,7 +811,7 @@ impl ListIssueTimelineRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<TimelineEvent>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<TimelineEvent>>;
@@ -885,7 +887,7 @@ impl ListTagsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<RepoTag>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoTag>>;
@@ -978,7 +980,7 @@ impl ListReleasesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<Release>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Release>>;
@@ -1048,7 +1050,7 @@ impl GetBranchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetBranchRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Branch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Branch>;
@@ -1107,7 +1109,7 @@ impl GetTagReferenceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<GitRef>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<GitRef>>;
@@ -1166,7 +1168,7 @@ impl GetAnnotatedTagRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = AnnotatedTagObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AnnotatedTagObject>;
@@ -1251,7 +1253,7 @@ impl From<String> for ListOrgReposRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
-    type Api = Gitea;
+    type Api = GiteaApi;
     type Success = Vec<RepositoryInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepositoryInfo>>;

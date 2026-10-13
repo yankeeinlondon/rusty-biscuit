@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::OpenAI;
+use super::OpenAIApi;
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -34,7 +34,7 @@ impl From<CreateSpeechRequest2> for CreateSpeechRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -231,7 +231,7 @@ impl From<CreateTranscriptionForm> for CreateTranscriptionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateTranscriptionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -337,7 +337,7 @@ impl From<CreateTranslationForm> for CreateTranslationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -396,7 +396,7 @@ impl ListVoiceConsentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListVoiceConsentsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceConsentListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceConsentListResource>;
@@ -494,7 +494,7 @@ impl From<CreateVoiceConsentForm> for CreateVoiceConsentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVoiceConsentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceConsentResource>;
@@ -551,7 +551,7 @@ impl From<String> for GetVoiceConsentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVoiceConsentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceConsentResource>;
@@ -606,7 +606,7 @@ impl UpdateVoiceConsentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateVoiceConsentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceConsentResource>;
@@ -673,7 +673,7 @@ impl From<String> for DeleteVoiceConsentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceConsentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceConsentDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceConsentDeletedResource>;
@@ -768,7 +768,7 @@ impl From<CreateVoiceForm> for CreateVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VoiceResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceResource>;
@@ -827,7 +827,7 @@ impl ListBatchesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListBatchesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListBatchesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListBatchesResponse>;
@@ -885,7 +885,7 @@ impl From<CreateBatchRequest2> for CreateBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Batch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Batch>;
@@ -947,7 +947,7 @@ impl From<String> for RetrieveBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Batch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Batch>;
@@ -1004,7 +1004,7 @@ impl From<String> for CancelBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Batch;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Batch>;
@@ -1096,7 +1096,7 @@ impl ListChatCompletionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ChatCompletionList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ChatCompletionList>;
@@ -1163,7 +1163,7 @@ impl From<CreateChatCompletionRequest2> for CreateChatCompletionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
@@ -1227,7 +1227,7 @@ impl From<String> for GetChatCompletionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetChatCompletionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
@@ -1281,7 +1281,7 @@ impl UpdateChatCompletionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateChatCompletionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
@@ -1347,7 +1347,7 @@ impl From<String> for DeleteChatCompletionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ChatCompletionDeleted;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ChatCompletionDeleted>;
@@ -1441,7 +1441,7 @@ impl From<String> for GetChatCompletionMessagesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ChatCompletionMessageList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ChatCompletionMessageList>;
@@ -1505,7 +1505,7 @@ impl From<CreateCompletionRequest2> for CreateCompletionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateCompletionResponse>;
@@ -1593,7 +1593,7 @@ impl ListContainersRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListContainersRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerListResource>;
@@ -1657,7 +1657,7 @@ impl From<CreateContainerBody> for CreateContainerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateContainerRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerResource>;
@@ -1721,7 +1721,7 @@ impl From<String> for RetrieveContainerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveContainerRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerResource>;
@@ -1780,7 +1780,7 @@ impl From<String> for DeleteContainerRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteContainerRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -1877,7 +1877,7 @@ impl From<String> for ListContainerFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerFileListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerFileListResource>;
@@ -1940,7 +1940,7 @@ impl CreateContainerFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateContainerFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerFileResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerFileResource>;
@@ -1997,7 +1997,7 @@ impl RetrieveContainerFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveContainerFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ContainerFileResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ContainerFileResource>;
@@ -2048,7 +2048,7 @@ impl DeleteContainerFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteContainerFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2099,7 +2099,7 @@ impl RetrieveContainerFileContentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -2218,7 +2218,7 @@ impl From<String> for ListConversationItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationItemList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationItemList>;
@@ -2298,7 +2298,7 @@ impl CreateConversationItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationItemList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationItemList>;
@@ -2372,7 +2372,7 @@ impl GetConversationItemRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetConversationItemRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationItem;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationItem>;
@@ -2428,7 +2428,7 @@ impl DeleteConversationItemRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationResource>;
@@ -2483,7 +2483,7 @@ impl From<CreateEmbeddingRequest2> for CreateEmbeddingRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateEmbeddingResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateEmbeddingResponse>;
@@ -2570,7 +2570,7 @@ impl ListEvalsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListEvalsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalList>;
@@ -2634,7 +2634,7 @@ impl From<CreateEvalRequest2> for CreateEvalRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateEvalRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Eval;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Eval>;
@@ -2694,7 +2694,7 @@ impl From<String> for GetEvalRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetEvalRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Eval;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Eval>;
@@ -2746,7 +2746,7 @@ impl UpdateEvalRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateEvalRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Eval;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Eval>;
@@ -2806,7 +2806,7 @@ impl From<String> for DeleteEvalRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -2909,7 +2909,7 @@ impl From<String> for GetEvalRunsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRunList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRunList>;
@@ -2975,7 +2975,7 @@ impl CreateEvalRunRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateEvalRunRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRun>;
@@ -3032,7 +3032,7 @@ impl GetEvalRunRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRun>;
@@ -3083,7 +3083,7 @@ impl CancelEvalRunRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelEvalRunRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRun>;
@@ -3134,7 +3134,7 @@ impl DeleteEvalRunRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteEvalRunRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -3223,7 +3223,7 @@ impl GetEvalRunOutputItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRunOutputItemList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRunOutputItemList>;
@@ -3293,7 +3293,7 @@ impl GetEvalRunOutputItemRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = EvalRunOutputItem;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EvalRunOutputItem>;
@@ -3378,7 +3378,7 @@ impl ListFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListFilesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListFilesResponse>;
@@ -3484,7 +3484,7 @@ impl From<CreateFileForm> for CreateFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OpenAIFile;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OpenAIFile>;
@@ -3537,7 +3537,7 @@ impl From<String> for RetrieveFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OpenAIFile;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OpenAIFile>;
@@ -3590,7 +3590,7 @@ impl From<String> for DeleteFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteFileResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteFileResponse>;
@@ -3643,7 +3643,7 @@ impl From<String> for DownloadFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DownloadFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -3697,7 +3697,7 @@ impl From<RunGraderRequest2> for RunGraderRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RunGraderRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RunGraderResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RunGraderResponse>;
@@ -3756,7 +3756,7 @@ impl From<ValidateGraderRequest2> for ValidateGraderRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ValidateGraderRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ValidateGraderResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ValidateGraderResponse>;
@@ -3866,7 +3866,7 @@ impl From<String> for ListFineTuningCheckpointPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListFineTuningCheckpointPermissionResponse>;
@@ -3936,7 +3936,7 @@ impl CreateFineTuningCheckpointPermissionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateFineTuningCheckpointPermissionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListFineTuningCheckpointPermissionResponse>;
@@ -3997,7 +3997,7 @@ impl DeleteFineTuningCheckpointPermissionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteFineTuningCheckpointPermissionResponse>;
@@ -4071,7 +4071,7 @@ impl ListPaginatedFineTuningJobsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListPaginatedFineTuningJobsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListPaginatedFineTuningJobsResponse>;
@@ -4132,7 +4132,7 @@ impl From<CreateFineTuningJobRequest2> for CreateFineTuningJobRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FineTuningJob>;
@@ -4196,7 +4196,7 @@ impl From<String> for RetrieveFineTuningJobRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveFineTuningJobRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FineTuningJob>;
@@ -4256,7 +4256,7 @@ impl From<String> for CancelFineTuningJobRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelFineTuningJobRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FineTuningJob>;
@@ -4340,7 +4340,7 @@ impl From<String> for ListFineTuningJobCheckpointsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListFineTuningJobCheckpointsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListFineTuningJobCheckpointsResponse>;
@@ -4430,7 +4430,7 @@ impl From<String> for ListFineTuningEventsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListFineTuningJobEventsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListFineTuningJobEventsResponse>;
@@ -4496,7 +4496,7 @@ impl From<String> for PauseFineTuningJobRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PauseFineTuningJobRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FineTuningJob>;
@@ -4556,7 +4556,7 @@ impl From<String> for ResumeFineTuningJobRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FineTuningJob>;
@@ -4611,7 +4611,7 @@ impl From<EditImageBodyJsonParam> for CreateImageEditRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ImagesResponse>;
@@ -4670,7 +4670,7 @@ impl From<CreateImageRequest2> for CreateImageRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateImageRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ImagesResponse>;
@@ -4791,7 +4791,7 @@ impl From<CreateImageVariationForm> for CreateImageVariationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ImagesResponse>;
@@ -4825,7 +4825,7 @@ impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListModelsResponse>;
@@ -4878,7 +4878,7 @@ impl From<String> for RetrieveModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Model;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Model>;
@@ -4931,7 +4931,7 @@ impl From<String> for DeleteModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteModelRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteModelResponse>;
@@ -4983,7 +4983,7 @@ impl From<CreateModerationRequest2> for CreateModerationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateModerationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CreateModerationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateModerationResponse>;
@@ -5059,7 +5059,7 @@ impl AdminApiKeysListRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ApiKeyList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ApiKeyList>;
@@ -5120,7 +5120,7 @@ impl From<serde_json::Value> for AdminApiKeysCreateRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysCreateRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AdminApiKeyCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AdminApiKeyCreateResponse>;
@@ -5180,7 +5180,7 @@ impl From<String> for AdminApiKeysGetRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysGetRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AdminApiKey;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AdminApiKey>;
@@ -5236,7 +5236,7 @@ impl From<String> for AdminApiKeysDeleteRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -5379,7 +5379,7 @@ impl ListAuditLogsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListAuditLogsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListAuditLogsResponse>;
@@ -5491,7 +5491,7 @@ impl ListOrganizationCertificatesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListCertificatesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListCertificatesResponse>;
@@ -5552,7 +5552,7 @@ impl From<UploadCertificateRequest2> for UploadCertificateRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Certificate>;
@@ -5611,7 +5611,7 @@ impl From<ToggleCertificatesRequest> for ActivateOrganizationCertificatesRequest
     }
 }
 impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationCertificateActivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationCertificateActivationResponse>;
@@ -5670,7 +5670,7 @@ impl From<ToggleCertificatesRequest> for DeactivateOrganizationCertificatesReque
     }
 }
 impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationCertificateDeactivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationCertificateDeactivationResponse>;
@@ -5747,7 +5747,7 @@ impl From<String> for GetCertificateRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetCertificateRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Certificate>;
@@ -5810,7 +5810,7 @@ impl ModifyCertificateRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ModifyCertificateRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Certificate>;
@@ -5877,7 +5877,7 @@ impl From<String> for DeleteCertificateRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteCertificateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteCertificateResponse>;
@@ -5995,7 +5995,7 @@ impl UsageCostsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageCostsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -6059,7 +6059,7 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveOrganizationDataRetentionRequest {}
 impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationDataRetention>;
@@ -6112,7 +6112,7 @@ for UpdateOrganizationDataRetentionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationDataRetention>;
@@ -6190,7 +6190,7 @@ impl ListGroupsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListGroupsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupListResource>;
@@ -6251,7 +6251,7 @@ impl From<CreateGroupBody> for CreateGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupResponse>;
@@ -6313,7 +6313,7 @@ impl From<String> for RetrieveGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupResponse>;
@@ -6367,7 +6367,7 @@ impl UpdateGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupResourceWithSuccess;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupResourceWithSuccess>;
@@ -6431,7 +6431,7 @@ impl From<String> for DeleteGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupDeletedResource>;
@@ -6525,7 +6525,7 @@ impl From<String> for ListGroupRoleAssignmentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleListResource>;
@@ -6592,7 +6592,7 @@ impl AssignGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AssignGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupRoleAssignment>;
@@ -6650,7 +6650,7 @@ impl RetrieveGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
@@ -6701,7 +6701,7 @@ impl UnassignGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
@@ -6798,7 +6798,7 @@ impl From<String> for ListGroupUsersRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UserListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserListResource>;
@@ -6862,7 +6862,7 @@ impl AddGroupUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AddGroupUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupUserAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupUserAssignment>;
@@ -6920,7 +6920,7 @@ impl RetrieveGroupUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupMemberUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupMemberUser>;
@@ -6971,7 +6971,7 @@ impl RemoveGroupUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupUserDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupUserDeletedResource>;
@@ -7033,7 +7033,7 @@ impl ListInvitesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListInvitesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = InviteListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<InviteListResponse>;
@@ -7091,7 +7091,7 @@ impl From<InviteRequest> for InviteUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for InviteUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Invite;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Invite>;
@@ -7155,7 +7155,7 @@ impl From<String> for RetrieveInviteRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveInviteRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Invite;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Invite>;
@@ -7214,7 +7214,7 @@ impl From<String> for DeleteInviteRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteInviteRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = InviteDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<InviteDeleteResponse>;
@@ -7287,7 +7287,7 @@ impl ListProjectsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectListResponse>;
@@ -7348,7 +7348,7 @@ impl From<ProjectCreateRequest> for CreateProjectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Project;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Project>;
@@ -7412,7 +7412,7 @@ impl From<String> for RetrieveProjectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Project;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Project>;
@@ -7467,7 +7467,7 @@ impl ModifyProjectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Project;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Project>;
@@ -7572,7 +7572,7 @@ impl From<String> for ListProjectApiKeysRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectApiKeysRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectApiKeyListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectApiKeyListResponse>;
@@ -7632,7 +7632,7 @@ impl RetrieveProjectApiKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectApiKeyRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectApiKey;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectApiKey>;
@@ -7683,7 +7683,7 @@ impl DeleteProjectApiKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectApiKeyRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectApiKeyDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectApiKeyDeleteResponse>;
@@ -7743,7 +7743,7 @@ impl From<String> for ArchiveProjectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Project;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Project>;
@@ -7841,7 +7841,7 @@ impl From<String> for ListProjectCertificatesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListProjectCertificatesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListProjectCertificatesResponse>;
@@ -7905,7 +7905,7 @@ impl ActivateProjectCertificatesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationProjectCertificateActivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
@@ -7969,7 +7969,7 @@ impl DeactivateProjectCertificatesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationProjectCertificateDeactivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
@@ -8038,7 +8038,7 @@ impl From<String> for RetrieveProjectDataRetentionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectDataRetention>;
@@ -8096,7 +8096,7 @@ impl UpdateProjectDataRetentionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectDataRetention>;
@@ -8198,7 +8198,7 @@ impl From<String> for ListProjectGroupsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectGroupListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectGroupListResource>;
@@ -8262,7 +8262,7 @@ impl AddProjectGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AddProjectGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectGroup;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectGroup>;
@@ -8329,7 +8329,7 @@ impl RetrieveProjectGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectGroup;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectGroup>;
@@ -8383,7 +8383,7 @@ impl RemoveProjectGroupRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RemoveProjectGroupRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectGroupDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectGroupDeletedResource>;
@@ -8443,7 +8443,7 @@ impl From<String> for RetrieveProjectHostedToolPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectHostedToolPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectHostedToolPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectHostedToolPermissions>;
@@ -8501,7 +8501,7 @@ impl UpdateProjectHostedToolPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectHostedToolPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectHostedToolPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectHostedToolPermissions>;
@@ -8568,7 +8568,7 @@ impl From<String> for RetrieveProjectModelPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectModelPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectModelPermissions>;
@@ -8626,7 +8626,7 @@ impl UpdateProjectModelPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectModelPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectModelPermissions>;
@@ -8693,7 +8693,7 @@ impl From<String> for DeleteProjectModelPermissionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectModelPermissionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectModelPermissionsDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectModelPermissionsDeleteResponse>;
@@ -8791,7 +8791,7 @@ impl From<String> for ListProjectRateLimitsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectRateLimitListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectRateLimitListResponse>;
@@ -8862,7 +8862,7 @@ impl UpdateProjectRateLimitsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectRateLimitsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectRateLimit;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectRateLimit>;
@@ -8956,7 +8956,7 @@ impl From<String> for ListProjectServiceAccountsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectServiceAccountListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectServiceAccountListResponse>;
@@ -9020,7 +9020,7 @@ impl CreateProjectServiceAccountRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectServiceAccountRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectServiceAccountCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectServiceAccountCreateResponse>;
@@ -9081,7 +9081,7 @@ impl RetrieveProjectServiceAccountRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectServiceAccount;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectServiceAccount>;
@@ -9144,7 +9144,7 @@ impl UpdateProjectServiceAccountRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectServiceAccount;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectServiceAccount>;
@@ -9206,7 +9206,7 @@ impl DeleteProjectServiceAccountRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectServiceAccountRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectServiceAccountDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectServiceAccountDeleteResponse>;
@@ -9313,7 +9313,7 @@ impl From<String> for ListProjectSpendAlertsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendAlertListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendAlertListResource>;
@@ -9380,7 +9380,7 @@ impl CreateProjectSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
@@ -9438,7 +9438,7 @@ impl RetrieveProjectSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
@@ -9500,7 +9500,7 @@ impl UpdateProjectSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
@@ -9558,7 +9558,7 @@ impl DeleteProjectSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendAlertDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendAlertDeletedResource>;
@@ -9644,7 +9644,7 @@ impl From<String> for ListProjectUsersRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectUserListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectUserListResponse>;
@@ -9705,7 +9705,7 @@ impl CreateProjectUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectUser>;
@@ -9763,7 +9763,7 @@ impl RetrieveProjectUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectUser>;
@@ -9825,7 +9825,7 @@ impl ModifyProjectUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ModifyProjectUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectUser>;
@@ -9883,7 +9883,7 @@ impl DeleteProjectUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectUserDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectUserDeleteResponse>;
@@ -9955,7 +9955,7 @@ impl ListRolesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListRolesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = PublicRoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PublicRoleListResource>;
@@ -10016,7 +10016,7 @@ impl From<PublicCreateOrganizationRoleBody> for CreateRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -10076,7 +10076,7 @@ impl From<String> for RetrieveRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -10133,7 +10133,7 @@ impl UpdateRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -10195,7 +10195,7 @@ impl From<String> for DeleteRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleDeletedResource>;
@@ -10275,7 +10275,7 @@ impl ListOrganizationSpendAlertsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendAlertListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendAlertListResource>;
@@ -10339,7 +10339,7 @@ impl From<CreateSpendAlertBody> for CreateOrganizationSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
@@ -10401,7 +10401,7 @@ impl From<String> for RetrieveOrganizationSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
@@ -10456,7 +10456,7 @@ impl UpdateOrganizationSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
@@ -10521,7 +10521,7 @@ impl From<String> for DeleteOrganizationSpendAlertRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendAlertDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendAlertDeletedResource>;
@@ -10660,7 +10660,7 @@ impl UsageAudioSpeechesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -10836,7 +10836,7 @@ impl UsageAudioTranscriptionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -10985,7 +10985,7 @@ impl UsageCodeInterpreterSessionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -11156,7 +11156,7 @@ impl UsageCompletionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -11335,7 +11335,7 @@ impl UsageEmbeddingsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -11511,7 +11511,7 @@ impl UsageFileSearchCallsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -11705,7 +11705,7 @@ impl UsageImagesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageImagesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -11891,7 +11891,7 @@ impl UsageModerationsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -12040,7 +12040,7 @@ impl UsageVectorStoresRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -12210,7 +12210,7 @@ impl UsageWebSearchCallsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageResponse>;
@@ -12326,7 +12326,7 @@ impl ListUsersRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListUsersRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UserListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserListResponse>;
@@ -12390,7 +12390,7 @@ impl From<String> for RetrieveUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = User;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<User>;
@@ -12444,7 +12444,7 @@ impl ModifyUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ModifyUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = User;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<User>;
@@ -12506,7 +12506,7 @@ impl From<String> for DeleteUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteUserRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UserDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserDeleteResponse>;
@@ -12600,7 +12600,7 @@ impl From<String> for ListUserRoleAssignmentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleListResource>;
@@ -12667,7 +12667,7 @@ impl AssignUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AssignUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UserRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserRoleAssignment>;
@@ -12725,7 +12725,7 @@ impl RetrieveUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
@@ -12776,7 +12776,7 @@ impl UnassignUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnassignUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
@@ -12854,7 +12854,7 @@ impl ListProjectGroupRoleAssignmentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleListResource>;
@@ -12925,7 +12925,7 @@ impl AssignProjectGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AssignProjectGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = GroupRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GroupRoleAssignment>;
@@ -12990,7 +12990,7 @@ impl RetrieveProjectGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
@@ -13049,7 +13049,7 @@ impl UnassignProjectGroupRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
@@ -13145,7 +13145,7 @@ impl From<String> for ListProjectRolesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = PublicRoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PublicRoleListResource>;
@@ -13211,7 +13211,7 @@ impl CreateProjectRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -13268,7 +13268,7 @@ impl RetrieveProjectRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -13330,7 +13330,7 @@ impl UpdateProjectRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Role;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Role>;
@@ -13388,7 +13388,7 @@ impl DeleteProjectRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleDeletedResource>;
@@ -13466,7 +13466,7 @@ impl ListProjectUserRoleAssignmentsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RoleListResource>;
@@ -13537,7 +13537,7 @@ impl AssignProjectUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AssignProjectUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UserRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserRoleAssignment>;
@@ -13602,7 +13602,7 @@ impl RetrieveProjectUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
@@ -13661,7 +13661,7 @@ impl UnassignProjectUserRoleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnassignProjectUserRoleRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
@@ -13749,7 +13749,7 @@ impl From<CreateRealtimeCallForm> for CreateRealtimeCallRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -13804,7 +13804,7 @@ impl AcceptRealtimeCallRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AcceptRealtimeCallRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -13866,7 +13866,7 @@ impl From<String> for HangupRealtimeCallRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for HangupRealtimeCallRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -13920,7 +13920,7 @@ impl ReferRealtimeCallRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ReferRealtimeCallRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -13981,7 +13981,7 @@ impl RejectRealtimeCallRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -14042,7 +14042,7 @@ impl From<RealtimeCreateClientSecretRequest> for CreateRealtimeClientSecretReque
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RealtimeCreateClientSecretResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RealtimeCreateClientSecretResponse>;
@@ -14101,7 +14101,7 @@ impl From<RealtimeSessionCreateRequest> for CreateRealtimeSessionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RealtimeSessionCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RealtimeSessionCreateResponse>;
@@ -14161,7 +14161,7 @@ for CreateRealtimeTranscriptionSessionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RealtimeTranscriptionSessionCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RealtimeTranscriptionSessionCreateResponse>;
@@ -14221,7 +14221,7 @@ for CreateRealtimeTranslationClientSecretRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = RealtimeTranslationClientSecretCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
@@ -14282,7 +14282,7 @@ impl From<CreateResponse> for CreateResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Response;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Response>;
@@ -14406,7 +14406,7 @@ impl From<String> for GetResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Response;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Response>;
@@ -14479,7 +14479,7 @@ impl From<String> for DeleteResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -14538,7 +14538,7 @@ impl From<String> for CancelResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Response;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Response>;
@@ -14651,7 +14651,7 @@ impl From<String> for ListInputItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ResponseItemList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ResponseItemList>;
@@ -14720,7 +14720,7 @@ impl From<CreateUploadRequest2> for CreateUploadRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateUploadRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Upload;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Upload>;
@@ -14784,7 +14784,7 @@ impl From<String> for CancelUploadRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelUploadRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Upload;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Upload>;
@@ -14838,7 +14838,7 @@ impl CompleteUploadRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CompleteUploadRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = Upload;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Upload>;
@@ -14916,7 +14916,7 @@ impl AddUploadPartRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = UploadPart;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UploadPart>;
@@ -15000,7 +15000,7 @@ impl ListVectorStoresRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListVectorStoresResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListVectorStoresResponse>;
@@ -15064,7 +15064,7 @@ impl From<CreateVectorStoreRequest2> for CreateVectorStoreRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreObject>;
@@ -15128,7 +15128,7 @@ impl From<String> for GetVectorStoreRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreObject>;
@@ -15185,7 +15185,7 @@ impl ModifyVectorStoreRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ModifyVectorStoreRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreObject>;
@@ -15251,7 +15251,7 @@ impl From<String> for DeleteVectorStoreRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteVectorStoreResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteVectorStoreResponse>;
@@ -15308,7 +15308,7 @@ impl CreateVectorStoreFileBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
@@ -15366,7 +15366,7 @@ impl GetVectorStoreFileBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreFileBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
@@ -15418,7 +15418,7 @@ impl CancelVectorStoreFileBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelVectorStoreFileBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
@@ -15519,7 +15519,7 @@ impl ListFilesInVectorStoreBatchRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListVectorStoreFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListVectorStoreFilesResponse>;
@@ -15656,7 +15656,7 @@ impl From<String> for ListVectorStoreFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ListVectorStoreFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListVectorStoreFilesResponse>;
@@ -15729,7 +15729,7 @@ impl CreateVectorStoreFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
@@ -15787,7 +15787,7 @@ impl GetVectorStoreFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
@@ -15849,7 +15849,7 @@ impl UpdateVectorStoreFileAttributesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateVectorStoreFileAttributesRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
@@ -15907,7 +15907,7 @@ impl DeleteVectorStoreFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVectorStoreFileRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeleteVectorStoreFileResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeleteVectorStoreFileResponse>;
@@ -15958,7 +15958,7 @@ impl RetrieveVectorStoreFileContentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreFileContentResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreFileContentResponse>;
@@ -16017,7 +16017,7 @@ impl SearchVectorStoreRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VectorStoreSearchResultsPage;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VectorStoreSearchResultsPage>;
@@ -16079,7 +16079,7 @@ impl From<CreateConversationBody> for CreateConversationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateConversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationResource>;
@@ -16143,7 +16143,7 @@ impl From<String> for GetConversationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetConversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationResource>;
@@ -16200,7 +16200,7 @@ impl UpdateConversationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateConversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ConversationResource>;
@@ -16266,7 +16266,7 @@ impl From<String> for DeleteConversationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedConversationResource>;
@@ -16302,7 +16302,7 @@ impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetorganizationspendlimitRequest {}
 impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendLimitResource>;
@@ -16354,7 +16354,7 @@ impl From<UpdateOrganizationSpendLimitBody> for UpdateorganizationspendlimitRequ
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendLimitResource>;
@@ -16395,7 +16395,7 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteorganizationspendlimitRequest {}
 impl schematic_runtime::EndpointSpec for DeleteorganizationspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = OrganizationSpendLimitDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OrganizationSpendLimitDeletedResource>;
@@ -16452,7 +16452,7 @@ impl From<String> for GetprojectspendlimitRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendLimitResource>;
@@ -16510,7 +16510,7 @@ impl UpdateprojectspendlimitRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendLimitResource>;
@@ -16577,7 +16577,7 @@ impl From<String> for DeleteprojectspendlimitRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteprojectspendlimitRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProjectSpendLimitDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProjectSpendLimitDeletedResource>;
@@ -16639,7 +16639,7 @@ impl CreateanAPIkeyforaserviceaccountRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateanAPIkeyforaserviceaccountRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ServiceAccountApiKeyBody;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ServiceAccountApiKeyBody>;
@@ -16719,7 +16719,7 @@ impl From<CreatecontentprovenancecheckForm> for CreatecontentprovenancecheckRequ
     }
 }
 impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ProvenanceResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ProvenanceResource>;
@@ -16788,7 +16788,7 @@ impl ListVideosRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListVideosRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoListResource>;
@@ -16849,7 +16849,7 @@ impl From<CreateVideoJsonBody> for CreateVideoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoResource>;
@@ -16935,7 +16935,7 @@ impl From<CreateVideoCharacterForm> for CreateVideoCharacterRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoCharacterRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoCharacterResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoCharacterResource>;
@@ -16992,7 +16992,7 @@ impl From<String> for GetVideoCharacterRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoCharacterResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoCharacterResource>;
@@ -17046,7 +17046,7 @@ impl From<CreateVideoEditJsonBody> for CreateVideoEditRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoResource>;
@@ -17105,7 +17105,7 @@ impl From<CreateVideoExtendJsonBody> for CreateVideoExtendRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoResource>;
@@ -17167,7 +17167,7 @@ impl From<String> for GetVideoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVideoRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoResource>;
@@ -17224,7 +17224,7 @@ impl From<String> for DeleteVideoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVideoRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedVideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedVideoResource>;
@@ -17296,7 +17296,7 @@ impl From<String> for RetrieveVideoContentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -17353,7 +17353,7 @@ impl CreateVideoRemixRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VideoResource>;
@@ -17414,7 +17414,7 @@ impl From<TokenCountsBody> for GetinputtokencountsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = TokenCountsResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<TokenCountsResource>;
@@ -17473,7 +17473,7 @@ impl From<CompactResponseMethodPublicBody> for CompactconversationRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CompactconversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = CompactResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CompactResource>;
@@ -17549,7 +17549,7 @@ impl ListSkillsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListSkillsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillListResource>;
@@ -17610,7 +17610,7 @@ impl From<CreateSkillBody> for CreateSkillRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSkillRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillResource>;
@@ -17672,7 +17672,7 @@ impl From<String> for GetSkillRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSkillRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillResource>;
@@ -17726,7 +17726,7 @@ impl UpdateSkillDefaultVersionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateSkillDefaultVersionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillResource>;
@@ -17790,7 +17790,7 @@ impl From<String> for DeleteSkillRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteSkillRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedSkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedSkillResource>;
@@ -17847,7 +17847,7 @@ impl From<String> for GetSkillContentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -17941,7 +17941,7 @@ impl From<String> for ListSkillVersionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillVersionListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillVersionListResource>;
@@ -18004,7 +18004,7 @@ impl CreateSkillVersionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSkillVersionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillVersionResource>;
@@ -18061,7 +18061,7 @@ impl GetSkillVersionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSkillVersionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = SkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SkillVersionResource>;
@@ -18112,7 +18112,7 @@ impl DeleteSkillVersionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteSkillVersionRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedSkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedSkillVersionResource>;
@@ -18163,7 +18163,7 @@ impl GetSkillVersionContentRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSkillVersionContentRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<serde_json::Value>;
@@ -18223,7 +18223,7 @@ impl From<String> for CancelChatSessionMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ChatSessionResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ChatSessionResource>;
@@ -18278,7 +18278,7 @@ impl From<CreateChatSessionBody> for CreateChatSessionMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ChatSessionResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ChatSessionResource>;
@@ -18388,7 +18388,7 @@ impl From<String> for ListThreadItemsMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ThreadItemListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ThreadItemListResource>;
@@ -18460,7 +18460,7 @@ impl From<String> for GetThreadMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetThreadMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ThreadResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ThreadResource>;
@@ -18519,7 +18519,7 @@ impl From<String> for DeleteThreadMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = DeletedThreadResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DeletedThreadResource>;
@@ -18608,7 +18608,7 @@ impl ListThreadsMethodRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ThreadListResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ThreadListResource>;
@@ -18684,7 +18684,7 @@ impl From<BetaCreateResponse> for BetaCreateResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaCreateResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaResponse>;
@@ -18829,7 +18829,7 @@ impl From<String> for BetaGetResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaGetResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaResponse>;
@@ -18926,7 +18926,7 @@ impl From<String> for BetaDeleteResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaDeleteResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -19009,7 +19009,7 @@ impl From<String> for BetaCancelResponseRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaCancelResponseRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaResponse>;
@@ -19082,7 +19082,7 @@ impl From<BetaCompactResponseMethodPublicBody> for BetaCompactconversationReques
     }
 }
 impl schematic_runtime::EndpointSpec for BetaCompactconversationRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaCompactResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaCompactResource>;
@@ -19221,7 +19221,7 @@ impl From<String> for BetaListInputItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaListInputItemsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaResponseItemList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaResponseItemList>;
@@ -19308,7 +19308,7 @@ impl From<BetaTokenCountsBody> for BetaGetinputtokencountsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for BetaGetinputtokencountsRequest {
-    type Api = OpenAI;
+    type Api = OpenAIApi;
     type Success = BetaTokenCountsResource;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BetaTokenCountsResource>;

@@ -17,17 +17,20 @@ pub use requests::*;
 pub use responses::*;
 /// The EmqxBasic API: EMQX Broker REST API with Basic Authentication (API Key + Secret)
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum EmqxBasic {}
-/// A client for the [`EmqxBasic`] API.
-pub type EmqxBasicClient = schematic_runtime::Client<EmqxBasic>;
-impl schematic_runtime::Api for EmqxBasic {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct EmqxBasic(schematic_runtime::Client<EmqxBasicApi>);
+/// The tag of the [`EmqxBasic`] API: each of its request types names it as `EndpointSpec::Api`, so that [`EmqxBasic`] sends only this API's requests. Callers never write it.
+pub enum EmqxBasicApi {}
+impl schematic_runtime::Api for EmqxBasicApi {
     const NAME: &'static str = "EmqxBasic";
 }
+schematic_runtime::api_client!(EmqxBasic, EmqxBasicApi);
 impl EmqxBasic {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://localhost:18083/api/v5";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -50,34 +53,45 @@ impl EmqxBasic {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<EmqxBasicClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+    /// Sends HTTP Basic `username` and `password` when a call
+    /// supplies no credential, replacing any credential set
+    /// before.
+    #[must_use]
+    pub fn basic_auth(
+        self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        self.credentials(schematic_runtime::Credential::basic(username, password))
+    }
+}
+impl Default for EmqxBasic {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// The EmqxBearer API: EMQX Broker REST API with Bearer Token authentication (JWT)
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum EmqxBearer {}
-/// A client for the [`EmqxBearer`] API.
-pub type EmqxBearerClient = schematic_runtime::Client<EmqxBearer>;
-impl schematic_runtime::Api for EmqxBearer {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct EmqxBearer(schematic_runtime::Client<EmqxBearerApi>);
+/// The tag of the [`EmqxBearer`] API: each of its request types names it as `EndpointSpec::Api`, so that [`EmqxBearer`] sends only this API's requests. Callers never write it.
+pub enum EmqxBearerApi {}
+impl schematic_runtime::Api for EmqxBearerApi {
     const NAME: &'static str = "EmqxBearer";
 }
+schematic_runtime::api_client!(EmqxBearer, EmqxBearerApi);
 impl EmqxBearer {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://localhost:18083/api/v5";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -103,18 +117,15 @@ impl EmqxBearer {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<EmqxBearerClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for EmqxBearer {
+    fn default() -> Self {
+        Self::new()
     }
 }

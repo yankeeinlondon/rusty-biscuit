@@ -35,7 +35,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = UnfoldedCircleCoreRest::new()?;
+//!     let client = UnfoldedCircleCoreRest::new();
 //!     let response = client.send(GetSystemInfoCoreRestRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -47,25 +47,26 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = UnfoldedCircleCoreRest::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = UnfoldedCircleCoreRest::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::unfolded_circle::core_rest::*;
 /// The UnfoldedCircleCoreRest API: Unfolded Circle Core REST API
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum UnfoldedCircleCoreRest {}
-/// A client for the [`UnfoldedCircleCoreRest`] API.
-pub type UnfoldedCircleCoreRestClient = schematic_runtime::Client<
-    UnfoldedCircleCoreRest,
->;
-impl schematic_runtime::Api for UnfoldedCircleCoreRest {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct UnfoldedCircleCoreRest(schematic_runtime::Client<UnfoldedCircleCoreRestApi>);
+/// The tag of the [`UnfoldedCircleCoreRest`] API: each of its request types names it as `EndpointSpec::Api`, so that [`UnfoldedCircleCoreRest`] sends only this API's requests. Callers never write it.
+pub enum UnfoldedCircleCoreRestApi {}
+impl schematic_runtime::Api for UnfoldedCircleCoreRestApi {
     const NAME: &'static str = "UnfoldedCircleCoreRest";
 }
+schematic_runtime::api_client!(UnfoldedCircleCoreRest, UnfoldedCircleCoreRestApi);
 impl UnfoldedCircleCoreRest {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://remote.local/api";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -91,19 +92,16 @@ impl UnfoldedCircleCoreRest {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<UnfoldedCircleCoreRestClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for UnfoldedCircleCoreRest {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `Login` endpoint.
@@ -137,7 +135,7 @@ impl From<LoginRequest> for LoginCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = ApiResponseMessage;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ApiResponseMessage>;
@@ -178,7 +176,7 @@ impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -212,7 +210,7 @@ impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSystemInfoCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = SystemInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SystemInfo>;
@@ -246,7 +244,7 @@ impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportBackupCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for ExportBackupCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -314,7 +312,7 @@ impl From<RestoreBackupForm> for RestoreBackupCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RestoreBackupCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = BackupRestoreReportItems;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BackupRestoreReportItems>;
@@ -382,7 +380,7 @@ impl UploadResourceCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = ResourceItems;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ResourceItems>;
@@ -435,7 +433,7 @@ impl GetResourceCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetResourceCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -506,7 +504,7 @@ impl From<InstallCustomIntegrationForm> for InstallCustomIntegrationCoreRestRequ
     }
 }
 impl schematic_runtime::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = IntegrationDriverInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<IntegrationDriverInfo>;
@@ -574,7 +572,7 @@ impl UploadCustomIrCodeSetCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = CodeSetUploadResult;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CodeSetUploadResult>;
@@ -647,7 +645,7 @@ impl InstallCustomComponentCoreRestRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = CustomInstall;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CustomInstall>;
@@ -684,7 +682,7 @@ impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryLogsTextCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for QueryLogsTextCoreRestRequest {
-    type Api = UnfoldedCircleCoreRest;
+    type Api = UnfoldedCircleCoreRestApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;

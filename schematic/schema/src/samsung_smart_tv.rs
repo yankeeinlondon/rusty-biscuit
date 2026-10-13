@@ -33,7 +33,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = SamsungSmartTv::new()?;
+//!     let client = SamsungSmartTv::new();
 //!     let response = client.send(GetDeviceInfoRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -45,23 +45,26 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = SamsungSmartTv::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = SamsungSmartTv::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::samsung_smart_tv::*;
 /// The SamsungSmartTv API: Samsung Smart TV LAN API (S95C-focused modern Tizen subset)
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum SamsungSmartTv {}
-/// A client for the [`SamsungSmartTv`] API.
-pub type SamsungSmartTvClient = schematic_runtime::Client<SamsungSmartTv>;
-impl schematic_runtime::Api for SamsungSmartTv {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct SamsungSmartTv(schematic_runtime::Client<SamsungSmartTvApi>);
+/// The tag of the [`SamsungSmartTv`] API: each of its request types names it as `EndpointSpec::Api`, so that [`SamsungSmartTv`] sends only this API's requests. Callers never write it.
+pub enum SamsungSmartTvApi {}
+impl schematic_runtime::Api for SamsungSmartTvApi {
     const NAME: &'static str = "SamsungSmartTv";
 }
+schematic_runtime::api_client!(SamsungSmartTv, SamsungSmartTvApi);
 impl SamsungSmartTv {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://192.168.1.1:8001";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -73,19 +76,16 @@ impl SamsungSmartTv {
     pub fn definition() -> schematic_runtime::ApiDefinition {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<SamsungSmartTvClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for SamsungSmartTv {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `GetDeviceInfo` endpoint.
@@ -101,7 +101,7 @@ impl SamsungSmartTv {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDeviceInfoRequest {}
 impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = SamsungDeviceInfoResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SamsungDeviceInfoResponse>;
@@ -135,7 +135,7 @@ impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetServerLogsRequest {}
 impl schematic_runtime::EndpointSpec for GetServerLogsRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -188,7 +188,7 @@ impl From<String> for LaunchApplicationByIdRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for LaunchApplicationByIdRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -245,7 +245,7 @@ impl From<String> for LaunchApplicationByNameRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for LaunchApplicationByNameRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -300,7 +300,7 @@ impl From<String> for GetAppStatusRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = SamsungAppStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SamsungAppStatusResponse>;
@@ -355,7 +355,7 @@ impl From<String> for CloseAppRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CloseAppRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -410,7 +410,7 @@ impl From<String> for InstallAppRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for InstallAppRequest {
-    type Api = SamsungSmartTv;
+    type Api = SamsungSmartTvApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;

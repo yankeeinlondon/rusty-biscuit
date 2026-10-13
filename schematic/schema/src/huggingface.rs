@@ -52,7 +52,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = HuggingFaceHub::new()?;
+//!     let client = HuggingFaceHub::new();
 //!     let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -64,23 +64,26 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = HuggingFaceHub::builder().base_url("https://staging.example.com/v1").build()?;
+//! let client = HuggingFaceHub::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::huggingface::*;
 /// The HuggingFaceHub API: Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum HuggingFaceHub {}
-/// A client for the [`HuggingFaceHub`] API.
-pub type HuggingFaceHubClient = schematic_runtime::Client<HuggingFaceHub>;
-impl schematic_runtime::Api for HuggingFaceHub {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct HuggingFaceHub(schematic_runtime::Client<HuggingFaceHubApi>);
+/// The tag of the [`HuggingFaceHub`] API: each of its request types names it as `EndpointSpec::Api`, so that [`HuggingFaceHub`] sends only this API's requests. Callers never write it.
+pub enum HuggingFaceHubApi {}
+impl schematic_runtime::Api for HuggingFaceHubApi {
     const NAME: &'static str = "HuggingFaceHub";
 }
+schematic_runtime::api_client!(HuggingFaceHub, HuggingFaceHubApi);
 impl HuggingFaceHub {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://huggingface.co/api";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -106,19 +109,16 @@ impl HuggingFaceHub {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<HuggingFaceHubClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for HuggingFaceHub {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `ListModels` endpoint.
@@ -134,7 +134,7 @@ impl HuggingFaceHub {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<ModelInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<ModelInfo>>;
@@ -187,7 +187,7 @@ impl From<String> for GetModelRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetModelRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = ModelInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ModelInfo>;
@@ -235,7 +235,7 @@ impl ListModelFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListModelFilesRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<RepoFile>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoFile>>;
@@ -293,7 +293,7 @@ impl GetModelFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetModelFileRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = FileMetadata;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FileMetadata>;
@@ -344,7 +344,7 @@ impl ListModelCommitsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListModelCommitsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<Commit>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Commit>>;
@@ -395,7 +395,7 @@ impl GetModelReadmeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetModelReadmeRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -451,7 +451,7 @@ impl From<String> for ListModelDiscussionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListModelDiscussionsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = DiscussionList;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DiscussionList>;
@@ -499,7 +499,7 @@ impl GetModelCardRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetModelCardRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -536,7 +536,7 @@ impl schematic_runtime::EndpointSpec for GetModelCardRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetsRequest {}
 impl schematic_runtime::EndpointSpec for ListDatasetsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<DatasetInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<DatasetInfo>>;
@@ -589,7 +589,7 @@ impl From<String> for GetDatasetRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetDatasetRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = DatasetInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DatasetInfo>;
@@ -637,7 +637,7 @@ impl ListDatasetFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListDatasetFilesRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<RepoFile>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoFile>>;
@@ -695,7 +695,7 @@ impl GetDatasetFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetDatasetFileRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = FileMetadata;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FileMetadata>;
@@ -746,7 +746,7 @@ impl ListDatasetCommitsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListDatasetCommitsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<Commit>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Commit>>;
@@ -797,7 +797,7 @@ impl GetDatasetReadmeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetDatasetReadmeRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = String;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Text;
@@ -834,7 +834,7 @@ impl schematic_runtime::EndpointSpec for GetDatasetReadmeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpacesRequest {}
 impl schematic_runtime::EndpointSpec for ListSpacesRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<SpaceInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<SpaceInfo>>;
@@ -887,7 +887,7 @@ impl From<String> for GetSpaceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSpaceRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = SpaceInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SpaceInfo>;
@@ -935,7 +935,7 @@ impl ListSpaceFilesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListSpaceFilesRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<RepoFile>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoFile>>;
@@ -993,7 +993,7 @@ impl GetSpaceFileRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetSpaceFileRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = FileMetadata;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<FileMetadata>;
@@ -1048,7 +1048,7 @@ impl From<CreateRepoBody> for CreateRepoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRepoRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = RepoUrl;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<RepoUrl>;
@@ -1107,7 +1107,7 @@ impl From<DeleteRepoBody> for DeleteRepoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteRepoRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1173,7 +1173,7 @@ impl UpdateRepoSettingsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateRepoSettingsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1235,7 +1235,7 @@ impl From<MoveRepoBody> for MoveRepoRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MoveRepoRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1276,7 +1276,7 @@ impl schematic_runtime::EndpointSpec for MoveRepoRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WhoAmIRequest {}
 impl schematic_runtime::EndpointSpec for WhoAmIRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = UserInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserInfo>;
@@ -1331,7 +1331,7 @@ impl From<String> for GetUserRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetUserRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = UserInfo;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserInfo>;
@@ -1388,7 +1388,7 @@ impl From<String> for ListUserReposRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListUserReposRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<RepoInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<RepoInfo>>;
@@ -1445,7 +1445,7 @@ impl From<String> for GetUserCollectionsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetUserCollectionsRequest {
-    type Api = HuggingFaceHub;
+    type Api = HuggingFaceHubApi;
     type Success = Vec<Collection>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<Collection>>;

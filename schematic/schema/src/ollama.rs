@@ -15,17 +15,20 @@ use serde::{Deserialize, Serialize};
 pub use schematic_definitions::ollama::*;
 /// The OllamaNative API: Ollama native REST API for local LLM inference and model management
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum OllamaNative {}
-/// A client for the [`OllamaNative`] API.
-pub type OllamaNativeClient = schematic_runtime::Client<OllamaNative>;
-impl schematic_runtime::Api for OllamaNative {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct OllamaNative(schematic_runtime::Client<OllamaNativeApi>);
+/// The tag of the [`OllamaNative`] API: each of its request types names it as `EndpointSpec::Api`, so that [`OllamaNative`] sends only this API's requests. Callers never write it.
+pub enum OllamaNativeApi {}
+impl schematic_runtime::Api for OllamaNativeApi {
     const NAME: &'static str = "OllamaNative";
 }
+schematic_runtime::api_client!(OllamaNative, OllamaNativeApi);
 impl OllamaNative {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://localhost:11434";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -37,19 +40,16 @@ impl OllamaNative {
     pub fn definition() -> schematic_runtime::ApiDefinition {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<OllamaNativeClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for OllamaNative {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `Generate` endpoint.
@@ -83,7 +83,7 @@ impl From<GenerateBody> for GenerateNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GenerateNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -142,7 +142,7 @@ impl From<ChatBody> for ChatNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ChatNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -201,7 +201,7 @@ impl From<EmbeddingsBody> for EmbeddingsNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for EmbeddingsNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = EmbeddingsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<EmbeddingsResponse>;
@@ -242,7 +242,7 @@ impl schematic_runtime::EndpointSpec for EmbeddingsNativeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsNativeRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListModelsResponse>;
@@ -294,7 +294,7 @@ impl From<ShowModelBody> for ShowModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ShowModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = ShowModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ShowModelResponse>;
@@ -353,7 +353,7 @@ impl From<PullModelBody> for PullModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PullModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -412,7 +412,7 @@ impl From<PushModelBody> for PushModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PushModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -471,7 +471,7 @@ impl From<CopyModelBody> for CopyModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CopyModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -530,7 +530,7 @@ impl From<DeleteModelBody> for DeleteModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = ();
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Empty;
@@ -589,7 +589,7 @@ impl From<CreateModelBody> for CreateModelNativeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateModelNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -630,7 +630,7 @@ impl schematic_runtime::EndpointSpec for CreateModelNativeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRunningModelsNativeRequest {}
 impl schematic_runtime::EndpointSpec for ListRunningModelsNativeRequest {
-    type Api = OllamaNative;
+    type Api = OllamaNativeApi;
     type Success = ListRunningModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListRunningModelsResponse>;
@@ -653,17 +653,20 @@ impl schematic_runtime::EndpointSpec for ListRunningModelsNativeRequest {
 }
 /// The OllamaOpenAI API: Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum OllamaOpenAI {}
-/// A client for the [`OllamaOpenAI`] API.
-pub type OllamaOpenAIClient = schematic_runtime::Client<OllamaOpenAI>;
-impl schematic_runtime::Api for OllamaOpenAI {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct OllamaOpenAI(schematic_runtime::Client<OllamaOpenAIApi>);
+/// The tag of the [`OllamaOpenAI`] API: each of its request types names it as `EndpointSpec::Api`, so that [`OllamaOpenAI`] sends only this API's requests. Callers never write it.
+pub enum OllamaOpenAIApi {}
+impl schematic_runtime::Api for OllamaOpenAIApi {
     const NAME: &'static str = "OllamaOpenAI";
 }
+schematic_runtime::api_client!(OllamaOpenAI, OllamaOpenAIApi);
 impl OllamaOpenAI {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://localhost:11434";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -675,19 +678,16 @@ impl OllamaOpenAI {
     pub fn definition() -> schematic_runtime::ApiDefinition {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<OllamaOpenAIClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for OllamaOpenAI {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `ChatCompletions` endpoint.
@@ -721,7 +721,7 @@ impl From<OpenAIChatCompletionRequest> for ChatCompletionsOaiRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ChatCompletionsOaiRequest {
-    type Api = OllamaOpenAI;
+    type Api = OllamaOpenAIApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -780,7 +780,7 @@ impl From<OpenAICompletionRequest> for CompletionsOaiRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CompletionsOaiRequest {
-    type Api = OllamaOpenAI;
+    type Api = OllamaOpenAIApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -839,7 +839,7 @@ impl From<OpenAIEmbeddingRequest> for EmbeddingsOaiRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for EmbeddingsOaiRequest {
-    type Api = OllamaOpenAI;
+    type Api = OllamaOpenAIApi;
     type Success = OpenAIEmbeddingResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OpenAIEmbeddingResponse>;
@@ -880,7 +880,7 @@ impl schematic_runtime::EndpointSpec for EmbeddingsOaiRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsOaiRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsOaiRequest {
-    type Api = OllamaOpenAI;
+    type Api = OllamaOpenAIApi;
     type Success = OpenAIListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<OpenAIListModelsResponse>;

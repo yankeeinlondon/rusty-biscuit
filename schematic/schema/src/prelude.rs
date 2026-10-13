@@ -2,7 +2,7 @@
 
 //! Convenient re-exports for working with generated API clients.
 //!
-//! This prelude exports each API's marker type and client alias, and
+//! This prelude exports each API's client struct, and
 //! the runtime types every send uses. Request and response types are
 //! **not** re-exported here to avoid naming conflicts. Import them
 //! from specific API modules instead:
@@ -13,26 +13,26 @@
 //!
 //! ## Re-exports
 //!
-//! **APIs and their clients:**
+//! **API clients:**
 //!
-//! - [`Anthropic`] + [`AnthropicClient`]
-//! - [`ArtificialAnalysisData`] + [`ArtificialAnalysisDataClient`]
-//! - [`ArtificialAnalysisCritPt`] + [`ArtificialAnalysisCritPtClient`]
-//! - [`Bitbucket`] + [`BitbucketClient`]
-//! - [`OpenAI`] + [`OpenAIClient`]
-//! - [`ElevenLabs`] + [`ElevenLabsClient`]
-//! - [`Gitea`] + [`GiteaClient`]
-//! - [`GitHub`] + [`GitHubClient`]
-//! - [`GitLab`] + [`GitLabClient`]
-//! - [`HuggingFaceHub`] + [`HuggingFaceHubClient`]
-//! - [`LmStudio`] + [`LmStudioClient`]
-//! - [`OllamaNative`] + [`OllamaNativeClient`]
-//! - [`OllamaOpenAI`] + [`OllamaOpenAIClient`]
-//! - [`EmqxBasic`] + [`EmqxBasicClient`]
-//! - [`EmqxBearer`] + [`EmqxBearerClient`]
-//! - [`Eversolo`] + [`EversoloClient`]
-//! - [`SamsungSmartTv`] + [`SamsungSmartTvClient`]
-//! - [`UnfoldedCircleCoreRest`] + [`UnfoldedCircleCoreRestClient`]
+//! - [`Anthropic`]
+//! - [`ArtificialAnalysisData`]
+//! - [`ArtificialAnalysisCritPt`]
+//! - [`Bitbucket`]
+//! - [`OpenAI`]
+//! - [`ElevenLabs`]
+//! - [`Gitea`]
+//! - [`GitHub`]
+//! - [`GitLab`]
+//! - [`HuggingFaceHub`]
+//! - [`LmStudio`]
+//! - [`OllamaNative`]
+//! - [`OllamaOpenAI`]
+//! - [`EmqxBasic`]
+//! - [`EmqxBearer`]
+//! - [`Eversolo`]
+//! - [`SamsungSmartTv`]
+//! - [`UnfoldedCircleCoreRest`]
 //!
 //! **WebSocket definition helpers:**
 //!
@@ -52,7 +52,7 @@
 //! use schematic_schema::prelude::*;
 //! use schematic_schema::openai::RetrieveModelRequest;
 //!
-//! let client = OpenAI::new()?;
+//! let client = OpenAI::new();
 //! let response = client
 //!     .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
 //!     .await?;
@@ -64,30 +64,24 @@ pub use schematic_runtime::{
     CallOptions, Credential, Deadline, OriginPolicy, RawResponse, Response,
     TransportError,
 };
-pub use crate::anthropic::{Anthropic, AnthropicClient};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisData, ArtificialAnalysisDataClient,
-};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtClient,
-};
-pub use crate::bitbucket::{Bitbucket, BitbucketClient};
-pub use crate::openai::{OpenAI, OpenAIClient};
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsClient};
-pub use crate::gitea::{Gitea, GiteaClient};
-pub use crate::github::{GitHub, GitHubClient};
-pub use crate::gitlab::{GitLab, GitLabClient};
-pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubClient};
-pub use crate::lmstudio::{LmStudio, LmStudioClient};
-pub use crate::ollama::{OllamaNative, OllamaNativeClient};
-pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIClient};
-pub use crate::emqx::{EmqxBasic, EmqxBasicClient};
-pub use crate::emqx::{EmqxBearer, EmqxBearerClient};
-pub use crate::eversolo::{Eversolo, EversoloClient};
-pub use crate::samsung_smart_tv::{SamsungSmartTv, SamsungSmartTvClient};
-pub use crate::unfolded_circle_core_rest::{
-    UnfoldedCircleCoreRest, UnfoldedCircleCoreRestClient,
-};
+pub use crate::anthropic::Anthropic;
+pub use crate::artificial_analysis::ArtificialAnalysisData;
+pub use crate::artificial_analysis::ArtificialAnalysisCritPt;
+pub use crate::bitbucket::Bitbucket;
+pub use crate::openai::OpenAI;
+pub use crate::elevenlabs::ElevenLabs;
+pub use crate::gitea::Gitea;
+pub use crate::github::GitHub;
+pub use crate::gitlab::GitLab;
+pub use crate::huggingface::HuggingFaceHub;
+pub use crate::lmstudio::LmStudio;
+pub use crate::ollama::OllamaNative;
+pub use crate::ollama::OllamaOpenAI;
+pub use crate::emqx::EmqxBasic;
+pub use crate::emqx::EmqxBearer;
+pub use crate::eversolo::Eversolo;
+pub use crate::samsung_smart_tv::SamsungSmartTv;
+pub use crate::unfolded_circle_core_rest::UnfoldedCircleCoreRest;
 pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
 pub use crate::unfolded_circle_core_ws::define_api as define_unfolded_circle_core_ws_api_definition;
 pub use crate::unfolded_circle_dock_ws::define_api as define_unfolded_circle_dock_ws_api_definition;

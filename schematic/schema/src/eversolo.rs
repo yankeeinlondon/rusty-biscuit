@@ -44,7 +44,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Eversolo::new()?;
+//!     let client = Eversolo::new();
 //!     let response = client.send(DeviceGetModelRequest::default(), &CallOptions::new()).await?;
 //!     println!("{}", response.meta);
 //!     Ok(())
@@ -56,23 +56,26 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = Eversolo::builder().base_url("http://192.168.1.50:9529").build()?;
+//! let client = Eversolo::new().base_url("http://192.168.1.50:9529");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::eversolo::*;
 /// The Eversolo API: Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum Eversolo {}
-/// A client for the [`Eversolo`] API.
-pub type EversoloClient = schematic_runtime::Client<Eversolo>;
-impl schematic_runtime::Api for Eversolo {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct Eversolo(schematic_runtime::Client<EversoloApi>);
+/// The tag of the [`Eversolo`] API: each of its request types names it as `EndpointSpec::Api`, so that [`Eversolo`] sends only this API's requests. Callers never write it.
+pub enum EversoloApi {}
+impl schematic_runtime::Api for EversoloApi {
     const NAME: &'static str = "Eversolo";
 }
+schematic_runtime::api_client!(Eversolo, EversoloApi);
 impl Eversolo {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "http://192.168.1.1:9529";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -84,19 +87,16 @@ impl Eversolo {
     pub fn definition() -> schematic_runtime::ApiDefinition {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<EversoloClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for Eversolo {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `DeviceGetModel` endpoint.
@@ -112,7 +112,7 @@ impl Eversolo {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeviceGetModelRequest {}
 impl schematic_runtime::EndpointSpec for DeviceGetModelRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = GetModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GetModelResponse>;
@@ -161,7 +161,7 @@ impl RemoteSendKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RemoteSendKeyRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -213,7 +213,7 @@ impl RemoteInputTextRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for RemoteInputTextRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -250,7 +250,7 @@ impl schematic_runtime::EndpointSpec for RemoteInputTextRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicGetStateRequest {}
 impl schematic_runtime::EndpointSpec for MusicGetStateRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = GetStateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GetStateResponse>;
@@ -284,7 +284,7 @@ impl schematic_runtime::EndpointSpec for MusicGetStateRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayOrPauseRequest {}
 impl schematic_runtime::EndpointSpec for MusicPlayOrPauseRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -318,7 +318,7 @@ impl schematic_runtime::EndpointSpec for MusicPlayOrPauseRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayNextRequest {}
 impl schematic_runtime::EndpointSpec for MusicPlayNextRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -352,7 +352,7 @@ impl schematic_runtime::EndpointSpec for MusicPlayNextRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicPlayLastRequest {}
 impl schematic_runtime::EndpointSpec for MusicPlayLastRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -401,7 +401,7 @@ impl MusicSeekToRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MusicSeekToRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -438,7 +438,7 @@ impl schematic_runtime::EndpointSpec for MusicSeekToRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicGetInputOutputListRequest {}
 impl schematic_runtime::EndpointSpec for MusicGetInputOutputListRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = InputOutputListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<InputOutputListResponse>;
@@ -487,7 +487,7 @@ impl MusicSetInputRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MusicSetInputRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = InputOutputListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<InputOutputListResponse>;
@@ -539,7 +539,7 @@ impl MusicSetOutputRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MusicSetOutputRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = InputOutputListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<InputOutputListResponse>;
@@ -591,7 +591,7 @@ impl MusicSetVolumeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MusicSetVolumeRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -644,7 +644,7 @@ impl MusicSetMuteRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for MusicSetMuteRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -681,7 +681,7 @@ impl schematic_runtime::EndpointSpec for MusicSetMuteRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PowerGetOptionsRequest {}
 impl schematic_runtime::EndpointSpec for PowerGetOptionsRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = PowerOptionsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<PowerOptionsResponse>;
@@ -730,7 +730,7 @@ impl PowerSetOptionRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for PowerSetOptionRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -767,7 +767,7 @@ impl schematic_runtime::EndpointSpec for PowerSetOptionRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetScreenBrightnessRequest {}
 impl schematic_runtime::EndpointSpec for SystemGetScreenBrightnessRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = BrightnessResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BrightnessResponse>;
@@ -816,7 +816,7 @@ impl SystemSetScreenBrightnessRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SystemSetScreenBrightnessRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -853,7 +853,7 @@ impl schematic_runtime::EndpointSpec for SystemSetScreenBrightnessRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetKnobBrightnessRequest {}
 impl schematic_runtime::EndpointSpec for SystemGetKnobBrightnessRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = BrightnessResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<BrightnessResponse>;
@@ -902,7 +902,7 @@ impl SystemSetKnobBrightnessRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SystemSetKnobBrightnessRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -939,7 +939,7 @@ impl schematic_runtime::EndpointSpec for SystemSetKnobBrightnessRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetVuModeListRequest {}
 impl schematic_runtime::EndpointSpec for SystemGetVuModeListRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = DisplayModeListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DisplayModeListResponse>;
@@ -988,7 +988,7 @@ impl SystemSetVuModeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SystemSetVuModeRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1025,7 +1025,7 @@ impl schematic_runtime::EndpointSpec for SystemSetVuModeRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemGetSpectrumModeListRequest {}
 impl schematic_runtime::EndpointSpec for SystemGetSpectrumModeListRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = DisplayModeListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<DisplayModeListResponse>;
@@ -1074,7 +1074,7 @@ impl SystemSetSpectrumModeRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SystemSetSpectrumModeRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1127,7 +1127,7 @@ impl SystemChangeVuDisplayRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for SystemChangeVuDisplayRequest {
-    type Api = Eversolo;
+    type Api = EversoloApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;

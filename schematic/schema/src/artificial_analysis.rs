@@ -15,19 +15,20 @@ use serde::{Deserialize, Serialize};
 pub use schematic_definitions::artificial_analysis::*;
 /// The ArtificialAnalysisData API: Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum ArtificialAnalysisData {}
-/// A client for the [`ArtificialAnalysisData`] API.
-pub type ArtificialAnalysisDataClient = schematic_runtime::Client<
-    ArtificialAnalysisData,
->;
-impl schematic_runtime::Api for ArtificialAnalysisData {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct ArtificialAnalysisData(schematic_runtime::Client<ArtificialAnalysisDataApi>);
+/// The tag of the [`ArtificialAnalysisData`] API: each of its request types names it as `EndpointSpec::Api`, so that [`ArtificialAnalysisData`] sends only this API's requests. Callers never write it.
+pub enum ArtificialAnalysisDataApi {}
+impl schematic_runtime::Api for ArtificialAnalysisDataApi {
     const NAME: &'static str = "ArtificialAnalysisData";
 }
+schematic_runtime::api_client!(ArtificialAnalysisData, ArtificialAnalysisDataApi);
 impl ArtificialAnalysisData {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://artificialanalysis.ai/api/v2";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -55,19 +56,16 @@ impl ArtificialAnalysisData {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<ArtificialAnalysisDataClient, schematic_runtime::BuildError> {
-        Self::builder().build()
+}
+impl Default for ArtificialAnalysisData {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `ListLlmModels` endpoint.
@@ -83,7 +81,7 @@ impl ArtificialAnalysisData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListLlmModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListLlmModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = LlmModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<LlmModelsResponse>;
@@ -132,7 +130,7 @@ impl ListTextToImageModelsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTextToImageModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MediaModelsResponse>;
@@ -169,7 +167,7 @@ impl schematic_runtime::EndpointSpec for ListTextToImageModelsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListImageEditingModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListImageEditingModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MediaModelsResponse>;
@@ -203,7 +201,7 @@ impl schematic_runtime::EndpointSpec for ListImageEditingModelsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTextToSpeechModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListTextToSpeechModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MediaModelsResponse>;
@@ -252,7 +250,7 @@ impl ListTextToVideoModelsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListTextToVideoModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MediaModelsResponse>;
@@ -304,7 +302,7 @@ impl ListImageToVideoModelsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListImageToVideoModelsRequest {
-    type Api = ArtificialAnalysisData;
+    type Api = ArtificialAnalysisDataApi;
     type Success = MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<MediaModelsResponse>;
@@ -330,19 +328,22 @@ impl schematic_runtime::EndpointSpec for ListImageToVideoModelsRequest {
 }
 /// The ArtificialAnalysisCritPt API: Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.
 ///
-/// This type is never constructed. It names the API, so that its
-/// client sends only this API's requests, and it holds the API's
-/// constants and constructors.
-pub enum ArtificialAnalysisCritPt {}
-/// A client for the [`ArtificialAnalysisCritPt`] API.
-pub type ArtificialAnalysisCritPtClient = schematic_runtime::Client<
-    ArtificialAnalysisCritPt,
->;
-impl schematic_runtime::Api for ArtificialAnalysisCritPt {
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct ArtificialAnalysisCritPt(
+    schematic_runtime::Client<ArtificialAnalysisCritPtApi>,
+);
+/// The tag of the [`ArtificialAnalysisCritPt`] API: each of its request types names it as `EndpointSpec::Api`, so that [`ArtificialAnalysisCritPt`] sends only this API's requests. Callers never write it.
+pub enum ArtificialAnalysisCritPtApi {}
+impl schematic_runtime::Api for ArtificialAnalysisCritPtApi {
     const NAME: &'static str = "ArtificialAnalysisCritPt";
 }
+schematic_runtime::api_client!(ArtificialAnalysisCritPt, ArtificialAnalysisCritPtApi);
 impl ArtificialAnalysisCritPt {
-    /// The base URL a client uses unless its builder sets another.
+    /// The base URL a client uses unless `base_url` sets another.
     pub const BASE_URL: &'static str = "https://artificialanalysis.ai/api/v2";
     /// The API's documentation, when the definition names it.
     pub const DOCS_URL: Option<&'static str> = Some(
@@ -370,22 +371,16 @@ impl ArtificialAnalysisCritPt {
                     ),
             )
     }
-    /// A client builder seeded from [`definition`](Self::definition)
-    /// and the API's default headers.
-    pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-        schematic_runtime::Client::builder(Self::definition())
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
     }
-    /// A client with every default.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-    /// cannot be initialized.
-    pub fn new() -> Result<
-        ArtificialAnalysisCritPtClient,
-        schematic_runtime::BuildError,
-    > {
-        Self::builder().build()
+}
+impl Default for ArtificialAnalysisCritPt {
+    fn default() -> Self {
+        Self::new()
     }
 }
 /// Request for `EvaluateCritPt` endpoint.
@@ -419,7 +414,7 @@ impl From<CritPtEvaluateBody> for EvaluateCritPtRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for EvaluateCritPtRequest {
-    type Api = ArtificialAnalysisCritPt;
+    type Api = ArtificialAnalysisCritPtApi;
     type Success = CritPtEvaluateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CritPtEvaluateResponse>;

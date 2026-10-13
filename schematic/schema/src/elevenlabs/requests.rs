@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use super::responses::*;
-use super::ElevenLabs;
+use super::ElevenLabsApi;
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -34,7 +34,7 @@ impl CreateSpeechRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -95,7 +95,7 @@ impl StreamSpeechRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for StreamSpeechRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -157,7 +157,7 @@ impl CreateSpeechWithTimestampsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSpeechWithTimestampsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = SpeechWithTimestampsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SpeechWithTimestampsResponse>;
@@ -219,7 +219,7 @@ impl StreamSpeechWithTimestampsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for StreamSpeechWithTimestampsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = SpeechWithTimestampsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SpeechWithTimestampsResponse>;
@@ -289,7 +289,7 @@ impl ListVoicesRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListVoicesRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ListVoicesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListVoicesResponse>;
@@ -350,7 +350,7 @@ impl From<String> for GetVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = VoiceResponseModel;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceResponseModel>;
@@ -407,7 +407,7 @@ impl From<String> for DeleteVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -443,7 +443,7 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDefaultVoiceSettingsRequest {}
 impl schematic_runtime::EndpointSpec for GetDefaultVoiceSettingsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = VoiceSettings;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceSettings>;
@@ -498,7 +498,7 @@ impl From<String> for GetVoiceSettingsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVoiceSettingsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = VoiceSettings;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<VoiceSettings>;
@@ -552,7 +552,7 @@ impl UpdateVoiceSettingsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateVoiceSettingsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -610,7 +610,7 @@ impl GetVoiceSampleAudioRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetVoiceSampleAudioRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -661,7 +661,7 @@ impl DeleteVoiceSampleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceSampleRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -742,7 +742,7 @@ impl AddVoiceSampleRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = AddSampleResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AddSampleResponse>;
@@ -778,7 +778,7 @@ impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSharedVoicesRequest {}
 impl schematic_runtime::EndpointSpec for ListSharedVoicesRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ListSharedVoicesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListSharedVoicesResponse>;
@@ -837,7 +837,7 @@ impl AddSharedVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for AddSharedVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = AddSharedVoiceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AddSharedVoiceResponse>;
@@ -899,7 +899,7 @@ impl From<CreatePvcVoiceBody> for CreatePvcVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreatePvcVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = AddSharedVoiceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<AddSharedVoiceResponse>;
@@ -958,7 +958,7 @@ impl UpdatePvcVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdatePvcVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1019,7 +1019,7 @@ impl TrainPvcVoiceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for TrainPvcVoiceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1080,7 +1080,7 @@ impl From<CreateSoundEffectBody> for CreateSoundEffectRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSoundEffectRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -1121,7 +1121,7 @@ impl schematic_runtime::EndpointSpec for CreateSoundEffectRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = Vec<ModelInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<Vec<ModelInfo>>;
@@ -1178,7 +1178,7 @@ impl From<String> for CreateSingleUseTokenRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = SingleUseTokenResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SingleUseTokenResponse>;
@@ -1214,7 +1214,7 @@ impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryRequest {}
 impl schematic_runtime::EndpointSpec for GetHistoryRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = GetHistoryResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<GetHistoryResponse>;
@@ -1271,7 +1271,7 @@ impl From<String> for GetHistoryItemRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetHistoryItemRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = SpeechHistoryItemResponseModel;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SpeechHistoryItemResponseModel>;
@@ -1330,7 +1330,7 @@ impl From<String> for DeleteHistoryItemRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteHistoryItemRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1389,7 +1389,7 @@ impl From<String> for GetHistoryItemAudioRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetHistoryItemAudioRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -1444,7 +1444,7 @@ impl From<DownloadHistoryBody> for DownloadHistoryItemsRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DownloadHistoryItemsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = bytes::Bytes;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Binary;
@@ -1485,7 +1485,7 @@ impl schematic_runtime::EndpointSpec for DownloadHistoryItemsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUsageStatsRequest {}
 impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = UsageStatsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UsageStatsResponse>;
@@ -1519,7 +1519,7 @@ impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserRequest {}
 impl schematic_runtime::EndpointSpec for GetUserRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = UserResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<UserResponse>;
@@ -1553,7 +1553,7 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserSubscriptionRequest {}
 impl schematic_runtime::EndpointSpec for GetUserSubscriptionRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = SubscriptionModel;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<SubscriptionModel>;
@@ -1610,7 +1610,7 @@ impl From<String> for GetResourceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for GetResourceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ResourceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ResourceResponse>;
@@ -1665,7 +1665,7 @@ impl ShareResourceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ShareResourceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1727,7 +1727,7 @@ impl UnshareResourceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UnshareResourceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1789,7 +1789,7 @@ impl CopyResourceToWorkspaceRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -1833,7 +1833,7 @@ impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListServiceAccountsRequest {}
 impl schematic_runtime::EndpointSpec for ListServiceAccountsRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ListServiceAccountsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListServiceAccountsResponse>;
@@ -1892,7 +1892,7 @@ impl From<String> for ListServiceAccountApiKeysRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for ListServiceAccountApiKeysRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ListApiKeysResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListApiKeysResponse>;
@@ -1950,7 +1950,7 @@ impl CreateApiKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateApiKeyRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = CreateApiKeyResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateApiKeyResponse>;
@@ -2019,7 +2019,7 @@ impl UpdateApiKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateApiKeyRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -2081,7 +2081,7 @@ impl DeleteApiKeyRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -2119,7 +2119,7 @@ impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWebhooksRequest {}
 impl schematic_runtime::EndpointSpec for ListWebhooksRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = ListWebhooksResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<ListWebhooksResponse>;
@@ -2171,7 +2171,7 @@ impl From<CreateWebhookBody> for CreateWebhookRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for CreateWebhookRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = CreateWebhookResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<CreateWebhookResponse>;
@@ -2230,7 +2230,7 @@ impl UpdateWebhookRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateWebhookRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
@@ -2297,7 +2297,7 @@ impl From<String> for DeleteWebhookRequest {
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteWebhookRequest {
-    type Api = ElevenLabs;
+    type Api = ElevenLabsApi;
     type Success = StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<StatusResponse>;
