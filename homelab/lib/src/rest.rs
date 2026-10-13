@@ -4,8 +4,7 @@
 use std::time::Duration;
 
 use schematic_schema::schematic_runtime::{
-    Api, ApiError, BuildError, CallOptions, Client, ClientBuilder, EndpointSpec, ErrorKind,
-    NoDeclaredError, Outcome, Response, TransportError,
+    ApiError, BuildError, ErrorKind, NoDeclaredError, Outcome, Response, TransportError,
 };
 
 /// Bounds establishing a connection to a LAN device that may be asleep.
@@ -13,17 +12,6 @@ pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Bounds each request, so an unresponsive device fails instead of hanging.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Applies the base URL and the device timeouts to a generated client builder.
-pub(crate) fn device_builder<A: Api>(
-    builder: ClientBuilder<A>,
-    base_url: String,
-) -> ClientBuilder<A> {
-    builder
-        .base_url(base_url)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-}
 
 /// A failed REST call to a LAN device.
 ///
@@ -61,17 +49,8 @@ pub enum RestError {
     },
 }
 
-/// Sends `request` with default call options and maps the outcome.
-pub(crate) async fn send<A, R>(client: &Client<A>, request: R) -> Result<R::Success, RestError>
-where
-    A: Api,
-    R: EndpointSpec<Api = A, Failure = NoDeclaredError>,
-{
-    into_result(client.send(request, &CallOptions::default()).await)
-}
-
 /// Turns a send result into the success value or a [`RestError`].
-fn into_result<T>(
+pub(crate) fn into_result<T>(
     sent: Result<Response<T, NoDeclaredError>, TransportError>,
 ) -> Result<T, RestError> {
     let (meta, outcome) = sent?.into_parts();
@@ -108,43 +87,5 @@ pub(crate) mod test_support {
             }
         });
         address
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use schematic_schema::eversolo::Eversolo;
-    use schematic_schema::schematic_runtime::SharedTransport;
-
-    use super::*;
-
-    #[test]
-    fn device_builder_sets_the_request_timeout() {
-        let client = device_builder(Eversolo::builder(), "http://127.0.0.1:9529".to_string())
-            .build()
-            .expect("client builds");
-
-        assert!(format!("{client:?}").contains("timeout: 10s"));
-    }
-
-    #[test]
-    fn device_builder_sets_a_connect_timeout() {
-        // A client attached to a shared transport refuses connection
-        // options and names the one it found, which exposes that the
-        // connect timeout was set.
-        let transport = SharedTransport::builder().build().expect("transport");
-
-        let refused = device_builder(Eversolo::builder(), "http://127.0.0.1:9529".to_string())
-            .transport(&transport)
-            .build()
-            .expect_err("connection options conflict with a shared transport");
-
-        assert_eq!(
-            refused,
-            BuildError::TransportOptionConflict {
-                option: "connect_timeout"
-            }
-        );
-        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(5));
     }
 }

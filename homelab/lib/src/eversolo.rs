@@ -3,7 +3,7 @@
 //! Provides a homelab-native interface over the generated schematic client.
 
 use schematic_schema::eversolo::{
-    DeviceGetModelRequest, Eversolo as EversoloApi, EversoloClient, MusicGetInputOutputListRequest,
+    DeviceGetModelRequest, Eversolo as EversoloRest, EversoloApi, MusicGetInputOutputListRequest,
     MusicGetStateRequest, MusicPlayLastRequest, MusicPlayNextRequest, MusicPlayOrPauseRequest,
     MusicSeekToRequest, MusicSetInputRequest, MusicSetMuteRequest, MusicSetOutputRequest,
     MusicSetVolumeRequest, PowerGetOptionsRequest, PowerSetOptionRequest, RemoteInputTextRequest,
@@ -12,7 +12,7 @@ use schematic_schema::eversolo::{
     SystemSetKnobBrightnessRequest, SystemSetScreenBrightnessRequest, SystemSetSpectrumModeRequest,
     SystemSetVuModeRequest,
 };
-use schematic_schema::schematic_runtime::{EndpointSpec, NoDeclaredError};
+use schematic_schema::schematic_runtime::{CallOptions, EndpointSpec, NoDeclaredError};
 
 use crate::rest::{self, RestError};
 
@@ -35,7 +35,7 @@ pub enum EversoloError {
 
 /// Eversolo DMP-A8 music streamer client.
 pub struct Eversolo {
-    client: EversoloClient,
+    client: EversoloRest,
     host: String,
     port: u16,
 }
@@ -61,7 +61,10 @@ impl Eversolo {
     pub fn new(host: impl Into<String>, port: u16) -> Result<Self, EversoloError> {
         let host = host.into();
         let base_url = format!("http://{host}:{port}");
-        let client = rest::device_builder(EversoloApi::builder(), base_url)
+        let client = EversoloRest::new()
+            .base_url(base_url)
+            .connect_timeout(rest::CONNECT_TIMEOUT)
+            .timeout(rest::REQUEST_TIMEOUT)
             .build()
             .map_err(RestError::from)?;
         Ok(Self { client, host, port })
@@ -81,7 +84,9 @@ impl Eversolo {
     where
         R: EndpointSpec<Api = EversoloApi, Failure = NoDeclaredError>,
     {
-        Ok(rest::send(&self.client, request).await?)
+        Ok(rest::into_result(
+            self.client.send(request, &CallOptions::default()).await,
+        )?)
     }
 
     // ── Device ──────────────────────────────────────────────────────
@@ -294,6 +299,7 @@ mod tests {
 
 #[cfg(test)]
 mod client_tests {
+    use schematic_schema::schematic_runtime::{BuildError, SharedTransport};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -312,6 +318,29 @@ mod client_tests {
         let described = format!("{:?}", eversolo.client);
         assert!(described.contains("http://192.0.2.10:9529"), "{described}");
         assert!(described.contains("timeout: 10s"), "{described}");
+    }
+
+    #[test]
+    fn new_sets_a_connect_timeout() {
+        // A client attached to a shared transport refuses connection
+        // options and names the one it found, which exposes that the
+        // connect timeout was set.
+        let eversolo = Eversolo::new("192.0.2.10", 9529).expect("client builds");
+        let transport = SharedTransport::builder().build().expect("transport");
+
+        let refused = eversolo
+            .client
+            .clone()
+            .transport(&transport)
+            .build()
+            .expect_err("connection options conflict with a shared transport");
+
+        assert_eq!(
+            refused,
+            BuildError::TransportOptionConflict {
+                option: "connect_timeout"
+            }
+        );
     }
 
     #[test]

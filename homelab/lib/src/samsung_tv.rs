@@ -9,13 +9,13 @@
 use schematic_schema::samsung_smart_tv::{
     CloseAppRequest, GetAppStatusRequest, GetDeviceInfoRequest, GetServerLogsRequest,
     InstallAppRequest, LaunchApplicationByIdRequest, LaunchApplicationByNameRequest,
-    SamsungSmartTv, SamsungSmartTvClient,
+    SamsungSmartTv, SamsungSmartTvApi,
 };
 use schematic_schema::samsung_smart_tv_remote_ws::{
     ArtModeClient, ArtModeConnectionParams, RemoteControlClient, RemoteControlConnectionParams,
     SamsungSmartTvRemoteWs,
 };
-use schematic_schema::schematic_runtime::{ClientBuilder, EndpointSpec, NoDeclaredError};
+use schematic_schema::schematic_runtime::{CallOptions, EndpointSpec, NoDeclaredError};
 use schematic_schema::ws_shared::{WsClientOptions, WsError};
 
 use crate::rest::{self, RestError};
@@ -82,7 +82,7 @@ impl From<WsError> for SamsungTvError {
 
 /// Samsung Smart TV client for REST and WebSocket control.
 pub struct SamsungTv {
-    rest_client: SamsungSmartTvClient,
+    rest_client: SamsungSmartTv,
     ws_client: SamsungSmartTvRemoteWs,
     host: String,
     rest_port: u16,
@@ -154,9 +154,13 @@ impl SamsungTv {
 
     async fn send<R>(&self, request: R) -> Result<R::Success, SamsungTvError>
     where
-        R: EndpointSpec<Api = SamsungSmartTv, Failure = NoDeclaredError>,
+        R: EndpointSpec<Api = SamsungSmartTvApi, Failure = NoDeclaredError>,
     {
-        Ok(rest::send(&self.rest_client, request).await?)
+        Ok(rest::into_result(
+            self.rest_client
+                .send(request, &CallOptions::default())
+                .await,
+        )?)
     }
 
     // ── REST: Device ─────────────────────────────────────────────────
@@ -392,16 +396,17 @@ impl SamsungTv {
 // ── Command Builders ─────────────────────────────────────────────────
 
 /// Builds a remote control key command for the Samsung TV.
-/// The REST client builder for `{scheme}://{host}:{rest_port}`.
+/// The unvalidated REST client for `{scheme}://{host}:{rest_port}`, with the
+/// device timeouts.
 ///
 /// Invalid certificates are accepted only over HTTPS: the TV's certificate is
 /// self-signed, and a plain-HTTP client has no certificate to check.
-fn rest_builder(host: &str, rest_port: u16, use_https: bool) -> ClientBuilder<SamsungSmartTv> {
+fn rest_builder(host: &str, rest_port: u16, use_https: bool) -> SamsungSmartTv {
     let scheme = if use_https { "https" } else { "http" };
-    let builder = rest::device_builder(
-        SamsungSmartTv::builder(),
-        format!("{scheme}://{host}:{rest_port}"),
-    );
+    let builder = SamsungSmartTv::new()
+        .base_url(format!("{scheme}://{host}:{rest_port}"))
+        .connect_timeout(rest::CONNECT_TIMEOUT)
+        .timeout(rest::REQUEST_TIMEOUT);
     if use_https {
         builder.danger_accept_invalid_certificates()
     } else {
