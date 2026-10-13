@@ -9,6 +9,12 @@ blast_radius:
   - biscuit-speaks/lib/src/providers/host/gtts.rs
   - biscuit-speaks/lib/src/providers/host/echogarden.rs
   - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+  - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+  - biscuit-speaks/lib/src/providers/host/say.rs
+  - biscuit-speaks/lib/src/providers/host/say/system_defaults.rs
+  - biscuit-speaks/lib/src/prepared.rs
+  - biscuit-speaks/lib/src/speak.rs
+  - biscuit-speaks/lib/src/detached.rs
   - biscuit-speaks/cli/src/main.rs
 ---
 
@@ -166,4 +172,140 @@ A private helper creates or reuses the cache file, atomically publishes the
 ready job into the same slot, or records failure. The preparation deadline is
 ten minutes; later audio cannot overtake the reserved sequence while it is
 pending. Preparation records may contain speech text and are never projected
-into Playa's journal or `playa spool` output.
+into Playa's journal or `playa spool` output. A record the helper cannot
+decode fails its slot immediately rather than holding the queue until the
+deadline.
+
+## Preparing Speech
+
+`Speak::prepare` fills the audio file cache ahead of time, so the phrase plays
+at once when it is needed. It synthesizes the phrase into the cache and plays
+nothing. It also starts no scheduler and reserves no spool slot.
+
+```rust
+// On macOS: an explicit speed fixes Say's rate, and the system voice resolves.
+let config = TtsConfig::new().with_speed(SpeedLevel::Fast);
+let prepared = Speak::new("the build is green").with_config(config.clone()).prepare().await?;
+// The system voice changes here.
+prepared.play().await?; // still the voice it prepared with: a cache hit
+Speak::new("the build is green").with_config(config).play().await?; // the new voice: a miss
+```
+
+Normal-speed Say never prepares (see [Say's system defaults](#says-system-defaults)),
+which is why the example asks for an explicit speed.
+
+### The returned object and a fresh object
+
+```mermaid
+flowchart TD
+    P["Speak::prepare"] --> R["Resolve the first available provider's settings"]
+    R -->|unresolved default, eSpeak, SAPI| N["Success, nothing cached; is_prepared() is false"]
+    R -->|fully resolved| C{"Cache file exists?"}
+    C -->|yes| K["Reuse it"]
+    C -->|no| S["Synthesize and publish atomically"]
+    K --> T["Returned object retains provider and settings"]
+    S --> T
+    T --> PL["Returned object: play with the retained settings"]
+    S -.->|same file| F["Fresh Speak resolves current defaults"]
+    K -.->|same file| F
+    F -->|same provider and settings| H["Cache hit"]
+    F -->|a default changed| M["Cache miss: synthesize anew"]
+```
+
+- **The returned object** keeps the provider and the settings that provider
+  resolved (for example Say's voice and rate, or ElevenLabs' voice and model).
+  It uses them first in `play`, `play_with_result`, and `play_detached`, even
+  if a system or account default changed since.
+- **A fresh object** resolves the current defaults itself. When it resolves the
+  same provider and settings, it computes the same cache key and reuses the
+  file. The returned object can therefore be discarded, as Claudine's pre-warm
+  does. If a default changed, the fresh object misses and synthesizes new audio.
+- `is_prepared()` is true only when this object's `prepare` published or found a
+  cache file. It records completed work: the operating system may still have
+  deleted the temporary file since. Cloning keeps it.
+- `with_volume` keeps the preparation, because volume is applied at playback
+  and is never part of a cache key. `with_voice`, `with_gender`,
+  `with_language`, `with_failover`, and `with_config` clear it; a later
+  `prepare` resolves again and consults the cache.
+
+### What gets prepared
+
+Only the first available provider for the failover strategy is prepared. If
+that provider fails to construct, resolve, or synthesize, `prepare` returns the
+error and tries no other provider. That is narrower than playback, which fails
+over. A strategy with no candidate returns `NoProvidersAvailable`.
+
+`prepare` succeeds without caching anything when:
+
+| Case | Why |
+| --- | --- |
+| eSpeak or SAPI is the first provider | They speak directly and produce no file |
+| Say at normal speed | The system rate is not read yet |
+| Say with no voice or gender, when the system voice lookup fails | The voice is unknown |
+| Echogarden with no voice it can resolve | The engine picks its own default, which can change |
+| ElevenLabs with no requested voice, when the voice list fails to load | The voice is unknown |
+| `PLAYA_DRY_RUN` is `1`, `true`, `TRUE`, or `yes` | Dry run |
+
+A dry run is checked before any provider is chosen: no provider detection,
+voice listing, network request, subprocess, cache read, or cache write happens,
+and the builder is returned unchanged (an earlier preparation is kept). The
+same holds for a direct `TtsExecutor::prepare` call, with or without the
+`playa` feature.
+
+Preparation can make a billed ElevenLabs request. Two concurrent preparations
+of the same phrase may both synthesize; atomic publication still leaves one
+complete file. A failed or cancelled preparation leaves no partial entry.
+
+### Playback after preparation
+
+- `play` and `play_with_result` play the retained file, or synthesize it again
+  with the retained settings if it vanished. If that fails, the failover
+  strategy's other providers run with the caller's original configuration,
+  never with the retained voice; `SpecificProvider` never switches.
+  `SpeakResult` names the provider and voice that actually spoke.
+- `play_detached` publishes the retained file as a ready job. If it vanished,
+  the reserved slot's preparation record carries the retained settings, and
+  the helper synthesizes them, falling back the same way. Synthesis never runs
+  in the requesting process.
+- Speed is applied once: Say, Echogarden, and ElevenLabs bake it into the
+  file and play at normal speed; Kokoro and gTTS apply it at playback.
+
+### Say's system defaults
+
+With no requested voice or gender, Say speaks with the system voice. The
+library reads that voice through AppKit's `NSSpeechSynthesizer` (a short
+`osascript` call) and accepts it only if `say -v '?'` lists it. This lookup was
+verified to match the audio `say` produces without `-v`. Any other answer (the
+call fails, the output is malformed, or the voice is unlisted) leaves the voice
+unresolved, so nothing is cached for that request.
+
+The system *rate* is not read, because no lookup has been verified to describe
+it. A normal-speed Say request therefore stays uncached, and the lookup is
+skipped for it. An explicit speed sets the rate to 175 words per minute times
+the multiplier.
+
+### The ElevenLabs default-voice record
+
+Without a requested voice, ElevenLabs picks a voice from the account's voice
+list. That listing is a network request, and a fresh `play_detached` call must
+find prepared default speech without one. So each selection from a successful
+listing is recorded:
+
+- **Where:** `.biscuit-speaks-elevenlabs-voice-{hash}.json`, beside the
+  provider capability cache file (so `BISCUIT_SPEAKS_CACHE` moves it too),
+  written atomically.
+- **What:** the chosen voice and model, the inputs that chose them (gender,
+  language, model, and the configured fallback voice), an account context, and
+  the time it was written. The account context is the API address, the name
+  of the environment variable the key came from, and the optional
+  `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` label. No API key or other credential is
+  stored or hashed.
+- **Trust window:** 24 hours from when it was written. A missing, unreadable,
+  mismatched, or expired record is a cache miss, and the detached helper
+  selects the voice through the API as before.
+- **Refresh:** every `prepare` lists the voices again and rewrites the record,
+  even when the record is fresh. Ordinary playback also rewrites it.
+
+The record never changes which voice is selected; it only remembers what the
+selection chose. Two API keys read from the same environment variable share
+records unless `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` tells them apart.

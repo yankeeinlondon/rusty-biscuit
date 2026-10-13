@@ -32,7 +32,7 @@
 //! - [`types`] - Core type definitions (providers, config, audio formats)
 //! - [`errors`] - Error types for TTS operations
 //! - [`traits`] - The `TtsExecutor` trait for provider implementations
-//! - [`speak`] - The main `Speak` struct for TTS operations
+//! - [`mod@speak`] - The main `Speak` struct for TTS operations
 
 pub mod audio_cache;
 pub mod cache;

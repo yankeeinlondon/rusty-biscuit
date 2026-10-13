@@ -40,6 +40,13 @@ provider.speak("Hello", &TtsConfig::default()).await?;
 the requested gain through native Playa. Without `playa`, uses macOS `afplay -v`.
 Detached synthesis reserves an ordered preparation slot.
 
+**Caching and `prepare`**: keyed by voice and integer WPM rate. The voice is
+the requested one, `Alex`/`Samantha` for a gender, or the system voice read
+through `NSSpeechSynthesizer` (via `osascript`) and accepted only if
+`say -v '?'` lists it. The system *rate* is not read, so normal-speed requests
+are synthesized into an uncached temporary file and `prepare` is a no-op for
+them; an explicit speed (175 WPM × multiplier) caches and prepares.
+
 ---
 
 ### eSpeak / eSpeak-NG
@@ -228,6 +235,14 @@ let sfx = provider.create_sound_effect("dog barking", Some(3.0)).await?;
 - Voices are optimized for specific models
 
 **Speed Control**: Supports 0.7x to 1.2x (values clamped to this range).
+
+**Default-voice record**: without a requested voice, each selection from the
+account's voice list is written to `.biscuit-speaks-elevenlabs-voice-{hash}.json`
+beside the capability cache file. It holds voice, model, selection inputs, a
+non-secret account context, and the write time, and is trusted for 24 hours so
+a fresh `play_detached` finds prepared audio with no API request. `prepare`
+always re-lists voices and rewrites it; a failed listing makes `prepare` a
+no-op.
 
 **Features**:
 - Premium neural voices

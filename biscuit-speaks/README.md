@@ -141,8 +141,9 @@ synthesis. The scheduler waits up to ten minutes; helper failure or timeout
 marks the slot failed and advances the queue. Windows SAPI and eSpeak publish
 direct command jobs with lossless arguments. Say synthesizes PCM WAV using the
 selected voice and rate, then queues volume-controlled playback from the same
-content-addressed cache used by other file providers. Temporary synthesis
-files are removed before handoff.
+content-addressed cache used by other file providers. When Say's voice or rate
+cannot be resolved, which today includes every normal-speed request, the WAV
+goes to a temporary file that is never cached.
 
 Detached delivery preserves the foreground provider selection and failover
 order. Providers represented only by enum variants remain explicitly
@@ -151,6 +152,50 @@ Claudine audio, survives requester exit, and remains best-effort after handoff.
 Preparation records are private and may contain speech text; journal/status
 output redacts them. `PLAYA_DRY_RUN=1` bypasses synthesis, cache, spool, journal,
 and subprocess work.
+
+### Preparing speech ahead of time
+
+`prepare` synthesizes a phrase into the shared audio cache without playing it,
+so later playback starts at once:
+
+```rust
+use biscuit_speaks::{Speak, SpeedLevel, TtsConfig};
+
+// On macOS, Say caches only an explicit speed; normal-speed Say never prepares.
+let config = TtsConfig::new().with_speed(SpeedLevel::Fast);
+
+let prepared = Speak::new("the build is green").with_config(config.clone()).prepare().await?;
+
+// The returned object keeps the provider and settings it resolved, even if
+// the system voice changes in the meantime.
+prepared.play().await?;
+
+// A fresh object resolves the current defaults itself. With the same provider
+// and settings it reuses the same cached file; after a default changed, it
+// synthesizes new audio.
+Speak::new("the build is green").with_config(config).play().await?;
+```
+
+- Only the first available provider for the failover strategy is prepared.
+  Its error is returned; preparation never tries another provider.
+- Some preparations have nothing to do and still succeed: eSpeak and SAPI speak
+  directly, and a default the library cannot resolve (Say's normal rate, an
+  Echogarden engine default, an ElevenLabs voice list that failed to load) is
+  never cached. `is_prepared()` is true only when a file was published.
+- `with_volume` keeps the preparation, since volume is applied at playback.
+  `with_voice`, `with_gender`, `with_language`, `with_failover`, and
+  `with_config` clear it.
+- If the retained provider fails at playback, the strategy's other providers
+  run with your original configuration. `SpecificProvider` never switches.
+- Under `PLAYA_DRY_RUN`, `prepare` returns the builder unchanged before looking
+  at any provider.
+- ElevenLabs' default voice comes from the account's voice list, so each
+  selection is recorded beside the capability cache file and trusted for 24
+  hours. That lets a later `play_detached` find the prepared file with no
+  network request. Every `prepare` re-checks the voice list. The record holds
+  no API key.
+
+See [TTS Caching](docs/tts-caching.md) for the full rules.
 
 ## Deferred Providers
 
@@ -175,7 +220,8 @@ These providers are often found on hosts and may be added to this library in the
 | `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
 | `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
-| `PLAYA_DRY_RUN` | `1`/`true` skips synthesis, playback, cache, and detached-spool side effects |
+| `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` | Optional label that keeps ElevenLabs default-voice records apart when different API keys use the same environment variable |
+| `PLAYA_DRY_RUN` | `1`, `true`, `TRUE`, or `yes` skips synthesis, preparation, playback, cache, and detached-spool side effects |
 
 ## API Overview
 

@@ -187,13 +187,17 @@ Speak::new("Custom").with_volume(VolumeLevel::Explicit(0.3)).play().await?;
 ### Speed Levels
 
 ```rust
-// Preset levels
-Speak::new("Fast!").with_speed(SpeedLevel::Fast).play().await?;     // 1.25x
-Speak::new("Normal").with_speed(SpeedLevel::Normal).play().await?;  // 1.0x
-Speak::new("Slow").with_speed(SpeedLevel::Slow).play().await?;      // 0.75x
+// Preset levels (speed lives on TtsConfig; Speak has no with_speed)
+let fast = TtsConfig::new().with_speed(SpeedLevel::Fast);     // 1.25x
+let normal = TtsConfig::new().with_speed(SpeedLevel::Normal); // 1.0x
+let slow = TtsConfig::new().with_speed(SpeedLevel::Slow);     // 0.75x
+Speak::new("Fast!").with_config(fast).play().await?;
 
 // Explicit value (clamped 0.25-4.0)
-Speak::new("Custom").with_speed(SpeedLevel::Explicit(1.5)).play().await?;
+Speak::new("Custom")
+    .with_config(TtsConfig::new().with_speed(SpeedLevel::Explicit(1.5)))
+    .play()
+    .await?;
 ```
 
 **Provider-Specific Speed Handling**:
@@ -310,6 +314,11 @@ update_provider_in_cache(TtsProvider::Host(HostTtsProvider::Say)).await?;
 | Say | Yes (as integer WPM) | Rate baked into audio by `say -r` |
 
 **Atomic Writes**: Uses temp file + rename pattern to prevent corruption.
+
+**Volume** is never in a key, so a prepared file plays at the volume asked for
+at playback. Unresolved external defaults (normal-speed Say, an Echogarden
+engine default) are synthesized fresh and never read from or written to the
+cache.
 
 ---
 

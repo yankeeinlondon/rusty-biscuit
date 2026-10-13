@@ -22,14 +22,17 @@ use biscuit_speaks::{Speak, TtsConfig, Gender, VolumeLevel, SpeedLevel};
 // Simple usage - speaks with best available provider
 Speak::new("Hello, world!").play().await?;
 
-// With configuration
-Speak::new("Custom voice")
+// With configuration (speed is set on TtsConfig; Speak has no with_speed)
+let config = TtsConfig::new()
     .with_voice("Samantha")
     .with_gender(Gender::Female)
     .with_volume(VolumeLevel::Soft)
-    .with_speed(SpeedLevel::Fast)
-    .play()
-    .await?;
+    .with_speed(SpeedLevel::Fast);
+Speak::new("Custom voice").with_config(config).play().await?;
+
+// Synthesize into the audio cache now, play later
+let prepared = Speak::new("Done").prepare().await?;
+prepared.play().await?;
 
 // Get metadata about what was used
 let result = Speak::new("Hello").play_with_result().await?;
@@ -57,6 +60,8 @@ pub trait TtsExecutor: Send + Sync {
     async fn speak_with_result(&self, text: &str, config: &TtsConfig) -> Result<SpeakResult, TtsError>;
     async fn is_ready(&self) -> bool;
     fn info(&self) -> &str;
+    // Default: Ok(()) without work (eSpeak, SAPI)
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError>;
 }
 
 // Optional for voice enumeration
@@ -98,6 +103,17 @@ OS-specific default stacks (highest quality first):
 - Cache key: provider + voice_id + text + format + speed (conditional)
 - Atomic writes to prevent corruption
 
+**Preparation** (`Speak::prepare`; rules in `biscuit-speaks/docs/tts-caching.md`):
+first available provider only, its error returned, nothing played or spooled.
+No-op success (`is_prepared()` false) for eSpeak/SAPI, dry run (checked before
+discovery), and unresolved defaults (normal-speed Say, failed Say voice lookup,
+Echogarden engine default, failed ElevenLabs listing). A *fresh* `Speak` with
+the same resolved settings hits the same file (Claudine's pre-warm relies on
+it); `with_volume` keeps preparation, other `with_*` setters clear it.
+ElevenLabs default-voice records sit beside the capability cache file, trusted
+24 h, keyed by selection inputs + non-secret account context
+(`BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT`); `prepare` always re-lists voices.
+
 ## Playback and detached preparation
 
 The `playa` feature also enables `playa/native-playback`. File-producing
@@ -113,6 +129,17 @@ same slot to ready or failed. The ten-minute preparation deadline prevents one
 stuck synthesis from blocking the queue forever, while reservation prevents
 later audio from overtaking it. Playback is serialized across all participating
 processes and survives requester exit. Delivery is best-effort after handoff.
+
+A `Speak` returned by `prepare` plays through its retained provider and
+settings first (`play`, `play_with_result`, `play_detached`), skipping default
+lookups; on failure, the strategy's *other* providers run with the original
+config (`SpecificProvider` never switches). A vanished prepared file is
+resynthesized with the retained settings, in the helper for `play_detached`:
+the preparation record's optional `prepared` key carries them (absent = an
+unprepared or older record; `null` or any malformed value fails the slot at
+once). Tests of the helper use `detached.rs`'s `#[cfg(test)]` capture of the
+spawned record and call `run_preparation` in-process: spawning the test binary
+would rerun its whole suite.
 
 Detached support is concrete for Kokoro, EchoGarden, gTTS, ElevenLabs, macOS
 `say`, Windows SAPI, and eSpeak. Deferred enum-only providers return

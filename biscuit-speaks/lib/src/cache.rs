@@ -6,7 +6,7 @@
 //! ## Cache Location
 //!
 //! The cache file is stored at `~/.biscuit-speaks-cache.json`, unless
-//! `BISCUIT_SPEAKS_CACHE` names a different file. See [`cache_file_path`].
+//! `BISCUIT_SPEAKS_CACHE` names a different file. See `cache_file_path`.
 //!
 //! ## Atomicity
 //!
