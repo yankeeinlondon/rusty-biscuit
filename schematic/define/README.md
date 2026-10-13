@@ -117,12 +117,12 @@ Authentication can be modeled in two ways:
 
 The definition only says *where* a credential goes and which environment variables can supply one. The generator translates it into the API's runtime `ApiDefinition`: each accepted method becomes a credential placement (an OAuth2 method is accepted as a bearer access token), and the environment mapping becomes the API's environment fallback. At send time [`schematic-runtime`](../runtime/README.md) resolves one credential per request, first match wins:
 
-1. A per-call credential (`CallOptions::credential(...)`)
+1. A per-call credential (`.credential(...)` on the call)
 2. A client credential (`{Api}::new().api_key(...)`, `.basic_auth(...)`, or `.credentials(...)`)
 3. The first set, non-empty variable of the environment fallback
 4. None: the request is sent anonymously, and the server's reply (typically a 401) arrives in the response envelope
 
-`CallOptions::anonymous()` skips every source. See [Credentials](../docs/runtime/credentials.md) for the full rules.
+`.anonymous()` on a call skips every source. See [Credentials](../docs/runtime/credentials.md) for the full rules.
 
 Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before translating the fallback.
 
@@ -322,8 +322,11 @@ let token = get_token_from_somewhere();
 // Every send of this client carries the token
 let client = OpenAI::new().credentials(Credential::access_token(token));
 
-// Or one send only, overriding the client credential
-let options = CallOptions::new().credential(Credential::basic("user", "pass"));
+// Or one call only, overriding the client credential
+let models = client
+    .list_models()
+    .credential(Credential::access_token(other_token))
+    .await?;
 ```
 
 A credential's kind must match a placement the definition accepts: `Credential::access_token` for bearer and OAuth2, `Credential::api_key` for key headers, query parameters, and cookies, and `Credential::basic` for Basic. An explicit credential always wins over the environment fallback.

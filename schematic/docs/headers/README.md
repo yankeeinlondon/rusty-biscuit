@@ -12,8 +12,8 @@ Schematic has two credential paths, one per kind of generated client:
 The runtime resolves one credential per send, and the first source that
 supplies one wins:
 
-1. `CallOptions::anonymous()`, which sends no credential from any source
-2. a per-call credential, `CallOptions::new().credential(..)`
+1. `.anonymous()` on the call, which sends no credential from any source
+2. a per-call credential, `.credential(..)` on the call
 3. the client credential, set with `api_key(..)`, `basic_auth(..)`, or
    `credentials(..)`
 4. the first set, non-empty variable of the API's environment fallback

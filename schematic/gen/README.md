@@ -535,6 +535,7 @@ impl<'a> ListReleasesCall<'a> {
     pub fn anonymous(self) -> Self { ... }
     pub fn credential(self, credential: schematic_runtime::Credential) -> Self { ... }
     pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self { ... }
+    // `full` ends the endpoint's setters: `FullCall` keeps only the per-call settings
     pub fn full(self) -> schematic_runtime::FullCall<'a, GitHubApi, ListReleasesRequest> { ... }
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> { ... }
 }

@@ -379,7 +379,7 @@ Choose the correct `ApiResponse` variant for each endpoint:
 | `ApiResponse::Text` | Plain text responses | `Text` | `String` |
 | `ApiResponse::Empty` | 204 No Content, fire-and-forget | `Empty` | `()` |
 
-Every endpoint is called the same way, with `client.send(request, &CallOptions::new())`; the response type only selects the codec the generated request struct declares, and so the success type inside the `Response` envelope. See [Sending and Responses](../docs/runtime/sending-and-responses.md).
+Every endpoint is called the same way, through its endpoint method (`client.list_models().await?`); the response type only selects the codec the generated request struct declares, and so the success type the call returns (inside the `Response` envelope when awaited with `.full()`). See [Calling an API](../docs/runtime/calling-an-api.md) and [Sending and Responses](../docs/runtime/sending-and-responses.md).
 
 **Common Mistakes:**
 

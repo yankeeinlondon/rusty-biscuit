@@ -65,8 +65,10 @@ The full list of settings is in [Building clients](./building-clients.md).
 The method is the endpoint's id in snake case: `ListReleases` becomes
 `list_releases`, and `RetrieveModel` becomes `retrieve_model`.
 
-**Required values are arguments**: path values, required query or header
-values, and a request body the endpoint requires.
+**Required values are arguments**: each path value, then the request body
+when the endpoint has one, in the order `{Endpoint}Request::new` takes them.
+Query, header, and cookie values are always setters, even when the API marks
+them required; the generated client does not enforce them.
 
 ```rust
 let model = openai.retrieve_model("gpt-4").await?; // Model
@@ -97,8 +99,8 @@ These methods exist on every call, whatever the endpoint:
 | `.credential(Credential)` | sends this credential instead of the client's or the environment's |
 | `.anonymous()` | sends no credential from any source |
 | `.deadline(&Deadline)` | bounds the call by a deadline shared with other calls |
-| `.full()` | returns the whole reply instead of the data |
-| `.build()` | checks the call without sending it |
+| `.full()` | returns the whole reply instead of the data; chain it after the endpoint's setters |
+| `.build()` | checks the call's arguments without sending it |
 
 ```rust
 use schematic_schema::prelude::*;
@@ -185,9 +187,34 @@ the endpoint's own setters.
 
 ## Checking first: `.build()?`
 
-`.build()` encodes the request without sending anything, and returns the same
-call or an `InvalidArgument`. Without it, the same check runs when the call is
-awaited, so `.build()` is only needed when you want the failure early.
+`.build()` checks the call's arguments without sending anything, and returns
+the same call or an `InvalidArgument`. It runs the same preparation the send
+runs, with the call's per-call credential or `.anonymous()`, so it refuses
+exactly what the send would refuse:
+
+- a request that cannot be encoded, such as a JSON body that fails to
+  serialize;
+- a header name or value that is not a valid header, including the body's
+  content type (a value ending in a newline is a common cause);
+- a credential of a kind the API does not accept, such as Basic credentials
+  for an API that takes a bearer token;
+- a credential that cannot be placed: a token that is not a valid header
+  value, or a request that already sets the header, query parameter, or
+  cookie the credential goes in.
+
+```rust
+let call = gh.get_repository("octo", "widgets")
+    .credential(Credential::basic("user", "password"));
+assert!(call.build().is_err()); // GitHub takes a token, not Basic credentials
+```
+
+Without `.build()`, the same checks run when the call is awaited, so it is only
+needed when you want the failure early. They run again at the await even after
+a successful `.build()`, because client settings, environment variables, and
+time can change in between. Failures that are not about the call's arguments
+are reported only when it is awaited: an invalid client setting (check those
+with the client's own `.build()?`), a cross-origin target the policy refuses,
+and an expired deadline.
 
 ```rust
 let call = gh.list_releases("yankeeinlondon", "rusty-biscuit")

@@ -190,7 +190,7 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
 - **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors, and a client accepts only its own API's requests
 - **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
-- **One method per endpoint**: `client.list_models().await?` returns the decoded value or a `CallError`; optional values are chained setters
+- **One method per endpoint**: `client.list_models().await?` returns the decoded value or a `CallError`; optional values are chained setters, which come before `.full()`
 - **One response envelope**: with `.full()`, every reply that arrived, whatever its status, is an `Ok(Response)` with the decoded value or the failure (raw body kept), plus status, headers, and request id; `Err(TransportError)` means no reply arrived
 - **Credentials**: Bearer, API Key (header, query, or cookie), Basic, and OAuth2 tokens, supplied per call, per client, or from env var fallback chains; a missing credential sends anonymously
 - **Safe redirects**: the runtime follows redirects itself under a per-API cross-origin policy and sends the credential only where that policy allows
