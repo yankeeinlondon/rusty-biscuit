@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use biscuit_terminal::components::git_graph::{GitGraphPlan, GraphViewport, NaturalSize};
 use biscuit_terminal::components::mermaid::MermaidTheme;
@@ -10,13 +9,14 @@ use biscuit_visualized::mermaid::{CommitGeometry, GitGraphGeometry, MermaidDiagr
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::git::recorder;
 use worktree::graph::{BASE_DEFAULT_WINDOW, GatherInput, LINE_WINDOW, MergedElsewhere, gather};
+use worktree::questions;
 use worktree::listing::RefTips;
 use worktree::pull_requests::{OpenPullRequest, PrCheckStatus, PrListing};
 
 use super::*;
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .status()
@@ -25,7 +25,7 @@ fn run_git(repo: &Path, args: &[&str]) {
 }
 
 fn git_output(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .output()
@@ -55,7 +55,22 @@ fn commit(path: &Path, file: &str) -> String {
     fs::write(path.join(file), format!("{file}\n")).unwrap();
     run_git(path, &["add", "--", file]);
     run_git(path, &["commit", "-q", "-m", file]);
-    git_output(path, &["rev-parse", "HEAD"])
+    head(path)
+}
+
+/// The commit `HEAD` names in the repository at `path`, read from its files:
+/// a fixture's commit costs no `rev-parse`. Fixtures never pack refs
+/// (`gc.auto=0`), so a branch `HEAD` names is a loose ref.
+fn head(path: &Path) -> String {
+    let git_dir = path.join(".git");
+    let head = fs::read_to_string(git_dir.join("HEAD")).expect("read HEAD");
+    let sha = match head.trim().strip_prefix("ref: ") {
+        Some(reference) => fs::read_to_string(git_dir.join(reference)).expect("read the checked-out branch"),
+        None => head,
+    };
+    let sha = sha.trim().to_string();
+    assert_eq!(sha.len(), 40, "HEAD names a commit: {sha:?}");
+    sha
 }
 
 fn commits(shas: &[&String]) -> Vec<LaneEntry> {
@@ -137,9 +152,14 @@ fn the_base_view_gives_every_worktree_branch_a_line() {
     forked(&mut forks, "feature-c", "feature-b", 30);
 
     let branch_names = ["main", "feature-a", "feature-b", "chore/merged", "feature-c"];
+    let input = input(&repo.path, "main", &branch_names, forks);
     recorder::start_recording();
-    let (graph, verbose) = gather(&input(&repo.path, "main", &branch_names, forks), true, true);
-    let calls = recorder::finish_recording();
+    questions::start_recording();
+    let (graph, verbose) = gather(&input, true, true);
+    // The budget below is in history questions; none of them runs Git.
+    let calls = questions::finish_recording();
+    let processes = recorder::finish_recording();
+    assert_eq!(processes, Vec::<Vec<String>>::new());
     let graph = graph.expect("base view");
 
     assert!(verbose.is_none(), "the base view has no verbose section");
@@ -256,13 +276,13 @@ fn the_git_graph_tags_own_prs_only_and_takes_the_width_override() {
 /// An empty commit, for long chains; returns its full SHA.
 fn empty_commit(path: &Path, message: &str) -> String {
     run_git(path, &["commit", "-q", "--allow-empty", "-m", message]);
-    git_output(path, &["rev-parse", "HEAD"])
+    head(path)
 }
 
 /// Merges `branch` into the checked-out branch with a merge commit; returns it.
 fn merge_no_ff(path: &Path, branch: &str) -> String {
     run_git(path, &["merge", "-q", "--no-ff", "--no-edit", branch]);
-    git_output(path, &["rev-parse", "HEAD"])
+    head(path)
 }
 
 fn set_origin_main(path: &Path, sha: &str) {
@@ -473,7 +493,7 @@ fn commit_on(path: &Path, tree: &str, parents: &[&str], message: &str) -> String
         args.extend(["-p", *parent]);
     }
     args.push(tree);
-    let output = Command::new("git")
+    let output = worktree::git::command()
         .current_dir(path)
         .args(&args)
         .env("GIT_AUTHOR_DATE", &date)
@@ -507,7 +527,7 @@ struct BulkCommits {
 
 impl BulkCommits {
     fn new(path: &Path) -> Self {
-        let mut child = Command::new("git")
+        let mut child = worktree::git::command()
             .current_dir(path)
             .args(["fast-import", "--quiet", "--done"])
             .stdin(std::process::Stdio::piped())
@@ -1141,7 +1161,7 @@ fn set_branches(path: &Path, tips: &[(&str, &str)]) {
 /// Applies `git update-ref --stdin` instructions in one call.
 fn update_refs(path: &Path, instructions: &str) {
     use std::io::Write;
-    let mut child = Command::new("git")
+    let mut child = worktree::git::command()
         .current_dir(path)
         .args(["update-ref", "--stdin"])
         .stdin(std::process::Stdio::piped())
@@ -1244,48 +1264,89 @@ fn continued_after_merge(local_main: LocalMain) -> ContinuedAfterMerge {
     ContinuedAfterMerge { _dir: dir, path, d, w, p, sync, x, c, n, p_prime, local_main, forks }
 }
 
+/// `continued_after_merge(local_main)` has the observed topology, checked
+/// with Git itself in a handful of batched reads.
+fn assert_continued_after_merge_has_the_observed_topology(local_main: LocalMain) {
+    let repo = continued_after_merge(local_main);
+    let mut listed = vec![repo.c.as_str(), repo.sync.as_str(), repo.n.as_str(), repo.w[0].as_str()];
+    listed.extend(repo.p_prime.as_deref());
+    let mut args = vec!["rev-list", "--no-walk=unsorted", "--parents"];
+    args.extend(&listed);
+    let parents = git_output(&repo.path, &args);
+    let parent_line = |sha: &str| parents.lines().find(|line| line.starts_with(sha)).unwrap_or_else(|| panic!("{sha} listed")).to_string();
+    let names = ["refs/remotes/origin/main", "main", "HEAD", "fix/wt-ux", "fix/sniff-pr"];
+    let mut args = vec!["rev-parse"];
+    args.extend(names);
+    let resolved = git_output(&repo.path, &args);
+    let at = |rev: &str| resolved.lines().nth(names.iter().position(|name| *name == rev).expect("a listed name")).expect("resolved").to_string();
+    let first_parents = |tip: &str| git_output(&repo.path, &["rev-list", "--first-parent", tip]);
+
+    assert_eq!(parent_line(&repo.c), format!("{} {} {}", repo.c, repo.p, repo.b()), "{local_main:?}");
+    assert_eq!(parent_line(&repo.sync), format!("{} {} {}", repo.sync, repo.w[2], repo.p), "{local_main:?}");
+    assert_eq!(parent_line(&repo.n), format!("{} {}", repo.n, repo.b()), "{local_main:?}");
+    assert_eq!(parent_line(&repo.w[0]), format!("{} {}", repo.w[0], repo.d[1]), "{local_main:?}");
+    assert_eq!(at("refs/remotes/origin/main"), repo.c, "{local_main:?}");
+    let expected_main = match repo.local_main {
+        LocalMain::AtMerge => &repo.c,
+        LocalMain::Behind => &repo.p,
+        LocalMain::Diverged => {
+            let p_prime = repo.p_prime.as_ref().expect("P'");
+            assert_eq!(parent_line(p_prime), format!("{p_prime} {}", repo.p));
+            p_prime
+        }
+    };
+    assert_eq!(at("main"), *expected_main, "{local_main:?}");
+    assert_eq!(at("HEAD"), *expected_main, "the main checkout is on main: {local_main:?}");
+    assert_eq!(at("fix/wt-ux"), repo.n, "{local_main:?}");
+    assert_eq!(at("fix/sniff-pr"), *repo.b(), "{local_main:?}");
+
+    // B is on fix/wt-ux's first-parent chain, not on main's or origin/main's.
+    assert!(first_parents("fix/wt-ux").lines().any(|sha| sha == repo.b()), "{local_main:?}");
+    assert!(!first_parents("refs/remotes/origin/main").lines().any(|sha| sha == repo.b()), "{local_main:?}");
+    assert_eq!(git_output(&repo.path, &["merge-base", &repo.p, repo.b()]), repo.p, "the fork measured against B: {local_main:?}");
+    let up_to_b: usize = git_output(&repo.path, &["rev-list", "--first-parent", "--count", &format!("{}..{}", repo.d[1], repo.b())]).parse().unwrap();
+    assert_eq!(up_to_b, 3 + 1 + CONTINUED_AFTER_SYNC, "{local_main:?}");
+    assert!(up_to_b > LINE_WINDOW, "{local_main:?}");
+
+    let sniff = repo.forks.get("fix/sniff-pr").expect("fix/sniff-pr's record");
+    assert_eq!((sniff.base_branch.as_str(), &sniff.base_sha), ("fix/wt-ux", repo.b()), "{local_main:?}");
+    assert!(repo.forks.get("fix/wt-ux").is_none(), "fix/wt-ux has no record, as observed");
+    for branch in repo.branches() {
+        assert_eq!(at(branch).len(), 40, "{branch} exists");
+    }
+}
+
 #[test]
 #[serial_test::serial]
-fn continued_after_merge_fixture_has_the_observed_topology() {
-    for local_main in [LocalMain::AtMerge, LocalMain::Behind, LocalMain::Diverged] {
-        let repo = continued_after_merge(local_main);
-        let at = |rev: &str| git_output(&repo.path, &["rev-parse", rev]);
-        let first_parents = |tip: &str| git_output(&repo.path, &["rev-list", "--first-parent", tip]);
+fn continued_after_merge_fixture_at_the_merge_has_the_observed_topology() {
+    assert_continued_after_merge_has_the_observed_topology(LocalMain::AtMerge);
+}
 
-        assert_eq!(parent_line(&repo.path, &repo.c), format!("{} {} {}", repo.c, repo.p, repo.b()), "{local_main:?}");
-        assert_eq!(parent_line(&repo.path, &repo.sync), format!("{} {} {}", repo.sync, repo.w[2], repo.p), "{local_main:?}");
-        assert_eq!(parent_line(&repo.path, &repo.n), format!("{} {}", repo.n, repo.b()), "{local_main:?}");
-        assert_eq!(parent_line(&repo.path, &repo.w[0]), format!("{} {}", repo.w[0], repo.d[1]), "{local_main:?}");
-        assert_eq!(at("refs/remotes/origin/main"), repo.c, "{local_main:?}");
-        let expected_main = match repo.local_main {
-            LocalMain::AtMerge => &repo.c,
-            LocalMain::Behind => &repo.p,
-            LocalMain::Diverged => {
-                let p_prime = repo.p_prime.as_ref().expect("P'");
-                assert_eq!(parent_line(&repo.path, p_prime), format!("{p_prime} {}", repo.p));
-                p_prime
-            }
-        };
-        assert_eq!(at("main"), *expected_main, "{local_main:?}");
-        assert_eq!(at("HEAD"), *expected_main, "the main checkout is on main: {local_main:?}");
-        assert_eq!(at("fix/wt-ux"), repo.n, "{local_main:?}");
-        assert_eq!(at("fix/sniff-pr"), *repo.b(), "{local_main:?}");
+#[test]
+#[serial_test::serial]
+fn continued_after_merge_fixture_behind_has_the_observed_topology() {
+    assert_continued_after_merge_has_the_observed_topology(LocalMain::Behind);
+}
 
-        // B is on fix/wt-ux's first-parent chain, not on main's or origin/main's.
-        assert!(first_parents("fix/wt-ux").lines().any(|sha| sha == repo.b()), "{local_main:?}");
-        assert!(!first_parents("refs/remotes/origin/main").lines().any(|sha| sha == repo.b()), "{local_main:?}");
-        assert_eq!(git_output(&repo.path, &["merge-base", &repo.p, repo.b()]), repo.p, "the fork measured against B: {local_main:?}");
-        let up_to_b: usize = git_output(&repo.path, &["rev-list", "--first-parent", "--count", &format!("{}..{}", repo.d[1], repo.b())]).parse().unwrap();
-        assert_eq!(up_to_b, 3 + 1 + CONTINUED_AFTER_SYNC, "{local_main:?}");
-        assert!(up_to_b > LINE_WINDOW, "{local_main:?}");
+#[test]
+#[serial_test::serial]
+fn continued_after_merge_fixture_diverged_has_the_observed_topology() {
+    assert_continued_after_merge_has_the_observed_topology(LocalMain::Diverged);
+}
 
-        let sniff = repo.forks.get("fix/sniff-pr").expect("fix/sniff-pr's record");
-        assert_eq!((sniff.base_branch.as_str(), &sniff.base_sha), ("fix/wt-ux", repo.b()), "{local_main:?}");
-        assert!(repo.forks.get("fix/wt-ux").is_none(), "fix/wt-ux has no record, as observed");
-        for branch in repo.branches() {
-            assert_eq!(at(branch).len(), 40, "{branch} exists");
+/// The exhaustive match fails to compile when a [`LocalMain`] gains a
+/// variant without a topology test above.
+#[test]
+fn every_local_main_has_a_topology_test() {
+    let test_of = |local_main: LocalMain| -> fn() {
+        match local_main {
+            LocalMain::AtMerge => continued_after_merge_fixture_at_the_merge_has_the_observed_topology,
+            LocalMain::Behind => continued_after_merge_fixture_behind_has_the_observed_topology,
+            LocalMain::Diverged => continued_after_merge_fixture_diverged_has_the_observed_topology,
         }
-    }
+    };
+    let tests = [LocalMain::AtMerge, LocalMain::Behind, LocalMain::Diverged].map(test_of);
+    assert_eq!(tests.len(), 3);
 }
 
 /// `b` merged twice, then continued:
@@ -1311,15 +1372,17 @@ struct MergedTwice {
 }
 
 fn merged_twice_and_continued() -> MergedTwice {
-    let (dir, path, r, tree) = repo_with_root();
-    let d1 = commit_on(&path, &tree, &[&r], "d1");
-    let b1 = commit_on(&path, &tree, &[&d1], "b1");
-    let p1 = commit_on(&path, &tree, &[&d1], "p1");
-    let c1 = commit_on(&path, &tree, &[&p1, &b1], "Merge branch 'b'");
-    let b2 = commit_on(&path, &tree, &[&b1], "b2");
-    let p2 = commit_on(&path, &tree, &[&c1], "p2");
-    let c2 = commit_on(&path, &tree, &[&p2, &b2], "Merge branch 'b' again");
-    let n = commit_on(&path, &tree, &[&b2], "n");
+    let (dir, path, r, _) = repo_with_root();
+    let mut bulk = BulkCommits::new(&path);
+    let d1 = bulk.commit(&[&r], "d1");
+    let b1 = bulk.commit(&[&d1], "b1");
+    let p1 = bulk.commit(&[&d1], "p1");
+    let c1 = bulk.commit(&[&p1, &b1], "Merge branch 'b'");
+    let b2 = bulk.commit(&[&b1], "b2");
+    let p2 = bulk.commit(&[&c1], "p2");
+    let c2 = bulk.commit(&[&p2, &b2], "Merge branch 'b' again");
+    let n = bulk.commit(&[&b2], "n");
+    bulk.finish();
     set_branches(&path, &[("main", &c2), ("b", &n)]);
     MergedTwice { _dir: dir, path, d1, b1, p1, c1, b2, p2, c2, n }
 }
@@ -1369,12 +1432,14 @@ struct NewBranchAtMergedTip {
 }
 
 fn new_branch_at_merged_tip() -> NewBranchAtMergedTip {
-    let (dir, path, r, tree) = repo_with_root();
-    let d1 = commit_on(&path, &tree, &[&r], "d1");
-    let b1 = commit_on(&path, &tree, &[&d1], "b1");
-    let p = commit_on(&path, &tree, &[&d1], "p");
-    let c = commit_on(&path, &tree, &[&p, &b1], "Merge branch 'old'");
-    let n1 = commit_on(&path, &tree, &[&b1], "n1");
+    let (dir, path, r, _) = repo_with_root();
+    let mut bulk = BulkCommits::new(&path);
+    let d1 = bulk.commit(&[&r], "d1");
+    let b1 = bulk.commit(&[&d1], "b1");
+    let p = bulk.commit(&[&d1], "p");
+    let c = bulk.commit(&[&p, &b1], "Merge branch 'old'");
+    let n1 = bulk.commit(&[&b1], "n1");
+    bulk.finish();
     set_branches(&path, &[("main", &c), ("new", &n1)]);
     let mut forks = ForkOriginStore::default();
     forked_at(&mut forks, "new", "main", &b1, 20);
@@ -1440,20 +1505,28 @@ fn is_lane_read(args: &[&str], tip: &str, stop: &[&str]) -> bool {
     args.len() == 6 + rest.len() && args[..2] == ["log", "--first-parent"] && args[5] == tip && args[6..] == rest[..]
 }
 
-/// Gathers the base view while `fails` makes matching Git calls fail, and
-/// asserts that at least one call was failed.
+/// Gathers the base view while `fails` makes matching history questions
+/// fail, and asserts that at least one was failed. The view is gathered both
+/// in-process and through Git, which must agree.
 fn gather_failing(repo: &Path, branches: &[&str], forks: ForkOriginStore, fails: impl Fn(&[&str]) -> bool + Send + Sync + Clone + 'static) -> GraphFacts {
-    recorder::start_recording();
-    let (graph, _) = {
-        let _failing = recorder::fail_matching(fails.clone());
-        gather(&input(repo, "main", branches, forks), true, false)
+    let gather_with = |through_git: bool| {
+        let input = input(repo, "main", branches, forks.clone());
+        let _git = through_git.then(worktree::graph::history_through_git::enter);
+        questions::start_recording();
+        let (graph, _) = {
+            let _failing = recorder::fail_matching(fails.clone());
+            gather(&input, true, false)
+        };
+        let asked = questions::finish_recording();
+        assert!(
+            recorder::has_any_matching(&asked, |args| fails(&args.iter().map(String::as_str).collect::<Vec<_>>())),
+            "the injected failure never fired (through git: {through_git}): {asked:?}"
+        );
+        graph.expect("a failed read keeps the graph")
     };
-    let calls = recorder::finish_recording();
-    assert!(
-        recorder::has_any_matching(&calls, |args| fails(&args.iter().map(String::as_str).collect::<Vec<_>>())),
-        "the injected failure never fired: {calls:?}"
-    );
-    graph.expect("a failed read keeps the graph")
+    let graph = gather_with(false);
+    assert_eq!(gather_with(true), graph, "Git's answers and the in-process ones differ");
+    graph
 }
 
 /// `fix/wt-ux` still merges `B` into `C`, with both commits drawn, and the
@@ -1575,16 +1648,17 @@ fn old_connections() -> OldConnections {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
     init_repo(&path);
-    let mut a = vec![empty_commit(&path, "r")];
-    a.extend((1..=10).map(|n| empty_commit(&path, &format!("a{n}"))));
-    run_git(&path, &["checkout", "-q", "-b", "side"]);
-    let side: Vec<String> = (1..=8).map(|n| empty_commit(&path, &format!("s{n}"))).collect();
-    run_git(&path, &["checkout", "-q", "main"]);
-    for n in 1..=3 {
-        empty_commit(&path, &format!("b{n}"));
-    }
-    let merge = merge_no_ff(&path, "side");
-    let after: Vec<String> = (1..=20).map(|n| empty_commit(&path, &format!("c{n}"))).collect();
+    // Empty commits, all written by one `git fast-import`.
+    let mut bulk = BulkCommits::new(&path);
+    let mut a = vec![bulk.commit(&[], "r")];
+    a.extend(bulk.chain(&a[0].clone(), "a", 10));
+    let side = bulk.chain(&a[10], "s", 8);
+    let b = bulk.chain(&a[10], "b", 3);
+    let merge = bulk.commit(&[&b[2], &side[7]], "Merge branch 'side'");
+    let after = bulk.chain(&merge, "c", 20);
+    bulk.finish();
+    update_refs(&path, &format!("update refs/heads/main {}\nupdate refs/heads/side {}\n", after[19], side[7]));
+    run_git(&path, &["reset", "-q", "--hard", "main"]);
     OldConnections { _dir: dir, path, a, side, merge, after }
 }
 
@@ -1632,7 +1706,7 @@ fn a_merged_lane_competes_under_the_height_cap_by_activity() {
     let branch_at = |name: &str, time: i64| {
         run_git(&path, &["checkout", "-q", "-b", name, "main"]);
         let date = format!("@{time} +0000");
-        let status = Command::new("git")
+        let status = worktree::git::command()
             .current_dir(&path)
             .args(["commit", "-q", "--allow-empty", "-m", name])
             .env("GIT_COMMITTER_DATE", &date)
