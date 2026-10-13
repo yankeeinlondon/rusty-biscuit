@@ -28,7 +28,8 @@ pub enum RestError {
     #[error("{0}")]
     Transport(#[from] TransportError),
 
-    /// The device replied with a non-success status.
+    /// The device replied with an error status, and its body was read in
+    /// full.
     #[error("status {status}: {body}")]
     Status {
         /// HTTP status code.
@@ -37,9 +38,10 @@ pub enum RestError {
         body: String,
     },
 
-    /// The device replied, but the body could not be used: a 2xx body that
-    /// did not decode, a body cut off mid-read, or a redirect that was not
-    /// followed.
+    /// The device replied, but the reply could not be used: a 2xx body that
+    /// did not decode, a body cut off mid-read whatever its status, or a
+    /// redirect that was refused or failed. Every reply failure other than a
+    /// fully read error status lands here.
     #[error("status {status}: {error}")]
     Response {
         /// HTTP status code.
@@ -51,7 +53,10 @@ pub enum RestError {
     /// A call failure of a kind the runtime added after this mapping was
     /// written. `CallError` is `#[non_exhaustive]`, so this arm must exist;
     /// today every failure maps to one of the variants above.
-    #[error("{0}")]
+    ///
+    /// Transparent: `CallError`'s `Display` leaves the cause to its `source`,
+    /// so wrapping it opaquely would drop that cause from the error chain.
+    #[error(transparent)]
     Call(CallError<NoDeclaredError>),
 }
 
@@ -92,5 +97,36 @@ pub(crate) mod test_support {
             }
         });
         address
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use schematic_schema::eversolo::Eversolo;
+
+    use super::RestError;
+    use super::test_support::closing_listener;
+
+    #[tokio::test]
+    async fn a_call_error_kept_whole_still_reports_its_cause() {
+        // No current failure produces `Call`, so it is built by hand from a
+        // real call error to check that the cause stays reachable.
+        let address = closing_listener().await;
+        let client = Eversolo::new()
+            .base_url(format!("http://{address}"))
+            .build()
+            .expect("client builds");
+        let call_error = client
+            .music_get_state()
+            .await
+            .expect_err("no reply fails");
+        let cause = call_error.source().expect("call error has a cause").to_string();
+
+        let wrapped = RestError::Call(call_error.clone());
+
+        assert_eq!(wrapped.to_string(), call_error.to_string());
+        assert_eq!(wrapped.source().map(|source| source.to_string()), Some(cause));
     }
 }

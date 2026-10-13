@@ -126,9 +126,9 @@ pub enum EversoloError {
 |---------|------|---------|
 | `Build` | the host does not form a valid base URL | the build failure |
 | `Transport` | no reply arrived: connection refused or dropped, TLS failure, timeout | the failure kind and the redacted request URL |
-| `Status` | the device replied with a non-2xx status | `status {code}: {body}` |
-| `Response` | the device replied but the body could not be used, such as a 2xx body that is not the expected JSON | `status {code}: {reason} ({n} body bytes)` |
-| `Call` | a call failure of a kind the runtime adds in a later version; no current failure produces it | the runtime's call error |
+| `Status` | the device replied with an error status and its whole body | `status {code}: {body}` |
+| `Response` | the device replied but the reply could not be used: a 2xx body that is not the expected JSON, a body cut off mid-read, or a redirect that was refused or failed | `status {code}: {reason} ({n} body bytes)` |
+| `Call` | a call failure of a kind the runtime adds in a later version; no current failure produces it | the runtime's call error, with its cause kept as the error's source |
 
 For example, a device answering `503 device busy` displays as
 `Eversolo API error: status 503: device busy`. No variant displays request
