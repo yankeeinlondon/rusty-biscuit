@@ -18,11 +18,10 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         .iter()
         .map(|api| {
             let module_name = format_ident!("{}", get_module_path(api));
-            let marker = format_ident!("{}", api.name);
-            let client = format_ident!("{}Client", api.name);
+            let client = format_ident!("{}", api.name);
 
             quote! {
-                pub use crate::#module_name::{#marker, #client};
+                pub use crate::#module_name::#client;
             }
         })
         .collect();
@@ -43,7 +42,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
 
     let client_list: Vec<String> = apis
         .iter()
-        .map(|api| format!("//! - [`{name}`] + [`{name}Client`]", name = api.name))
+        .map(|api| format!("//! - [`{name}`]", name = api.name))
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
@@ -62,7 +61,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
     quote! {
         //! Convenient re-exports for working with generated API clients.
         //!
-        //! This prelude exports each API's marker type and client alias, and
+        //! This prelude exports each API's client struct, and
         //! the runtime types every send uses. Request and response types are
         //! **not** re-exported here to avoid naming conflicts. Import them
         //! from specific API modules instead:
@@ -73,7 +72,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //!
         //! ## Re-exports
         //!
-        //! **APIs and their clients:**
+        //! **API clients:**
         //!
         #client_list_tokens
         //!
@@ -91,7 +90,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //! use schematic_schema::prelude::*;
         //! use schematic_schema::openai::RetrieveModelRequest;
         //!
-        //! let client = OpenAI::new()?;
+        //! let client = OpenAI::new();
         //! let response = client
         //!     .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
         //!     .await?;
@@ -104,7 +103,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
             CallOptions, Credential, Deadline, OriginPolicy, RawResponse, Response, TransportError,
         };
 
-        // APIs and their clients
+        // API clients
         #(#api_reexports)*
 
         // WebSocket definition helpers

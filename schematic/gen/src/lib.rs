@@ -5,9 +5,13 @@
 //! the hand-written `schematic-runtime` crate sends their requests. Per API
 //! the generated code includes:
 //!
-//! - an uninhabited marker type named after the API, with `BASE_URL`,
-//!   `DOCS_URL`, `definition()`, `builder()`, and `new()`
-//! - a `{Name}Client` alias for `schematic_runtime::Client<{Name}>`
+//! - a client struct named after the API, the only name a caller writes,
+//!   wrapping `schematic_runtime::Client<{Name}Api>`; the
+//!   `schematic_runtime::api_client!` macro gives it every client-wide
+//!   setting and send, and generation adds `BASE_URL`, `DOCS_URL`, `definition()`, an
+//!   infallible `new()`, and `basic_auth()` when the API accepts HTTP Basic
+//! - a `{Name}Api` tag type that the API's request types name, so the client
+//!   sends only that API's requests
 //! - one request struct per endpoint, implementing
 //!   `schematic_runtime::EndpointSpec` (its API, success type, codec, and
 //!   endpoint id)
@@ -41,21 +45,22 @@
 //! For an API named "OpenAI" with endpoints `ListModels` and `RetrieveModel`:
 //!
 //! ```text
-//! pub enum OpenAI {}
-//! pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
+//! pub struct OpenAI(schematic_runtime::Client<OpenAIApi>);
+//! pub enum OpenAIApi {}
+//! schematic_runtime::api_client!(OpenAI, OpenAIApi);
 //!
 //! pub struct ListModelsRequest { ... }
 //! pub struct RetrieveModelRequest { pub model: String, ... }
 //!
 //! impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
-//!     type Api = OpenAI;
+//!     type Api = OpenAIApi;
 //!     type Success = Model;
 //!     type Decoder = schematic_runtime::Json<Model>;
 //!     ...
 //! }
 //!
 //! // A caller sends the concrete request; its type fixes the response type.
-//! let response = OpenAI::new()?.send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new()).await?;
+//! let response = OpenAI::new().send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new()).await?;
 //! ```
 
 pub mod asyncapi_import;
@@ -85,7 +90,7 @@ pub use inference::infer_module_path;
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 1;
+pub const RUNTIME_ABI: u32 = 2;
 
 
 pub use export::openapi::{

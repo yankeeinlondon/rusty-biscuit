@@ -360,7 +360,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         }
     }
 
-    // The API name becomes the marker type and `{name}Client`.
+    // The API name becomes the client struct and `{name}Api`, its tag type.
     if let Err(reason) = check_type_ident(&api.name) {
         diagnostics.push(error(
             None,
@@ -740,8 +740,8 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
     for api in group {
         let suffix = get_request_suffix(api);
         let api_items = [
-            (api.name.clone(), "API marker type"),
-            (format!("{}Client", api.name), "client alias"),
+            (api.name.clone(), "API client struct"),
+            (crate::codegen::api_struct::api_tag_name(api), "API tag type"),
         ];
         for (name, role) in api_items {
             emitted.entry(name).or_default().push(Owner {

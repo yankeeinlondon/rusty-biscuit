@@ -7,8 +7,8 @@
 //!
 //! ## Submodules
 //!
-//! - [`api_struct`] - Generates each API's marker type, client alias, and
-//!   constructors
+//! - [`api_struct`] - Generates each API's client struct, tag type, and
+//!   API-specific items
 //! - [`request_structs`] - Generates per-endpoint request structs and their
 //!   `schematic_runtime::EndpointSpec` implementations
 //! - [`shared`] - Generates the request-side helpers of `shared.rs`
@@ -17,7 +17,7 @@
 //! ## Code Generation Flow
 //!
 //! 1. Each endpoint gets a request struct via [`generate_request_struct`]
-//! 2. Each API gets its marker and client via [`generate_api_struct`]
+//! 2. Each API gets its client struct and tag via [`generate_api_struct`]
 //! 3. `shared.rs` gets the request helpers via [`generate_request_helpers`]
 //!
 //! ## Output Format

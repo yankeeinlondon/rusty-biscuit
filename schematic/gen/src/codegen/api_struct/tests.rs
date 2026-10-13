@@ -60,25 +60,59 @@ fn env(placement: Placement, vars: &[&str], username_vars: &[&str]) -> Option<En
 }
 
 #[test]
-fn an_api_is_a_marker_with_constants_constructors_and_a_runtime_client_alias() {
+fn an_api_is_one_client_struct_over_a_tag_with_constants_and_an_infallible_new() {
     let mut api = make_api("OpenAi", AuthStrategy::None, &[]);
     api.docs_url = Some("https://docs.example.com".to_string());
     let code = code(&api);
 
     for expected in [
-        "pub enum OpenAi {}",
-        "pub type OpenAiClient = schematic_runtime::Client<OpenAi>;",
-        "impl schematic_runtime::Api for OpenAi",
+        "#[derive(Clone, Debug)]\npub struct OpenAi(schematic_runtime::Client<OpenAiApi>);",
+        "pub enum OpenAiApi {}",
+        "impl schematic_runtime::Api for OpenAiApi",
         "const NAME: &'static str = \"OpenAi\";",
+        "schematic_runtime::api_client!(OpenAi, OpenAiApi);",
         "pub const BASE_URL: &'static str = \"https://api.example.com/v1\";",
         "pub const DOCS_URL: Option<&'static str> = Some(\"https://docs.example.com\");",
         "pub fn definition() -> schematic_runtime::ApiDefinition",
         "schematic_runtime::ApiDefinition::new(Self::BASE_URL)",
-        "pub fn builder() -> schematic_runtime::ClientBuilder<Self>",
-        "schematic_runtime::Client::builder(Self::definition())",
-        "pub fn new() -> Result<OpenAiClient, schematic_runtime::BuildError>",
+        "pub fn new() -> Self",
+        "schematic_runtime::Client::new(Self::definition())",
+        "impl Default for OpenAi",
     ] {
         assert!(code.contains(expected), "missing `{expected}` in:\n{code}");
+    }
+    // One user-facing name: no alias, no builder, and no forwarded setting
+    // written out per API.
+    for removed in ["OpenAiClient", "pub type", "fn builder", "ClientBuilder", "BuildError", "fn base_url", "fn send"] {
+        assert!(!code.contains(removed), "`{removed}` is still emitted:\n{code}");
+    }
+}
+
+#[test]
+fn basic_auth_is_emitted_only_for_an_api_that_accepts_basic() {
+    let basic = code(&make_api("Basic", AuthStrategy::Basic, &["BASIC_PASS"]));
+    assert!(
+        squash(&basic).contains(&squash(
+            "pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self { \
+             self.credentials(schematic_runtime::Credential::basic(username, password)) }"
+        )),
+        "{basic}"
+    );
+
+    let mut mixed = make_api("Mixed", AuthStrategy::BearerToken { header: None }, &[]);
+    mixed.auth_policy = Some(AuthPolicy {
+        explicit: vec![AuthMethod::BearerToken { header: None }, AuthMethod::Basic],
+        env_fallback: None,
+    });
+    assert!(code(&mixed).contains("pub fn basic_auth("), "an API accepting Basic among others gets it");
+
+    for api in [
+        make_api("Bearer", AuthStrategy::BearerToken { header: None }, &["TOKEN"]),
+        make_api("Keyed", AuthStrategy::ApiKey { header: "x-api-key".to_string(), value_prefix: None }, &["KEY"]),
+        make_api("Open", AuthStrategy::None, &[]),
+    ] {
+        let code = code(&api);
+        assert!(!code.contains("basic_auth"), "{} takes no Basic credential:\n{code}", api.name);
     }
 }
 
@@ -117,7 +151,7 @@ fn the_client_has_no_own_transport_send_path_or_credential_store() {
 }
 
 #[test]
-fn default_headers_seed_the_builder() {
+fn default_headers_seed_new() {
     let mut api = make_api("Versioned", AuthStrategy::None, &[]);
     api.headers = vec![
         ("anthropic-version".to_string(), "2023-06-01".to_string()),

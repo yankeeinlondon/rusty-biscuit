@@ -125,8 +125,9 @@ pub enum RestMethod {
 pub struct RestApi {
     /// Unique identifier for this API (used for generated type names).
     ///
-    /// "OpenAI", for example, generates the API marker `enum OpenAI {}` and
-    /// the client alias `type OpenAIClient = schematic_runtime::Client<OpenAI>`.
+    /// "OpenAI", for example, generates the client struct
+    /// `struct OpenAI(schematic_runtime::Client<OpenAIApi>)` and its tag type
+    /// `enum OpenAIApi {}`.
     pub name: String,
     /// Human-readable description of the API.
     pub description: String,

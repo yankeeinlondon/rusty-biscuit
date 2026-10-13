@@ -434,7 +434,7 @@ fn collect_use_names(tree: &syn::UseTree, names: &mut Vec<String>) {
 fn expected_exports(group: &[&RestApi]) -> Vec<String> {
     let mut names: Vec<String> = group
         .iter()
-        .flat_map(|api| [api.name.clone(), format!("{}Client", api.name)])
+        .map(|api| api.name.clone())
         .collect();
     names.sort();
     names

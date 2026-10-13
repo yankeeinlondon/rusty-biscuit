@@ -84,10 +84,9 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     quote! {
         //! Generated REST API clients and WebSocket API definition helpers.
         //!
-        //! Each REST API module holds the API's marker type with its
-        //! constructors, a `{Name}Client` alias for its
-        //! [`schematic_runtime::Client`], its request types, and its response
-        //! types re-exported from the definitions. Sending, credentials,
+        //! Each REST API module holds the API's client struct, named after the
+        //! API and wrapping a [`schematic_runtime::Client`], its request types,
+        //! and its response types re-exported from the definitions. Sending, credentials,
         //! redirects, deadlines, and the response envelope belong to
         //! [`schematic_runtime`].
         //!
@@ -213,8 +212,8 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
     quote! {
         //! Generated REST API clients.
         //!
-        //! Each API is available as a separate module with its marker type,
-        //! client alias, request types, and response types.
+        //! Each API is available as a separate module with its client struct,
+        //! request types, and response types.
         //!
         //! ## Available APIs
         //!
@@ -254,7 +253,7 @@ fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
             r#"//! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = {api_name}::new()?;
+//! let client = {api_name}::new();
 //! ```"#
         );
     };
@@ -271,7 +270,7 @@ fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-//!     let client = {api_name}::new()?;
+//!     let client = {api_name}::new();
 //!     let response = client.send({construct}, &CallOptions::new()).await?;
 //!     println!("{{}}", response.meta);
 //!     let data = response.into_result()?;

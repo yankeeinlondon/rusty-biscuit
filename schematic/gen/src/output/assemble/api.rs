@@ -1,14 +1,15 @@
 //! API module assembly for generated code modules.
 //!
-//! An API module holds the API's marker type, client alias, and
-//! constructors, one request struct per endpoint with its
-//! `schematic_runtime::EndpointSpec` implementation, and the re-exported
-//! definition types. It has no send methods: the runtime client sends.
+//! An API module holds the API's client struct and tag type, one request
+//! struct per endpoint with its `schematic_runtime::EndpointSpec`
+//! implementation, and the re-exported definition types. Its sends are the
+//! runtime client's, forwarded by `schematic_runtime::api_client!`.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{Endpoint, RestApi};
 
+use crate::codegen::api_struct::api_tag_name;
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_paginated_impl,
     generate_request_struct_with_options,
@@ -24,7 +25,7 @@ pub const SPLIT_THRESHOLD_LINES: usize = 2000;
 /// Parts produced when splitting a large API module into submodules.
 pub struct SplitApiParts {
     /// Module docs, submodule declarations, re-exports, and each API's
-    /// marker type, client alias, and constructors.
+    /// client struct and tag type.
     pub mod_rs: TokenStream,
     /// Request structs, their `EndpointSpec` and `Paginated` impls, and form
     /// bodies.
@@ -57,7 +58,7 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
             &endpoint,
             &suffix,
             Some(module_path),
-            &api.name,
+            &api_tag_name(api),
         ));
     }
     for endpoint in &api.endpoints {
@@ -125,8 +126,8 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
 }
 
 /// Assembles the API module code (e.g., anthropic.rs): module documentation,
-/// the re-exported definition types, the API's marker type and client, and
-/// its request structs.
+/// the re-exported definition types, the API's client struct and tag type,
+/// and its request structs.
 pub fn assemble_api_module(api: &RestApi) -> TokenStream {
     assemble_api_module_with_options(api, &OutputOptions::default())
 }
@@ -206,7 +207,7 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 ///
 /// Produces three TokenStreams intended for:
 /// - `mod.rs` - module docs, submodule declarations, re-exports, and the
-///   API's marker type, client alias, and constructors
+///   API's client struct and tag type
 /// - `requests.rs` - all request structs with their `EndpointSpec` and
 ///   `Paginated` impls
 /// - `responses.rs` - definitions re-exports
@@ -253,7 +254,7 @@ fn split_parts(
     module_path: &str,
 ) -> SplitApiParts {
     let shared_import = shared_import(apis);
-    let markers: Vec<_> = apis.iter().map(|api| format_ident!("{}", api.name)).collect();
+    let tags: Vec<_> = apis.iter().map(|api| format_ident!("{}", api_tag_name(api))).collect();
     let api_structs = apis.iter().map(|api| generate_api_struct(api));
     let requests = apis.iter().map(|api| api_requests(api, module_path));
 
@@ -275,7 +276,7 @@ fn split_parts(
         #shared_import
 
         use super::responses::*;
-        use super::{#(#markers),*};
+        use super::{#(#tags),*};
 
         #(#requests)*
     };

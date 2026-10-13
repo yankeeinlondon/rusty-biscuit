@@ -14,7 +14,7 @@
 //! - [`UpdateStrategy::ChangeTo`] - Switch to a different auth strategy
 //!
 //! Generated clients no longer have a `variant()` method, so no generated code
-//! reads it; a client is reconfigured through its `{Api}::builder()`.
+//! reads it; a client is reconfigured through its chained settings.
 
 use serde::{Deserialize, Serialize};
 
@@ -346,7 +346,7 @@ pub enum ApiKeyLocation {
 /// Strategy for updating authentication when creating API variants.
 ///
 /// No generated code reads it: the generated `variant()` method it served was
-/// removed, and a client is reconfigured through its `{Api}::builder()`.
+/// removed, and a client is reconfigured through its chained settings.
 ///
 /// ## Examples
 ///

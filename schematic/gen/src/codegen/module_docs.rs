@@ -224,7 +224,7 @@ use schematic_schema::{module}::{request};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    let client = {api_name}::new()?;
+    let client = {api_name}::new();
     let response = client.send({request}::default(), &CallOptions::new()).await?;
     println!("{{}}", response.meta);
     Ok(())
@@ -236,7 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
 ```text
 use schematic_schema::prelude::*;
 
-let client = {api_name}::builder().base_url("{custom_base_url}").build()?;
+let client = {api_name}::new().base_url("{custom_base_url}");
 ```"#
         )
     }
@@ -472,7 +472,7 @@ mod tests {
             example.contains("client.send(ListItemsRequest::default(), &CallOptions::new())"),
             "{example}"
         );
-        assert!(example.contains("let client = TestApi::new()?;"), "{example}");
+        assert!(example.contains("let client = TestApi::new();"), "{example}");
         assert!(!example.contains("CreateItemRequest"), "{example}");
     }
 
@@ -499,7 +499,7 @@ mod tests {
             "{example}"
         );
         assert!(
-            example.contains(r#"TestApi::builder().base_url("https://staging.example.com/v1").build()?"#),
+            example.contains(r#"TestApi::new().base_url("https://staging.example.com/v1");"#),
             "{example}"
         );
     }

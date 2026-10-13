@@ -1,29 +1,35 @@
 //! Per-API client generation for REST APIs.
 //!
-//! Each API gets an uninhabited marker type named after it, which carries the
-//! API's constants and constructors, and a `{Name}Client` alias for the
-//! runtime client bound to that marker:
+//! Each API gets one client struct named after it, the only name a caller
+//! writes, and a tag type that its request types name as their
+//! `EndpointSpec::Api`, so the client sends only that API's requests:
 //!
 //! ```text
-//! pub enum OpenAI {}
-//! pub type OpenAIClient = schematic_runtime::Client<OpenAI>;
+//! /// The OpenAI API: ...
+//! #[derive(Clone, Debug)]
+//! pub struct OpenAI(schematic_runtime::Client<OpenAIApi>);
 //!
-//! impl schematic_runtime::Api for OpenAI {
+//! pub enum OpenAIApi {}
+//!
+//! impl schematic_runtime::Api for OpenAIApi {
 //!     const NAME: &'static str = "OpenAI";
 //! }
+//!
+//! schematic_runtime::api_client!(OpenAI, OpenAIApi);
 //!
 //! impl OpenAI {
 //!     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
 //!     pub const DOCS_URL: Option<&'static str> = Some("https://platform.openai.com/docs");
 //!     pub fn definition() -> schematic_runtime::ApiDefinition { ... }
-//!     pub fn builder() -> schematic_runtime::ClientBuilder<Self> { ... }
-//!     pub fn new() -> Result<OpenAIClient, schematic_runtime::BuildError> { ... }
+//!     pub fn new() -> Self { ... }
+//!     // only when the API accepts HTTP Basic credentials:
+//!     pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self { ... }
 //! }
 //! ```
 //!
-//! Sending, hooks, and connection settings belong to the runtime client and
-//! its builder; nothing here forwards to them. Because every request type
-//! names its API marker, the runtime client accepts only that API's requests.
+//! The macro forwards every client-wide setting and send to the runtime
+//! client the struct wraps, so that surface is written once, in the runtime.
+//! Generation emits only what is specific to the API.
 
 mod auth;
 mod helpers;
@@ -41,10 +47,16 @@ pub(crate) fn env_fallback_vars(api: &RestApi) -> Option<(Vec<String>, Vec<Strin
     auth::auth_config(api).env.map(|env| (env.vars, env.username_vars))
 }
 
-/// Generates the marker type, client alias, and constructors of one API.
+/// The name of `api`'s tag type, which its request types name as their
+/// `EndpointSpec::Api`.
+pub(crate) fn api_tag_name(api: &RestApi) -> String {
+    format!("{}Api", api.name)
+}
+
+/// Generates the client struct, tag type, and API-specific items of one API.
 pub fn generate_api_struct(api: &RestApi) -> TokenStream {
-    let marker = format_ident!("{}", api.name);
-    let client = format_ident!("{}Client", api.name);
+    let client = format_ident!("{}", api.name);
+    let tag = format_ident!("{}", api_tag_name(api));
     let name = &api.name;
     let base_url = &api.base_url;
     let docs_url = match &api.docs_url {
@@ -59,27 +71,50 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         .iter()
         .filter(|(header, _)| !header.eq_ignore_ascii_case("cookie"))
         .map(|(header, value)| quote! { .default_header(#header, #value) });
+    let basic_auth = auth::auth_config(api)
+        .accepted
+        .contains(&auth::Placement::Basic)
+        .then(|| {
+            quote! {
+                /// Sends HTTP Basic `username` and `password` when a call
+                /// supplies no credential, replacing any credential set
+                /// before.
+                #[must_use]
+                pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self {
+                    self.credentials(schematic_runtime::Credential::basic(username, password))
+                }
+            }
+        });
 
-    let marker_doc = format!(" The {name} API: {}", api.description.trim());
-    let client_doc = format!(" A client for the [`{name}`] API.");
+    let client_doc = format!(" The {name} API: {}", api.description.trim());
+
+    let tag_doc = format!(
+        " The tag of the [`{name}`] API: each of its request types names it as \
+         `EndpointSpec::Api`, so that [`{name}`] sends only this API's requests. \
+         Callers never write it."
+    );
 
     quote! {
-        #[doc = #marker_doc]
-        ///
-        /// This type is never constructed. It names the API, so that its
-        /// client sends only this API's requests, and it holds the API's
-        /// constants and constructors.
-        pub enum #marker {}
-
         #[doc = #client_doc]
-        pub type #client = schematic_runtime::Client<#marker>;
+        ///
+        /// Create a client with [`new`](Self::new), which never fails, and
+        /// chain settings onto it. Settings are validated by
+        /// [`build`](Self::build), or else by the first send, which reports
+        /// an invalid one as `TransportErrorKind::InvalidClient`.
+        #[derive(Clone, Debug)]
+        pub struct #client(schematic_runtime::Client<#tag>);
 
-        impl schematic_runtime::Api for #marker {
+        #[doc = #tag_doc]
+        pub enum #tag {}
+
+        impl schematic_runtime::Api for #tag {
             const NAME: &'static str = #name;
         }
 
-        impl #marker {
-            /// The base URL a client uses unless its builder sets another.
+        schematic_runtime::api_client!(#client, #tag);
+
+        impl #client {
+            /// The base URL a client uses unless `base_url` sets another.
             pub const BASE_URL: &'static str = #base_url;
             /// The API's documentation, when the definition names it.
             pub const DOCS_URL: Option<&'static str> = #docs_url;
@@ -91,21 +126,19 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                 #definition
             }
 
-            /// A client builder seeded from [`definition`](Self::definition)
-            /// and the API's default headers.
-            pub fn builder() -> schematic_runtime::ClientBuilder<Self> {
-                schematic_runtime::Client::builder(Self::definition())
-                    #(#default_headers)*
+            /// A client with the API's defaults and default headers. With no
+            /// credential set, a send reads the API's environment variables,
+            /// and with none present it is sent anonymously.
+            pub fn new() -> Self {
+                Self(schematic_runtime::Client::new(Self::definition()) #(#default_headers)*)
             }
 
-            /// A client with every default.
-            ///
-            /// ## Errors
-            ///
-            /// Returns [`schematic_runtime::BuildError`] when the HTTP client
-            /// cannot be initialized.
-            pub fn new() -> Result<#client, schematic_runtime::BuildError> {
-                Self::builder().build()
+            #basic_auth
+        }
+
+        impl Default for #client {
+            fn default() -> Self {
+                Self::new()
             }
         }
     }
