@@ -5,10 +5,10 @@
 //!
 //! ## Limitations
 //!
-//! GitLab's schematic client does not include a `GetProject` endpoint.
-//! Repository metadata is inferred from other API responses:
-//! - Existence verified via `ListRepositoryTree` (returns 404 if not found)
-//! - Full metadata requires the `GetProject` endpoint (future iteration)
+//! The generated client has a `GetProjectRequest`, but this provider does not
+//! call it yet. Repository metadata is a stub instead:
+//! - Existence is verified via `ListRepositoryTree` (404 if not found)
+//! - Every field a project lookup would supply is `None` or a default
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
@@ -113,8 +113,9 @@ impl Default for GitLabRemote {
 impl GitLabRemote {
     /// Fetches the root tree listing.
     ///
-    /// Counted as `tree`, not `metadata`: absent `GetProject`, the metadata path
-    /// pays for a full tree fetch, and the counter names the work done.
+    /// Counted as `tree`, not `metadata`: without a `GetProject` call, the
+    /// metadata path pays for a full tree fetch, and the counter names the work
+    /// done.
     async fn fetch_tree_items(&self, owner: &str, repo: &str) -> Result<Vec<TreeItem>, SniffError> {
         let request = ListRepositoryTreeRequest::new(project_path(owner, repo));
         count_api_request("tree");
@@ -124,7 +125,7 @@ impl GitLabRemote {
     /// Builds the minimal metadata GitLab can report without `GetProject`.
     ///
     /// Pure — the caller has already proven the project exists by fetching its
-    /// tree. Adding `GetProject` to schematic-definitions is what would let these
+    /// tree. Sending the generated `GetProjectRequest` is what would let these
     /// `None`s become real values.
     fn stub_metadata(&self, owner: &str, repo: &str) -> RepoMetadata {
         let full_name = format!("{}/{}", owner, repo);
@@ -182,16 +183,15 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
-        // GitLab's schematic client does not include GetProject.
-        // Use ListRepositoryTree to verify project existence and extract basic info.
-        // This is a mitigation documented in phase0-audit.md.
+        // GetProjectRequest is not called yet; the tree fetch proves the
+        // project exists and the metadata is a stub.
         self.fetch_tree_items(owner, repo).await?;
         Ok(self.stub_metadata(owner, repo))
     }
 
     /// Resolves the one tree that serves as both existence probe and evidence.
     ///
-    /// Absent `GetProject`, GitLab's "metadata" call *is* a tree fetch whose result
+    /// Without a `GetProject` call, GitLab's "metadata" call *is* a tree fetch whose result
     /// was thrown away — so a report used to pay for the identical tree three
     /// times (metadata, documents, CI/CD). Keeping the result collapses that to one.
     async fn snapshot(&self, owner: &str, repo: &str) -> Result<RemoteRepoSnapshot, SniffError> {
@@ -440,7 +440,8 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // GitLab ListGroupProjects endpoint is not implemented in schematic-definitions
+        // The generated client has ListGroupProjectsRequest, but this provider
+        // does not call it yet, so group listings are always empty.
         Ok(Vec::new())
     }
 

@@ -215,8 +215,8 @@ fn decode_directory_listing(body: &[u8]) -> Result<PaginatedResponse<SourceEntry
 ///
 /// ## Notes
 ///
-/// Invalid UTF-8 is replaced rather than rejected, matching the text decoding
-/// the endpoint's former text response applied.
+/// Invalid UTF-8 is replaced rather than rejected, as the runtime's text codec
+/// does for endpoints that declare a text response.
 fn decode_file_text(body: &[u8]) -> String {
     String::from_utf8_lossy(body).into_owned()
 }
@@ -678,8 +678,8 @@ impl RemoteRepoProvider for BitbucketRemote {
     }
 
     async fn list_org_repos(&self, _workspace: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // Bitbucket ListWorkspaceRepos endpoint is not implemented in schematic-definitions
-        // Return empty for now
+        // The generated client has ListWorkspaceReposRequest, but this provider does not call
+        // it yet, so workspace listings are always empty.
         Ok(Vec::new())
     }
 

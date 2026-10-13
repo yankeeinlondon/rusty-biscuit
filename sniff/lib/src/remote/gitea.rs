@@ -577,8 +577,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // Gitea ListOrgRepos endpoint is not implemented in schematic-definitions
-        // Return empty for now
+        // The generated client has ListOrgReposRequest, but this provider does not call
+        // it yet, so organization listings are always empty.
         Ok(Vec::new())
     }
 

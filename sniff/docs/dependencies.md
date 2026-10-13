@@ -125,10 +125,22 @@ Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
 ## Optional Features
 
 - `network` (`reqwest` + `tokio` + `futures`, rustls) gates remote lookups; `remote`
-  is an alias for it. `metrics` gates instrumentation. Both are off by default, so
-  a consumer that only needs local detection — such as `rendezvous-core`, which
-  depends on Sniff with `default-features = false` — pulls in neither an async
-  runtime nor an HTTP stack.
+  is an alias for it. `metrics` gates instrumentation. Both are off by default,
+  so a consumer that only needs local detection — such as `rendezvous-core`,
+  which depends on Sniff with `default-features = false` — compiles none of
+  Sniff's own network or remote code. It still links an HTTP stack, because
+  `schematic-schema` (below) is an unconditional dependency.
+
+## Generated REST Clients (`remote::{github, gitlab, gitea, bitbucket}`)
+
+- **`schematic-schema`.** The remote providers call its generated clients,
+  which send through `schematic-runtime` (re-exported as
+  `schematic_schema::schematic_runtime`), so Sniff declares no runtime
+  dependency of its own. The edge is unconditional even though only the
+  `remote` module uses it, so every build of Sniff carries the runtime's
+  `reqwest` and `tokio` whatever its features.
+- **`wiremock` (dev-dependency).** Local HTTP mocks for the provider and other
+  remote-lookup tests, so none of them reaches a real forge.
 - The CLI's `test-fixtures` feature carries `biscuit-test-harness` into the
   non-test build and enables two helper binaries, exclusively for L2 styling
   tests. Their test targets declare `required-features`, so ordinary local L1
