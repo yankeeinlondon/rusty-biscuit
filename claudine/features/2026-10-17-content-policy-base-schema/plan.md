@@ -19,6 +19,7 @@ packages:
     - darkmatter
     - content-policy
     - dmls
+    - darkmatter-cli
 source_files_during_phase_2:
     - content-policy/schemas/content-policy.yaml
     - content-policy/lib/tests/editor_schema.rs
@@ -46,6 +47,55 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/content-policy/SKILL.md
+source_files_during_phase_3:
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/tests/l1/content_policy_compose_contract.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/md_process_fixture.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/standalone_stdio.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/compose.md
 ---
 
 # Content Policy Base Schema Implementation Plan
@@ -180,7 +230,7 @@ Before declaring these tables complete, search affected load-bearing reads for `
 
 ### Wave 4 — Consumer Implementation (Parallel)
 
-- [ ] **Select CLI Baseline**
+- [x] **Select CLI Baseline**
   - Depends on **Prove Resolution**. Owner: Darkmatter CLI argument definitions, dispatch, validation command, and baseline process tests.
   - Add `--no-baseline-schema`, conflict it with explicit `--schema`, and select: disable flag → explicit custom schema → truthy captured disable environment → captured `BASELINE_SCHEMA` → embedded default. Explicit custom schema wins over environment opt-out; failed custom loading never falls back.
   - Extract/reuse a pure disable-value predicate for `1`, `true`, `TRUE`, `yes`, `YES`, using the request snapshot. Preserve compose's flags and environment behavior; do not reuse its live-environment-reading helper.
@@ -188,13 +238,13 @@ Before declaring these tables complete, search affected load-bearing reads for `
   - Preserve JSON fields (`schema` may be null with an effective baseline), quiet behavior, and exit codes 0/1/2/3. Pretty output bases its no-schema claim on the effective schema. Use existing `TerminalRenderable` components for changed terminal messages.
   - Add table-driven process checks for the entire selection order, combined inputs, every truthy spelling, representative non-disabling values, broken custom files, the usage conflict, trigger/document validation after opt-out, and custom replacement of `content_policy`. Cover `last_updated: not-a-date` default rejection and explicit opt-out compatibility.
 
-- [ ] **Preserve Editor Typing**
+- [x] **Preserve Editor Typing**
   - Depends on **Prove Resolution**. Owner: DMLS schema overlay/typed consumers and editor protocol tests.
   - Carry the resolved baseline into both typed completion/hover and compiled validation views. Make only necessary consumer changes; matching extension baselines still overlay built-in → triggers → document schema, including document replacement of `content_policy`.
   - Add DMLS tests for compact-list completion, `rule:` values, `action:` values, long-form keys, and hover on compact and long-form rules. Assert shipped suggestion text and branch descriptions survive resolution.
   - Assert item/field diagnostics and missing-field mapping positions through DMLS's protocol result, plus extension override and same-name definition isolation. Embedded entries must not become watcher dependencies.
 
-- [ ] **Verify Compose Contract**
+- [x] **Verify Compose Contract**
   - Depends on **Prove Resolution**. Owner: library declaration comparisons and compose tests; no CLI argument or DMLS source edits.
   - Replace unrelated-property editor-schema fixtures with actual `content_policy` lists in `content_policy_editor_schema.rs`. Replace `long_form_without_rule_is_not_flagged_by_the_schema` with both-reject coverage; remove mixed-`Evergreen` positive fixtures.
   - Run the shared declarations against `Policy::from_declaration` and baseline validation. Cover every supported rule/action, mixed forms, malformed durations/units/capitalization, leading zero/zero, nested properties, missing/null fields, null items, extra fields, and all documented schema limitations with separate expected results.
@@ -208,7 +258,7 @@ Before declaring these tables complete, search affected load-bearing reads for `
 
 ### Wave 5 — Independent Closure Evidence (Parallel)
 
-- [ ] **Verify Standalone Use**
+- [x] **Verify Standalone Use**
   - Depends on all Wave 4 tasks. Owner: library out-of-checkout tests and built `md`/DMLS subprocess fixtures.
   - Run outside the repository with only test documents present and fixture-owned home/config/cache/temp. Scrub `BASELINE_SCHEMA`, `DARKMATTER_NO_BASELINE_SCHEMA`, `SCHEMAS_DIR`, and other schema/editor overrides through established fixture builders.
   - Prove built `md schema validate` and `md compose` accept the valid policy and reject the acceptance-case invalid policies; prove built DMLS validates and completes over stdio. Use existing protocol fixtures with bounded waits and child teardown, never an editor UI.
@@ -216,7 +266,7 @@ Before declaring these tables complete, search affected load-bearing reads for `
   - Execute every robustness-table mutation and positive control, asserting observable outcomes. Complete the load-bearing read audit and fix or explicitly report any reader-boundary gap identified in Phase 1.
   - Keep fixtures portable across macOS, Linux, native Windows, and WSL2. Use Test Toolkit/runtime manifest and binary lookup conventions; declare repository reads in CI-indexable forms. Use existing OS coverage without adding cells or workloads.
 
-- [ ] **Update Behavior Records**
+- [x] **Update Behavior Records**
   - Depends on all Wave 4 tasks. Owner: documentation and skills; coordinate any artifact header correction with its owner.
   - Update Darkmatter's schema definition, runtime baseline contract, CLI schema-validation documentation, and `docs/topics/schemas/dmls-schema-support.md`. Explain effective schema precedence, captured CLI selection, compatibility change, opt-out examples, node diagnostics, and passive validation.
   - Update affected Darkmatter/Content Policy READMEs, `content-policy/docs/topics/policy-lifecycle.md`, `darkmatter/docs/dependencies.md`, and repository `docs/dependencies.md`. Record the dependency direction and disabled `file-adapter` feature.

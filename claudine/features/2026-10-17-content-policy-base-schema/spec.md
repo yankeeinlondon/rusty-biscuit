@@ -38,6 +38,7 @@ depends-on:
 related:
     - 2026-09-28-content-policy
     - 2026-10-13-named-type-presence-and-local-names
+implemented: true
 ---
 
 # Compile Content Policy's Schema into the Base Schema

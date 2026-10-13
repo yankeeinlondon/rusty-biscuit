@@ -9,6 +9,7 @@ packages:
     - darkmatter
     - content-policy
     - dmls
+    - darkmatter-cli
 source_files_during_phase_1:
     - Cargo.lock
     - darkmatter/lib/Cargo.toml
@@ -20,7 +21,7 @@ docs_updated_during_phase_1:
     - docs/dependencies.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-human_review: false
+human_review: true
 source_files_during_phase_2:
     - content-policy/schemas/content-policy.yaml
     - content-policy/lib/tests/editor_schema.rs
@@ -48,36 +49,110 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/content-policy/SKILL.md
+human_review_items:
+    - |-
+        **Only one of the seven rule suggestions shows up in editor completion.**
+
+        Content Policy's schema offers seven example rules (`Evergreen`, `TimeSensitive`, `ValidFor(3mo)`, and so on) as editor suggestions for a `content_policy` entry. When you type a rule in an editor that uses DMLS (Darkmatter's language server), only `Evergreen` is offered. Everything else works: the editor checks rules, completes actions and keys, and shows each rule form's description on hover.
+
+        Why: Darkmatter allows only one `suggest(...)` list per property, even when the property's type has several alternatives. It then keeps a suggestion only if the alternative that carries the list accepts it. All seven are on the `Evergreen` alternative, so six are dropped. This is documented Darkmatter behavior that predates this work. Moving each suggestion to its own alternative is rejected ("at most one `suggest` constraint"). The spec asks the editor to complete "supported rule forms" and to preserve the shipped suggestions, so that criterion is only partly met.
+
+        Why decide now: the next phase writes the documentation and skills, which must describe either the current behavior or the fixed one.
+
+        Options:
+
+        - **A. Accept the limitation for now and document it.** Phase 4 records that the editor suggests only `Evergreen`. A separate fix spec can change the rule later.
+            - Pro: no change to Darkmatter's schema rules inside this feature; nothing is delayed.
+            - Con: authors don't see the other rule forms in completion until the follow-up lands.
+        - **B. Change Darkmatter's rule inside this feature:** check a property's single suggestion list against all of its alternatives, so a suggestion is kept when any alternative accepts it.
+            - Pro: all seven suggestions appear, and the spec's editor criterion is fully met.
+            - Con: it changes a documented Darkmatter contract that other schemas rely on, which is beyond this spec's "no new resolver capability" boundary. It needs its own tests and docs, and it grows this feature's review.
+        - **C. Allow one `suggest(...)` per alternative.**
+            - Pro: each suggestion sits beside the alternative it fits.
+            - Con: it is a bigger grammar change than B, with the same scope concern.
+
+        **Recommendation: A.** The behavior is correct according to Darkmatter's documented rules, and the gap is about convenience, not correctness: validation, hover, and the other completions all work. Changing the suggestion rule affects every schema, and should go through its own fix spec (B is the smaller of the two changes). It should not ride along with this feature.
+    - |-
+        **`md compose` errors locate a bad policy entry by line and column, not by its path inside the list.**
+
+        When a document's `content_policy` is invalid, `md schema validate` and the editor (DMLS) report the exact path of the bad part, such as `content_policy/1` or `/content_policy/1/rule`, plus its line and column. `md compose` reports the property name (`content_policy`) and the line and column of the bad entry, but not the path. The spec's acceptance criterion 2 asks every entry point to identify the offending item "(instance path such as `/content_policy/1/rule`, with the line and column)".
+
+        This is how `md compose` renders every schema error today, for every frontmatter property. This feature did not change it.
+
+        Why decide now: the next phase audits the acceptance criteria and must say whether criterion 2 is met for compose.
+
+        Options:
+
+        - **A. Accept line and column as identifying the item for compose.** Record it in the audit as met by position, and leave compose's error format alone.
+            - Pro: no change to compose's error output, which many tests and users see; the location is exact.
+            - Con: the compose message doesn't say which list entry in words.
+        - **B. Add the instance path to compose's schema error message in this feature.**
+            - Pro: criterion 2 is met to the letter, and all three entry points read the same.
+            - Con: it changes the output of every compose schema error, not just policies. Snapshot tests and docs would need updating, and the change has nothing to do with Content Policy.
+        - **C. Do A now, and open a separate fix to add the path to compose errors.**
+            - Pro: this feature closes, and the improvement still happens for all properties.
+            - Con: a second piece of work to schedule.
+
+        **Recommendation: C.** The location compose prints is exact, and adding the path is a general improvement to compose's errors, not to this feature. It deserves its own small fix with its own tests.
 message_to_agent: |-
-    Phase 2 is done: the runtime baseline now declares `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`, and every library caller that attaches the Darkmatter baseline (compose's default, DMLS, `with_darkmatter_baseline_json_schema`) prepares it from embedded documents. Read "## Phase 2" in this log.
+    Phase 4 is done: standalone tests, docs, and skills. Read "## Phase 4" in this log.
 
-    Facts for Phase 3:
+    Facts for Phase 5:
 
-    1. Effective behavior already changed outside the CLI.
-       - Default `md compose` and DMLS now validate `content_policy` against the real list type, with no `$schema`.
-       - Only `md schema validate` still uses no baseline by default (`cli/src/commands/schema/validate.rs::load_api`); that is **Select CLI Baseline**.
-       - The full darkmatter and claudine suites pass, so no existing fixture held an invalid policy.
-    2. The shipped Content Policy schema is in its final form: `rule: "short_form(required)"` (quoted) and `policy: [short_form, long_form]` as bare names.
-       - `union_fixtures::content_policy_union_schema(shipped)` now returns the shipped text unchanged.
-       - `content_policy_bare_schema` is the shipped text with `rule` made optional.
-       - `content_policy_fixtures::baseline_with_policy` is the identity, after an exactly-once check of the declaration line.
-    3. `content_policy_editor_schema::long_form_without_rule_is_not_flagged_by_the_schema` was already flipped to `long_form_without_rule_is_rejected_by_the_schema_and_the_parser`.
-       - **Verify Compose Contract** still owns replacing that file's per-entry `p{index}` fixtures with real `content_policy` lists and retiring the mixed-`Evergreen` positive fixture (`mixed_compact_and_long_form_entries_validate`).
-    4. Reuse what already exists.
-       - Disk/embedded equivalence, the 109 mutation cells through both sources, all 52 `DECLARATIONS` with positions through the embedded baseline, typed definitions, cache reuse, empty `dependencies()`, and trigger/document same-name isolation are all proven. See the Phase 2 requirement-to-test table.
-       - CLI and DMLS tests can `#[path]`-include `darkmatter/lib/tests/content_policy_fixtures/mod.rs` and run `DECLARATIONS` through their own entry points. Add it to that package's `[package.metadata.ci.tests] source-inputs`.
-    5. Public API: a new additive variant, `SchemaSourceId::Embedded(String)`.
-       - It appears only in errors from preparing embedded documents. Those cannot happen at runtime: the shipped baseline panics instead, and a passive test guards it.
-       - DMLS's `if let SchemaSourceId::File` sites correctly ignore it.
-    6. DMLS fixture trap. A test that writes the shipped baseline into a temp workspace must also write `content-policy/schemas/content-policy.yaml` three directories above it. See `lsp_session::write_shipped_baseline_layout`. Do not put the baseline under a directory named `schemas`: DMLS then reads a malformed buffer there as a trigger-schema candidate.
-    7. Windows trap, hit this phase. Never pass a raw `std::fs::canonicalize` result as a `FileReference`. The `\\?\` spelling is rejected as `InvalidSyntax`; use `biscuit_file::canonicalize_simplified`.
-    8. Docs still stale, for Phase 4:
-       - the "planned" base-schema wording in `content-policy/README.md` (around `:103`) and `content-policy/docs/topics/policy-lifecycle.md` (`:7`, around `:961`);
-       - the "today a schema cannot type a whole list" paragraph (around `:937`);
-       - the Darkmatter schema docs and skill.
-
-       The lifecycle page's missing-`rule` sentence and the Content Policy skill's "Editor schema" section were corrected this phase.
-    9. Still true from Phase 1: `CliProcessFixture` does not scrub `SCHEMAS_DIR`; `dmls/tests/l1/stdio_subprocess.rs` inherits the host environment; `just cross-check` takes nextest name filters only, and several may be listed.
+    1. Two human-review items are open (`human_review_items`): rule suggestions in DMLS completion (only `Evergreen` is offered), and `md compose` error output naming the property plus line/column but not the instance path (`/content_policy/1/rule`). The docs describe the current behavior for both. If either is decided as "fix now", the Audit Acceptance task must reflect that.
+    2. Gates at the end of Phase 4 (macOS): `just test` in darkmatter 9737 passed / 11 skipped; content-policy 176 passed / 4 skipped; claudine 8694 passed / 9 skipped; `just lint` passes in all three. Native Windows ran the new standalone tests (CLI 35, DMLS 12, lib 8, all passed). Linux and WSL2 were not run for Phase 4 files.
+    3. New tests: `darkmatter/cli/tests/l1/standalone_baseline.rs`, `darkmatter/dmls/tests/l1/standalone_stdio.rs`; `content_policy_embedded_baseline::the_embedded_baseline_is_prepared_once_per_process` was extended to run from temp dirs outside the checkout.
+    4. Observed, not fixed (pre-existing, out of scope): `md compose` stderr keeps ANSI colors and OSC 8 hyperlinks under `NO_COLOR=1`; `darkmatter/docs/topics/caching.md:19` and `:318` name a fix directory, which breaks the docs rule. Under heavy host load, `entry_point_parity::md_entry_points_agree_on_every_reference_part_00` and `schema_validate_core_types::null_admitting_presence_matches_the_phase_a_table_end_to_end` took over 5 s once; both passed in the rerun.
+    5. Both skill entry files are slightly over 200 lines (`content-policy` 204, `darkmatter` 208; the latter was 205 before).
+source_files_during_phase_3:
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/union_item_editor.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/tests/l1/content_policy_compose_contract.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/md_process_fixture.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/standalone_stdio.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/lib/tests/content_policy_fixtures/mod.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/compose.md
 ---
 
 # Implementation Log for 2026-10-17-content-policy-base-schema
@@ -808,3 +883,386 @@ around `:937`), which was already stale before this phase.
 - `just cross-check --os linux darkmatter …` (same filters): pass. WSL2 was
   not run; CI's nightly covers it.
 - No skipped or pre-existing failures.
+
+## Phase 3
+
+Run on 2026-10-12. The three Wave 4 tasks ran as parallel subagents with
+separate file ownership (CLI, DMLS, library tests). The coordinator then
+reviewed and integrated their changes and ran the gates.
+
+### Select CLI Baseline
+
+- `md schema validate` gains `--no-baseline-schema`, which clap conflicts
+  with `--schema` (usage error, exit 2 from clap; stderr says "cannot be
+  used with", stdout empty).
+- `cli/src/commands/schema/validate.rs::load_api` selects in the spec's
+  order: flag opt-out → `--schema` → truthy `DARKMATTER_NO_BASELINE_SCHEMA`
+  → `BASELINE_SCHEMA` → embedded baseline
+  (`with_darkmatter_baseline_json_schema`). Both variables are read from the
+  request snapshot only. `DarkmatterSchemas::new` is unchanged.
+- The pure predicate `commands::compose::disables_baseline_schema(Option<&str>)`
+  accepts exactly `1`, `true`, `TRUE`, `yes`, `YES`.
+  `env_disables_baseline_schema` (compose and clean, live environment) now
+  delegates to it. It is still the file's only `std::env::var`, so the
+  context-construction guard's allowlist count is unchanged.
+- `no_schema` needed no change: under the embedded baseline,
+  `effective_for` returns a schema, so pretty output says "has a schema
+  definition and is valid". JSON `schema` stays null for a document without
+  `$schema`.
+- **Departure (recorded, not in the spec's text):** relative custom
+  baseline paths never worked before this phase. `--schema ./x.yaml` and
+  `BASELINE_SCHEMA=x.yaml` failed with exit 2 because the library resolved
+  them like a `$schema` value with an empty base. The spec requires custom
+  paths to resolve in the launch context, so `load_api` now resolves them
+  first with `crate::io::resolve_file_path`, the function compose's
+  `--baseline-schema` uses. A path that does not resolve is still exit 2,
+  with no fallback.
+- Tests changed:
+  - `schema_validate::schema_validate_no_schema_no_baseline_is_vacuous_success`
+    is now `…_with_baseline_opt_out_is_vacuous_success`. It passes
+    `--no-baseline-schema` and adds `last_updated: not-a-date`, so the
+    opt-out is load-bearing.
+  - `schema_robustness_matrix::run` passes `--no-baseline-schema` (see
+    "Validation cost" below).
+  - The other sites listed in the Phase 1 integration map
+    (`schema_validate_baseline.rs` snapshots, `schema_validate_shipped_artifacts`,
+    `schema_triggers`, `entry_point_parity`, custom-baseline cases) still
+    pass and still test what their names say. They are unchanged.
+
+### Validation cost (coordinator finding)
+
+With the default baseline, every distinct document schema compiles the
+merged baseline. That cost is about 12 ms per document in a debug build;
+`--no-baseline-schema` takes 0.03 s for the same 60 documents.
+
+- Measured on a debug `md`, 60 documents each with its own inline `$schema`:
+  - default baseline: 0.89 s;
+  - custom baseline equal to the shipped one: 0.88 s;
+  - the same baseline without `content_policy`: 0.72 s.
+
+  So `content_policy` adds about 20%. The rest is the baseline that already
+  existed.
+- 100 plain documents in one directory took 1.1 s, against 35 ms for one.
+  The validator cache keys on the document's full resolution context, and
+  the baseline declares `stylesheet: file`, so the validator really is
+  context-dependent. Compose already pays this per document; `md schema
+  validate` did not, because it had no baseline.
+- This is the spec's intended compatibility change, not redundant work
+  introduced here. Reusing validators across documents would be a
+  validator-cache design change, which is outside this spec.
+- Effect on tests: `schema_robustness_matrix::instance_side_matrix` and
+  `alphanumeric_options_through_md_schema_validate` rose from about 0.3 s to
+  2.5–2.9 s, and 5.4 s under load. That breaks the L1 budget on CI runners.
+  Those columns judge document schemas and were written before the
+  default baseline existed, so the shared runner now passes
+  `--no-baseline-schema`, with a comment saying why. Baseline selection and
+  merging have their own tests. All seven matrix tests are back to
+  0.16–0.32 s.
+
+### Preserve Editor Typing
+
+- No DMLS source change was needed. Every editor feature worked with the
+  embedded baseline.
+- New `dmls/tests/l1/content_policy_baseline.rs` (8 tests) reuses
+  `union_item_editor.rs`'s helpers. Those helpers were made `pub(crate)`,
+  a visibility-only change. The suite `#[path]`-includes
+  `content_policy_fixtures`, which is now in `dmls/Cargo.toml`
+  `source-inputs`.
+- **Gap, not fixed: shipped suggestions.** Only `Evergreen` of the seven
+  `suggest(...)` values in `content-policy.yaml` reaches completion.
+  - All seven are on the `^Evergreen$` branch. Darkmatter lints suggestions
+    against the arm that carries them, so it drops the other six, from disk
+    and embedded sources alike. This is documented in
+    `darkmatter/docs/topics/schemas/definition.md:2546`: "`suggest(...)`
+    candidates are linted against their own arm, so a candidate that only
+    another arm accepts is dropped".
+  - The schema cannot be corrected by moving suggestions to their matching
+    branches. The coordinator tried it, and preparation then fails with "a
+    property definition may contain at most one `suggest` constraint"
+    (`definition.md:445`, which applies across union atoms). The edit was
+    reverted.
+  - The typed baseline still carries all seven candidates, so embedding
+    preserves them. Completion offers rule forms only as far as Darkmatter's
+    documented suggestion rules allow.
+  - Changing those rules changes a documented Darkmatter contract and is
+    beyond this spec's scope ("no new resolver capability"). It is raised
+    for human review.
+  - The DMLS test asserts `Evergreen` is offered and does not lock in the
+    six omissions.
+- Template values: `file_changed_leading_template` (`FileChanged({{HOME}}/x, @fp)`)
+  is rejected by direct library validation. DMLS publishes nothing for it,
+  because DMLS validates with `PendingPolicy::Defer` as compose does: a
+  `{{…}}` value is checked after interpolation. The table test expects no
+  DMLS diagnostic for such rows, and says why.
+- Performance note: opening about 130 documents in one session took about
+  15.7 s, against 0.4 s for editing one open buffer. The declarations test
+  therefore edits a single buffer. The many-open-documents slowdown predates
+  this work and was not pursued.
+
+### Verify Compose Contract
+
+- `content_policy_editor_schema.rs` was rewritten. The `p{index}`
+  per-entry fixtures and `mixed_compact_and_long_form_entries_validate` are
+  gone; the latter treated `Evergreen` with other rules as valid, which is
+  the `evergreen_with_another_rule` limitation row. The file now drives every
+  `DECLARATIONS` row (block and flow) through a document that imports the
+  shipped schema in its own `$schema`, which is the one source not yet
+  covered. `long_form_without_rule_is_rejected_by_the_schema_and_the_parser`
+  uses real `content_policy` lists (`/content_policy/0`,
+  `/content_policy/1/rule`).
+- `DECLARATIONS` gains 15 both-reject rows (67 in all): `malformed_date`,
+  `missing_rule_after_a_valid_entry`, `null_rule_after_a_valid_entry`,
+  `capitalized_action`, and FileChanged grammar rejections (no fingerprint,
+  comma, backslash, leading/trailing space not trimmed, absolute, `~`, `@`,
+  `%`, leading template, nested fingerprint property). The embedded, disk,
+  CLI, and DMLS consumers all run the larger table.
+- New `lib/tests/l1/content_policy_compose_contract.rs`: see the mapping
+  below.
+- Known boundary: compose defers shell-pending (`$(...)`) schema problems
+  and does not re-check plain shell output. A `$(...)` producing an invalid
+  policy therefore passes `md compose` on its own, as for every baseline
+  field. Only `{{ }}` templates are tested, to keep shells out of L1.
+- Stale comment fixed by the coordinator:
+  `ComposeOptions::with_darkmatter_baseline_schema` said it loads the
+  authored schema from `darkmatter/docs/schemas/darkmatter.yaml`. It now
+  names the compiled-in baseline and says its imports resolve without the
+  disk.
+
+### Requirement-to-test mapping (Phase 3)
+
+| Requirement | Test |
+| --- | --- |
+| Five-level selection order, combined inputs, launch-relative custom paths | `schema_validate_baseline_selection::selection_*` (10 tests) |
+| Every truthy spelling and representative non-disabling values | `schema_validate_baseline_selection::spelling_*` (11 tests, one per row), guard `spelling_tests_cover_every_row_once`; pure predicate `commands::compose::tests::disables_baseline_schema_accepts_exactly_the_documented_spellings` |
+| Broken custom baseline: exit 2, no fallback | `…::broken_schema_flag_baseline_exits_2_without_fallback`, `…_even_with_env_opt_out`, `broken_baseline_schema_env_exits_2_without_fallback`, `missing_baseline_schema_env_file_exits_2_without_fallback` |
+| Flag conflict | `…::no_baseline_schema_conflicts_with_schema_flag` |
+| Document and trigger schemas after opt-out; `--no-trigger-schemas` independent | `…::document_schema_still_validates_after_{flag,env}_opt_out`, `trigger_schema_still_validates_after_{flag,env}_opt_out`, `no_trigger_schemas_keeps_the_embedded_baseline` |
+| Document `$schema` replaces `content_policy` (CLI) | `…::document_schema_replaces_the_baseline_content_policy` |
+| CLI default accepts the example and policy-free doc; JSON `schema` null; quiet; pretty wording | `…::default_accepts_the_authoring_example`, `default_accepts_a_policy_free_document_quietly` |
+| CLI default rejects unknown rule/action, empty list, wrong shape, missing/null `rule` with path, kind, line/column | `…::default_rejects_*` (6 tests) |
+| `last_updated: not-a-date` compatibility change and opt-outs | `…::default_rejects_an_invalid_last_updated`, `{flag,env}_opt_out_accepts_an_invalid_last_updated_without_a_schema`, `schema_validate::schema_validate_no_schema_with_baseline_opt_out_is_vacuous_success` |
+| DMLS completion: compact item, `rule:` and `action:` values, long-form keys | `content_policy_baseline::completion_offers_rule_forms_actions_and_long_form_keys_from_the_embedded_schema` |
+| DMLS hover on compact and long-form rules with shipped descriptions | `content_policy_baseline::hover_on_compact_and_long_form_rules_shows_the_shipped_branch_descriptions` |
+| DMLS item/field/mapping/value diagnostic positions | `content_policy_baseline::diagnostics_address_the_offending_item_field_or_value`, `every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor` |
+| DMLS valid example and policy-free doc clean | `content_policy_baseline::the_authoring_example_and_a_policy_free_document_are_clean` |
+| DMLS layering (built-in → extension → trigger → document) and same-name isolation | `content_policy_baseline::extensions_triggers_and_document_schemas_replace_the_baseline_declaration`, `a_document_schema_with_the_same_type_names_does_not_collide_with_the_baseline` |
+| Embedded documents never watched | `content_policy_baseline::embedded_baseline_documents_are_never_watched_dependencies` |
+| Shared declarations through a document-imported schema; both-reject missing/null `rule` | `content_policy_editor_schema::declarations_meet_their_expectations_through_a_document_import`, `long_form_without_rule_is_rejected_by_the_schema_and_the_parser` |
+| Compose keeps the example unchanged; absent policy not inserted | `content_policy_compose_contract::the_authoring_example_composes_with_its_policy_unchanged`, `a_document_without_a_policy_gains_no_policy_key` |
+| Resolved invalid value fails; pending templates checked after resolution | `content_policy_compose_contract::a_resolved_invalid_policy_fails_composition_at_its_item`, `pending_templates_are_checked_after_resolution` |
+| Document declaration keeps optional-null materialization; baseline alone does not | `content_policy_compose_contract::a_document_declared_policy_keeps_optional_null_materialization` |
+| Passive validation: bytes unchanged, no stamping, nonexistent `FileChanged` file passes, no effect engine or network | `content_policy_compose_contract::policy_checks_are_passive` |
+
+### Pre-existing defect fixed (Windows compile)
+
+`darkmatter/cli/tests/l1/schema_triggers.rs` (last changed in `be155d6d1`,
+before this phase) gated `strip_ansi` with `#[cfg(unix)]`, but the un-gated
+`matched_dialects` calls it. The CLI's L1 test binary therefore did not
+compile on Windows, which blocked Windows evidence for this phase's CLI
+tests (and CI's Windows leg on `main`). The body is portable, so the `cfg`
+was removed. No other change was made to that file.
+
+### Gates
+
+- `just test` in `darkmatter/` (lib, CLI, DMLS): 9721 passed, 0 failed,
+  11 skipped. No test took 3 s or more.
+- `just lint` in `darkmatter/`: pass.
+- `just test` in `claudine/`: 8694 passed, 0 failed, 9 skipped.
+- `just lint` in `claudine/`: pass.
+- `content-policy/` was not touched this phase. A schema edit was tried and
+  reverted, and the file matches HEAD.
+- Native Windows (`just cross-check --os windows`):
+  - `darkmatter` lib, the four `content_policy_*` filters: 8 passed;
+  - `darkmatter-cli`, `schema_validate_baseline_selection`,
+    `schema_robustness_matrix`, `schema_validate::`, `schema_triggers`: 139
+    passed (after the fix above);
+  - `dmls`, `content_policy_baseline` and `union_item_editor`: 13 passed.
+  - Under that parallel run, `schema_robustness_matrix` columns took
+    3.0–4.0 s on Windows even with `--no-baseline-schema`. That is the
+    existing process cost on Windows, not this phase's baseline; the same
+    columns take 0.16–0.32 s on macOS and Linux.
+- Linux (`just cross-check --os linux`): `darkmatter-cli` (selection and
+  matrix) 51 passed; `dmls` `content_policy_baseline` 8 passed.
+- WSL2 was not run; CI's nightly covers it.
+- No skipped or pre-existing failures remain in the gates above.
+
+## Phase 4
+
+Run on 2026-10-12. The two Wave 5 tasks ran as parallel foreground
+subagents with separate file ownership: tests (Rust) and docs/skills. The
+coordinator then checked compose's error output, corrected the skill's test
+list, re-ran every gate after both finished, and updated the records.
+
+### Verify Standalone Use
+
+- `CliProcessFixture` (`darkmatter/cli/tests/common/fixture.rs`) did not
+  remove `SCHEMAS_DIR`. It now does, and the fixture's environment table says
+  so. `md_process_fixture.rs`'s env-recording probe (Unix and Windows) now
+  records `BASELINE_SCHEMA` and `SCHEMAS_DIR`, and
+  `inherited_families_do_not_reach_the_child_and_fixture_defaults_win`
+  asserts that host values for both never reach `md`.
+- New `darkmatter/cli/tests/l1/standalone_baseline.rs`. Every test runs the
+  built `md` from a temp directory outside the checkout that holds only the
+  test document:
+  - `compose_accepts_the_authoring_example_unchanged`;
+  - `compose_rejects_{an_unknown_rule, an_unknown_action, an_empty_policy_list, a_policy_that_is_not_a_list, a_long_form_entry_without_rule, a_long_form_entry_with_null_rule}`,
+    one `#[test]` per acceptance row (exit 1, empty stdout, the property and
+    the row's line and column), with the guard
+    `compose_rejection_tests_cover_every_acceptance_row_once`;
+  - `host_schema_configuration_cannot_stand_in_for_the_embedded_schemas`:
+    the test process exports a permissive `BASELINE_SCHEMA`,
+    `DARKMATTER_NO_BASELINE_SCHEMA=1`, and `SCHEMAS_DIR`. `validate` and
+    `compose` still reject the invalid policy and accept the example. Control
+    runs prove the first two variables would change the verdict if they
+    reached the child. With `BASELINE_SCHEMA` taken out of the removal list,
+    this test and the probe test both fail;
+  - `schema_validate_meets_the_{even,odd}_shared_declarations_in_{block,flow}_form`:
+    every `DECLARATIONS` row in both presentations through `md schema
+    validate` (verdict, path, kind, line, column). The table is split four
+    ways to keep each run under 1 s, with the guard
+    `declaration_runs_cover_both_presentations_and_halves_once`;
+  - `schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error`:
+    the duplicate-key and malformed-YAML rows exit 3 with
+    `frontmatter_parse`.
+- New `darkmatter/dmls/tests/l1/standalone_stdio.rs`:
+  `the_built_server_validates_and_completes_policies_without_schema_files`
+  starts the built `dmls` over stdio from a temp directory outside the
+  checkout. Home, config, cache, and data point at fixture directories, and
+  the three schema variables and inherited `DARKMATTER_*`/`DM_*`/`DMLS_*`
+  are removed. Each of the six invalid documents publishes a
+  `darkmatter.schema` diagnostic at its anchor, and the example publishes
+  none. Completion offers `Evergreen` in a compact item and exactly
+  `refresh`/`archive`/`remove` for `action:`. The conversation waits at most
+  20 s and the exit at most 10 s, and the child is always shut down.
+  `stdio_subprocess.rs` helpers (`ChildGuard`, `write_message`,
+  `read_message`) became `pub(crate)`. In `content_policy_baseline.rs`, the
+  fixture module became `pub(crate)`, because clippy rejects including the
+  same file twice. Both are visibility-only changes.
+- Library: `content_policy_embedded_baseline::the_embedded_baseline_is_prepared_once_per_process`
+  was extended rather than duplicated. It runs two requests, each rooted in
+  its own temp directory and asserted to be outside the checkout. Each
+  accepts the example and rejects the six acceptance cases at their instance
+  paths, and the test checks pointer identity of the cached baseline after
+  the second load. No schema file is read from disk. The shared fixtures
+  gained `ACCEPTANCE_REJECTIONS` and a `declaration(name)` lookup.
+- `md schema validate` for the six acceptance cases was already covered by
+  `schema_validate_baseline_selection::default_rejects_*`, which now also
+  runs without `SCHEMAS_DIR`.
+
+### Robustness tables and read audit
+
+- All nine schema-mutation columns already ran against both the disk and the
+  embedded sources (Phases 1–2), each with its column-coverage guard.
+- **Gap filled:** the `types.long_form` column had no "trailing/invalid
+  content" cells. It now has `malformed field definition` and `invalid YAML`,
+  both expected to fail preparation, on disk and embedded. Reverting the edit
+  makes the first one fail, so the edit is load-bearing.
+- **Gap filled:** before this phase, the declaration-shape table reached the
+  CLI through only six rows. Every row now runs through `md schema validate`
+  (above). DMLS already ran every row.
+- The audit grep (`serde(default)`, `unwrap_or_default`,
+  `filter_map(.. as_str)`, `.ok()`, null-collapsing `Option`) covered the
+  code changed in Phases 2–3: `embedded.rs`, the `resolve.rs` source seam,
+  `load_api`, and `disables_baseline_schema`. It found no silent loss:
+  - `embedded.rs` has no matches, and the new `resolve.rs` code turns every
+    missing value or unexpected shape into a typed error;
+  - `compose.rs:738`'s `std::env::var(..).ok()` treats a non-UTF-8 value as
+    unset, so the baseline stays on. That fails safe, because no such value
+    can be an opt-out spelling;
+  - `compose.rs:715` (`yaml.get("$schema").unwrap_or(&yaml)`) is an existing,
+    intentional fallback for a custom baseline written without a `$schema`
+    wrapper.
+
+### Update Behavior Records
+
+- `darkmatter/docs/topics/schemas/definition.md` has two new subsections:
+  - "The Built-in Baseline": the embedded table and its virtual paths, no
+    fallback, never watched, prepared once per process;
+  - "Selecting the Baseline": per-entry-point defaults, the truthy
+    spellings, a Mermaid precedence flowchart, an example per rule, the
+    launch-directory paths, the opt-out scope, and the `last_updated`
+    compatibility example.
+
+  Its usage line and flag table, the JSON `schema` note, the
+  `suggest(...)` example, the `$(...)` boundary, and the "Compose and
+  Validate Defaults" section were also updated.
+- `darkmatter/docs/inline/schema-validation.md`: the five-rule table, the
+  conflict and path rules, the compatibility example, the no-insertion and
+  optional-null example, and the `$(...)` boundary.
+- `darkmatter/docs/schemas/darkmatter-schema.md` (the runtime baseline
+  contract): the baseline is the default on all three surfaces, it is
+  compiled in, and it has a `content_policy` entry.
+- `darkmatter/docs/topics/schemas/dmls-schema-support.md`: the compiled-in
+  baseline, a "Content policies" subsection, and two known limitations: only
+  `Evergreen` is suggested, and `{{ … }}` values are not diagnosed.
+- `content-policy/README.md` and `content-policy/docs/topics/policy-lifecycle.md`
+  no longer carry the "planned" wording, the "cannot type a whole list"
+  statement, or the "suggests rule forms" overclaim. The remaining
+  parser-only rejections now have examples.
+  `content-policy/docs/dependencies.md` names Darkmatter as a current consumer.
+- `darkmatter/docs/dependencies.md` and `docs/dependencies.md` were already
+  correct and are unchanged. No Darkmatter README describes `md schema
+  validate`'s baseline, so none changed.
+- Skills: `content-policy/SKILL.md` now says `&` and `^` FileChanged
+  prefixes are accepted, which corrects an earlier claim. Its editor-schema
+  section is rewritten, and its test list now names the new test files.
+  `darkmatter/schema.md` has a new "Runtime baseline" section; small fixes
+  went into `darkmatter/SKILL.md`, `cli.md`, and `compose.md`.
+- Two claims from the brief were corrected against the code:
+  - baseline origin is recorded on the effective schema
+    (`origins["content_policy"]`), not on each problem;
+  - a missing `rule` is reported as kind `invalid` at the entry's path, not
+    `missing`.
+- `definition.md` quoted a made-up pretty-mode message (`no schema;
+  vacuously valid`) that the code does not print. It was removed, following
+  `validate.rs`.
+
+### Findings raised or left alone
+
+- **Raised for human review:** `md compose` reports a bad entry by property
+  name plus line and column (for example `invalid content_policy: … at 4:5`),
+  not by instance path. `md schema validate` and DMLS print the path. This is
+  compose's existing rendering for every schema error. See
+  `human_review_items`.
+- Observed, pre-existing, not fixed:
+  - `md compose` stderr keeps ANSI color codes and OSC 8 hyperlinks under
+    `NO_COLOR=1`. The new compose tests strip them;
+  - `darkmatter/docs/topics/caching.md:19` and `:318` name a fix directory.
+- No departure from the spec in this phase. The spec was left unchanged
+  except for `implemented: true`.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Requirement | Test |
+| --- | --- |
+| Library baseline validation outside the checkout; second load reuses the cache | `content_policy_embedded_baseline::the_embedded_baseline_is_prepared_once_per_process` |
+| Built `md compose` accepts the example and rejects each acceptance case | `standalone_baseline::compose_accepts_the_authoring_example_unchanged`, `compose_rejects_*` (6) + guard |
+| Built `md schema validate` meets every shared declaration and the reader-boundary rows | `standalone_baseline::schema_validate_meets_the_*` (4) + guard, `schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error` |
+| Host `BASELINE_SCHEMA`/`DARKMATTER_NO_BASELINE_SCHEMA`/`SCHEMAS_DIR` cannot reach `md` | `standalone_baseline::host_schema_configuration_cannot_stand_in_for_the_embedded_schemas`, `md_process_fixture::inherited_families_do_not_reach_the_child_and_fixture_defaults_win` |
+| Built DMLS validates and completes over stdio without schema files | `standalone_stdio::the_built_server_validates_and_completes_policies_without_schema_files` |
+| Missing robustness cells (`types.long_form` trailing/invalid) | `content_policy_disk_baseline::long_form_cells`, `embedded_sources::embedded_long_form_cells` |
+
+### Gates
+
+Run on macOS after both subagents finished:
+
+- `just test` in `darkmatter/`: 9737 passed, 0 failed, 11 skipped.
+- `just test` in `content-policy/`: 176 passed, 4 skipped.
+- `just test` in `claudine/`: 8694 passed, 9 skipped.
+- `just lint` in `claudine/`, `darkmatter/`, and `content-policy/` all pass.
+  The last includes `deps-check`, which finds no Darkmatter crate for
+  default or all features.
+- The test subagent's earlier full run showed two existing tests over 5 s
+  under a host load average of about 24:
+  `entry_point_parity::md_entry_points_agree_on_every_reference_part_00` and
+  `schema_validate_core_types::null_admitting_presence_matches_the_phase_a_table_end_to_end`.
+  Neither is new. The coordinator's rerun had no failures.
+- Native Windows (`just cross-check --os windows`), run by the test
+  subagent:
+  - `darkmatter-cli` `standalone_baseline` and `md_process_fixture`: 35 of 35,
+    each under 2 s;
+  - `dmls` `standalone_stdio`, `stdio_subprocess`, and
+    `content_policy_baseline`: 12 of 12;
+  - `darkmatter` lib `content_policy_embedded_baseline` and `long_form_cells`:
+    8 of 8.
+- Linux and WSL2 were not run for this phase's files; CI covers them.
