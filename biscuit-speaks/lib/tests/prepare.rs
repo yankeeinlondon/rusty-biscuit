@@ -825,8 +825,15 @@ async fn speak_retains_say_preparation_only_when_both_settings_resolve() {
 // ============================================================================
 
 /// The default stack with only the fakes installed: Kokoro, then Echogarden.
-fn kokoro_then_echogarden(fixture: &TtsFixture) -> (TtsConfig, test_toolkit::EnvGuard) {
-    let default_order = test_toolkit::EnvGuard::remove_safe("TTS_PROVIDER");
+///
+/// An ElevenLabs API key would end the stack with ElevenLabs, which a
+/// fallback without a player would then call over the network.
+fn kokoro_then_echogarden(fixture: &TtsFixture) -> (TtsConfig, [test_toolkit::EnvGuard; 3]) {
+    let default_order = [
+        test_toolkit::EnvGuard::remove_safe("TTS_PROVIDER"),
+        test_toolkit::EnvGuard::remove_safe("ELEVEN_LABS_API_KEY"),
+        test_toolkit::EnvGuard::remove_safe("ELEVENLABS_API_KEY"),
+    ];
     fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
     fixture.install(FakeTool::Echogarden, Behavior::Synthesize);
     fixture.install(FakeTool::Mpv, Behavior::Synthesize);
@@ -834,7 +841,7 @@ fn kokoro_then_echogarden(fixture: &TtsFixture) -> (TtsConfig, test_toolkit::Env
         .with_volume(VolumeLevel::Explicit(0.0))
         .with_failover(TtsFailoverStrategy::FirstAvailable);
     assert_eq!(
-        biscuit_speaks::get_providers_for_strategy(&config.failover_strategy)[..2],
+        biscuit_speaks::get_providers_for_strategy(&config.failover_strategy),
         [
             TtsProvider::Host(HostTtsProvider::KokoroTts),
             TtsProvider::Host(HostTtsProvider::EchoGarden)

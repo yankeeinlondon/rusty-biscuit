@@ -8,6 +8,11 @@
 //! was written; anything missing, unreadable, mismatched, or expired is a
 //! cache miss.
 //!
+//! Records exist only when the caller names the account with
+//! `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT`. Without that label nothing local can
+//! tell two API keys under the same variable apart, so no record is written
+//! or trusted and the default voice is resolved through the API.
+//!
 //! Records live beside the voice-capability cache file, so
 //! `BISCUIT_SPEAKS_CACHE` relocates them too. No field holds, or is derived
 //! from, an API key.
@@ -23,8 +28,8 @@ use tracing::debug;
 /// How long a record is trusted after it was written.
 pub(crate) const TRUST_SECONDS: u64 = 24 * 60 * 60;
 
-/// Names an optional caller-chosen label that tells accounts apart when two
-/// API keys share an environment variable.
+/// Names the caller-chosen, non-secret label that tells accounts apart when
+/// two API keys share an environment variable.
 const ACCOUNT_LABEL_ENV: &str = "BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT";
 
 /// Everything the default voice selection depends on besides the account.
@@ -57,15 +62,20 @@ pub(crate) struct Snapshot {
 /// A non-secret identifier for the account the API key belongs to.
 ///
 /// The API address, the name of the environment variable the key is read
-/// from (in the client's precedence order), and the optional
-/// `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` label. Two keys under the same
-/// variable name share a context unless the label differs; the 24-hour trust
-/// window and refresh-on-prepare bound that. `None` without a key.
+/// from (in the client's precedence order), and the
+/// `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` label, which must differ per account.
+/// `None`, which disables default-voice records, without a key or without a
+/// non-blank label: the key itself is never stored or hashed, so nothing else
+/// distinguishes two keys under the same variable.
 pub(crate) fn account_context(base_url: &str) -> Option<String> {
     let key_source = ["ELEVEN_LABS_API_KEY", "ELEVENLABS_API_KEY"]
         .into_iter()
         .find(|name| std::env::var(name).is_ok())?;
-    let label = std::env::var(ACCOUNT_LABEL_ENV).unwrap_or_default();
+    let label = std::env::var(ACCOUNT_LABEL_ENV).ok()?;
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
     Some(format!("{base_url};key-source={key_source};label={label}"))
 }
 

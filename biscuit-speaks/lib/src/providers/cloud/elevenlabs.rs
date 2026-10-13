@@ -1938,7 +1938,7 @@ mod tests {
     // ========================================================================
 
     const NOW: u64 = 1_800_000_000;
-    const ACCOUNT: &str = "https://api.elevenlabs.io;key-source=ELEVEN_LABS_API_KEY;label=";
+    const ACCOUNT: &str = "https://api.elevenlabs.io;key-source=ELEVEN_LABS_API_KEY;label=work";
     const TEXT: &str = "This is a test message: prepared ElevenLabs";
 
     /// Owns the audio cache (the OS temporary directory) and the record directory
@@ -2108,7 +2108,7 @@ mod tests {
         assert!(detached_hit(&at(NOW + snapshot::TRUST_SECONDS - 1), &transport, &female()).await);
         assert!(!detached_hit(&at(NOW + snapshot::TRUST_SECONDS), &transport, &female()).await, "expired");
         assert!(!detached_hit(&at(NOW - 1), &transport, &female()).await, "written in the future");
-        let other_account = recording_provider(&transport, NOW, Some("https://api.elevenlabs.io;key-source=ELEVENLABS_API_KEY;label="));
+        let other_account = recording_provider(&transport, NOW, Some("https://api.elevenlabs.io;key-source=ELEVENLABS_API_KEY;label=work"));
         assert!(!detached_hit(&other_account, &transport, &female()).await, "another account");
         assert!(!detached_hit(&recording_provider(&transport, NOW, None), &transport, &female()).await, "no account");
         let other_language = female().with_language(Language::Custom("fr".into()));
@@ -2265,6 +2265,30 @@ mod tests {
         assert!(detached_hit(&provider, &transport, &fast).await);
     }
 
+    /// Removes both API-key variables for the test's lifetime, so a key set
+    /// and dropped inside the test restores absence rather than the
+    /// developer's own key.
+    fn without_api_keys() -> [test_toolkit::EnvGuard; 2] {
+        [
+            test_toolkit::EnvGuard::remove_safe("ELEVEN_LABS_API_KEY"),
+            test_toolkit::EnvGuard::remove_safe("ELEVENLABS_API_KEY"),
+        ]
+    }
+
+    /// A provider built by a production constructor, so its account context
+    /// comes from the environment, with only its requests and clock replaced.
+    fn production_provider(
+        base: ElevenLabsProvider,
+        transport: &Arc<fake::FakeTransport>,
+        now: u64,
+    ) -> ElevenLabsProvider {
+        ElevenLabsProvider {
+            transport: Arc::clone(transport) as Arc<dyn ElevenLabsTransport>,
+            clock: Arc::new(fake::FakeClock::at(now)),
+            ..base
+        }
+    }
+
     /// The record never contains the API key, only the name of the
     /// variable it was read from.
     #[tokio::test]
@@ -2272,6 +2296,7 @@ mod tests {
     async fn the_account_context_and_record_hold_no_credential() {
         const SECRET: &str = "sk-sentinel-0123456789abcdef";
         let fixture = RecordFixture::new();
+        let _no_keys = without_api_keys();
         let _key = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", SECRET);
         let _other = test_toolkit::EnvGuard::set_safe("ELEVENLABS_API_KEY", "sk-other-secret");
         let _label = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "work");
@@ -2294,6 +2319,95 @@ mod tests {
         );
         drop(_other);
         assert_eq!(snapshot::account_context(ElevenLabs::BASE_URL), None, "no key, no records");
+    }
+
+    /// Without a label, two keys under one variable are indistinguishable,
+    /// so account A's preparation must not answer account B's detached
+    /// request: it writes no record, and B's lookup misses.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn an_unlabeled_account_switch_misses_instead_of_reusing_the_previous_accounts_voice() {
+        let fixture = RecordFixture::new();
+        let _no_keys = without_api_keys();
+        let account_a = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "dummy-account-a");
+        let transport_a = listed_voices();
+        let prepared = production_provider(ElevenLabsProvider::new().unwrap(), &transport_a, NOW)
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        assert!(matches!(prepared, Some(ResolvedSynthesis::ElevenLabs { ref voice, .. }) if voice == "f1"));
+        assert_eq!(fixture.audio_files(), 1, "account A's speech is cached");
+        assert!(fixture.records().is_empty(), "no label, no record");
+
+        drop(account_a);
+        let _account_b = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "dummy-account-b");
+        let transport_b = Arc::new(fake::FakeTransport::with_voices(vec![fake::voice(
+            "account-b-female",
+            Some("female"),
+        )]));
+        let fresh = production_provider(ElevenLabsProvider::new().unwrap(), &transport_b, NOW + 1);
+        assert!(!detached_hit(&fresh, &transport_b, &female()).await, "account A's voice is not reused");
+        assert_eq!(transport_b.total_requests(), 0);
+        assert!(fixture.records().is_empty());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_blank_account_label_records_and_trusts_nothing() {
+        let fixture = RecordFixture::new();
+        let _no_keys = without_api_keys();
+        let _key = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "dummy-account-a");
+        for blank in ["", "   "] {
+            let _label = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", blank);
+            assert_eq!(snapshot::account_context(ElevenLabs::BASE_URL), None, "{blank:?}");
+            let transport = listed_voices();
+            production_provider(ElevenLabsProvider::new().unwrap(), &transport, NOW)
+                .prepare_resolved(TEXT, &female())
+                .await
+                .unwrap();
+            let fresh = production_provider(ElevenLabsProvider::new().unwrap(), &transport, NOW + 1);
+            assert!(!detached_hit(&fresh, &transport, &female()).await, "{blank:?}");
+            assert_eq!(transport.list_requests(), 1, "the voice is resolved through the API");
+        }
+        assert!(fixture.records().is_empty());
+        assert_eq!(fixture.audio_files(), 1, "once resolved, the voice's audio is reused");
+    }
+
+    /// A labeled account reuses its own record without a request; changing
+    /// the label, the API address, or the key's variable misses.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_labeled_account_reuses_its_record_and_any_context_change_misses() {
+        let fixture = RecordFixture::new();
+        let _no_keys = without_api_keys();
+        let primary = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "dummy-account-a");
+        let label = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "work");
+        let transport = listed_voices();
+        production_provider(ElevenLabsProvider::new().unwrap(), &transport, NOW)
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        assert_eq!(fixture.records().len(), 1);
+        let fresh = || production_provider(ElevenLabsProvider::new().unwrap(), &transport, NOW + 1);
+        assert!(detached_hit(&fresh(), &transport, &female()).await, "same labeled account");
+
+        let address = production_provider(
+            ElevenLabsProvider::with_base_url("http://127.0.0.1:9").unwrap(),
+            &transport,
+            NOW + 1,
+        );
+        assert!(!detached_hit(&address, &transport, &female()).await, "another API address");
+
+        drop(label);
+        let personal = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "personal");
+        assert!(!detached_hit(&fresh(), &transport, &female()).await, "another label");
+        drop(personal);
+
+        let _label = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "work");
+        drop(primary);
+        let _alias = test_toolkit::EnvGuard::set_safe("ELEVENLABS_API_KEY", "dummy-account-a");
+        assert!(!detached_hit(&fresh(), &transport, &female()).await, "another key source");
+        assert_eq!(transport.list_requests(), 1, "only the preparation listed voices");
     }
 
     #[cfg(feature = "playa")]
