@@ -223,7 +223,7 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
 /// undeclared property and an unknown function — in a frontmatter
 /// `expression`, a lifecycle stack, and the body — runs no lifecycle action,
 /// no frontmatter `$()` or `::shell`, writes no file, and reads no lazy
-/// `current.*` / `current_env.*` value (DMLS never opens an evaluation
+/// `current.*` value (DMLS never opens an evaluation
 /// session; `undeclared_property.rs` scans the source for that).
 #[test]
 fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers() {
@@ -244,7 +244,7 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
          gate: current.branch == 'main' && missing_gate_fn(title)\n\
          note: $(touch {frontmatter_shell})\n\
          start:\n  stack:\n    - when: err\n      action:\n        - shell: touch {action_shell}\n        - set_frontmatter:\n            touched: true\n\
-         finalize:\n  say: \"{{{{ current_env.HOME }}}}\"\n\
+         finalize:\n  say: \"{{{{ current.os }}}}\"\n\
          ---\n\n\
          {{{{ current.branch }}}} {{{{ undeclared_prop }}}} {{{{ no_such_fn(title) }}}}\n\n\
          ::shell touch {body_shell}\n"
@@ -311,5 +311,71 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
         ),
         before,
         "passive validation must build no effect engine and attempt no network access",
+    );
+}
+
+/// Completion and hover over the `fm` root, its members, the reserved `env`
+/// and lazy `current` roots, and the released `doc`/`hook` names consult only
+/// descriptors and the parsed document: no frontmatter `$()` runs and no
+/// effect engine or network access is built. DMLS opens no evaluation session
+/// (`undeclared_property.rs` scans the source for that), so `current.*` and
+/// the process environment are never observed.
+#[test]
+fn fm_root_completion_and_hover_observe_nothing() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
+    let workspace = LspWorkspace::new();
+    let sentinel = workspace.path().join("FM_SHELL_RAN").to_string_lossy().replace('\\', "/");
+    let text = format!(
+        "---\ntitle: Passive\ndoc: {{ title: userland }}\nhook: $(touch {sentinel})\n---\n\n\
+         A: {{{{ fm }}}} {{{{ fm.title }}}} {{{{ fm. }}}}\n\
+         B: {{{{ doc.title }}}} {{{{ hook }}}} {{{{ current.branch }}}} {{{{ env.HOME }}}}\n"
+    );
+    let doc_path = workspace.path().join("fm.md");
+    std::fs::write(&doc_path, &text).unwrap();
+    let doc_uri = url::Url::from_file_path(&doc_path).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(passive_initialize_params(workspace.path()));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str(), "languageId": "markdown", "version": 1, "text": text }
+        }),
+    );
+    let _ = fixture.wait_for_diagnostics(doc_uri.as_str());
+    let positions: Vec<(u32, u32)> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("A:") || line.starts_with("B:"))
+        .flat_map(|(line, content)| {
+            content.match_indices("{{ ").map(move |(start, _)| (line as u32, (start + 4) as u32)).collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(positions.len(), 7, "{positions:?}");
+    for (line, character) in positions {
+        for method in ["textDocument/hover", "textDocument/completion"] {
+            let response = fixture.request(
+                method,
+                json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),
+            );
+            assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+        }
+    }
+    fixture.shutdown();
+
+    assert!(!std::path::Path::new(&sentinel).exists(), "a frontmatter shell ran");
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "fm completion and hover must build no effect engine and attempt no network access",
     );
 }

@@ -922,15 +922,36 @@ fn expression_value_completions(
     value_start: usize,
 ) -> Vec<CompletionItem> {
     let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
-    let frontmatter_keys: Vec<String> = ctx
-        .overlay
-        .and_then(|overlay| overlay.ast.as_ref())
-        .map(|ast| ast.top_level().map(|entry| entry.key.clone()).collect())
-        .unwrap_or_default();
+    let frontmatter_keys = expression_property_keys(ctx);
     expressions::completion_candidates(token, &frontmatter_keys)
         .into_iter()
         .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
         .collect()
+}
+
+/// The document properties an expression may name: the document's top-level
+/// frontmatter keys, then the top-level properties its own `$schema` declares
+/// but leaves unset (caller-supplied parameters). Base and extension baseline
+/// properties are not offered.
+pub(crate) fn expression_property_keys(ctx: &DocumentContext) -> Vec<String> {
+    let mut keys: Vec<String> = ctx
+        .overlay
+        .and_then(|overlay| overlay.ast.as_ref())
+        .map(|ast| ast.top_level().map(|entry| entry.key.clone()).collect())
+        .unwrap_or_default();
+    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
+    let schema = bundle.and_then(|bundle| bundle.effective.simplified.as_ref());
+    let declared: Vec<String> = match schema {
+        Some(SimplifiedSchema::Single(document)) => document.properties.keys().cloned().collect(),
+        Some(SimplifiedSchema::Union(arms)) => merged_root_arm_shape(arms).properties.into_keys().collect(),
+        None => Vec::new(),
+    };
+    for name in declared {
+        if !keys.contains(&name) {
+            keys.push(name);
+        }
+    }
+    keys
 }
 
 /// Lowers a neutral [`expressions::ExprCompletion`] to an LSP item with an eager
@@ -945,6 +966,7 @@ fn expr_completion_item(
     let kind = match candidate.kind {
         expressions::ExprCompletionKind::FrontmatterKey => CompletionItemKind::FIELD,
         expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
+        expressions::ExprCompletionKind::ReservedRoot => CompletionItemKind::MODULE,
         expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
     };
     Some(CompletionItem {

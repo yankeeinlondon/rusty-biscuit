@@ -6870,7 +6870,7 @@ const OPERAND_DOC: &str = concat!(
     "B4: {{ known || rhs_var }}\n",
     "B5: {{ is_empty(lower(nested)) }}\n",
     "S1: {{ quiet1 || \"d\" }} {{ quiet2 ? quiet2 : \"none\" }} {{ is_null(quiet3) }} {{ isEmpty(quiet4) }}\n",
-    "S2: {{ ok ? known : null }} {{ repo }} {{ doc['typo-key'] }}\n",
+    "S2: {{ ok ? known : null }} {{ repo }} {{ fm['typo-key'] }}\n",
     "D1: {{ foo--bar }}\n",
     "D2: {{ a- b }}\n",
     "D3: {{ iteration - 1 }} {{ c_op - d_op }}\n",
@@ -7191,7 +7191,7 @@ fn an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote() {
     assert_eq!(diagnostic_span(&unknown[0]), (5, 11, 19), "inside the anchored scalar: {}", unknown[0]);
     assert_eq!(
         unknown[0]["data"],
-        json!({ "key": "foo--bar", "replacement": "doc[\"foo--bar\"]" }),
+        json!({ "key": "foo--bar", "replacement": "fm[\"foo--bar\"]" }),
         "{}",
         unknown[0]
     );
@@ -7346,10 +7346,10 @@ fn dash_separated_key_carries_its_replacement_and_quick_fix() {
     };
 
     let cases = [
-        (at("D1:", "foo--bar"), "foo--bar", "doc['foo--bar']"),
+        (at("D1:", "foo--bar"), "foo--bar", "fm['foo--bar']"),
         (at("D2:", "a- b"), "a-b", "a-b"),
         // Single-quoted YAML: the replacement must not use `'`.
-        (at("f6:", "foo--bar"), "foo--bar", "doc[\"foo--bar\"]"),
+        (at("f6:", "foo--bar"), "foo--bar", "fm[\"foo--bar\"]"),
         (at("f7:", "a- b"), "a-b", "a-b"),
     ];
     for (diagnostic, key, replacement) in &cases {
