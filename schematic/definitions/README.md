@@ -358,9 +358,11 @@ let api = define_openai_api();
 // Uses Bearer token auth
 assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
 
-// Reads token from OPENAI_API_KEY environment variable
-assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
+// No environment fallback: the generated client sends the credential you give it
+assert!(api.env_auth.is_empty());
 ```
+
+Pass the key to the generated client with `OpenAI::builder().credentials(Credential::access_token(key))`; see [Credentials](../docs/runtime/credentials.md).
 
 ## Critical Configuration Requirements
 
@@ -370,12 +372,14 @@ assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
 
 Choose the correct `ApiResponse` variant for each endpoint:
 
-| Response Type | When to Use | Generated Method |
-|---------------|-------------|------------------|
-| `ApiResponse::Json(Schema)` | JSON responses (most common) | `request<T>()` |
-| `ApiResponse::Binary` | Audio files, images, ZIP archives | `request_bytes()` |
-| `ApiResponse::Text` | Plain text responses | `request_text()` |
-| `ApiResponse::Empty` | 204 No Content, fire-and-forget | `request_empty()` |
+| Response Type | When to Use | Generated Codec | Success Type |
+|---------------|-------------|-----------------|--------------|
+| `ApiResponse::Json(Schema)` | JSON responses (most common) | `Json<T>` | the named schema type `T` |
+| `ApiResponse::Binary` | Audio files, images, ZIP archives | `Binary` | `bytes::Bytes` |
+| `ApiResponse::Text` | Plain text responses | `Text` | `String` |
+| `ApiResponse::Empty` | 204 No Content, fire-and-forget | `Empty` | `()` |
+
+Every endpoint is called the same way, with `client.send(request, &CallOptions::new())`; the response type only selects the codec the generated request struct declares, and so the success type inside the `Response` envelope. See [Sending and Responses](../docs/runtime/sending-and-responses.md).
 
 **Common Mistakes:**
 
@@ -442,14 +446,11 @@ After adding or modifying an API definition:
 # 1. Generate the code
 cargo run -p schematic-gen -- --api YOUR_API --output schematic/schema/src
 
-# 2. Check for correct response methods
-grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/YOUR_API.rs
+# 2. Check that each endpoint got the intended codec (Json, Text, Binary, Empty)
+grep -rn "type Decoder" schematic/schema/src/YOUR_API*
 
 # 3. Verify it compiles
 cargo check -p schematic-schema
-
-# 4. For binary endpoints, verify convenience methods exist
-grep -n "pub async fn create_speech\|pub async fn download" schematic/schema/src/YOUR_API.rs
 ```
 
 ## Adding New APIs

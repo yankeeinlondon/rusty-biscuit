@@ -119,7 +119,7 @@
 //!
 //! let api = define_github_api();
 //! assert_eq!(api.name, "GitHub");
-//! assert_eq!(api.endpoints.len(), 17);
+//! assert_eq!(api.endpoints.len(), 16);
 //! ```
 //!
 //! ```
@@ -143,7 +143,7 @@
 //!
 //! let api = define_bitbucket_api();
 //! assert_eq!(api.name, "Bitbucket");
-//! assert_eq!(api.endpoints.len(), 16);
+//! assert_eq!(api.endpoints.len(), 15);
 //! ```
 //!
 //! ```
