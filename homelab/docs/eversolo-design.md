@@ -4,7 +4,7 @@ This document describes how to integrate the Eversolo DMP-A8 music streamer into
 
 ## Background
 
-The `schematic-schema` crate already contains a fully generated API client (`schematic_schema::eversolo::EversoloClient`, built from the `Eversolo` API marker) with 24 endpoints covering device identity, remote control, music playback, power management, and display settings. All endpoints use `GET` with query parameters and require no authentication. Default port is **9529**.
+The `schematic-schema` crate already contains a fully generated API client (the `schematic_schema::eversolo::Eversolo` client struct) with 24 endpoints covering device identity, remote control, music playback, power management, and display settings. All endpoints use `GET` with query parameters and require no authentication. Default port is **9529**.
 
 ## 1. Homelab Library: `Eversolo` Struct
 
@@ -14,7 +14,7 @@ The `schematic-schema` crate already contains a fully generated API client (`sch
 
 ### Design
 
-The `Eversolo` struct wraps the generated `schematic_schema::eversolo::EversoloClient`, providing a homelab-native interface that:
+The `Eversolo` struct wraps the generated `schematic_schema::eversolo::Eversolo` client, providing a homelab-native interface that:
 
 - Accepts a URL (constructed from host + port) rather than relying on the generated client's default `192.168.1.1:9529`
 - Bounds every call with a 5-second connect timeout and a 10-second request timeout
@@ -26,7 +26,7 @@ The `Eversolo` struct wraps the generated `schematic_schema::eversolo::EversoloC
 // homelab/lib/src/eversolo.rs
 
 use schematic_schema::eversolo::{
-    Eversolo as EversoloApi, EversoloClient,
+    Eversolo as EversoloRest, EversoloApi,
     // Request types
     DeviceGetModelRequest, MusicGetStateRequest, MusicPlayOrPauseRequest,
     MusicPlayNextRequest, MusicPlayLastRequest, MusicSeekToRequest,
@@ -46,7 +46,7 @@ pub use schematic_definitions::eversolo::*;
 pub const DEFAULT_PORT: u16 = 9529;
 
 pub struct Eversolo {
-    client: EversoloClient,
+    client: EversoloRest,
     host: String,
     port: u16,
 }
@@ -59,11 +59,11 @@ impl Eversolo {
     /// Creates a new Eversolo client for the given host and port.
     pub fn new(host: impl Into<String>, port: u16) -> Result<Self, EversoloError> {
         let host = host.into();
-        let client = EversoloApi::builder()
+        let client = EversoloRest::new()
             .base_url(format!("http://{host}:{port}"))
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
-            .build()
+            .build() // report a bad host here rather than on the first send
             .map_err(RestError::from)?;
         Ok(Self { client, host, port })
     }
