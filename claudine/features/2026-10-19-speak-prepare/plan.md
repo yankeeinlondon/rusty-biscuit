@@ -115,7 +115,7 @@ treat them as binding otherwise.
 
 Each runs once, before the work it informs.
 
-- [ ] **Spike A — Say effective-settings lookup (macOS only).** Informs Phase 3.
+- [x] **Spike A — Say effective-settings lookup (macOS only).** Informs Phase 3.
     - On the macOS host, determine how to read the voice and WPM rate that
       `say` actually uses when invoked without `-v`/`-r` (candidates:
       `defaults read com.apple.speech.voice.prefs`, `com.apple.speech.synthesis.general.prefs`,
@@ -134,19 +134,19 @@ Each runs once, before the work it informs.
 
 ### Test scaffolding (Wave 1, concurrent)
 
-- [ ] **Wave 1 / Task: Recording executable harness.** In
+- [x] **Wave 1 / Task: Recording executable harness.** In
   `biscuit-speaks/lib/tests/`, add a shared helper (modeled on
   `volume_control.rs`) that installs fake `say`, `kokoro`/`echogarden`/`gtts`
   executables on a fixture `PATH`, counts invocations, and can fail or hang on
   demand. Uses the monorepo test toolkit env guard; `TMPDIR`/`TMP`/`TEMP` owned
   by the fixture; `BISCUIT_SPEAKS_CACHE` pointed at a fixture dir.
-- [ ] **Wave 1 / Task: ElevenLabs fake transport + clock.** Design the
+- [x] **Wave 1 / Task: ElevenLabs fake transport + clock.** Design the
   injection seams (`trait ElevenLabsTransport`, `trait Clock`) in
   `elevenlabs.rs` with the production implementations unchanged in behavior.
   Ship one fake with request counting and scripted voice lists.
-- [ ] **Wave 1 / Task: Injectable Say resolver seam.** Define
+- [x] **Wave 1 / Task: Injectable Say resolver seam.** Define
   `trait SystemSpeechDefaults { fn voice(&self) -> Option<String>; fn rate_wpm(&self) -> Option<u32>; }` with a fake; production impl is a placeholder returning `None` until Phase 3.
-- [ ] **Wave 1 / Task: Locked spool fixture wiring.** Confirm
+- [x] **Wave 1 / Task: Locked spool fixture wiring.** Confirm
   `test_toolkit::LockedAudioSpool` usage for detached publication tests and a
   fake playback/publication boundary for `play`/`play_with_result`.
 
