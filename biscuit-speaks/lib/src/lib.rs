@@ -43,6 +43,7 @@ pub mod gender_inference;
 #[cfg(feature = "playa")]
 mod playa_bridge;
 pub mod playback;
+mod prepared;
 pub mod providers;
 pub mod speak;
 #[cfg(test)]

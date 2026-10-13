@@ -10,6 +10,7 @@ use tracing::debug;
 
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
+use crate::prepared::{ResolvedSynthesis, dry_run_enabled, publish, staging_file};
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 #[cfg(feature = "playa")]
@@ -81,18 +82,22 @@ impl KokoroTtsProvider {
         }
     }
 
-    /// Resolve the voice to use based on config (simple fallback).
-    fn resolve_voice(config: &TtsConfig) -> &str {
+    /// Resolve the voice every entry point synthesizes with.
+    ///
+    /// A requested voice is used as given; otherwise the built-in voice list
+    /// supplies the best match for the language and gender preferences. The
+    /// list is static, so this never needs a subprocess.
+    fn resolve_voice(config: &TtsConfig) -> String {
         if let Some(voice) = &config.requested_voice {
-            return voice.as_str();
+            return voice.clone();
         }
+        Self::select_best_voice(&get_kokoro_voices(), config)
+            .map_or_else(|| Self::DEFAULT_VOICE.to_string(), |voice| voice.name)
+    }
 
-        // Select default voice based on gender
-        match config.gender {
-            Gender::Male => "am_adam",
-            Gender::Female => Self::DEFAULT_VOICE,
-            Gender::Any => Self::DEFAULT_VOICE,
-        }
+    /// The shared-cache identity for `voice`; speed is applied at playback.
+    fn cache_key(text: &str, voice: &str) -> CacheKey {
+        CacheKey::new("kokoro", voice, text, "wav")
     }
 
     /// Select the best voice from the Kokoro voice list based on config constraints.
@@ -208,23 +213,15 @@ impl KokoroTtsProvider {
         (gender, language)
     }
 
-    /// Generate audio to the cache path, returning the path and whether it was a cache hit.
+    /// Return the cached file for `voice`, synthesizing it first on a miss.
     ///
-    /// This method handles the caching logic:
-    /// 1. Check if cached file exists
-    /// 2. If not, generate to cache path
-    /// 3. Return the path and cache hit status
-    async fn generate_to_cache(
-        &self,
-        text: &str,
-        voice: &str,
-    ) -> Result<(PathBuf, bool), TtsError> {
-        // Create cache key - speed NOT included (playa handles playback speed)
-        let cache_key = CacheKey::new("kokoro", voice, text, "wav");
-        let cache_path = cache_key.cache_path();
+    /// The second value reports a cache hit. Synthesis writes a staging file
+    /// and publishes it atomically; a failure or a dropped future kills the
+    /// child and deletes the staging file, so no partial entry is published.
+    async fn generate_to_cache(&self, text: &str, voice: &str) -> Result<(PathBuf, bool), TtsError> {
+        let cache_path = Self::cache_key(text, voice).cache_path();
 
-        // Check for cache hit
-        if cache_key.cache_exists() {
+        if cache_path.exists() {
             debug!(
                 provider = Self::PROVIDER_NAME,
                 voice = voice,
@@ -234,7 +231,6 @@ impl KokoroTtsProvider {
             return Ok((cache_path, true));
         }
 
-        // Cache miss - generate audio
         debug!(
             provider = Self::PROVIDER_NAME,
             voice = voice,
@@ -249,9 +245,10 @@ impl KokoroTtsProvider {
         let input_path = temp_dir.path().join("input.txt");
         tokio::fs::write(&input_path, text).await?;
 
+        let staged = staging_file(&cache_path)?;
         let mut cmd = tokio::process::Command::new("kokoro-tts");
         cmd.arg(&input_path);
-        cmd.arg(&cache_path);
+        cmd.arg(&*staged);
         cmd.arg("--voice").arg(voice);
         cmd.arg("--format").arg("wav");
 
@@ -266,6 +263,7 @@ impl KokoroTtsProvider {
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         debug!(
             provider = Self::PROVIDER_NAME,
@@ -294,16 +292,29 @@ impl KokoroTtsProvider {
             });
         }
 
+        publish(staged, &cache_path)?;
         Ok((cache_path, false))
+    }
+
+    /// Prepare the cache entry and report the settings it was prepared with.
+    pub(crate) async fn prepare_resolved(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        if dry_run_enabled() {
+            return Ok(None);
+        }
+        let voice = Self::resolve_voice(config);
+        self.generate_to_cache(text, &voice).await?;
+        Ok(Some(ResolvedSynthesis::Kokoro { voice }))
     }
 }
 
 impl TtsExecutor for KokoroTtsProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
         let voice = Self::resolve_voice(config);
-
-        // Generate to cache (or get cached file)
-        let (audio_path, _cache_hit) = self.generate_to_cache(text, voice).await?;
+        let (audio_path, _cache_hit) = self.generate_to_cache(text, &voice).await?;
 
         // Play the audio file
         #[cfg(feature = "playa")]
@@ -317,6 +328,10 @@ impl TtsExecutor for KokoroTtsProvider {
             let _ = audio_path;
             Err(TtsError::NoAudioPlayer)
         }
+    }
+
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.prepare_resolved(text, config).await.map(|_| ())
     }
 
     async fn is_ready(&self) -> bool {
@@ -337,22 +352,7 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        // Determine the voice to use
-        let voice_name = if let Some(voice) = &config.requested_voice {
-            voice.clone()
-        } else {
-            // No specific voice requested - select the best one based on constraints
-            let voices = self.list_voices().await?;
-            let selected = Self::select_best_voice(&voices, config).ok_or_else(|| {
-                TtsError::VoiceEnumerationFailed {
-                    provider: Self::PROVIDER_NAME.into(),
-                    message: "No matching voice found for the given constraints".into(),
-                }
-            })?;
-            selected.name
-        };
-
-        // Generate to cache (or get cached file)
+        let voice_name = Self::resolve_voice(config);
         let (audio_path, cache_hit) = self.generate_to_cache(text, &voice_name).await?;
 
         // Play the audio file (requires playa feature)
@@ -396,7 +396,7 @@ impl TtsExecutor for KokoroTtsProvider {
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
         let voice = Self::resolve_voice(config);
-        let (path, _) = self.generate_to_cache(text, voice).await?;
+        let (path, _) = self.generate_to_cache(text, &voice).await?;
         Ok(crate::playa_bridge::file_job(path, config))
     }
 
@@ -406,7 +406,7 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        let path = CacheKey::new("kokoro", Self::resolve_voice(config), text, "wav").cache_path();
+        let path = Self::cache_key(text, &Self::resolve_voice(config)).cache_path();
         Ok(path
             .is_file()
             .then(|| crate::playa_bridge::file_job(path, config)))
@@ -597,6 +597,21 @@ mod tests {
     fn test_resolve_voice_gender_any() {
         let config = TtsConfig::new();
         assert_eq!(KokoroTtsProvider::resolve_voice(&config), "af_heart");
+    }
+
+    #[test]
+    fn resolve_voice_honors_the_language_preference() {
+        let japanese = TtsConfig::new().with_language(Language::Custom("ja".into()));
+        assert_eq!(KokoroTtsProvider::resolve_voice(&japanese), "jf_alpha");
+        let japanese_male = japanese.with_gender(Gender::Male);
+        assert_eq!(KokoroTtsProvider::resolve_voice(&japanese_male), "jm_kumo");
+    }
+
+    #[test]
+    fn the_cache_key_keeps_its_existing_spelling_and_ignores_speed_and_volume() {
+        let golden = CacheKey::new("kokoro", "af_heart", "Hello", "wav").cache_path();
+        assert_eq!(KokoroTtsProvider::cache_key("Hello", "af_heart").cache_path(), golden);
+        assert_ne!(KokoroTtsProvider::cache_key("Hello", "am_adam").cache_path(), golden);
     }
 
     #[test]

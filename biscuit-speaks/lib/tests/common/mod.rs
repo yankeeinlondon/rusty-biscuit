@@ -26,10 +26,19 @@ pub enum FakeTool {
     KokoroTts,
     GttsCli,
     Echogarden,
+    /// eSpeak NG speaks directly; installing it proves preparation never runs it.
+    ESpeakNg,
+    /// A provider the library detects but has no executor for.
+    Piper,
     /// The host player Playa falls back to when native decoding fails, which
     /// it always does for [`fake_audio`]. Installing it makes playback a
     /// recorded boundary that never reaches an audio device.
     Mpv,
+    /// The player Say uses when the library is built without `playa`.
+    Afplay,
+    /// Runs Say's system-voice lookup; prints what
+    /// [`TtsFixture::set_system_voice_lookup`] scripted, or fails.
+    Osascript,
 }
 
 impl FakeTool {
@@ -40,7 +49,11 @@ impl FakeTool {
             Self::KokoroTts => "kokoro-tts",
             Self::GttsCli => "gtts-cli",
             Self::Echogarden => "echogarden",
+            Self::ESpeakNg => "espeak-ng",
+            Self::Piper => "piper",
             Self::Mpv => "mpv",
+            Self::Afplay => "afplay",
+            Self::Osascript => "osascript",
         }
     }
 
@@ -58,7 +71,7 @@ impl FakeTool {
             Self::KokoroTts => r#"output=; case "$1" in -*) ;; *) output="$2" ;; esac"#,
             // `echogarden speak TEXT OUTPUT …`; `list-voices` writes no file.
             Self::Echogarden => r#"output=; [ "$1" = speak ] && output="$3""#,
-            Self::Mpv => "output=",
+            Self::ESpeakNg | Self::Piper | Self::Mpv | Self::Afplay | Self::Osascript => "output=",
         }
     }
 
@@ -158,8 +171,20 @@ impl TtsFixture {
                 "printf partial > \"$output\"; exec /bin/sleep 60".into()
             }
         };
+        // Scripted stdout for the non-synthesis calls a test reads back.
+        let answer = match tool {
+            FakeTool::Say => format!(
+                "if [ \"$1\" = -v ] && [ \"$2\" = '?' ]; then /bin/cat {} 2>/dev/null; exit 0; fi",
+                shell_quote(&self.say_voices_file())
+            ),
+            FakeTool::Osascript => format!(
+                "/bin/cat {} 2>/dev/null || {{ echo 'scripted lookup failure' >&2; exit 1; }}",
+                shell_quote(&self.system_voice_lookup_file())
+            ),
+            _ => String::new(),
+        };
         let script = format!(
-            "#!/bin/sh\nrec={record}-$$\nprintf '%s\\n' \"$@\" > \"$rec.args\"\n{capture_stdin}\n{locate}\n\
+            "#!/bin/sh\nrec={record}-$$\nprintf '%s\\n' \"$@\" > \"$rec.args\"\n{capture_stdin}\n{answer}\n{locate}\n\
              if [ -n \"$output\" ]; then\n  printf '%s' \"$output\" > \"$rec.output\"\n  {on_output}\nfi\nexit 0\n",
             record = shell_quote(&record),
             locate = tool.locate_output(),
@@ -169,6 +194,25 @@ impl TtsFixture {
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
             .expect("fake executable mode");
         program
+    }
+
+    /// Lines the fake `say -v '?'` prints, in `say`'s listing format.
+    pub fn set_say_voices(&self, lines: &[&str]) {
+        let mut listing = lines.join("\n");
+        listing.push('\n');
+        std::fs::write(self.say_voices_file(), listing).expect("say voice listing");
+    }
+
+    /// What the fake `osascript` prints for Say's system-voice lookup;
+    /// `None` makes the lookup fail.
+    pub fn set_system_voice_lookup(&self, output: Option<&str>) {
+        let file = self.system_voice_lookup_file();
+        match output {
+            Some(output) => std::fs::write(file, output).expect("lookup output"),
+            None => {
+                let _ = std::fs::remove_file(file);
+            }
+        }
     }
 
     /// Every recorded launch of `tool`, in no particular order.
@@ -264,6 +308,14 @@ impl TtsFixture {
     fn records_dir(&self) -> PathBuf {
         self.root.path().join("records")
     }
+
+    fn say_voices_file(&self) -> PathBuf {
+        self.root.path().join("say-voices.txt")
+    }
+
+    fn system_voice_lookup_file(&self) -> PathBuf {
+        self.root.path().join("osascript.out")
+    }
 }
 
 /// Whether `pid` still names a live process.
@@ -274,6 +326,20 @@ pub fn process_alive(pid: u32) -> bool {
         .status()
         .expect("probe process")
         .success()
+}
+
+/// Whether `pid` is running, as opposed to exited or an unreaped zombie.
+///
+/// A killed child its parent has not yet reaped still answers `kill -0`, so
+/// this reads its state instead.
+pub fn process_running(pid: u32) -> bool {
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("probe process state");
+    let state = String::from_utf8_lossy(&output.stdout);
+    let state = state.trim();
+    !state.is_empty() && !state.starts_with('Z')
 }
 
 fn shell_quote(path: &Path) -> String {

@@ -67,7 +67,7 @@ struct CacheEnvelope {
 /// ## Returns
 ///
 /// `None` if no override is set and the home directory cannot be determined.
-fn cache_file_path() -> Option<PathBuf> {
+pub(crate) fn cache_file_path() -> Option<PathBuf> {
     resolve_cache_path(std::env::var_os(CACHE_PATH_ENV))
 }
 

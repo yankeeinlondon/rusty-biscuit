@@ -18,6 +18,15 @@
 //! let provider = ElevenLabsProvider::new()?;
 //! provider.speak("Hello, world!", &TtsConfig::default()).await?;
 //! ```
+//!
+//! ## Default voice records
+//!
+//! Without a requested voice, the voice is selected from the account's voice
+//! list. Each selection made from a successful listing is recorded locally
+//! (see `snapshot`), so a detached request can find prepared default speech
+//! without listing voices again.
+
+mod snapshot;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -37,7 +46,9 @@ use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::AudioFormat;
 #[cfg(feature = "playa")]
 use crate::types::{CloudTtsProvider, TtsProvider};
+use crate::prepared::{ResolvedSynthesis, dry_run_enabled};
 use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
+use snapshot::{SelectionInputs, Snapshot};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -71,8 +82,11 @@ pub struct ElevenLabsProvider {
     /// Voice listing and speech synthesis requests; replaceable so tests can
     /// count requests without a network.
     transport: Arc<dyn ElevenLabsTransport>,
-    #[allow(dead_code, reason = "scaffolding: no caller reads the clock yet")]
+    /// Decides whether a default-voice record is still trusted.
     clock: Arc<dyn Clock>,
+    /// The non-secret account identity default-voice records are keyed by;
+    /// `None` disables them.
+    account_context: Option<String>,
     /// Default voice ID to use when none specified.
     default_voice_id: String,
     /// Default model ID to use.
@@ -112,7 +126,7 @@ impl ElevenLabsProvider {
             });
         }
 
-        Ok(Self::from_client(ElevenLabs::new()))
+        Ok(Self::from_client(ElevenLabs::new(), ElevenLabs::BASE_URL))
     }
 
     /// Create a new ElevenLabs provider with a custom base URL.
@@ -134,10 +148,11 @@ impl ElevenLabsProvider {
             });
         }
 
-        Ok(Self::from_client(ElevenLabs::with_base_url(url)))
+        let url = url.into();
+        Ok(Self::from_client(ElevenLabs::with_base_url(url.clone()), &url))
     }
 
-    fn from_client(client: ElevenLabs) -> Self {
+    fn from_client(client: ElevenLabs, base_url: &str) -> Self {
         let client = Arc::new(client);
         Self {
             transport: Arc::new(HttpTransport {
@@ -145,6 +160,7 @@ impl ElevenLabsProvider {
             }),
             client,
             clock: Arc::new(SystemClock),
+            account_context: snapshot::account_context(base_url),
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
         }
@@ -162,9 +178,17 @@ impl ElevenLabsProvider {
             client: Arc::new(ElevenLabs::with_base_url("http://127.0.0.1:9")),
             transport,
             clock,
+            account_context: None,
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
         }
+    }
+
+    /// Key default-voice records by `account_context`.
+    #[cfg(test)]
+    pub(crate) fn with_account_context(mut self, account_context: Option<String>) -> Self {
+        self.account_context = account_context;
+        self
     }
 
     /// Set the default voice ID.
@@ -337,15 +361,7 @@ impl ElevenLabsProvider {
         model_id: &str,
         speed: SpeedLevel,
     ) -> Result<(PathBuf, bool), TtsError> {
-        // Build voice_id for cache key (combine voice_id + model_id)
-        let combined_id = format!("{}-{}", voice_id, model_id);
-
-        // Create cache key - speed IS included (ElevenLabs bakes speed via API)
-        let mut cache_key = CacheKey::new("elevenlabs", &combined_id, text, "mp3");
-        if speed != SpeedLevel::Normal {
-            cache_key = cache_key.with_speed(speed.value());
-        }
-
+        let cache_key = Self::cache_key(text, voice_id, model_id, speed);
         let cache_path = cache_key.cache_path();
 
         // Check for cache hit
@@ -398,55 +414,172 @@ impl ElevenLabsProvider {
         Ok((cache_path, false))
     }
 
-    async fn resolve_voice_id(&self, config: &TtsConfig) -> Result<String, TtsError> {
-        if let Some(voice_id) = &config.requested_voice {
-            tracing::debug!(
-                requested_voice = %voice_id,
-                "Using requested voice from config"
-            );
-            return Ok(voice_id.clone());
+    /// The shared-cache identity; speed is part of it because ElevenLabs
+    /// bakes speed into the audio.
+    fn cache_key(text: &str, voice_id: &str, model_id: &str, speed: SpeedLevel) -> CacheKey {
+        let key = CacheKey::new("elevenlabs", format!("{voice_id}-{model_id}"), text, "mp3");
+        if speed == SpeedLevel::Normal {
+            key
+        } else {
+            key.with_speed(speed.value())
         }
-        tracing::debug!("No requested voice in config, will resolve from gender/default");
+    }
 
-        let gender_label = match config.gender {
+    /// The requested model, else the provider default.
+    fn model(&self, config: &TtsConfig) -> String {
+        config
+            .requested_model
+            .clone()
+            .unwrap_or_else(|| self.default_model_id.clone())
+    }
+
+    fn gender_label(gender: Gender) -> Option<&'static str> {
+        match gender {
             Gender::Male => Some("male"),
             Gender::Female => Some("female"),
             Gender::Any => None,
-        };
+        }
+    }
 
-        // Try to get voice list and find an appropriate voice
-        match self.list_voices_raw().await {
-            Ok(voices) => {
-                // If gender specified, try to match it
-                if let Some(gender_label) = gender_label {
-                    if let Some(voice) = voices
-                        .voices
-                        .iter()
-                        .find(|voice| Self::voice_matches_gender(voice, gender_label))
-                    {
-                        return Ok(voice.voice_id.clone());
-                    }
-                    tracing::warn!(
-                        gender = gender_label,
-                        "No ElevenLabs voice matched gender, using first available"
-                    );
-                }
+    /// The inputs a default-voice selection for `config` depends on.
+    fn selection_inputs(&self, config: &TtsConfig) -> SelectionInputs {
+        SelectionInputs {
+            gender: Self::gender_label(config.gender).unwrap_or("any").into(),
+            language: config.language.code_prefix().into(),
+            model: self.model(config),
+            fallback: self.default_voice_id.clone(),
+        }
+    }
 
-                // Use first available voice (better than hardcoded default that may not exist)
-                if let Some(voice) = voices.voices.first() {
-                    return Ok(voice.voice_id.clone());
-                }
-            }
+    /// Select the voice and model every entry point synthesizes with.
+    ///
+    /// A requested voice wins. Otherwise the account's voice list supplies
+    /// the first voice matching the requested gender, else its first voice,
+    /// else (an empty list) the configured default; a failed listing also
+    /// falls back to the configured default.
+    async fn select(&self, config: &TtsConfig) -> Selection {
+        let model = self.model(config);
+        if let Some(voice_id) = &config.requested_voice {
+            tracing::debug!(requested_voice = %voice_id, "Using requested voice from config");
+            return Selection {
+                voice: voice_id.clone(),
+                model,
+                source: VoiceSource::Requested,
+            };
+        }
+        tracing::debug!("No requested voice in config, will resolve from gender/default");
+
+        let voices = match self.list_voices_raw().await {
+            Ok(voices) => voices.voices,
             Err(error) => {
                 tracing::warn!(
                     error = ?error,
                     "Failed to fetch ElevenLabs voices, falling back to hardcoded default"
                 );
+                return Selection {
+                    voice: self.default_voice_id.clone(),
+                    model,
+                    source: VoiceSource::Fallback,
+                };
+            }
+        };
+        let gender_match = Self::gender_label(config.gender).and_then(|gender_label| {
+            let found = voices
+                .iter()
+                .find(|voice| Self::voice_matches_gender(voice, gender_label));
+            if found.is_none() {
+                tracing::warn!(
+                    gender = gender_label,
+                    "No ElevenLabs voice matched gender, using first available"
+                );
+            }
+            found
+        });
+        // The first listed voice beats a hardcoded default the account may lack.
+        let voice = gender_match
+            .or_else(|| voices.first())
+            .map_or_else(|| self.default_voice_id.clone(), |voice| voice.voice_id.clone());
+        Selection {
+            voice,
+            model,
+            source: VoiceSource::Account,
+        }
+    }
+
+    /// Select, and record a selection made from the account's voice list.
+    ///
+    /// A record that cannot be written only costs a later detached request
+    /// its cache hit, so the failure is logged rather than returned.
+    async fn select_and_record(&self, config: &TtsConfig) -> Selection {
+        let selection = self.select(config).await;
+        if selection.source == VoiceSource::Account
+            && let Some(account_context) = &self.account_context
+        {
+            let record = Snapshot {
+                voice: selection.voice.clone(),
+                model: selection.model.clone(),
+                inputs: self.selection_inputs(config),
+                account_context: account_context.clone(),
+                written_at: self.clock.now_unix_seconds(),
+            };
+            if let Err(error) = snapshot::write(&record) {
+                tracing::warn!(%error, "Failed to record the ElevenLabs default voice");
             }
         }
+        selection
+    }
 
-        // Last resort: use hardcoded default
-        Ok(self.default_voice_id.clone())
+    /// The cache entry a detached request would play, found without any API
+    /// request: from the requested voice, or from a trusted default-voice
+    /// record.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn cached_path(&self, text: &str, config: &TtsConfig) -> Option<PathBuf> {
+        let model = self.model(config);
+        let voice = match &config.requested_voice {
+            Some(voice) => voice.clone(),
+            None => {
+                let account_context = self.account_context.as_deref()?;
+                let inputs = self.selection_inputs(config);
+                snapshot::load_trusted(&inputs, account_context, self.clock.now_unix_seconds())?.voice
+            }
+        };
+        let path = Self::cache_key(text, &voice, &model, config.speed).cache_path();
+        path.is_file().then_some(path)
+    }
+
+    /// Playback settings for ElevenLabs audio, whose speed is already baked in.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn playback_config(config: &TtsConfig) -> TtsConfig {
+        let mut playback = config.clone();
+        playback.speed = SpeedLevel::Normal;
+        playback
+    }
+
+    /// Prepare the cache entry and report the settings it was prepared with.
+    ///
+    /// The selection is always checked against the API, which also refreshes
+    /// the default-voice record. `None` when there is nothing to prepare: dry
+    /// run, or a voice list that could not be fetched, which leaves the
+    /// default voice unresolved.
+    pub(crate) async fn prepare_resolved(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        if dry_run_enabled() {
+            return Ok(None);
+        }
+        let selection = self.select_and_record(config).await;
+        if selection.source == VoiceSource::Fallback {
+            return Ok(None);
+        }
+        self.generate_to_cache(text, &selection.voice, &selection.model, config.speed)
+            .await?;
+        Ok(Some(ResolvedSynthesis::ElevenLabs {
+            voice: selection.voice,
+            model: selection.model,
+            speed: config.speed,
+        }))
     }
 
     /// Generate audio bytes from text using the ElevenLabs API.
@@ -477,13 +610,11 @@ impl ElevenLabsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Vec<u8>, TtsError> {
-        let voice_id = self.resolve_voice_id(config).await?;
-
-        // Use requested model from config, or fall back to default
-        let model_id = config
-            .requested_model
-            .clone()
-            .unwrap_or_else(|| self.default_model_id.clone());
+        let Selection {
+            voice: voice_id,
+            model: model_id,
+            ..
+        } = self.select(config).await;
 
         // Build the request body
         // Build voice settings if speed is not normal
@@ -763,8 +894,26 @@ impl HttpTransport {
     }
 }
 
+/// How a [`Selection`]'s voice was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VoiceSource {
+    /// The caller named it.
+    Requested,
+    /// From a successful listing of the account's voices.
+    Account,
+    /// The configured default, because the voice list could not be fetched.
+    Fallback,
+}
+
+/// The voice and model one operation synthesizes with.
+#[derive(Debug, Clone)]
+struct Selection {
+    voice: String,
+    model: String,
+    source: VoiceSource,
+}
+
 /// Wall-clock source for deciding whether persisted state is still trusted.
-#[allow(dead_code, reason = "scaffolding: no caller reads the clock yet")]
 pub(crate) trait Clock: Send + Sync {
     /// Seconds since the Unix epoch.
     fn now_unix_seconds(&self) -> u64;
@@ -783,22 +932,15 @@ impl Clock for SystemClock {
 
 impl TtsExecutor for ElevenLabsProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        // Resolve voice and model
-        let voice_id = self.resolve_voice_id(config).await?;
-        let model_id = config
-            .requested_model
-            .clone()
-            .unwrap_or_else(|| self.default_model_id.clone());
-
-        // Generate to cache (or get cached file)
+        let selection = self.select_and_record(config).await;
         let (audio_path, _cache_hit) = self
-            .generate_to_cache(text, &voice_id, &model_id, config.speed)
+            .generate_to_cache(text, &selection.voice, &selection.model, config.speed)
             .await?;
 
-        // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await
+            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, &Self::playback_config(config))
+                .await
         }
         #[cfg(not(feature = "playa"))]
         {
@@ -806,6 +948,10 @@ impl TtsExecutor for ElevenLabsProvider {
             let _ = audio_path;
             Err(TtsError::NoAudioPlayer)
         }
+    }
+
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.prepare_resolved(text, config).await.map(|_| ())
     }
 
     async fn is_ready(&self) -> bool {
@@ -829,18 +975,16 @@ impl TtsExecutor for ElevenLabsProvider {
             "speak_with_result called"
         );
 
-        // Resolve the voice ID (this may fetch the voice list for gender matching)
-        let voice_id = self.resolve_voice_id(config).await?;
+        // This may fetch the voice list for gender matching.
+        let Selection {
+            voice: voice_id,
+            model: model_used,
+            ..
+        } = self.select_and_record(config).await;
         tracing::debug!(
             voice_id = %voice_id,
             "speak_with_result resolved voice_id"
         );
-
-        // Determine the model that will be used
-        let model_used = config
-            .requested_model
-            .clone()
-            .unwrap_or_else(|| self.default_model_id.clone());
 
         // Generate to cache (or get cached file)
         let (audio_path, cache_hit) = self
@@ -852,7 +996,7 @@ impl TtsExecutor for ElevenLabsProvider {
         let playback = crate::playback::play_audio_file_with_report(
             &audio_path,
             AudioFormat::Mp3,
-            config,
+            &Self::playback_config(config),
         )
         .await?;
 
@@ -914,15 +1058,11 @@ impl TtsExecutor for ElevenLabsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let voice_id = self.resolve_voice_id(config).await?;
-        let model_id = config
-            .requested_model
-            .clone()
-            .unwrap_or_else(|| self.default_model_id.clone());
+        let selection = self.select_and_record(config).await;
         let (path, _) = self
-            .generate_to_cache(text, &voice_id, &model_id, config.speed)
+            .generate_to_cache(text, &selection.voice, &selection.model, config.speed)
             .await?;
-        Ok(crate::playa_bridge::file_job(path, config))
+        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
     }
 
     #[cfg(feature = "playa")]
@@ -931,19 +1071,9 @@ impl TtsExecutor for ElevenLabsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        let Some(voice_id) = config.requested_voice.as_deref() else {
-            return Ok(None);
-        };
-        let model_id = config.requested_model.as_deref().unwrap_or(&self.default_model_id);
-        let combined_id = format!("{voice_id}-{model_id}");
-        let mut key = CacheKey::new("elevenlabs", combined_id, text, "mp3");
-        if config.speed != SpeedLevel::Normal {
-            key = key.with_speed(config.speed.value());
-        }
-        let path = key.cache_path();
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, config)))
+        Ok(self
+            .cached_path(text, config)
+            .map(|path| crate::playa_bridge::file_job(path, &Self::playback_config(config))))
     }
 }
 
@@ -1008,6 +1138,8 @@ pub(crate) mod fake {
         pub voice_id: String,
         pub model_id: Option<String>,
         pub text: String,
+        /// The speed the audio is synthesized at, when not the API default.
+        pub speed: Option<String>,
     }
 
     /// An API whose voice list is scripted and whose requests are counted.
@@ -1077,6 +1209,11 @@ pub(crate) mod fake {
                 voice_id: request.voice_id,
                 model_id: request.body.model_id,
                 text: request.body.text,
+                speed: request
+                    .body
+                    .voice_settings
+                    .and_then(|settings| settings.speed)
+                    .map(|speed| speed.to_string()),
             });
             Box::pin(async { Ok(FAKE_AUDIO.to_vec()) })
         }
@@ -1750,6 +1887,382 @@ mod tests {
         let clock = fake::FakeClock::at(1_800_000_000);
         clock.advance(24 * 60 * 60);
         assert_eq!(clock.now_unix_seconds(), 1_800_086_400);
+    }
+
+    // ========================================================================
+    // Default-voice records: preparation, detached lookup, trust rules
+    // ========================================================================
+
+    const NOW: u64 = 1_800_000_000;
+    const ACCOUNT: &str = "https://api.elevenlabs.io;key-source=ELEVEN_LABS_API_KEY;label=";
+    const TEXT: &str = "This is a test message: prepared ElevenLabs";
+
+    /// Owns the audio cache (the OS temporary directory) and the record directory
+    /// (`BISCUIT_SPEAKS_CACHE`'s parent).
+    struct RecordFixture {
+        root: tempfile::TempDir,
+        _env: [test_toolkit::EnvGuard; 6],
+    }
+
+    impl RecordFixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            for dir in ["tmp", "records"] {
+                std::fs::create_dir(root.path().join(dir)).unwrap();
+            }
+            // `temp_dir` reads `TMPDIR` on Unix and `TMP`/`TEMP` on Windows.
+            let env = [
+                test_toolkit::EnvGuard::set_safe("TMPDIR", root.path().join("tmp")),
+                test_toolkit::EnvGuard::set_safe("TMP", root.path().join("tmp")),
+                test_toolkit::EnvGuard::set_safe("TEMP", root.path().join("tmp")),
+                test_toolkit::EnvGuard::set_safe(
+                    "BISCUIT_SPEAKS_CACHE",
+                    root.path().join("records").join("biscuit-speaks-cache.json"),
+                ),
+                test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN"),
+                test_toolkit::EnvGuard::remove_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT"),
+            ];
+            Self { root, _env: env }
+        }
+
+        fn records(&self) -> Vec<std::path::PathBuf> {
+            let mut records: Vec<_> = std::fs::read_dir(self.root.path().join("records"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            records.sort();
+            records
+        }
+
+        /// The one record, as JSON.
+        fn record(&self) -> serde_json::Value {
+            let records = self.records();
+            assert_eq!(records.len(), 1, "{records:?}");
+            serde_json::from_slice(&std::fs::read(&records[0]).unwrap()).unwrap()
+        }
+
+        fn audio_files(&self) -> usize {
+            std::fs::read_dir(self.root.path().join("tmp")).unwrap().count()
+        }
+    }
+
+    fn recording_provider(
+        transport: &Arc<fake::FakeTransport>,
+        now: u64,
+        account: Option<&str>,
+    ) -> ElevenLabsProvider {
+        ElevenLabsProvider::with_transport(
+            Arc::clone(transport) as Arc<dyn ElevenLabsTransport>,
+            Arc::new(fake::FakeClock::at(now)),
+        )
+        .with_account_context(account.map(str::to_owned))
+    }
+
+    fn female() -> TtsConfig {
+        TtsConfig::new()
+            .with_gender(Gender::Female)
+            .with_volume(crate::types::VolumeLevel::Explicit(0.0))
+    }
+
+    fn listed_voices() -> Arc<fake::FakeTransport> {
+        Arc::new(fake::FakeTransport::with_voices(vec![
+            fake::voice("m1", Some("male")),
+            fake::voice("f1", Some("female")),
+        ]))
+    }
+
+    /// Whether a fresh detached request finds a ready file, asserting it made
+    /// no API request to find out.
+    async fn detached_hit(provider: &ElevenLabsProvider, transport: &fake::FakeTransport, config: &TtsConfig) -> bool {
+        let before = transport.total_requests();
+        let path = provider.cached_path(TEXT, config);
+        #[cfg(feature = "playa")]
+        {
+            let job = provider.cached_detached_job(TEXT, config).await.unwrap();
+            assert_eq!(job.is_some(), path.is_some());
+            if let Some(job) = job {
+                let playa::detached::SpoolJob::PlayFile { path: job_path, playback, .. } = job else {
+                    panic!("a ready ElevenLabs job plays a file: {job:?}");
+                };
+                assert_eq!(Some(job_path.to_os_string().unwrap()), path.clone().map(PathBuf::into_os_string));
+                assert_eq!(playback.options.speed, Some(1.0), "baked speed is not applied again");
+            }
+        }
+        assert_eq!(transport.total_requests(), before, "a detached lookup makes no API request");
+        path.is_some()
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_prepared_default_voice_is_found_by_a_fresh_detached_lookup_without_any_request() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let prepared = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        assert_eq!(
+            prepared,
+            Some(ResolvedSynthesis::ElevenLabs {
+                voice: "f1".into(),
+                model: DEFAULT_MODEL_ID.into(),
+                speed: SpeedLevel::Normal,
+            })
+        );
+        assert_eq!((transport.list_requests(), transport.speech_calls().len()), (1, 1));
+        assert_eq!(fixture.audio_files(), 1);
+        assert_eq!(
+            fixture.record(),
+            serde_json::json!({
+                "voice": "f1",
+                "model": DEFAULT_MODEL_ID,
+                "inputs": {"gender": "female", "language": "en", "model": DEFAULT_MODEL_ID, "fallback": DEFAULT_VOICE_ID},
+                "account_context": ACCOUNT,
+                "written_at": NOW,
+            })
+        );
+
+        let fresh = recording_provider(&transport, NOW + 60, Some(ACCOUNT));
+        assert!(detached_hit(&fresh, &transport, &female()).await);
+        // Volume is playback-only: a louder request finds the same file.
+        let louder = female().with_volume(crate::types::VolumeLevel::Loud);
+        assert!(detached_hit(&fresh, &transport, &louder).await);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn every_prepare_rechecks_the_selection_and_a_changed_voice_list_updates_the_record() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        recording_provider(&transport, NOW, Some(ACCOUNT)).prepare_resolved(TEXT, &female()).await.unwrap();
+        recording_provider(&transport, NOW + 10, Some(ACCOUNT)).prepare_resolved(TEXT, &female()).await.unwrap();
+        assert_eq!(transport.list_requests(), 2, "a fresh record does not skip the API");
+        assert_eq!(transport.speech_calls().len(), 1, "the file is reused");
+        assert_eq!(fixture.record()["written_at"], NOW + 10);
+
+        transport.set_voices(Some(vec![fake::voice("f2", Some("female"))]));
+        let prepared = recording_provider(&transport, NOW + 20, Some(ACCOUNT))
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        assert!(matches!(prepared, Some(ResolvedSynthesis::ElevenLabs { ref voice, .. }) if voice == "f2"));
+        assert_eq!(transport.speech_calls().last().unwrap().voice_id, "f2");
+        assert_eq!(fixture.record()["voice"], "f2");
+        assert_eq!(fixture.audio_files(), 2);
+        let fresh = recording_provider(&transport, NOW + 30, Some(ACCOUNT));
+        assert!(detached_hit(&fresh, &transport, &female()).await);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn untrusted_records_miss_until_the_helper_resolves_through_the_api() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        recording_provider(&transport, NOW, Some(ACCOUNT)).prepare_resolved(TEXT, &female()).await.unwrap();
+        let at = |now| recording_provider(&transport, now, Some(ACCOUNT));
+
+        assert!(detached_hit(&at(NOW + snapshot::TRUST_SECONDS - 1), &transport, &female()).await);
+        assert!(!detached_hit(&at(NOW + snapshot::TRUST_SECONDS), &transport, &female()).await, "expired");
+        assert!(!detached_hit(&at(NOW - 1), &transport, &female()).await, "written in the future");
+        let other_account = recording_provider(&transport, NOW, Some("https://api.elevenlabs.io;key-source=ELEVENLABS_API_KEY;label="));
+        assert!(!detached_hit(&other_account, &transport, &female()).await, "another account");
+        assert!(!detached_hit(&recording_provider(&transport, NOW, None), &transport, &female()).await, "no account");
+        let other_language = female().with_language(Language::Custom("fr".into()));
+        assert!(!detached_hit(&at(NOW), &transport, &other_language).await, "other selection inputs");
+        let other_fallback = at(NOW).with_default_voice("someone-else");
+        assert!(!detached_hit(&other_fallback, &transport, &female()).await, "other fallback");
+
+        let record = fixture.records().remove(0);
+        std::fs::write(&record, b"{\"voice\":").unwrap();
+        assert!(!detached_hit(&at(NOW), &transport, &female()).await, "corrupt");
+        std::fs::remove_file(&record).unwrap();
+        assert!(!detached_hit(&at(NOW), &transport, &female()).await, "missing");
+
+        // The miss path's helper resolves through the API, which rewrites the
+        // record, and reuses the already-synthesized file.
+        #[cfg(feature = "playa")]
+        {
+            let lists = transport.list_requests();
+            at(NOW).detached_job(TEXT, &female()).await.unwrap();
+            assert_eq!(transport.list_requests(), lists + 1);
+            assert_eq!(transport.speech_calls().len(), 1);
+            assert!(detached_hit(&at(NOW), &transport, &female()).await);
+        }
+    }
+
+    /// Input robustness for the record file: the control row is a record the
+    /// provider wrote; each edited row must be a cache miss.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn every_malformed_record_shape_is_a_miss() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT));
+        provider.prepare_resolved(TEXT, &female()).await.unwrap();
+        let path = fixture.records().remove(0);
+        let original = std::fs::read_to_string(&path).unwrap();
+        let control: serde_json::Value = serde_json::from_str(&original).unwrap();
+
+        let edited = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut value = control.clone();
+            edit(&mut value);
+            serde_json::to_string(&value).unwrap()
+        };
+        let duplicated = |field: &str| {
+            original.replacen('{', &format!("{{\"{field}\":{},", control[field]), 1)
+        };
+        let mut rows: Vec<(String, String)> = Vec::new();
+        for field in ["voice", "model", "inputs", "account_context", "written_at"] {
+            let wrong_type = if field == "written_at" { serde_json::json!("1800000000") } else { serde_json::json!(123) };
+            let empty = if field == "inputs" { serde_json::json!({}) } else { serde_json::json!("") };
+            rows.push((format!("{field} absent"), edited(&|v| { v.as_object_mut().unwrap().remove(field); })));
+            rows.push((format!("{field} null"), edited(&|v| v[field] = serde_json::Value::Null)));
+            rows.push((format!("{field} wrong type"), edited(&|v| v[field] = wrong_type.clone())));
+            rows.push((format!("{field} empty"), edited(&|v| v[field] = empty.clone())));
+            rows.push((format!("{field} duplicate key"), duplicated(field)));
+        }
+        for input in ["gender", "language", "model", "fallback"] {
+            rows.push((format!("inputs.{input} absent"), edited(&|v| { v["inputs"].as_object_mut().unwrap().remove(input); })));
+            rows.push((format!("inputs.{input} null"), edited(&|v| v["inputs"][input] = serde_json::Value::Null)));
+            rows.push((format!("inputs.{input} wrong type"), edited(&|v| v["inputs"][input] = serde_json::json!(1))));
+            rows.push((format!("inputs.{input} empty"), edited(&|v| v["inputs"][input] = serde_json::json!(""))));
+            rows.push((
+                format!("inputs.{input} duplicate key"),
+                original.replacen("\"inputs\":{", &format!("\"inputs\":{{\"{input}\":{},", control["inputs"][input]), 1),
+            ));
+        }
+        rows.extend([
+            (
+                "inputs as an array, in declaration order".into(),
+                edited(&|v| v["inputs"] = serde_json::json!(["female", "en", DEFAULT_MODEL_ID, DEFAULT_VOICE_ID])),
+            ),
+            ("inputs unknown field".into(), edited(&|v| v["inputs"]["speed"] = serde_json::json!("fast"))),
+            ("unknown field".into(), edited(&|v| v["api_key"] = serde_json::json!("x"))),
+            ("trailing garbage".into(), format!("{original} garbage")),
+            ("a second document".into(), format!("{original}\n{original}")),
+            (
+                "fields as an array, in declaration order".into(),
+                serde_json::to_string(&["voice", "model", "inputs", "account_context", "written_at"].map(|field| &control[field])).unwrap(),
+            ),
+            ("empty file".into(), String::new()),
+            ("stale".into(), edited(&|v| v["written_at"] = serde_json::json!(NOW - snapshot::TRUST_SECONDS))),
+            ("future".into(), edited(&|v| v["written_at"] = serde_json::json!(NOW + 1))),
+            ("negative time".into(), edited(&|v| v["written_at"] = serde_json::json!(-1))),
+            ("mismatched account".into(), edited(&|v| v["account_context"] = serde_json::json!("another"))),
+            ("mismatched inputs".into(), edited(&|v| v["inputs"]["gender"] = serde_json::json!("male"))),
+            ("model differs from its input".into(), edited(&|v| v["model"] = serde_json::json!("eleven_turbo_v2"))),
+        ]);
+
+        assert!(detached_hit(&provider, &transport, &female()).await, "control row");
+        for (row, content) in &rows {
+            std::fs::write(&path, content).unwrap();
+            assert!(!detached_hit(&provider, &transport, &female()).await, "{row}: {content}");
+        }
+        std::fs::write(&path, &original).unwrap();
+        assert!(detached_hit(&provider, &transport, &female()).await, "control row restored");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_failed_voice_listing_prepares_and_records_nothing() {
+        let fixture = RecordFixture::new();
+        let transport = Arc::new(fake::FakeTransport::unreachable());
+        let prepared = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        assert_eq!(prepared, None, "the default voice is unresolved");
+        assert!(transport.speech_calls().is_empty());
+        assert!(fixture.records().is_empty());
+        assert_eq!(fixture.audio_files(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_requested_voice_prepares_without_listing_or_recording() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let config = female().with_voice("chosen");
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT));
+        let prepared = provider.prepare_resolved(TEXT, &config).await.unwrap();
+        assert!(matches!(prepared, Some(ResolvedSynthesis::ElevenLabs { ref voice, .. }) if voice == "chosen"));
+        assert_eq!(transport.list_requests(), 0);
+        assert!(fixture.records().is_empty());
+        assert!(detached_hit(&provider, &transport, &config).await);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn dry_run_prepares_nothing_and_makes_no_request() {
+        let fixture = RecordFixture::new();
+        let _dry_run = test_toolkit::EnvGuard::set_safe("PLAYA_DRY_RUN", "TRUE");
+        let transport = listed_voices();
+        let prepared = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .prepare(TEXT, &female())
+            .await;
+        prepared.unwrap();
+        assert_eq!(transport.total_requests(), 0);
+        assert!(fixture.records().is_empty());
+        assert_eq!(fixture.audio_files(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn baked_speed_reaches_the_api_and_the_key_but_not_playback() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT));
+        let fast = female().with_speed(SpeedLevel::Fast);
+        provider.prepare_resolved(TEXT, &fast).await.unwrap();
+        provider.prepare_resolved(TEXT, &female()).await.unwrap();
+        let speeds: Vec<_> = transport.speech_calls().into_iter().map(|call| call.speed).collect();
+        assert_eq!(speeds, [Some("1.2".to_string()), None], "Fast clamps to the API's 1.2");
+        assert_eq!(fixture.audio_files(), 2, "speed is part of the key");
+        assert!(detached_hit(&provider, &transport, &fast).await);
+    }
+
+    /// The record never contains the API key, only the name of the
+    /// variable it was read from.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_account_context_and_record_hold_no_credential() {
+        const SECRET: &str = "sk-sentinel-0123456789abcdef";
+        let fixture = RecordFixture::new();
+        let _key = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", SECRET);
+        let _other = test_toolkit::EnvGuard::set_safe("ELEVENLABS_API_KEY", "sk-other-secret");
+        let _label = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "work");
+
+        let context = snapshot::account_context(ElevenLabs::BASE_URL).unwrap();
+        assert_eq!(context, "https://api.elevenlabs.io;key-source=ELEVEN_LABS_API_KEY;label=work");
+        let transport = listed_voices();
+        recording_provider(&transport, NOW, Some(&context)).prepare_resolved(TEXT, &female()).await.unwrap();
+        let record = std::fs::read_to_string(&fixture.records()[0]).unwrap();
+        assert!(!record.contains(SECRET) && !record.contains("sk-other-secret"), "{record}");
+        assert!(!record.contains(&biscuit_hash::xx_hash(SECRET).to_string()), "{record}");
+
+        let personal = test_toolkit::EnvGuard::set_safe("BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT", "personal");
+        assert_ne!(snapshot::account_context(ElevenLabs::BASE_URL).unwrap(), context);
+        drop(personal);
+        drop(_key);
+        assert_eq!(
+            snapshot::account_context("http://localhost:8080").as_deref(),
+            Some("http://localhost:8080;key-source=ELEVENLABS_API_KEY;label=work")
+        );
+        drop(_other);
+        assert_eq!(snapshot::account_context(ElevenLabs::BASE_URL), None, "no key, no records");
+    }
+
+    #[cfg(feature = "playa")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn helper_synthesis_records_the_default_voice() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT));
+        assert!(!detached_hit(&provider, &transport, &female()).await);
+        provider.detached_job(TEXT, &female()).await.unwrap();
+        assert_eq!(fixture.record()["voice"], "f1");
+        assert!(detached_hit(&recording_provider(&transport, NOW, Some(ACCOUNT)), &transport, &female()).await);
     }
 
     #[test]
