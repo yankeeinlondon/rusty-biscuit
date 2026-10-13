@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const KEBAB_DOCUMENT: &str = "---\nspec-name: alpha\nlabel: \"v={{ spec-name }}\"\n_loop_count: 3\n---\n\
-Bare: [{{ spec-name }}] Doc: [{{ doc.spec-name }}] Bracket: [{{ doc['spec-name'] }}] \
+Bare: [{{ spec-name }}] Doc: [{{ fm.spec-name }}] Bracket: [{{ fm['spec-name'] }}] \
 Label: [{{ label }}] Prev: [{{ _loop_count - 1 }}|{{ 4-2 }}]\n";
 
 #[test]

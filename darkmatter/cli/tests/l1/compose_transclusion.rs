@@ -164,11 +164,9 @@ fn test_compose_state_variables_available_during_validation() {
     )
     .unwrap();
 
-    // `doc` is the reserved frontmatter namespace, so a property literally
-    // named `doc` is referenced as `doc.doc` (bare `{{doc}}` is the whole
-    // frontmatter object).
+    // `doc` is an ordinary property, read here through the `fm` namespace.
     let template_path = temp_dir.path().join("template.md");
-    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc.doc}}\n").unwrap();
+    std::fs::write(&template_path, "# Docs\n\n::file docs/{{fm.doc}}\n").unwrap();
 
     fixture
         .command()
