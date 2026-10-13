@@ -19,11 +19,11 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
-reviewed: false
-review_iterations: 0
-clarified: false
-implemented: false
+status: implemented
+reviewed: true
+review_iterations: 3
+implemented: true
+completed: true
 depends_on:
     - 2026-10-12-schematic-runtime-envelope
 related:
@@ -35,7 +35,7 @@ human_review_items:
   - |-
     **Please confirm: no per-API on/off switches (feature flags) for the generated API crate. Branch A has been applied, pending your answer.**
 
-    This work gives every generated API client one method per endpoint, which made the generated crate (`schematic-schema`) slower to compile. The spec's rule (D3) says: if a clean debug build gets more than 25% slower, add one feature flag per API, so that a program using only ElevenLabs does not compile the other 17 APIs. The two ways of reading "the build" give different answers. You were asked before Phase 5, but no answer was recorded, so Phase 5 applied the plan's own rule (option A below). That changed no code, so it is easy to reverse. Phase 6 has since moved the consumers (biscuit-speaks, sniff, and the homelab crates) onto the new methods. Their call code works the same under A or B, so choosing B now would add only a feature line to each consumer's `Cargo.toml`, plus the generator change. It is best decided before the final phase closes the work.
+    This work gives every generated API client one method per endpoint, which made the generated crate (`schematic-schema`) slower to compile. The spec's rule (D3) says: if a clean debug build gets more than 25% slower, add one feature flag per API, so that a program using only ElevenLabs does not compile the other 17 APIs. The two ways of reading "the build" give different answers. You were asked before Phase 5, but no answer was recorded, so Phase 5 applied the plan's own rule (option A below). That changed no code, so it is easy to reverse. Phase 6 has since moved the consumers (biscuit-speaks, sniff, and the homelab crates) onto the new methods. Their call code works the same under A or B, so choosing B now would add only a feature line to each consumer's `Cargo.toml`, plus the generator change. All eight phases are now done under A, so this is the one decision left before the work is accepted.
 
     Measured on the development Mac (debug builds, old and new code built back to back):
     - **The whole build command**, including dependencies every user compiles anyway: 45.5 s before, 47.5 s after, **+4.5%**.
@@ -43,17 +43,17 @@ human_review_items:
 
     Options:
     - **A. Keep it as applied: no feature flags.** This uses the whole-command number, as the plan's ruling 14 and D3's literal wording do. *Pros:* nothing more to build, and consumers keep their current setup. *Cons:* about 2 s more on every clean build of every consumer, for every API whether it is used or not.
-    - **B. Switch to per-API feature flags.** This uses the crate-only number. *Pros:* a consumer compiles only the APIs it uses, which also helps as more APIs are added. *Cons:* a generator change, plus a `Cargo.toml` change in six consumer crates. In a whole-workspace build the flags merge, so the saving shows mainly when one package is built alone. If you choose B, it should be done before the final phase (Phase 8).
+    - **B. Switch to per-API feature flags.** This uses the crate-only number. *Pros:* a consumer compiles only the APIs it uses, which also helps as more APIs are added. *Cons:* a generator change, plus a `Cargo.toml` change in six consumer crates. In a whole-workspace build the flags merge, so the saving shows mainly when one package is built alone. If you choose B, it is a follow-up change on top of this work.
     - **C. Keep A now, and record per-API feature flags as a separate future item** to revisit if the API count or build times grow. *Pros:* this change stays small. *Cons:* the 2 s per clean build remains until then.
 
     **Recommendation: A (or C if you want the idea tracked).** The extra wait a user actually sees is about 2 s on a build of about 46 s, well under 25%. Branch B's generator change and six consumer edits are out of proportion to that saving.
+
+    **DECISION:** A: keep changes as applied
 message_to_agent: |-
-  Phase 7 is complete: docs, READMEs, and skills now describe endpoint methods and CallError. Read "## Phase 7" in implementation-log.md.
-  - The author has still NOT confirmed D3 branch A; the human_review item stays open. If the spec now records B, run plan Tasks 5.B.1-5.B.3 before Phase 8's validation, and add the per-API features to schematic/docs/dependencies.md, schematic/schema/README.md, and docs/runtime/calling-an-api.md.
-  - New page: schematic/docs/runtime/calling-an-api.md. Its Rust examples are not compiled; they were hand-checked against generated signatures. If Task 8.3's audit wants executable evidence for R10, the existing schema tests (github_client.rs) cover every documented behavior; see the Phase 7 requirement-to-test table.
-  - The only source change was a /// comment on api_client! (schematic/runtime/src/api_client.rs). schematic `just test` and `just lint` pass; consumers were not re-run in Phase 7 because their source did not change.
-  - The schematic-define SKILL.md entry points exceed the 200-line target (308 and 287 lines). They were already over before this work; trimming them is out of scope, but worth listing as an open item in Task 8.4.
-  - Phase 8 Task 8.2 (`just ci-local --plan`) will show the doc and skill changes; per repo CI rules, non-source Markdown schedules no package unless a test reads it.
+  All 8 phases are done; the status is "implementation complete, ready for review". Read "## Phase 8" in implementation-log.md for the R1-R10 and D1-D4 audit, the list of departures from the spec, and the open items.
+  - D3 branch A (no per-API feature flags) is applied, but the author has still not confirmed it; that is the open human_review item.
+  - Phase 8 changed no code. It fixed three Markdown pages that still showed the removed `CallOptions` call shape: schematic/docs/headers/README.md, schematic/define/README.md, and schematic/definitions/README.md.
+  - CI never runs `just test-schema`, which holds the generated crate's 39 tests, including the R5 and R6 evidence in github_client.rs. Run it locally when reviewing.
 ---
 
 # Schematic endpoint methods

@@ -173,6 +173,133 @@ skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/headers.md
     - .claude/skills/homelab/SKILL.md
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+    - schematic/docs/headers/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+source_code:
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/api_client.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/tests/l1/call.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/client_settings.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/runtime/tests/l1/whole_send_elapsed.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.rs
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/bitbucket/responses.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/eversolo/responses.rs
+    - schematic/schema/src/gitea.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/gitea/responses.rs
+    - schematic/schema/src/github.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/github/responses.rs
+    - schematic/schema/src/gitlab.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/gitlab/responses.rs
+    - schematic/schema/src/huggingface.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/huggingface/responses.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/samsung_tv.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+documentation:
+    - schematic/features/2026-10-12-schematic-endpoint-methods/endpoint-inventory.md
+    - schematic/docs/generation/validation.md
+    - homelab/docs/eversolo-design.md
+    - sniff/docs/repos/repo-tech-design.md
+    - schematic/README.md
+    - schematic/schema/README.md
+    - schematic/runtime/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/sending-and-responses.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/codecs.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/headers/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-runtime
     - schematic-gen
@@ -180,6 +307,8 @@ packages:
     - biscuit-speaks
     - sniff
     - homelab
+    - schematic-define
+    - schematic-definitions
 ---
 
 # Implementation Log for 2026-10-12-schematic-endpoint-methods (8 phases)
@@ -1047,3 +1176,133 @@ The Markdown examples are not compiled. They were checked by hand against the ge
 
 - Every doc statement checked matches the code, and no `docs/` page names a feature or fix.
 - Status: Phase 7 implementation complete, ready for review. The author's confirmation of D3 branch A is still open.
+
+## Phase 8
+
+Phase 8 is final validation and close-out. Base: `26644fa0c`, a clean tree at the start of the phase. D3 branch A still holds, and the author's confirmation is still open in the spec's `human_review_items`. The only files changed in this phase are three documentation pages with leftover old-shape text (see Task 8.3), plus this log, the plan, and the spec frontmatter.
+
+### Task 8.1: Package suites (macOS, final tree)
+
+| Package area | `just test` | `just lint` |
+| --- | --- | --- |
+| `schematic` | exit 0. L1: 1924 passed, 12 skipped (tier-skipped, as in every phase). `test-fresh-output`: 6 of 6. `test-compile-fail`: 1 of 1 | exit 0 |
+| `schematic/schema` (`just test-schema`, `just lint-schema`) | exit 0, 39 passed | exit 0 (clippy `--all-targets -D warnings`) |
+| `schematic` `just check-drift` | exit 0, 7 of 7 (committed OpenAPI, Postman, and schema tree equal fresh output) | — |
+| `biscuit-speaks` | exit 0, 505 passed, 19 skipped (the existing `#[ignore]` live-API tests) | exit 0 |
+| `sniff` | exit 0, 3375 passed (5 slow), 33 skipped | exit 0 |
+| `homelab` (all seven crates: `homelab`, `homelab-cli`, `homelab-server`, `unfolded-integration-helper`, `arcam-amp-integration`, `eversolo-integration`, `sony-receiver-integration`) | exit 0, 243 passed, 8 skipped (pre-existing) | exit 0 (clippy on all seven crates, plus oxlint) |
+
+No failures, and no pre-existing failures. These are the numbers from Phases 6 and 7, unchanged.
+
+### Task 8.2: CI scope check
+
+`just ci-local --plan` against `origin/main` covers the whole `feat/modern-config` branch (741 changed paths, 119 commits, many features), so it cannot show what this feature schedules on its own. `just ci-local --plan --base a33e198b7`, run from the commit that scheduled this feature, isolates it: 137 changed paths and **31 executing cells**. Nothing was pushed.
+
+- **Scheduled packages, all expected:**
+    - `schematic-gen` and `schematic-runtime` (source changed): lint, plus L1 on every environment. `schematic-gen` also has L2 (tmux) on Linux and macOS.
+    - `biscuit-speaks`, `sniff`, and `homelab` (consumer source changed in Phase 6): lint, check, and L1 on every environment.
+    - `test-toolkit`: one lint cell that runs the archive-path guard alone, selected by `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs`. This is the guard's normal behavior.
+- **Check cells compile the unchanged dependents.** biscuit-speaks's check compiles 5, homelab's compiles 5 (including `eversolo-integration`, `arcam-amp-integration`, and `sony-receiver-integration`), and sniff's compiles 22. Those dependents are compiled but not tested, as the repo's CI rules intend.
+- **`schematic-schema` gets no cell.** It is excluded from the workspace. CI reaches it only through `schematic-gen`'s `slow_real_apis_compile_offline`, which regenerates all 18 APIs, compares the result with the committed tree, and compiles it (`.github/workflows/ci.yml` runs `just -f schematic/justfile test-fresh-output` in the build job). **CI does not run the schema crate's own 39 tests (`just test-schema`).** That gap predates this feature, but this feature relies on those tests as evidence for R5 and R6 (`github_client.rs`). It is listed as an open item below.
+- No package is scheduled unexpectedly. The docs and skill edits schedule nothing, because no test reads them.
+
+### Task 8.3: Spec coverage audit
+
+Every cited test was confirmed to exist in the final tree by name, and every suite holding them passed in Task 8.1.
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| **R1** One inherent method per endpoint, snake-case id, `new` order, sends nothing | ✅ | `gen/src/codegen/endpoint_methods/{names,mod}.rs`. Tests: `endpoint_methods::tests::methods_are_snake_case_ids_and_call_types_follow_the_request_name`, `an_endpoint_method_takes_the_required_values_in_new_order_and_sends_nothing`, and `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` (`GitHub::list_releases(&self, owner, repo) -> ListReleasesCall<'_>` in `schema/src/github/requests.rs`). With no trait import: the `endpoint_methods_control` target in `slow_generated_types_reject_misuse_at_compile_time` |
+| **R2** Generated call type with setters (no `with_`) and the shared per-call methods | ✅ | `a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards`, `each_call_type_has_exactly_its_setters_and_the_shared_methods`. Departure: `.full()` returns the runtime `FullCall`, not a generated type (ruling 3) |
+| **R3** `.await` gives `Result<Success, CallError<E>>`, one `?` | ✅ | `runtime/src/call.rs`. Tests: `call::awaiting_a_call_returns_the_data_of_a_2xx_reply`, `a_declared_error_or_an_undecodable_body_is_an_api_error_with_its_response_kept`, `a_connection_failure_is_a_transport_error_with_the_request_kept`, and the end-to-end child test `an_endpoint_method_sends_its_values_and_awaits_to_the_data` |
+| **R4** `.full()` returns the envelope | ✅ | `call::full_returns_the_envelope_for_a_success_and_for_an_error_reply`; `github_client::success_metadata_carries_request_id_status_and_headers`; compile-fail fixture `request_change_after_full` |
+| **R5** `.build()?` checks before sending; a built call is `Clone` and sends again; the same checks run at `.await` | ✅ | `call::build_refuses_an_invalid_argument_before_any_request_is_sent`, `a_built_call_sent_twice_makes_two_requests_and_two_results`; `github_client::a_built_call_sends_nothing_until_awaited_and_sends_once_per_copy`; in use in sniff's `github_list_workflow_runs_retries_anonymously_when_token_gets_{401,403}` |
+| **R6** Request objects and the generic send remain, with identical behavior | ✅ | `Client::send(request) -> Call`. Tests: `github_client::endpoint_method_and_generic_send_of_its_request_agree`, and the runtime L1 suites, which all send request objects |
+| **R7** Rustdoc carries description, method and path, required arguments, and setters | ✅ | `endpoint_methods/docs.rs`. Tests: `method_docs_carry_description_route_arguments_and_setters`, `method_docs_list_the_body_and_omit_empty_sections`, `a_missing_description_leaves_no_leading_blank_line`, `setter_and_call_type_docs_name_the_parameter_and_the_method` |
+| **R8** Compile cost measured before and after, OpenAI separately, plus crate size | ✅ | Task 1.4 (baseline) and Task 4.5 (after, paired back to back). Whole-command clean build +4.5%; `schematic-schema` unit +34%; incremental +28%; OpenAI probe +38% to +72%; rlib 42.8 MB to 69.0 MB; source 41,610 to 79,181 lines |
+| **R9** In-repo consumers adopt the methods | ✅ | Phase 6: biscuit-speaks, sniff, and homelab migrated; model-citizen is not a consumer. A grep over `.rs` files outside `schematic/` finds no `CallOptions` and no `into_result(`. The consumer suites pass (Task 8.1) |
+| **R10** A docs page explains calling an API | ✅ | `schematic/docs/runtime/calling-an-api.md`, linked from `docs/runtime/README.md`. It uses real GitHub and OpenAI endpoints rather than the spec's illustrative `create_issue`, a departure recorded in Phase 7. **This phase fixed three more pages that still showed the old shape** (see below) |
+| **D1** `CallError<E>`: `#[non_exhaustive]`, `Transport` and `Api`, `Error` and `Display`, `request_meta()` | ✅ with departures | `runtime/src/call.rs:232`. Departures: `Api` is a struct variant `{ error, meta: Box<ResponseMeta> }` (ruling 1; boxed to stay clear of `result_large_err`); `Display` names the call and leaves the inner text to `source()`. Tests: `call_error_display_names_the_call_without_secrets_and_its_source_is_the_inner_error`, `call_error_is_matched_with_a_wildcard_arm_and_converts_from_a_transport_error`, compile-fail `call_error_match_needs_a_wildcard` |
+| **D2** Collisions detected and renamed with a diagnostic; rename list pinned | ✅ | `_param` setters: `setters_keep_field_names_and_shared_call_method_names_gain_param`. `_endpoint` methods: `every_api_struct_and_trait_method_name_is_renamed`. Keywords: `a_keyword_endpoint_id_takes_the_field_sanitizer_suffix_and_is_listed`. Diagnostics: `renames_are_warnings_and_conflicts_are_errors_of_the_rust_output`. End to end: `renamed_endpoint_methods_and_setters_send_under_their_wire_names`. Pinned (empty) list: `output_validation::live_definitions_endpoint_method_renames_are_pinned`. Beyond the spec, trait-method names and pagination's planned `pages`, `fetch_page`, and `collect_all` are reserved too |
+| **D3** Measured rule | ✅ branch A, **author confirmation open** | Ruling 14 (whole command): +4.5%, so branch A, chained setters, no features. The unit-only reading (+34%) would choose B. This is still the spec's open `human_review_items` entry |
+| **D4** Call type wraps the runtime call; shared methods are one-line forwards | ✅ | `pub struct XCall<'a>(schematic_runtime::Call<'a, Tag, XRequest>)` with forwards and an `#[inline]` `into_future`. Test: `a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards`. Shared-helpers note: not moved, because the call types use only runtime items and `shared.rs` is byte-identical (Task 3.5) |
+| Validation: "a trybuild compile test" with only the API struct imported | ✅ by another tool | This is a `cargo check` control target inside the F3 fresh-crate test (`ENDPOINT_METHODS_CONTROL` in `fresh_output_compile.rs`), not trybuild. It shares one Cargo run with the 15 misuse cases. The runtime's own compile-fail fixtures use trybuild |
+
+**Drift found and fixed in this phase.** Phase 7's old-shape audit covered `docs/runtime`, `docs/generation`, four READMEs, and the skills. A repo-wide grep for `CallOptions::new()`, `send(..&CallOptions`, and `into_result()` found three more pages still describing the removed call shape. The plan's success criterion is that no `schematic/docs/` page does:
+
+- `schematic/docs/headers/README.md`: the credential precedence list named `CallOptions::anonymous()` and `CallOptions::new().credential(..)`. It now names `.anonymous()` and `.credential(..)` on the call.
+- `schematic/define/README.md`:
+    - The precedence list and the "skips every source" sentence named `CallOptions`. They now name the call's methods.
+    - The Programmatic Authentication example built an unused `CallOptions` value with a Basic credential, which also did not match the OpenAI client above it. It now shows `client.list_models().credential(Credential::access_token(other_token)).await?`.
+- `schematic/definitions/README.md`: "called the same way, with `client.send(request, &CallOptions::new())`" now names the endpoint method, says where the `Response` envelope comes from (`.full()`), and links `calling-an-api.md`.
+
+The remaining hits are all legitimate: `send_raw` and its `CallOptions`, `Response::into_result` on an envelope, runtime tests of the generic path, the generator's unrelated `Report::into_result`, OpenAPI `export(.., &options)`, and a `reqwest` `.send()` in a research note. No test reads the three edited pages, so they schedule no CI cell. Every new relative link resolves.
+
+### Task 8.4: Final record
+
+**Rulings adopted.** Rulings 1–12 in the plan, as confirmed in Phase 1, plus:
+
+- 13: the call-type name follows the request name, with `Request` replaced by `Call`;
+- 14: the D3 branch is decided on the whole-command clean build.
+
+**Departures from the spec** (spec untouched; the docs describe the code as built):
+
+1. `CallError::Api` is a struct variant `{ error, meta: Box<ResponseMeta> }`, not a tuple of `ApiError<E>` (ruling 1, Phase 2).
+2. `CallError`'s `Display` names the call and its redacted response, and the inner error is its `source()` (Phase 2).
+3. `.full()` returns the runtime's `FullCall`, not a generated per-endpoint type, so endpoint setters cannot follow it (ruling 3).
+4. `Call::map_request` is public, so generated setters in another crate can change the request (Phase 2).
+5. The generated `into_future` is `#[inline]`. Without it, all 547 send state machines compiled inside `schematic-schema` (+155% unit, rlib ×6). This was found by the R8 measurement and fixed in Phase 4.
+6. Trait-method names (`clone`, `fmt`, `default`, `into_future`, …) and pagination's planned names are reserved, beyond D2's list (Phase 3).
+7. Method names use `schematic_define`'s snake case, through the request-field sanitizer, as D2 requires. Uncased OpenAI ids produce names like `createan_apikeyforaserviceaccount`.
+8. The "trybuild" validation item is a `cargo check` control target in the F3 fresh-crate test (see Task 8.3).
+9. The docs page uses real GitHub endpoints instead of the spec's illustrative `create_issue` (Phase 7).
+
+**R8 numbers and D3 branch.** See Task 4.5 for the full tables. The decision pair:
+
+| Measurement | Base | After | Change |
+| --- | --- | --- | --- |
+| Clean build, whole command | 44.48 s, 46.47 s | 47.69 s, 47.36 s | +4.5% |
+| `schematic-schema` unit | 6.39 s, 6.32 s | 8.51 s, 8.51 s | +34% |
+
+Branch A (chained setters, no per-API features) was applied, pending the author's confirmation.
+
+**Shared helpers.** Not moved into the runtime. The call types use only `schematic_runtime` items, and `shared.rs` is unchanged.
+
+**Rename list for the shipped definitions.** Empty: no `_param`, `_endpoint`, or keyword rename, and no collision. It is pinned by `live_definitions_endpoint_method_renames_are_pinned`.
+
+**Open questions and items for the author:**
+
+1. **D3 branch A confirmation** (the spec's `human_review_items`). Choosing B now means a generator change for per-API features, plus a feature line in each consumer `Cargo.toml`. No call code changes.
+2. **Wider measurement** (ruling 11): release-profile builds, rust-analyzer latency, and a consumer's dependent build were not measured.
+3. **`CallError` `Display`.** If you prefer a transparent `Display` (the inner error's text), it is a two-line change.
+4. **homelab `RestError::Call`.** This new public variant is the target of the forced wildcard arm. sniff and biscuit-speaks fold that arm into an existing variant instead.
+5. **CI does not run `just test-schema`.** The generated crate's 39 tests, including the R5 and R6 evidence in `github_client.rs`, run only locally. CI compiles the crate but does not test it. This predates the feature.
+6. **Dead generator files.** `gen/src/codegen/api_struct/{constructors,fields,request_method,variant}.rs` and `gen/src/codegen/client/` are not declared as modules (Phase 1).
+7. **Uncased OpenAI operation ids** make awkward method names. Fixing that is a definitions change, which is a non-goal here.
+8. **Skill size.** The `schematic-define` `SKILL.md` entry points are over the 200-line target (308 and 287 lines). They were already over before this work.
+
+### Requirement-to-test mapping (this phase)
+
+Phase 8 changed three documentation pages and no code or behavior, so no test was added. The behavior those pages now describe is pinned by tests:
+
+- per-call `.credential(..)` and `.anonymous()` precedence: `github_client::credential_precedence_per_call_client_env_anonymous` and `anonymous_call_sends_no_credential_despite_client_and_env`;
+- an endpoint method returns the codec's success type, and `.full()` returns the envelope: `non_json_endpoints::*` and `call::full_returns_the_envelope_for_a_success_and_for_an_error_reply`.
+
+The Input Robustness Matrix does not apply: no parser or configuration reader changed.
+
+### Gates run
+
+- See Task 8.1: every package suite and lint passed on macOS.
+- Cross-OS: not run in this phase. Phase 8 changed only Markdown. The code changed in Phases 2–6 has no `#[cfg]`, path, or process logic. CI's pull request runs Linux and macOS, and the push to `main` adds Windows.
+- No pre-existing failures. Nothing skipped beyond the tier and `#[ignore]` skips listed in Task 8.1.
+
+### Final checkpoint
+
+- Every plan task is checked, or marked "not taken" with a reason (Branch B, Tasks 5.B.1–5.B.4).
+- **Status: implementation complete, ready for review.** Nothing was committed, the spec was not moved, and `just complete` was not run.
+
+## Review 1 rulings
+
+- **Item 1, `CallError::Api` shape: accepted.** The author accepted departure 1 of Task 8.4: `CallError::Api` stays the struct variant `{ error: ApiError<E>, meta: Box<ResponseMeta> }`. This ruling supersedes the spec's D1 tuple shape `Api(ApiError<E>)`; the spec is left untouched as a snapshot. A sweep of the READMEs, `docs/runtime/` pages, skills, and rustdoc found every description already in the struct shape with boxed `meta`, and every consumer match (homelab, sniff, biscuit-speaks, schematic tests) reads `meta` for the status, headers, or request and keeps a wildcard arm. No code or docs changed.
+- **Item 2, `.full()` return type: accepted.** The author accepted departure 3 of Task 8.4: `.full()` keeps returning the runtime's generic `FullCall`, and `.full()` is documented as the final endpoint-specific step, so endpoint setters are chained before it. The `FullCall` rustdoc, the generated call-type doc (regenerated into `schematic/schema`), `schematic/README.md`, `schematic/gen/README.md`, `schematic/docs/runtime/calling-an-api.md`, and the `schematic-define` skill's `gen.md` now state that order; `schematic/skill/SKILL.md` no longer describes the removed `send(request, &CallOptions)` call shape. The pagination spec and plan never write `.full()`; their refresh must keep this order. Pinned by `full_docs_say_the_endpoint_setters_come_before_it`.
+- **Item 3, homelab `RestError::Call`: accepted.** The author accepted the new public variant `RestError::Call(CallError<NoDeclaredError>)` as the target of the wildcard arm that `CallError`'s `#[non_exhaustive]` forces; open item 4 of Task 8.4 is resolved. A sweep of every consumer fold of `CallError` (homelab `rest.rs`, with `eversolo.rs` and `samsung_tv.rs` delegating to it; sniff `remote/envelope.rs`; biscuit-speaks ElevenLabs `map_call_error`) found the Transport, error-status, and other-reply mappings correct and covered by L1 tests, and every wildcard arm kept. One defect was fixed: `Call` was declared `#[error("{0}")]` without a source, so `RestError::source()` returned `None` and dropped the cause that `CallError`'s `Display` leaves to its `source`. It is now `#[error(transparent)]`, pinned by the new L1 test `rest::tests::a_call_error_kept_whole_still_reports_its_cause`. The rustdoc of `Status` and `Response` and the variant table in `homelab/docs/eversolo-design.md` now say that a body cut off mid-read and a refused or failed redirect are `Response`, whatever the status.

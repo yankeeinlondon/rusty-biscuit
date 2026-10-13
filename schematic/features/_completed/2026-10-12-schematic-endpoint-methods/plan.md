@@ -174,6 +174,133 @@ skills_files_updated_during_phase_7:
     - .claude/skills/schematic-define/schematic/gen.md
     - .claude/skills/schematic-define/schematic/headers.md
     - .claude/skills/homelab/SKILL.md
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+    - schematic/docs/headers/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+source_code:
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/api_client.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/tests/l1/call.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/client_settings.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/runtime/tests/l1/whole_send_elapsed.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.rs
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/bitbucket/responses.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/eversolo/responses.rs
+    - schematic/schema/src/gitea.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/gitea/responses.rs
+    - schematic/schema/src/github.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/github/responses.rs
+    - schematic/schema/src/gitlab.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/gitlab/responses.rs
+    - schematic/schema/src/huggingface.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/huggingface/responses.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/samsung_tv.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+documentation:
+    - schematic/features/2026-10-12-schematic-endpoint-methods/endpoint-inventory.md
+    - schematic/docs/generation/validation.md
+    - homelab/docs/eversolo-design.md
+    - sniff/docs/repos/repo-tech-design.md
+    - schematic/README.md
+    - schematic/schema/README.md
+    - schematic/runtime/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/sending-and-responses.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/codecs.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/headers/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-runtime
     - schematic-gen
@@ -181,6 +308,8 @@ packages:
     - biscuit-speaks
     - sniff
     - homelab
+    - schematic-define
+    - schematic-definitions
 ---
 
 # Schematic endpoint methods implementation plan
@@ -460,14 +589,14 @@ Each task runs in its own subagent and edits only its package. Each migrates fro
 
 ### Wave 12: Validation (parallel)
 
-- [ ] **Task 8.1: Package suites.** Run `just test` and `just lint` in `schematic`, `biscuit-speaks`, `sniff`, and each homelab crate. Run the schema crate's recipes.
-- [ ] **Task 8.2: CI scope check.** Run `just ci-local --plan` and read the executing cells. A `schematic/schema` change reaches its dependents, so confirm no package is scheduled unexpectedly. Do not push.
-- [ ] **Task 8.3: Spec coverage audit.** Walk R1–R10 and D1–D4 against the code and tests and tick each in `implementation-log.md` with the evidence (file, test name, or measurement).
+- [x] **Task 8.1: Package suites.** Run `just test` and `just lint` in `schematic`, `biscuit-speaks`, `sniff`, and each homelab crate. Run the schema crate's recipes.
+- [x] **Task 8.2: CI scope check.** Run `just ci-local --plan` and read the executing cells. A `schematic/schema` change reaches its dependents, so confirm no package is scheduled unexpectedly. Do not push.
+- [x] **Task 8.3: Spec coverage audit.** Walk R1–R10 and D1–D4 against the code and tests and tick each in `implementation-log.md` with the evidence (file, test name, or measurement).
 
 ### Wave 13: Close (sequential)
 
-- [ ] **Task 8.4: Implementation log.** Finalize `implementation-log.md`: rulings adopted, deviations from the spec (for example the struct-variant `Api` in ruling 1), R8 numbers, D3 branch, the shared-helpers choice, the rename list, and open questions for the author (any wider measurement).
-- [ ] **Task 8.5: Hand off.** State "implementation complete, ready for review". Do not commit, move the spec, or run `just complete`.
+- [x] **Task 8.4: Implementation log.** Finalize `implementation-log.md`: rulings adopted, deviations from the spec (for example the struct-variant `Api` in ruling 1), R8 numbers, D3 branch, the shared-helpers choice, the rename list, and open questions for the author (any wider measurement).
+- [x] **Task 8.5: Hand off.** State "implementation complete, ready for review". Do not commit, move the spec, or run `just complete`.
 
 ### Final checkpoint
 
