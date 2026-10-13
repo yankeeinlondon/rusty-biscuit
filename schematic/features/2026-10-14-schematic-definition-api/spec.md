@@ -301,7 +301,7 @@ Query values moved out of path templates by the migration become ordinary option
 
 ## Suggested phases
 
-Each phase leaves the tree green (`just test`, `just lint` in `schematic/`, R24 comparison clean or explained). The plan may refine. The baseline is the tree as left by spec 3, not the tree this draft read.
+Each phase leaves the tree green (`just test`, `just lint` in `schematic/`, R24 comparison clean or explained). The plan may refine. The baseline is the tree as left by spec 3, not the tree this draft read. That tree includes the optional `page_size` (integer) and `page_token` (string) query parameters on the ElevenLabs `ListVoices` endpoint, added by spec 2 as a narrow scope exception (`2026-10-12-schematic-runtime-envelope` review 1, item 5); they are part of the baseline, not a difference to explain.
 
 1. **Baseline and safety net (no behavior change).** Re-verify counts (endpoint literals per API, `Some` uses of `oauth_scopes`/`auth_policy`, the 35 declared endpoints, dependents). Regenerate Rust, OpenAPI and Postman into a temporary directory and prove no diff against the committed trees. Add the serde derives of R17 first, then capture the JSON definition baseline (R24). Add the Rust-tree comparison test. Run the reproduce-first check of R22 now (read-only) and log the result.
 2. **Definition context.** Context, descriptors with the optional structural component and serde (R2), containers, `serde_json::Value`, aliases, collisions, `DefinitionError` (R1-R5, R7). Registries can be produced from it alongside the old `SchemaRegistry` (additive).

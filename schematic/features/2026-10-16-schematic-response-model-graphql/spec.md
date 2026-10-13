@@ -372,6 +372,10 @@ condition. SSE and NDJSON register a JSON item type; raw byte framing always yie
 and usable after the originating client handle is dropped; it need not be `Clone`
 or `Sync`. This extends the earlier runtime’s owned response contract.
 *Validated by:* L1 generator-output assertion plus the mock-server tests below.
+Hook-capable codecs (`2026-10-12-schematic-runtime-envelope` review 1, item 2):
+if the NDJSON codec implements the hook marker, it overrides `decode_hooked`
+and ships a test proving registered hooks run on its output; R12 applies the
+same obligation to every codec in this spec that implements the marker.
 
 **R7.** Items are delivered incrementally: a mock server sends several events or
 lines with deliberate delays and the test observes the first decoded item before the
@@ -490,7 +494,12 @@ migrated APIs that has such a hook is fixed (D-26).
 *Validated by:* compile-fail test (trybuild) in the runtime package or
 `schematic-gen`; an L1 search-based test that no definition in
 `schematic-definitions` carries such a hook; an L1 mock-server test that the global
-hook is not called for a stream or non-2xx reply.
+hook is not called for a stream or non-2xx reply; and, for each codec here that
+implements the marker (`GraphQl<D>`, a JSON-only multi-shape codec), an L1 test
+that registered hooks run on its output. The provided `decode_hooked` ignores
+hooks, so a codec that implements the marker without overriding it compiles and
+silently never runs them (`2026-10-12-schematic-runtime-envelope` review 1,
+item 2).
 
 ### Several shapes at one address (author ruling 2026-10-12)
 

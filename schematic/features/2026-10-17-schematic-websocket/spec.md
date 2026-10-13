@@ -939,6 +939,16 @@ specifics are listed below.
   `2026-10-18-schematic-fidelity-polish`.
 - Sniff's retirement of its hand-written provider client (D20) does not
   depend on this spec.
+- **`ws_shared` into the runtime (candidate).** Partial generation keeps two
+  compatibility checks: the `schematic-runtime` ABI marker, and a byte
+  comparison of the generated `shared.rs` and `ws_shared.rs`, which the marker
+  does not cover. The direction set by
+  `2026-10-12-schematic-runtime-envelope` review 1, item 6 is to move shared
+  helpers into `schematic-runtime` as features touch them, and to delete the
+  byte comparison once no generated shared helper file remains. While this
+  spec reworks `WsClientOptions` and the other `ws_shared` types (generated
+  from `ws_codegen/shared.rs`), consider moving them into the runtime, and
+  log the choice.
 
 ## Planning-time details assigned to this spec
 

@@ -160,7 +160,7 @@ Why:
 Why the runtime, not the generated crate:
 
 - The generated crate gains no new dependencies.
-- The runtime's ABI marker covers the helpers. That follows the direction set in review 1, Item 6: move shared helpers into the runtime instead of adding new generated shared code.
+- The runtime's ABI marker covers the helpers. That follows the direction set in `2026-10-12-schematic-runtime-envelope` review 1, Item 6: move shared helpers into the runtime instead of adding new generated shared code.
 
 ## Validation
 
