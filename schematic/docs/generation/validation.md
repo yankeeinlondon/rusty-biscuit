@@ -125,7 +125,8 @@ The same fields are available to code as
 | `invalid-request-suffix`: `request_suffix` is empty or not alphanumeric | ✓ | | | error |
 | `invalid-module-path`: the module path is not one Rust identifier | ✓ | | | error |
 | `invalid-type-syntax`: a body, response, or form JSON type is not a Rust type | ✓ | | | error |
-| `generated-name-collision`: two generated items, fields, or client methods share a name | ✓ | | | error |
+| `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name and a call type named like another item | ✓ | | | error |
+| `endpoint-method-rename`: an endpoint method or call-type setter was renamed to avoid a method every API struct or call type has (see below) | ✓ | | | warning |
 | `incomplete-schema-registry`: a JSON type has no schema in the module's registry | | ✓ | | error |
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
 | `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
@@ -221,6 +222,44 @@ Across the APIs of one module group (for example `OllamaNative` and
 `OllamaOpenAI`, which both generate into `ollama`), the same endpoint id is
 allowed: their request suffixes keep the generated Rust names apart. Only an
 actual collision of generated names is an error.
+
+### Endpoint method names
+
+Every REST endpoint becomes a method on its API struct, named after the
+endpoint id in snake case (`ListReleases` becomes `list_releases`), and that
+method returns a call type named after the request type (`ListReleasesCall`
+beside `ListReleasesRequest`). Each optional parameter becomes a setter on the
+call type, named like its request field (`per_page`, matching
+`with_per_page`).
+
+Some of those names are taken by methods that every API struct or every call
+type has. The generator renames the endpoint's name, never the shared one, so
+`.full()` and `.new()` mean the same thing everywhere:
+
+| The generated name would be | Because | It becomes |
+| --- | --- | --- |
+| an endpoint method named like an API-struct method (`new`, `send`, `base_url`, `clone`, …) | the API struct has that method | `new_endpoint` |
+| a setter named like a call-type method (`full`, `build`, `anonymous`, `credential`, `deadline`, the reserved `pages`, `fetch_page`, `collect_all`, or a trait method such as `clone`) | every call type has that method | `full_param` |
+| an endpoint method whose snake-case id is a Rust keyword | it is not an identifier | `type_`, the same rule request fields use |
+
+Each rename is reported as an `endpoint-method-rename` **warning** and never
+blocks the client:
+
+```text
+severity=warning api=Widgets endpoint=ListWidgets feature=endpoint-method-rename output=rust: setter `full` is generated as `full_param`: every call type has a method of that name
+```
+
+A name still claimed twice after renaming is a `generated-name-collision`
+**error**. The generator never invents a numbered name. Rename one of the
+endpoint ids or parameters instead:
+
+```text
+severity=error api=Widgets endpoint=GetApikey feature=generated-name-collision output=rust: endpoint method `get_apikey` is generated for endpoints `GetAPIKey` and `GetApikey`; rename one of the endpoint ids
+```
+
+The same list is available to code as
+`schematic_gen::codegen::endpoint_methods::endpoint_method_renames`. None of
+the shipped definitions needs a rename today.
 
 ### OpenAPI documents of a module group
 
