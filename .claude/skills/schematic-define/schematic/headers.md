@@ -210,7 +210,10 @@ use schematic_schema::prelude::*;
 
 let token = get_token_from_somewhere(); // Vault, OAuth, config file, ...
 let client = OpenAI::new().credentials(Credential::access_token(token));
-let options = CallOptions::new().credential(Credential::access_token(other_token));
+let models = client
+    .list_models()
+    .credential(Credential::access_token(other_token)) // this call only
+    .await?;
 ```
 
 This covers multi-tenant credentials, token rotation, test credentials, and

@@ -72,13 +72,13 @@ parameters (`EndpointParams.header`/`cookie`) become `with_*` fields sent in
 The generated `definition()` translates the effective auth policy into the
 runtime's `AuthConfig` (`ApiKeyParam` becomes `CredentialPlacement::ApiKeyQuery`
 or `ApiKeyCookie`). The runtime resolves one credential per send, for every
-placement: per call (`CallOptions::credential`) → client (`api_key(..)`,
+placement: per call (`.credential(..)` on the call) → client (`api_key(..)`,
 `basic_auth(..)`, or `credentials(..)`) → first non-empty env var of the
 definition's mapping (`env_order([..])` replaces the order) → anonymous.
 `api_key(secret)` goes to the first accepted single-secret placement (bearer,
 key header, query, or cookie) in definition order; on a Basic-only or no-auth
 API it is refused as `BuildError::IncompatibleCredential`. There is
-no missing-credential error, `CallOptions::anonymous()` sends without one, and
+no missing-credential error, `.anonymous()` on a call sends without one, and
 a credential never overrides a same-named request query/cookie/header value
 (that send fails as `InvalidArgument`). A client's `Debug` prints no
 credential.
@@ -141,12 +141,25 @@ When updating docs or examples that touch generated clients:
 - `schematic_runtime::api_client!(OpenAI, OpenAIApi);` gives the struct every
   client-wide setting, `build`, `send`, `send_raw`, and `check_link` as
   inherent methods (no trait import)
+- Per REST endpoint the struct also gets an inherent endpoint method (the
+  endpoint id in snake case, `ListModels` → `list_models`) taking the required
+  values in `{Endpoint}Request::new` order and returning a `{Endpoint}Call`
+  (the request name with `Request` → `Call`). Name clashes are renamed and
+  reported; see [`schematic/gen.md`](./schematic/gen.md) and
+  `schematic/docs/generation/validation.md`
 - Each request struct implements `schematic_runtime::EndpointSpec` (`type Api`,
   `Success`, `Failure = NoDeclaredError`, `Decoder`; `ENDPOINT_ID`, `METHOD`,
   `into_parts()`); a client accepts only its own API's requests
-- `client.send(request, &CallOptions::new())` returns `Ok(Response)` whenever a
-  response head arrived (any status), `Err(TransportError)` only otherwise;
-  `send_raw` skips decoding
+- A call sends nothing until `.await`, which returns
+  `Result<Success, CallError<Failure>>`; chain one setter per optional value,
+  then `.anonymous()`/`.credential(..)`/`.deadline(&d)` as needed. `.full()`
+  (chained last) yields the `Response` envelope (`Ok` whenever a response head
+  arrived, `Err(TransportError)` otherwise); `.build()?` checks the request
+  without sending. `CallError` is `#[non_exhaustive]`, so a `match` needs a
+  `_ =>` arm
+- `client.send(request)` (one argument) returns the same kind of call for a
+  `{Endpoint}Request` object, for generic code; `send_raw(request,
+  &CallOptions)` is the only API taking `CallOptions` and skips decoding
 - Base URL, timeout, credentials (`api_key`, `basic_auth`, `credentials`),
   env order, and response hooks (`pre_response_json`,
   `mutate_response::<Request, _>` for JSON endpoints of the same API) are
@@ -158,14 +171,10 @@ Canonical pattern:
 
 ```rust
 use schematic_schema::prelude::*;
-use schematic_schema::openai::ListModelsRequest;
 
 let client = OpenAI::new().api_key("token");
 
-let response = client
-    .send(ListModelsRequest::default(), &CallOptions::new())
-    .await?;
-let _models = response.into_result()?; // ListModelsResponse, or the ApiError
+let _models = client.list_models().await?; // ListModelsResponse, or a CallError
 ```
 
 ## OpenAPI Extension Reality (Current Exporter)
@@ -289,6 +298,7 @@ Read these as needed:
 - `schematic/gen/README.md` (generated client structs, tag types, and `EndpointSpec` contracts)
 - `schematic/docs/generation/request-side.md` (query, header, cookie, body, and credential placement)
 - `schematic/docs/runtime/README.md` (sending, response envelope, credentials, redirects, deadlines, hooks, redaction)
+- `schematic/docs/runtime/calling-an-api.md` (endpoint methods, setters, per-call overrides, `.full()`, `.build()?`, `CallError`)
 - `schematic/schema/README.md` (generated crate)
 - `schematic/definitions/README.md` (built-in API catalog)
 

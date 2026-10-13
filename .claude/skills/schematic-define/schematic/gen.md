@@ -66,7 +66,7 @@ API Definition (RestApi)
 ┌──────────────────┐
 │ Phase 1: Codegen │  generate_api_struct(), generate_request_struct(),
 │                  │  generate_request_helpers(), generate_paginated_trait(),
-│                  │  ModuleDocBuilder
+│                  │  generate_endpoint_methods(), ModuleDocBuilder
 └────────┬─────────┘
          │
          ▼
@@ -96,14 +96,14 @@ API Definition (RestApi)
 ```
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI + compile-time check, `pub use schematic_runtime`
-├── prelude.rs       # Each API's client struct, plus runtime CallOptions, Credential, Response, ...
+├── prelude.rs       # Each API's client struct, plus runtime Call, CallError, CallOptions, Credential, Response, ...
 ├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, Paginated
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 lines stays one file
 ├── lmstudio.rs
 ├── openai/          # A larger module is split into a directory:
 │   ├── mod.rs       #   module docs, re-exports, each API's client struct and tag
-│   ├── requests.rs  #   per-endpoint request structs and their EndpointSpec impls
+│   ├── requests.rs  #   per-endpoint request structs, EndpointSpec impls, call types, endpoint methods
 │   └── responses.rs #   (when the module has response types)
 ├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
 ├── emqx/            # EmqxBasic + EmqxBearer (combined, shared module)
@@ -126,7 +126,7 @@ Generated REST code only describes requests; the hand-written
 
 ```rust
 // lib.rs: the runtime ABI this crate was generated for, checked at compile time
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;
 const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, "...; regenerate the crate ...");
 pub use schematic_runtime;
 
@@ -138,8 +138,9 @@ pub struct FormFile { .. }                               // multipart file part
 pub trait Paginated {}                                   // marker for paginated endpoints
 ```
 
-Generated code defines no error type: sends report
-`schematic_runtime::TransportError` or a `Response` envelope, constructors
+Generated code defines no error type: an awaited call reports
+`schematic_runtime::CallError<E>` (`.full()`: a `Response` envelope or
+`schematic_runtime::TransportError`), client settings
 `schematic_runtime::BuildError`.
 
 ### Per-Endpoint Request Struct
@@ -210,12 +211,60 @@ impl MyApi {
 }
 ```
 
-Sending is `client.send(request, &CallOptions::new())` (or `send_raw`);
-credentials (`api_key`, `basic_auth`, `credentials`), base URL, timeout, env
+Sending is an endpoint method plus `.await` (next section); `client.send(request)`
+takes a request object for generic code, and `send_raw(request, &CallOptions)`
+skips decoding. Credentials (`api_key`, `basic_auth`, `credentials`), base URL, timeout, env
 order, and response hooks are chained onto the client. They are validated by
 the optional `build()?` (same type back) or on the first call
 (`TransportErrorKind::InvalidClient`). See `schematic/gen/README.md` and the runtime topic pages
 (`schematic/docs/runtime/`).
+
+### Endpoint Methods and Call Types
+
+Per REST endpoint the generator also emits an inherent method on the API
+struct, named after the endpoint id in snake case (`ListReleases` →
+`list_releases`), taking the required values in `{Endpoint}Request::new`
+order, and a call type named like the request with `Request` replaced by
+`Call` (`ListReleasesCall`). The call type wraps
+`schematic_runtime::Call`, has one setter per optional value (the request field
+name without `with_`), forwards `.anonymous()`, `.credential(..)`,
+`.deadline(&d)`, `.full()`, and `.build()`, and implements `IntoFuture`:
+
+```rust
+// GitHub, from schematic/schema/src/github/requests.rs (abridged)
+impl GitHub {
+    pub fn list_releases(&self, owner: impl Into<String>, repo: impl Into<String>)
+        -> ListReleasesCall<'_>;
+}
+pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListReleasesRequest>);
+impl<'a> ListReleasesCall<'a> {
+    pub fn page(self, value: i64) -> Self;       // request.with_page(value)
+    pub fn per_page(self, value: i64) -> Self;   // request.with_per_page(value)
+    // anonymous, credential, deadline, full, build
+}
+
+let releases = github.list_releases("owner", "repo").per_page(10).await?;
+// Result<Success, CallError<Failure>>; CallError is #[non_exhaustive]
+```
+
+Name collisions are resolved by renaming the endpoint's name, never the shared
+one:
+
+- an endpoint method named like an API-struct method (`new`, `send`,
+  `base_url`, `clone`, …) gains `_endpoint`
+- a setter named like a call-type method (`full`, `build`, `anonymous`,
+  `credential`, `deadline`, the reserved `pages`, `fetch_page`,
+  `collect_all`, or a trait method such as `clone`) gains `_param`
+- a Rust keyword goes through the request-field sanitizer (`type_`)
+
+Each rename is an `endpoint-method-rename` warning; a name still claimed twice
+is a `generated-name-collision` error (no numbered names are invented). The
+rename list for shipped definitions is pinned by
+`live_definitions_endpoint_method_renames_are_pinned` in
+`schematic/gen/tests/l1/output_validation.rs` and is currently empty. Rules:
+`schematic/gen/src/codegen/endpoint_methods/names.rs` and
+`schematic/docs/generation/validation.md`; calling them:
+`schematic/docs/runtime/calling-an-api.md`.
 
 ## Validation
 

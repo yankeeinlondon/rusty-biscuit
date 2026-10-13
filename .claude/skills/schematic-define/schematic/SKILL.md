@@ -14,8 +14,8 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 | `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `ApiResponse` |
 | `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
-| `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, typed `send` → `Response` envelope (`Ok` iff a response head arrived, else `TransportError`), `send_raw` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; `send` futures are boxed. Docs: `schematic/docs/runtime/` |
-| `schematic-schema` | Generated clients (auto-generated, do not edit): per API one client struct `{Api}` and its tag `{Api}Api`, and per endpoint a request struct implementing `EndpointSpec` |
+| `schematic-runtime` | Hand-written runtime every generated REST client wraps a `Client<Tag>` of: infallible `Client::new` with chained settings validated by `build()?` or on the first call (`TransportErrorKind::InvalidClient`), `api_client!` forwarding them onto each API struct, `SharedTransport`, tighten-only `OriginPolicy`, awaitable `Call` (`.await` → `Result<T, CallError<E>>`, `.full()` → `Response` envelope that is `Ok` iff a response head arrived, else `TransportError`), `send_raw(request, &CallOptions)` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; call futures are boxed. Docs: `schematic/docs/runtime/` |
+| `schematic-schema` | Generated clients (auto-generated, do not edit): per API one client struct `{Api}` and its tag `{Api}Api`, and per endpoint a request struct implementing `EndpointSpec`, an endpoint method on `{Api}`, and a `{Endpoint}Call` type |
 
 ## CLI Commands
 
@@ -69,7 +69,7 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
           request_suffix: Some("OaiRequest".to_string()), ... }
 ```
 
-The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`). The generator automatically combines shared-module APIs into a single output file; generating one member (`generate --api ollama-native`) regenerates the whole shared module and keeps every other module. Full generation (`--api all`) deletes obsolete generator-owned modules.
+The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`); call types follow, since `Request` becomes `Call` (`EmbeddingsNativeCall`). The generator automatically combines shared-module APIs into a single output file; generating one member (`generate --api ollama-native`) regenerates the whole shared module and keeps every other module. Full generation (`--api all`) deletes obsolete generator-owned modules.
 
 OpenAPI and Postman artifacts use the same resolved module name as generated
 Rust files. Shared-module APIs emit one grouped artifact, e.g.
@@ -96,38 +96,57 @@ with `BASE_URL`, `DOCS_URL`, `definition()`, an infallible `new()`, and
 `basic_auth()` only when the API accepts Basic; `schematic_runtime::api_client!`
 gives it every client-wide setting and send. Each request struct implements
 `schematic_runtime::EndpointSpec` with `type Api = OpenAIApi` (a tag callers
-never write), so a client accepts only its own API's requests.
+never write), so a client accepts only its own API's requests. Each REST
+endpoint is also an inherent method on the client struct (`list_models`)
+returning a `{Endpoint}Call` (`ListModelsCall`); naming and rename rules are in
+[gen.md](./gen.md#endpoint-methods-and-call-types).
 
 ### Constructing and Sending
 
 ```rust
 use schematic_schema::prelude::*;
-use schematic_schema::openai::ListModelsRequest;
 
 let client = OpenAI::new();                        // never fails
+let github = GitHub::new();
 let staging = OpenAI::new()
     .base_url("https://staging.api.com/v1")
     .timeout(std::time::Duration::from_secs(10))
     .build()?; // optional: BuildError now; otherwise the first send reports it
 
-// Ok(Response) whenever a response head arrived (any status);
-// Err(TransportError) only when none did. `send_raw` skips decoding.
-let response = client.send(ListModelsRequest::default(), &CallOptions::new()).await?;
-let models = response.into_result()?;
+// Nothing is sent until `.await`: Ok(ListModelsResponse) or Err(CallError)
+let models = client.list_models().await?;
+
+// Optional values are setters; `.full()` (chain it last) returns the
+// Response envelope: Ok whenever a response head arrived (any status),
+// Err(TransportError) only when none did.
+let response = github.list_releases("owner", "repo").per_page(10).full().await?;
+
+match github.get_repository("owner", "repo").await {
+    Ok(repository) => { /* ... */ }
+    Err(CallError::Transport(error)) => { /* no response head arrived */ }
+    Err(CallError::Api { error, meta }) => { /* error status, bad body, hook refusal */ }
+    Err(_) => { /* CallError is #[non_exhaustive]: a wildcard arm is required */ }
+}
 ```
+
+`.build()?` encodes a call without sending it (the same checks run again at
+`.await`). For generic code over request objects, `client.send(request)` takes
+one `{Endpoint}Request` and returns the same kind of call; `send_raw(request,
+&CallOptions)` skips decoding and is the only API that takes `CallOptions`.
+Details: `schematic/docs/runtime/calling-an-api.md`.
 
 ### Credentials
 
 The runtime resolves one credential per send: per call → client → first
 non-empty env var of the definition's mapping → anonymous. There is no
-missing-credential error; a server that needs one answers (typically 401)
-inside the envelope.
+missing-credential error; a server that needs one answers (typically 401),
+which `.await` reports as `CallError::Api` (inside the envelope with `.full()`).
 
 ```rust
-let options = CallOptions::new().credential(Credential::access_token(token)); // per call
+client.list_models().credential(Credential::access_token(token)).await?; // per call
 let client = OpenAI::new().api_key(token); // per client, wherever the API takes its key
 let client = OpenAI::new().env_order(["STAGING_API_KEY"]); // replaces env_auth order
-client.send(request, &CallOptions::anonymous()).await?; // no credential at all
+client.list_models().anonymous().await?; // no credential at all
 ```
 
 A credential never overrides a same-named query, cookie, or header value the
@@ -262,6 +281,7 @@ grep -rn "type Decoder" schematic/schema/src/
 | Duplicate struct definitions | Shared module missing `request_suffix` | Set distinct `request_suffix` on each API |
 | Recursive struct definition | Body type name collision | Rename to `*Body` suffix |
 | Binary endpoint reports `MalformedSuccess` | Wrong `ApiResponse` | Use `ApiResponse::Binary` |
-| 401 in the envelope, metadata shows `AuthMethod::Anonymous` | No credential from any source | Pass `Credential` per call/client, or check `env_auth` var names |
+| 401 as `CallError::Api` (or in the envelope), metadata shows `AuthMethod::Anonymous` | No credential from any source | Pass `Credential` per call/client, or check `env_auth` var names |
 | Send fails with `InvalidArgument` before any request | Request sets a same-named query/cookie/header value | Drop the request value or the credential |
+| `endpoint-method-rename` warning / `generated-name-collision` error | Endpoint id or parameter clashes with a generated method name | See [gen.md](./gen.md#endpoint-methods-and-call-types); rename the id or parameter |
 | Build fails naming two `schematic-runtime` ABIs | Generated crate older than the runtime | Regenerate (`just generate`) |
