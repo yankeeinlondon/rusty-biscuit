@@ -9,7 +9,8 @@
 //! - scopes every request to the API by naming the tag in its
 //!   `EndpointSpec` implementation, with the endpoint's HTTP method
 //! - carries the definition's authentication translation in `definition()`
-//! - has no send path, request enum, or credential store of its own
+//! - has no send path, request enum, or credential store of its own; its
+//!   only sends are the endpoint methods' calls through the runtime client
 
 use proc_macro2::TokenStream;
 use schematic_define::{
@@ -415,13 +416,11 @@ fn module_has_no_send_path_of_its_own() {
     for removed in [
         "reqwest",
         "async fn",
-        ".send(",
         "pub enum TestApiRequest",
         "SchematicError",
         "ResponseKind",
         "RequestParts =",
         "fn request",
-        "fn get_items",
         "build_and_send_request",
         "merge_headers",
         "append_query_pairs",
@@ -438,6 +437,20 @@ fn module_has_no_send_path_of_its_own() {
     ] {
         assert!(!code.contains(removed), "`{removed}` is still emitted:\n{code}");
     }
+
+    // The only sends are the endpoint methods', through the runtime client,
+    // one per endpoint, each returning that endpoint's call type.
+    let flat = squash(&code);
+    assert_eq!(flat.matches(".send(").count(), 2, "{code}");
+    assert_eq!(flat.matches("self.0.send(").count(), 2, "{code}");
+    assert!(
+        flat.contains("pubfnget_items(&self)->GetItemsCall<'_>{GetItemsCall(self.0.send(GetItemsRequest::default()))}"),
+        "{code}"
+    );
+    assert!(
+        flat.contains("pubfnget_item(&self,item_id:implInto<String>)->GetItemCall<'_>{GetItemCall(self.0.send(GetItemRequest::new(item_id)))}"),
+        "{code}"
+    );
 }
 
 #[test]

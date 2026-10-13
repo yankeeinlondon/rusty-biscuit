@@ -2,8 +2,10 @@
 //!
 //! An API module holds the API's client struct and tag type, one request
 //! struct per endpoint with its `schematic_runtime::EndpointSpec`
-//! implementation, and the re-exported definition types. Its sends are the
-//! runtime client's, forwarded by `schematic_runtime::api_client!`.
+//! implementation, one call type per endpoint with the endpoint method that
+//! returns it, and the re-exported definition types. Its sends are the
+//! runtime client's, forwarded by `schematic_runtime::api_client!` and by
+//! the call types.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -11,7 +13,7 @@ use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
 use crate::codegen::{
-    ModuleDocBuilder, generate_api_struct, generate_paginated_impl,
+    ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_paginated_impl,
     generate_request_struct_with_options,
 };
 
@@ -27,14 +29,15 @@ pub struct SplitApiParts {
     /// Module docs, submodule declarations, re-exports, and each API's
     /// client struct and tag type.
     pub mod_rs: TokenStream,
-    /// Request structs, their `EndpointSpec` and `Paginated` impls, and form
-    /// bodies.
+    /// Request structs, their `EndpointSpec` and `Paginated` impls, form
+    /// bodies, call types, and the endpoint methods.
     pub requests_rs: TokenStream,
     /// The re-exported definition types.
     pub responses_rs: TokenStream,
 }
 
-/// The request structs and `Paginated` impls of one API.
+/// The request structs, `Paginated` impls, call types, and endpoint methods
+/// of one API.
 ///
 /// An API-level `Cookie` header cannot be a client default header: the
 /// runtime refuses a default header that can carry a credential. So the API's
@@ -64,6 +67,7 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
     for endpoint in &api.endpoints {
         tokens.extend(generate_paginated_impl(endpoint, &suffix));
     }
+    tokens.extend(generate_endpoint_methods(api));
     tokens
 }
 
@@ -209,7 +213,7 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 /// - `mod.rs` - module docs, submodule declarations, re-exports, and the
 ///   API's client struct and tag type
 /// - `requests.rs` - all request structs with their `EndpointSpec` and
-///   `Paginated` impls
+///   `Paginated` impls, the call types, and the endpoint methods
 /// - `responses.rs` - definitions re-exports
 pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> SplitApiParts {
     let module_path = get_module_path(api);
@@ -254,7 +258,11 @@ fn split_parts(
     module_path: &str,
 ) -> SplitApiParts {
     let shared_import = shared_import(apis);
-    let tags: Vec<_> = apis.iter().map(|api| format_ident!("{}", api_tag_name(api))).collect();
+    // The endpoint methods in `requests.rs` extend the API structs.
+    let api_items: Vec<_> = apis
+        .iter()
+        .flat_map(|api| [format_ident!("{}", api.name), format_ident!("{}", api_tag_name(api))])
+        .collect();
     let api_structs = apis.iter().map(|api| generate_api_struct(api));
     let requests = apis.iter().map(|api| api_requests(api, module_path));
 
@@ -276,7 +284,7 @@ fn split_parts(
         #shared_import
 
         use super::responses::*;
-        use super::{#(#tags),*};
+        use super::{#(#api_items),*};
 
         #(#requests)*
     };

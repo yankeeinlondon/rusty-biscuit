@@ -1582,8 +1582,9 @@ mod tests {
             "requests.rs should import the response types it names"
         );
         assert!(
-            requests_rs.contains("use super::LargeApiApi;"),
-            "requests.rs should import the API tag its requests name"
+            requests_rs.contains("use super::{LargeApi, LargeApiApi};"),
+            "requests.rs should import the API tag its requests name and the API \
+             struct its endpoint methods extend"
         );
 
         let responses = fs::read_to_string(dir.join("responses.rs")).unwrap();

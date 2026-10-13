@@ -128,6 +128,10 @@ pub enum Feature {
     InvalidRequestSuffix,
     /// Two generated Rust items, fields, or methods would share a name.
     GeneratedNameCollision,
+    /// An endpoint method or call-type setter was given a name other than the
+    /// one its rule gives, to avoid a method every API struct or call type
+    /// has.
+    EndpointMethodRename,
     /// A module path the generated crate cannot declare.
     InvalidModulePath,
     /// An output file name that is not one safe path component.
@@ -155,6 +159,7 @@ impl Feature {
             Self::InvalidIdentifier => "invalid-identifier",
             Self::InvalidRequestSuffix => "invalid-request-suffix",
             Self::GeneratedNameCollision => "generated-name-collision",
+            Self::EndpointMethodRename => "endpoint-method-rename",
             Self::InvalidModulePath => "invalid-module-path",
             Self::InvalidOutputFilename => "invalid-output-filename",
             Self::IncompleteSchemaRegistry => "incomplete-schema-registry",

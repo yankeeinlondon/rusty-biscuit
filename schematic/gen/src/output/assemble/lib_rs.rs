@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
-use super::helpers::{get_module_path, get_request_suffix};
+use super::helpers::get_module_path;
 use crate::output::options::OutputOptions;
 use crate::output::ws_modules::ws_definition_modules;
 
@@ -85,10 +85,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         //! Generated REST API clients and WebSocket API definition helpers.
         //!
         //! Each REST API module holds the API's client struct, named after the
-        //! API and wrapping a [`schematic_runtime::Client`], its request types,
-        //! and its response types re-exported from the definitions. Sending, credentials,
-        //! redirects, deadlines, and the response envelope belong to
-        //! [`schematic_runtime`].
+        //! API and wrapping a [`schematic_runtime::Client`], with one method per
+        //! endpoint; the call type each method returns; its request types; and
+        //! its response types re-exported from the definitions. Sending,
+        //! credentials, redirects, deadlines, and the response envelope belong
+        //! to [`schematic_runtime`].
         //!
         //! ## Available REST APIs
         //!
@@ -108,8 +109,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         //!
         //! ## Results
         //!
-        //! A send returns `Ok` with a [`schematic_runtime::Response`] whenever
-        //! the server answered, whatever the status, and
+        //! Awaiting an endpoint call returns `Ok` with the endpoint's data for a
+        //! 2xx reply that decoded, and otherwise a
+        //! [`schematic_runtime::CallError`]. After `.full()`, it returns `Ok`
+        //! with a [`schematic_runtime::Response`] whenever the server answered,
+        //! whatever the status, and
         //! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
         //! arrived.
 
@@ -247,7 +251,6 @@ fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
         );
     };
     let api_name = &api.name;
-    let module = get_module_path(api);
     let Some(endpoint) = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get) else {
         return format!(
             r#"//! ```text
@@ -257,23 +260,15 @@ fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
 //! ```"#
         );
     };
-    let request = format!("{}{}", endpoint.id, get_request_suffix(api));
-    let construct = if endpoint.path.contains('{') {
-        format!("{request}::from(\"example\")")
-    } else {
-        format!("{request}::default()")
-    };
+    let call = crate::codegen::endpoint_methods::example_invocation(api, endpoint, "client");
     format!(
         r#"//! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_schema::{module}::{request};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {{
 //!     let client = {api_name}::new();
-//!     let response = client.send({construct}, &CallOptions::new()).await?;
-//!     println!("{{}}", response.meta);
-//!     let data = response.into_result()?;
+//!     let data = {call}.await?;
 //!     Ok(())
 //! }}
 //! ```"#

@@ -9,6 +9,8 @@
 //!
 //! - [`api_struct`] - Generates each API's client struct, tag type, and
 //!   API-specific items
+//! - [`endpoint_methods`] - Generates each endpoint's method on its API
+//!   struct and the call type it returns
 //! - [`request_structs`] - Generates per-endpoint request structs and their
 //!   `schematic_runtime::EndpointSpec` implementations
 //! - [`shared`] - Generates the request-side helpers of `shared.rs`
@@ -18,7 +20,9 @@
 //!
 //! 1. Each endpoint gets a request struct via [`generate_request_struct`]
 //! 2. Each API gets its client struct and tag via [`generate_api_struct`]
-//! 3. `shared.rs` gets the request helpers via [`generate_request_helpers`]
+//! 3. Each API gets its endpoint methods and call types via
+//!    [`generate_endpoint_methods`]
+//! 4. `shared.rs` gets the request helpers via [`generate_request_helpers`]
 //!
 //! ## Output Format
 //!
@@ -29,12 +33,14 @@
 //! See [`crate::output`] for the assembly and file writing logic.
 
 pub mod api_struct;
+pub mod endpoint_methods;
 pub mod module_docs;
 pub mod request_structs;
 pub mod shared;
 pub mod traits;
 
 pub use api_struct::generate_api_struct;
+pub use endpoint_methods::generate_endpoint_methods;
 pub use module_docs::ModuleDocBuilder;
 pub(crate) use module_docs::lines_to_doc_comments;
 pub use request_structs::{

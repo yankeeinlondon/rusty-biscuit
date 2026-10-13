@@ -492,6 +492,14 @@ abi_refusal_tests! {
             schematic_gen::RUNTIME_ABI + 1,
             schematic_gen::RUNTIME_ABI
         );
+    // A group generated before endpoint methods (ABI 2) has none, so a
+    // partial run must not keep it beside regenerated groups.
+    refuses_modules_generated_against_abi_2:
+        |lib: &str| lib.replace(&current_marker(), &abi_marker_item("2")),
+        format!(
+            "records schematic-runtime ABI 2, this generator emits ABI {}",
+            schematic_gen::RUNTIME_ABI
+        );
     refuses_missing_legacy_abi_marker:
         without_marker,
         "records no schematic-runtime ABI";

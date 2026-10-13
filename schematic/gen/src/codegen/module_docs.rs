@@ -203,12 +203,7 @@ impl<'a> ModuleDocBuilder<'a> {
         };
 
         let api_name = &self.api.name;
-        let module = crate::output::get_module_path(self.api);
-        let request = format!(
-            "{}{}",
-            endpoint.id,
-            crate::output::get_request_suffix(self.api)
-        );
+        let call = crate::codegen::endpoint_methods::example_invocation(self.api, endpoint, "client");
         let custom_base_url = if self.api.base_url == "http://192.168.1.1:9529" {
             "http://192.168.1.50:9529"
         } else {
@@ -220,12 +215,14 @@ impl<'a> ModuleDocBuilder<'a> {
 
 ```text
 use schematic_schema::prelude::*;
-use schematic_schema::{module}::{request};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     let client = {api_name}::new();
-    let response = client.send({request}::default(), &CallOptions::new()).await?;
+    let data = {call}.await?;
+
+    // the whole response: status, headers, and request id as well
+    let response = {call}.full().await?;
     println!("{{}}", response.meta);
     Ok(())
 }}
@@ -468,12 +465,14 @@ mod tests {
         let example = builder.example_section();
 
         // Should use ListItems (GET) not CreateItem (POST)
+        assert!(example.contains("let data = client.list_items().await?;"), "{example}");
         assert!(
-            example.contains("client.send(ListItemsRequest::default(), &CallOptions::new())"),
+            example.contains("let response = client.list_items().full().await?;"),
             "{example}"
         );
         assert!(example.contains("let client = TestApi::new();"), "{example}");
-        assert!(!example.contains("CreateItemRequest"), "{example}");
+        assert!(!example.contains("create_item"), "{example}");
+        assert!(!example.contains("CallOptions"), "{example}");
     }
 
     #[test]
@@ -494,10 +493,7 @@ mod tests {
         let builder = ModuleDocBuilder::new(&api);
         let example = builder.example_section();
 
-        assert!(
-            example.contains("client.send(CreateItemRequest::default(), &CallOptions::new())"),
-            "{example}"
-        );
+        assert!(example.contains("let data = client.create_item().await?;"), "{example}");
         assert!(
             example.contains(r#"TestApi::new().base_url("https://staging.example.com/v1");"#),
             "{example}"

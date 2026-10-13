@@ -90,17 +90,22 @@ fn assert_endpoint_spec(content: &str, api: &str, request: &str, success: &str, 
     );
 }
 
-/// Asserts the module emits neither a generic request method nor a
-/// per-endpoint send method: the runtime client's `send` serves every
-/// endpoint.
-fn assert_no_send_methods(content: &str, endpoint_methods: &[&str]) {
+/// Asserts the module emits no generic request method and no async send of
+/// its own, and that each of `endpoint_methods` is an endpoint method
+/// returning its call type, which the runtime sends when awaited.
+fn assert_endpoint_methods(content: &str, endpoint_methods: &[&str]) {
     let code = without_comments(content);
     assert!(!code.contains("async fn"), "No send method should be emitted:\n{code}");
     assert!(!code.contains("fn request"), "No generic request method should be emitted:\n{code}");
+    let flat: String = code.split_whitespace().collect();
     for method in endpoint_methods {
+        let call: String = method
+            .split('_')
+            .map(|word| word[..1].to_uppercase() + &word[1..])
+            .collect();
         assert!(
-            !code.contains(&format!("fn {method}")),
-            "No `{method}` convenience method should be emitted:\n{code}"
+            flat.contains(&format!("pubfn{method}(&self")) && flat.contains(&format!("->{call}Call<'_>{{{call}Call(self.0.send(")),
+            "`{method}` should be an endpoint method returning `{call}Call`:\n{code}"
         );
     }
 }
@@ -235,7 +240,7 @@ fn generated_files_exist_and_have_expected_structure() {
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
-    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 2;"));
+    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;"));
     assert!(lib_content.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     assert!(lib_content.contains("pub use schematic_runtime;"));
     assert!(lib_content.contains("pub mod shared;"));
@@ -270,8 +275,8 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("impl schematic_runtime::EndpointSpec for ListModelsRequest {"));
     assert!(api_content.contains("type Api = OpenAIApi;"));
 
-    // The runtime client sends; the module has no send method of its own
-    assert_no_send_methods(&api_content, &["list_models"]);
+    // Each endpoint has a method; the runtime client sends its call
+    assert_endpoint_methods(&api_content, &["list_models"]);
 
     // Verify prelude.rs content
     let prelude_content =
@@ -545,7 +550,7 @@ fn binary_response_declares_bytes_success_and_binary_decoder() {
         !api_content.contains("schematic_runtime::Json<"),
         "Binary-only API should not decode JSON"
     );
-    assert_no_send_methods(&api_content, &["get_audio"]);
+    assert_endpoint_methods(&api_content, &["get_audio"]);
 }
 
 /// Tests that Text response endpoints decode to `String`.
@@ -598,7 +603,7 @@ fn text_response_declares_string_success_and_text_decoder() {
         "String",
         "schematic_runtime::Text",
     );
-    assert_no_send_methods(&api_content, &["get_plain_text"]);
+    assert_endpoint_methods(&api_content, &["get_plain_text"]);
 }
 
 /// Tests that Empty response endpoints decode to `()`.
@@ -651,7 +656,7 @@ fn empty_response_declares_unit_success_and_empty_decoder() {
         "()",
         "schematic_runtime::Empty",
     );
-    assert_no_send_methods(&api_content, &["delete_item"]);
+    assert_endpoint_methods(&api_content, &["delete_item"]);
 }
 
 /// Tests that each endpoint of a mixed API declares its own success type and
@@ -743,7 +748,7 @@ fn mixed_response_types_declare_each_endpoint_decoder() {
         assert_endpoint_spec(&api_content, "MixedTest", request, success, decoder);
     }
 
-    assert_no_send_methods(&api_content, &["get_json", "get_binary", "get_text", "delete_item"]);
+    assert_endpoint_methods(&api_content, &["get_json", "get_binary", "get_text", "delete_item"]);
 }
 
 /// Tests ElevenLabs API generates correct binary methods for audio endpoints.
@@ -787,7 +792,7 @@ fn elevenlabs_binary_endpoints_generate_correctly() {
         "ElevenLabs JSON endpoints must decode JSON"
     );
 
-    assert_no_send_methods(&api_content, &["create_speech", "stream_speech"]);
+    assert_endpoint_methods(&api_content, &["create_speech", "stream_speech"]);
 }
 
 // =============================================================================

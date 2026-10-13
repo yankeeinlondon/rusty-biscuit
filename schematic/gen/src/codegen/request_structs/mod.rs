@@ -115,8 +115,6 @@ pub fn generate_request_struct_with_options(
     module_path: Option<&str>,
     api_marker: &str,
 ) -> TokenStream {
-    use schematic_define::ApiRequest;
-
     let struct_name = format_ident!("{}{}", endpoint.id, suffix);
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
@@ -134,14 +132,8 @@ pub fn generate_request_struct_with_options(
 
     // Form endpoints get a synthesized `{EndpointId}Form` body type, so from here
     // down they follow exactly the same path as JSON bodies.
-    let form_type_name = form::form_body_type_name(endpoint);
-    let body_type_name = match (&endpoint.request, &form_type_name) {
-        (Some(ApiRequest::Json(schema)), _) => Some(schema.type_name.as_str()),
-        (Some(ApiRequest::Text { .. }), _) => Some("String"),
-        (Some(ApiRequest::Binary { .. }), _) => Some("Vec<u8>"),
-        (_, Some(name)) => Some(name.as_str()),
-        _ => None,
-    };
+    let body_type_name = request_body_type_name(endpoint);
+    let body_type_name = body_type_name.as_deref();
     let has_body = body_type_name.is_some();
 
     let path_param_fields = path_params::generate_path_param_fields(&path_params);
@@ -248,6 +240,20 @@ pub fn generate_request_struct_with_options(
         #from_string_impls
 
         #endpoint_spec_impl
+    }
+}
+
+/// The type of the request's `body` field, or `None` when it sends no body:
+/// the JSON type, a generated `{EndpointId}Form`, `String` for a text body,
+/// or `Vec<u8>` for a binary body.
+pub(crate) fn request_body_type_name(endpoint: &Endpoint) -> Option<String> {
+    use schematic_define::ApiRequest;
+
+    match &endpoint.request {
+        Some(ApiRequest::Json(schema)) => Some(schema.type_name.clone()),
+        Some(ApiRequest::Text { .. }) => Some("String".to_string()),
+        Some(ApiRequest::Binary { .. }) => Some("Vec<u8>".to_string()),
+        _ => form::form_body_type_name(endpoint),
     }
 }
 

@@ -59,8 +59,16 @@
 //!     ...
 //! }
 //!
-//! // A caller sends the concrete request; its type fixes the response type.
-//! let response = OpenAI::new().send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new()).await?;
+//! pub struct RetrieveModelCall<'a>(schematic_runtime::Call<'a, OpenAIApi, RetrieveModelRequest>);
+//!
+//! impl OpenAI {
+//!     pub fn retrieve_model(&self, model: impl Into<String>) -> RetrieveModelCall<'_> { ... }
+//! }
+//!
+//! // A caller calls the endpoint method; awaiting its call sends it, and the
+//! // request type fixes the response type.
+//! let client = OpenAI::new();
+//! let model = client.retrieve_model("gpt-4").await?;
 //! ```
 
 pub mod asyncapi_import;
@@ -90,7 +98,7 @@ pub use inference::infer_module_path;
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 2;
+pub const RUNTIME_ABI: u32 = 3;
 
 
 pub use export::openapi::{

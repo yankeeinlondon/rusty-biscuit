@@ -70,6 +70,7 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
         "FixtureSettings",
         &["request-id-header", "secret-names", "deny-cross-origin", "query-and-header-secrets"],
     ),
+    ("FixtureNames", &["endpoint-method-renames", "keyword-setter"]),
 ];
 
 /// Request and response types for the fixture APIs, one module per API.
@@ -117,6 +118,7 @@ pub struct Echo {
 }
 "#,
     ),
+    ("fixture_names", ""),
 ];
 
 fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
@@ -308,6 +310,25 @@ fn fixture_apis() -> Vec<RestApi> {
     settings.request_id_header = Some("x-request-id".to_string());
     settings.cross_origin = CrossOrigin::deny();
 
+    // Names the generator must rename: a `new` endpoint method (an API-struct
+    // method), a `full` setter (a shared call method), and a keyword setter.
+    let mut list_items = endpoint("ListItems", RestMethod::Get, "/owners/{owner}/items", ApiResponse::Empty);
+    list_items.params = Some(located_params(
+        vec![
+            named_param("full", QueryParamType::Boolean),
+            named_param("type", QueryParamType::String),
+            named_param("limit", QueryParamType::Integer),
+        ],
+        vec![],
+        vec![],
+    ));
+    let names = fixture_api(
+        "FixtureNames",
+        "fixture_names",
+        AuthStrategy::None,
+        vec![endpoint("New", RestMethod::Post, "/new", ApiResponse::Empty), list_items],
+    );
+
     vec![
         bearer,
         fixture_api(
@@ -343,6 +364,7 @@ fn fixture_apis() -> Vec<RestApi> {
             vec![endpoint("WhoAmI", RestMethod::Get, "/me", ApiResponse::Empty)],
         ),
         settings,
+        names,
     ]
 }
 
@@ -413,6 +435,7 @@ use schematic_schema::fixture_cookie_key::{FixtureCookieKey, GetProfileRequest};
 use schematic_schema::fixture_oauth::{FixtureOAuth, WhoAmIRequest};
 use schematic_schema::fixture_policy_key::{FixturePolicyKey, PingRequest};
 use schematic_schema::fixture_query_key::{FixtureQueryKey, ListThingsRequest};
+use schematic_schema::fixture_names::FixtureNames;
 use schematic_schema::fixture_settings::{Echo, EchoRequest, FixtureSettings, MovedRequest};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome, RedirectRefusal, TransportErrorKind};
@@ -451,10 +474,6 @@ fn query(request: &Request) -> String {
     request.url.query().unwrap_or_default().to_string()
 }
 
-fn options() -> CallOptions {
-    CallOptions::new()
-}
-
 // ---- raw request bodies ----
 
 #[tokio::test]
@@ -466,7 +485,7 @@ async fn text_body_reaches_the_server_verbatim_under_its_content_type() {
             .credentials(Credential::basic("u", "p"))
             .build()
             .unwrap();
-        let response = client.send(SendNoteRequest::new(text.to_string()), &options()).await.unwrap();
+        let response = client.send(SendNoteRequest::new(text.to_string())).full().await.unwrap();
         assert_eq!(response.into_result().ok(), Some(()), "an empty endpoint drains the body");
 
         let request = only_request(&server).await;
@@ -484,7 +503,7 @@ async fn binary_body_reaches_the_server_byte_for_byte() {
     for bytes in [not_utf8, Vec::new()] {
         let server = start_server().await;
         let client = FixtureBasic::new().base_url(server.uri()).basic_auth("u", "p");
-        client.send(UploadBlobRequest::new("a b", bytes.clone()), &options()).await.unwrap();
+        client.send(UploadBlobRequest::new("a b", bytes.clone())).full().await.unwrap();
 
         let request = only_request(&server).await;
         assert_eq!(request.method.as_str(), "PUT");
@@ -510,7 +529,7 @@ async fn set_header_parameters_override_static_headers_by_case_insensitive_name(
         .with_x_trace_id("abc 123".to_string())
         .with_x_mode("param".to_string())
         .with_x_ids(vec![1, 22, 333]);
-    client.send(request, &options()).await.unwrap();
+    client.send(request).full().await.unwrap();
 
     let request = only_request(&server).await;
     assert_eq!(header(&request, "x-trace-id"), ["abc 123"]);
@@ -525,7 +544,7 @@ async fn set_header_parameters_override_static_headers_by_case_insensitive_name(
 async fn unset_header_parameters_keep_static_headers_and_send_nothing() {
     let server = start_server().await;
     let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
-    client.send(SearchWidgetsRequest::default(), &options()).await.unwrap();
+    client.send(SearchWidgetsRequest::default()).full().await.unwrap();
 
     let request = only_request(&server).await;
     assert_eq!(header(&request, "x-mode"), ["static"]);
@@ -542,7 +561,7 @@ async fn invalid_header_parameter_values_fail_before_send_without_echoing_them()
         let server = start_server().await;
         let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
         let request = SearchWidgetsRequest::default().with_x_trace_id(value.to_string());
-        let error = client.send(request, &options()).await.unwrap_err();
+        let error = client.send(request).full().await.unwrap_err();
 
         let TransportErrorKind::InvalidArgument(argument) = &error.kind else {
             panic!("expected an invalid argument, got {error:?}");
@@ -564,7 +583,7 @@ async fn cookies_from_api_endpoint_and_parameters_share_one_header() {
     let request = SearchWidgetsRequest::default()
         .with_session("a b;c\r\nX-Evil: 1".to_string())
         .with_prefs(vec!["x,y".to_string(), "é".to_string(), "%".to_string()]);
-    client.send(request, &options()).await.unwrap();
+    client.send(request).full().await.unwrap();
 
     let request = only_request(&server).await;
     // API cookies first, then the endpoint's (`theme` replaced in place),
@@ -580,7 +599,7 @@ async fn cookies_from_api_endpoint_and_parameters_share_one_header() {
 async fn unset_cookie_parameters_still_merge_api_and_endpoint_cookies() {
     let server = start_server().await;
     let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
-    client.send(SearchWidgetsRequest::default(), &options()).await.unwrap();
+    client.send(SearchWidgetsRequest::default()).full().await.unwrap();
 
     let request = only_request(&server).await;
     assert_eq!(header(&request, "cookie"), ["api=1; theme=dark; session=static"]);
@@ -592,9 +611,9 @@ async fn unset_cookie_parameters_still_merge_api_and_endpoint_cookies() {
 async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter() {
     let server = start_server().await;
     let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
-    let keyed = options().credential(Credential::api_key("SENTINEL key&="));
+    let keyed = Credential::api_key("SENTINEL key&=");
     let response = client
-        .send(ListThingsRequest::default().with_q("x y".to_string()), &keyed)
+        .send(ListThingsRequest::default().with_q("x y".to_string())).credential(keyed.clone()).full()
         .await
         .unwrap();
 
@@ -609,7 +628,7 @@ async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter(
     let server = start_server().await;
     let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
     let declared = ListThingsRequest::default().with_api_key("declared".to_string());
-    let error = client.send(declared, &keyed).await.unwrap_err();
+    let error = client.send(declared).credential(keyed.clone()).full().await.unwrap_err();
     assert!(matches!(error.kind, TransportErrorKind::InvalidArgument(_)), "{error:?}");
     assert_nothing_sent(&server).await;
 }
@@ -618,7 +637,7 @@ async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter(
 async fn env_query_key_is_read_from_the_definition_env_names() {
     let server = start_server().await;
     let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
-    let response = client.send(ListThingsRequest::default(), &options()).await.unwrap();
+    let response = client.send(ListThingsRequest::default()).full().await.unwrap();
 
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar("FIXTURE_QUERY_KEY_TOKEN".to_string()));
     assert_eq!(query(&only_request(&server).await), "api_key=env-query-key");
@@ -632,7 +651,7 @@ async fn the_first_non_empty_env_variable_supplies_the_key() {
         .env_order(["FIXTURE_EMPTY_KEY", "FIXTURE_SECOND_KEY"])
         .build()
         .unwrap();
-    let response = client.send(ListThingsRequest::default(), &options()).await.unwrap();
+    let response = client.send(ListThingsRequest::default()).full().await.unwrap();
 
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar("FIXTURE_SECOND_KEY".to_string()));
     assert_eq!(query(&only_request(&server).await), "api_key=second-key");
@@ -646,7 +665,7 @@ async fn a_missing_key_sends_the_request_anonymously() {
         .env_order(["SCHEMATIC_FIXTURE_UNSET_KEY_7F3A"])
         .build()
         .unwrap();
-    let response = client.send(ListThingsRequest::default(), &options()).await.unwrap();
+    let response = client.send(ListThingsRequest::default()).full().await.unwrap();
 
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
     assert_eq!(query(&only_request(&server).await), "", "no key is sent and none is invented");
@@ -657,16 +676,16 @@ async fn a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name() {
     let server = start_server().await;
     let client = FixtureCookieKey::new().base_url(server.uri()).build().unwrap();
     client
-        .send(GetProfileRequest::default().with_theme("t".to_string()), &options())
+        .send(GetProfileRequest::default().with_theme("t".to_string())).full()
         .await
         .unwrap();
     assert_eq!(header(&only_request(&server).await, "cookie"), ["lang=en; theme=t; sid=env-cookie-key"]);
 
     let server = start_server().await;
     let client = FixtureCookieKey::new().base_url(server.uri()).build().unwrap();
-    let keyed = options().credential(Credential::api_key("SENTINEL;v"));
+    let keyed = Credential::api_key("SENTINEL;v");
     let declared = GetProfileRequest::default().with_sid("param".to_string());
-    let error = client.send(declared, &keyed).await.unwrap_err();
+    let error = client.send(declared).credential(keyed.clone()).full().await.unwrap_err();
     assert!(matches!(error.kind, TransportErrorKind::InvalidArgument(_)), "{error:?}");
     assert!(!format!("{error} {error:?}").contains("SENTINEL"), "{error:?}");
     assert_nothing_sent(&server).await;
@@ -681,7 +700,7 @@ async fn an_anonymous_call_sends_no_credential_from_any_source() {
         .build()
         .unwrap();
     let response = client
-        .send(GetProfileRequest::default().with_theme("t".to_string()), &CallOptions::anonymous())
+        .send(GetProfileRequest::default().with_theme("t".to_string())).anonymous().full()
         .await
         .unwrap();
 
@@ -693,14 +712,14 @@ async fn an_anonymous_call_sends_no_credential_from_any_source() {
 async fn a_policy_without_env_fallback_reads_no_variable() {
     let server = start_server().await;
     let client = FixturePolicyKey::new().base_url(server.uri()).build().unwrap();
-    let response = client.send(PingRequest::default(), &options()).await.unwrap();
+    let response = client.send(PingRequest::default()).full().await.unwrap();
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
     assert_eq!(query(&only_request(&server).await), "", "FIXTURE_POLICY_KEY_TOKEN is not read");
 
     let server = start_server().await;
     let client = FixturePolicyKey::new().base_url(server.uri()).build().unwrap();
     client
-        .send(PingRequest::default(), &options().credential(Credential::api_key("explicit")))
+        .send(PingRequest::default()).credential(Credential::api_key("explicit")).full()
         .await
         .unwrap();
     assert_eq!(query(&only_request(&server).await), "token=explicit");
@@ -712,19 +731,19 @@ async fn a_policy_without_env_fallback_reads_no_variable() {
 async fn api_key_goes_where_each_generated_definition_takes_a_key() {
     let server = start_server().await;
     let bearer = FixtureBearer::new().base_url(server.uri()).api_key("k-bearer");
-    bearer.send(ListWidgetsRequest::default(), &options()).await.unwrap();
+    bearer.send(ListWidgetsRequest::default()).full().await.unwrap();
     assert_eq!(header(&only_request(&server).await, "authorization"), ["Bearer k-bearer"]);
 
     let server = start_server().await;
     let query_key = FixtureQueryKey::new().base_url(server.uri()).api_key("k-query");
-    let response = query_key.send(ListThingsRequest::default(), &options()).await.unwrap();
+    let response = query_key.send(ListThingsRequest::default()).full().await.unwrap();
     assert_eq!(response.meta.request.auth, AuthMethod::ClientLevel, "the set key beats the environment");
     assert_eq!(query(&only_request(&server).await), "api_key=k-query");
 
     // Basic takes two values, so a single key has nowhere to go.
     let server = start_server().await;
     let basic = FixtureBasic::new().base_url(server.uri()).api_key("k-basic");
-    let error = basic.send(GetNoteRequest::default(), &options()).await.unwrap_err();
+    let error = basic.send(GetNoteRequest::default()).full().await.unwrap_err();
     let TransportErrorKind::InvalidClient(build) = &error.kind else {
         panic!("a key on a Basic-only API is refused: {error:?}");
     };
@@ -737,13 +756,13 @@ async fn api_key_goes_where_each_generated_definition_takes_a_key() {
 async fn new_never_fails_and_an_invalid_setting_surfaces_at_build_or_the_first_send() {
     let server = start_server().await;
     let client = FixtureBearer::new().base_url("not a url");
-    let error = client.send(ListWidgetsRequest::default(), &options()).await.unwrap_err();
+    let error = client.send(ListWidgetsRequest::default()).full().await.unwrap_err();
     assert!(matches!(error.kind, TransportErrorKind::InvalidClient(_)), "{error:?}");
     let built: Result<FixtureBearer, _> = client.build();
     assert!(built.is_err(), "build reports the same setting");
 
     let built: FixtureBearer = FixtureBearer::new().base_url(server.uri()).build().unwrap();
-    built.send(ListWidgetsRequest::default(), &options()).await.unwrap();
+    built.send(ListWidgetsRequest::default()).full().await.unwrap();
     only_request(&server).await;
 }
 
@@ -781,7 +800,7 @@ async fn header_key_oauth_and_form_bodies_reach_the_server() {
         .build()
         .unwrap();
     let form = SubmitFormForm { name: "a b".to_string(), note: None };
-    client.send(SubmitFormRequest::new(form), &options()).await.unwrap();
+    client.send(SubmitFormRequest::new(form)).full().await.unwrap();
     let request = only_request(&server).await;
     assert_eq!(header(&request, "x-api-key"), ["k-1"]);
     assert_eq!(header(&request, "content-type"), ["application/x-www-form-urlencoded"]);
@@ -790,7 +809,7 @@ async fn header_key_oauth_and_form_bodies_reach_the_server() {
     let server = start_server().await;
     let client = FixtureOAuth::new().base_url(server.uri()).build().unwrap();
     client
-        .send(WhoAmIRequest::default(), &options().credential(Credential::access_token("tok")))
+        .send(WhoAmIRequest::default()).credential(Credential::access_token("tok")).full()
         .await
         .unwrap();
     assert_eq!(header(&only_request(&server).await, "authorization"), ["Bearer tok"]);
@@ -816,12 +835,12 @@ async fn each_endpoint_decodes_with_its_declared_codec() {
     let basic = FixtureBasic::new().base_url(server.uri()).build().unwrap();
     let bearer = FixtureBearer::new().base_url(server.uri()).build().unwrap();
 
-    let note: Option<String> = basic.send(GetNoteRequest::default(), &options()).await.unwrap().into_result().ok();
+    let note: Option<String> = basic.send(GetNoteRequest::default()).full().await.unwrap().into_result().ok();
     assert_eq!(note.as_deref(), Some(r#"{"a":1}"#), "a text endpoint keeps a JSON body as text");
-    let blob = basic.send(GetBlobRequest::default(), &options()).await.unwrap().into_result().ok();
+    let blob = basic.send(GetBlobRequest::default()).full().await.unwrap().into_result().ok();
     assert_eq!(blob.as_deref(), Some(&b"plain"[..]));
 
-    let response = bearer.send(GetWidgetRequest::new("w1"), &options()).await.unwrap();
+    let response = bearer.send(GetWidgetRequest::new("w1")).full().await.unwrap();
     assert_eq!(response.meta.status.as_u16(), 200);
     let Outcome::Failure(error) = &response.outcome else {
         panic!("HTML on a JSON endpoint is not a success: {response}");
@@ -852,10 +871,70 @@ async fn a_mutator_registered_for_a_generated_request_runs_only_for_that_endpoin
         .build()
         .unwrap();
 
-    let list = client.send(ListWidgetsRequest::default(), &options()).await.unwrap().into_result().unwrap();
+    let list = client.send(ListWidgetsRequest::default()).full().await.unwrap().into_result().unwrap();
     assert_eq!(list.items.len(), 1, "the mutator ran for its endpoint");
-    let widget = client.send(GetWidgetRequest::new("w1"), &options()).await.unwrap().into_result().unwrap();
+    let widget = client.send(GetWidgetRequest::new("w1")).full().await.unwrap().into_result().unwrap();
     assert_eq!(widget.name, "n", "another endpoint is untouched");
+}
+
+// ---- endpoint methods ----
+
+#[tokio::test]
+async fn an_endpoint_method_sends_its_values_and_awaits_to_the_data() {
+    let server = MockServer::start().await;
+    Mock::given(path("/widgets"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"items":[{"id":"a","name":"n"}]}"#, "application/json"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/widgets/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(r#"{"error":"gone"}"#, "application/json"))
+        .mount(&server)
+        .await;
+    let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
+
+    let list = client
+        .list_widgets()
+        .limit(5)
+        .q("x".to_string())
+        .tag(vec!["a".to_string(), "b".to_string()])
+        .anonymous()
+        .await
+        .unwrap();
+    assert_eq!(list.items, [Widget { id: "a".to_string(), name: "n".to_string() }]);
+    let request = only_request(&server).await;
+    assert_eq!(query(&request), "limit=5&q=x&tag=a&tag=b");
+    assert!(header(&request, "authorization").is_empty(), "the per-call setting reached the send");
+
+    let full = client.list_widgets().full().await.unwrap();
+    assert_eq!(full.meta.status.as_u16(), 200);
+    assert_eq!(full.into_result().unwrap().items.len(), 1);
+
+    match client.get_widget("missing").await {
+        Err(CallError::Api { error, meta }) => {
+            assert_eq!(meta.status.as_u16(), 404);
+            assert_eq!(error.body, &br#"{"error":"gone"}"#[..]);
+        }
+        other => panic!("a 404 is an API error with its response kept: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn renamed_endpoint_methods_and_setters_send_under_their_wire_names() {
+    let server = start_server().await;
+    let client = FixtureNames::new().base_url(server.uri());
+    client.list_items("me").full_param(true).type_("t".to_string()).limit(3).await.unwrap();
+    let request = only_request(&server).await;
+    assert_eq!(request.url.path(), "/owners/me/items");
+    assert_eq!(query(&request), "full=true&type=t&limit=3");
+
+    let server = start_server().await;
+    let client = FixtureNames::new().base_url(server.uri());
+    let built = client.new_endpoint().build().unwrap();
+    built.clone().await.unwrap();
+    built.await.unwrap();
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 2, "a built call sent twice makes two requests");
+    assert!(received.iter().all(|request| request.method.as_str() == "POST" && request.url.path() == "/new"));
 }
 
 // ---- definition settings reach the runtime ----
@@ -881,7 +960,7 @@ async fn request_id_secret_names_and_cross_origin_policy_come_from_the_definitio
         .with_x_pin("SENTINEL-PIN".to_string())
         .with_pin_code("SENTINEL-CODE".to_string())
         .with_page("2".to_string());
-    let response = client.send(request, &options()).await.unwrap();
+    let response = client.send(request).full().await.unwrap();
     assert_eq!(response.data(), Some(&Echo { ok: true }));
     assert_eq!(response.meta.request_id.as_deref(), Some("req-42"));
     let stored = format!("{response} {:?} {:?}", response.meta.request.query, response.meta.request.headers);
@@ -891,7 +970,7 @@ async fn request_id_secret_names_and_cross_origin_policy_come_from_the_definitio
     assert_eq!(header(&received, "x-pin"), ["SENTINEL-PIN"], "the server still receives the value");
 
     // The definition's `deny` policy refuses even a same-origin redirect.
-    let response = client.send(MovedRequest::default(), &options()).await.unwrap();
+    let response = client.send(MovedRequest::default()).full().await.unwrap();
     let Outcome::Failure(error) = &response.outcome else {
         panic!("a redirect under `deny` is not followed: {response}");
     };
@@ -934,6 +1013,8 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "header_key_oauth_and_form_bodies_reach_the_server",
     "each_endpoint_decodes_with_its_declared_codec",
     "a_mutator_registered_for_a_generated_request_runs_only_for_that_endpoint",
+    "an_endpoint_method_sends_its_values_and_awaits_to_the_data",
+    "renamed_endpoint_methods_and_setters_send_under_their_wire_names",
     "request_id_secret_names_and_cross_origin_policy_come_from_the_definition",
 ];
 
@@ -1049,7 +1130,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "a success type other than the declared one",
         "async fn misuse(client: FixtureBearer) {
             let _: Response<String, NoDeclaredError> =
-                client.send(ListWidgetsRequest::default(), &CallOptions::new()).await.unwrap();
+                client.send(ListWidgetsRequest::default()).full().await.unwrap();
         }",
         "E0308",
         "WidgetList",
@@ -1073,7 +1154,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "an arbitrary type that is no request",
         "async fn misuse(client: FixtureBearer) {
-            let _ = client.send(String::from(\"/widgets\"), &CallOptions::new()).await;
+            let _ = client.send(String::from(\"/widgets\")).full().await;
         }",
         "E0277",
         "EndpointSpec",
@@ -1081,7 +1162,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "another API's generated request through the typed send",
         "async fn misuse(client: FixtureBearer) {
-            let _ = client.send(PingRequest::default(), &CallOptions::new()).await;
+            let _ = client.send(PingRequest::default()).full().await;
         }",
         "E0271",
         "PingRequest",
@@ -1149,6 +1230,22 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "FixtureBearerRequest",
     ),
     (
+        "an endpoint's own setter after full",
+        "async fn misuse(client: FixtureBearer) {
+            let _ = client.list_widgets().full().limit(5).await;
+        }",
+        "E0599",
+        "limit",
+    ),
+    (
+        "the data, not the envelope, after full",
+        "async fn misuse(client: FixtureBearer) {
+            let _: WidgetList = client.list_widgets().full().await.unwrap();
+        }",
+        "E0308",
+        "Response",
+    ),
+    (
         "the removed injected-client constructor",
         "fn misuse() {
             let _ = FixtureBearer::with_client_and_base_url(todo!(), \"http://127.0.0.1:1\");
@@ -1170,6 +1267,28 @@ use schematic_schema::schematic_runtime::{
 };
 ";
 
+/// A use of endpoint methods from a file that imports only the API struct:
+/// no request, call, or trait import is needed to call an endpoint, chain a
+/// setter and per-call settings, await, ask for the full response, or build.
+const ENDPOINT_METHODS_CONTROL: &str = "#![allow(dead_code)]
+use schematic_schema::fixture_bearer::FixtureBearer;
+
+async fn used(client: FixtureBearer, deadline: schematic_schema::schematic_runtime::Deadline) {
+    let list = client.list_widgets().limit(10).anonymous().deadline(&deadline).await.unwrap();
+    let _: usize = list.items.len();
+    let full = client.list_widgets().limit(1).full().anonymous().await.unwrap();
+    let _: u16 = full.meta.status.as_u16();
+    let built = client.get_widget(\"w1\").build().unwrap();
+    let again = built.clone();
+    let _ = (built.await, again.await);
+    let _ = schematic_schema::fixture_names::FixtureNames::new()
+        .list_items(String::from(\"me\"))
+        .full_param(true)
+        .type_(String::new())
+        .await;
+}
+";
+
 #[test]
 fn slow_generated_types_reject_misuse_at_compile_time() {
     let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
@@ -1179,11 +1298,12 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
 
     let control = "async fn used(client: FixtureBearer) {
         let response: Response<WidgetList, NoDeclaredError> =
-            client.send(ListWidgetsRequest::default(), &CallOptions::new()).await.unwrap();
+            client.send(ListWidgetsRequest::default()).full().await.unwrap();
         let _ = response.data();
         let _ = FixtureBearer::new().mutate_response::<ListWidgetsRequest, _>(|_, _| Ok(()));
     }";
     fresh.add_test_file("misuse_control", &format!("{MISUSE_PRELUDE}{control}\n"));
+    fresh.add_test_file("endpoint_methods_control", ENDPOINT_METHODS_CONTROL);
     for (index, (_, snippet, _, _)) in MISUSES.iter().enumerate() {
         fresh.add_test_file(&format!("misuse_{index}"), &format!("{MISUSE_PRELUDE}{snippet}\n"));
     }
@@ -1206,6 +1326,11 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
     assert!(
         located("misuse_control").is_empty(),
         "the control, a correct use with the same imports, must compile{hint}:\n{}",
+        run.stderr
+    );
+    assert!(
+        located("endpoint_methods_control").is_empty(),
+        "endpoint methods must compile with only the API struct imported{hint}:\n{}",
         run.stderr
     );
     for (index, (misuse, snippet, code, named)) in MISUSES.iter().enumerate() {
@@ -1278,7 +1403,7 @@ const RUNTIME_DEFINITIONS: &[&str] = &[
     "fn request_empty",
     "fn with_client",
     "fn with_base_url",
-    "fn variant",
+    "fn variant(&self",
     "fn with_api_key_param",
     "fn api_key_header",
     "fn http_client",
@@ -1312,8 +1437,16 @@ fn generated_rest_code_references_the_runtime_and_defines_none_of_it() {
     let source_of = |name: &str| &rest_files.iter().find(|(path, _)| path == name).unwrap().1;
     assert!(source_of("lib.rs").contains("pub use schematic_runtime;"));
     assert!(source_of("lib.rs").contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
-    let github = source_of("github.rs");
+    // GitHub's endpoint methods push its module over the split threshold.
+    let github = source_of("github/requests.rs");
     assert!(github.contains("impl schematic_runtime::EndpointSpec for ListPullRequestsRequest"));
+    let github_flat: String = github.split_whitespace().collect::<String>().replace(",)", ")");
+    assert!(
+        github_flat.contains(
+            "pubfnlist_releases(&self,owner:implInto<String>,repo:implInto<String>)->ListReleasesCall<'_>"
+        ),
+        "GitHub has the endpoint method of the documented example"
+    );
     // Every REST API has exactly one user-facing client name: its struct,
     // given its settings by the runtime macro. No alias, per-API builder, or
     // fallible constructor remains anywhere.
@@ -1448,7 +1581,7 @@ async fn capture_query_request_lines() {
         lines.push(format!("{label}\t{line}"));
     };
 
-    let key = CallOptions::new().credential(Credential::api_key("test-key"));
+    let key = Credential::api_key("test-key");
     let gitea = Gitea::new().base_url(format!("{base}/api/v1")).build().unwrap();
 
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
@@ -1456,37 +1589,38 @@ async fn capture_query_request_lines() {
     scalars.limit = Some(0);
     scalars.state = Some("open closed".to_string());
     scalars.sort = Some("ünï+%&=/?#".to_string());
-    let _ = gitea.send(scalars, &key).await;
+    let _ = gitea.send(scalars).credential(key.clone()).full().await;
     record("ordered-scalars-reserved-unicode");
 
     let mut empty = ListPullRequestsRequest::new("o", "r");
     empty.state = Some(String::new());
-    let _ = gitea.send(empty, &key).await;
+    let _ = gitea.send(empty).credential(key.clone()).full().await;
     record("empty-value");
 
-    let _ = gitea.send(ListPullRequestsRequest::new("o", "r"), &key).await;
+    let _ = gitea.send(ListPullRequestsRequest::new("o", "r")).credential(key.clone()).full().await;
     record("no-query");
 
-    let _ = gitea.send(GetGitTreeRecursiveRequest::new("o", "r", "a b"), &key).await;
+    let _ = gitea.send(GetGitTreeRecursiveRequest::new("o", "r", "a b")).credential(key.clone()).full().await;
     record("legacy-embedded-literal-query");
 
     let tenant = Gitea::new().base_url(format!("{base}/api/v1?tenant=a b")).build().unwrap();
     let mut paged = ListPullRequestsRequest::new("o", "r");
     paged.page = Some(1);
-    let _ = tenant.send(paged, &key).await;
+    let _ = tenant.send(paged).credential(key.clone()).full().await;
     record("base-url-with-query");
 
     let gitlab = GitLab::new().base_url(format!("{base}/api/v4")).build().unwrap();
     let _ = gitlab
         .send(
             GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z"),
-            &key,
         )
+        .credential(key.clone())
+        .full()
         .await;
     record("legacy-embedded-query-with-placeholder");
 
     let openai = OpenAI::new().base_url(format!("{base}/v1")).build().unwrap();
-    let token = CallOptions::new().credential(Credential::access_token("test-token"));
+    let token = Credential::access_token("test-token");
     let mut items = ListConversationItemsRequest::new("conv 1");
     items.limit = Some(5);
     items.order = Some("a+b".to_string());
@@ -1497,13 +1631,13 @@ async fn capture_query_request_lines() {
         serde_json::json!(""),
         serde_json::json!("é"),
     ]);
-    let _ = openai.send(items, &token).await;
+    let _ = openai.send(items).credential(token.clone()).full().await;
     record("repeated-array-keys");
 
     let mut beta = BetaListInputItemsRequest::new("resp 1");
     beta.limit = Some(3);
     beta.include = Some(vec![serde_json::json!("x y")]);
-    let _ = openai.send(beta, &token).await;
+    let _ = openai.send(beta).credential(token.clone()).full().await;
     record("legacy-embedded-query-plus-declared");
 
     let out = std::env::var("WIRE_BASELINE_OUT").expect("WIRE_BASELINE_OUT");

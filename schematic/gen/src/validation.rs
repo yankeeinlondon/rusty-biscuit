@@ -66,6 +66,7 @@ use schematic_define::{
 };
 use schematic_definitions::registry::SchemaRegistry;
 
+use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
 use crate::export::resolve_module_name;
@@ -131,9 +132,9 @@ pub fn endpoint_uniqueness_key(endpoint: &Endpoint) -> EndpointUniquenessKey {
 /// Covers everything the OpenAPI and Postman validators check about routes,
 /// plus the Rust-only rules: identifiers, request suffixes, module paths and
 /// file names, type syntax, generated-name collisions across each module
-/// group, and the request inputs the client sends verbatim: header and
-/// cookie parameter names, raw body content types, and API-key parameter
-/// names.
+/// group, endpoint-method and setter renames (warnings), and the request
+/// inputs the client sends verbatim: header and cookie parameter names, raw
+/// body content types, and API-key parameter names.
 pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
@@ -371,6 +372,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
 
     check_module_path(api, diagnostics);
     check_api_key_param(api, diagnostics);
+    check_endpoint_method_names(api, diagnostics);
 
     for endpoint in &api.endpoints {
         let id = Some(endpoint.id.as_str());
@@ -397,6 +399,32 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         check_request_struct_fields(api, endpoint, diagnostics);
         check_raw_body_content_type(api, endpoint, diagnostics);
         check_sent_params(api, endpoint, diagnostics);
+    }
+}
+
+/// Reports each endpoint-method or setter rename as a warning, and each name
+/// still claimed twice after renaming as an error.
+fn check_endpoint_method_names(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let names = resolve_names(api);
+    for rename in &names.renames {
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Warning,
+            &api.name,
+            Some(&rename.endpoint),
+            Feature::EndpointMethodRename,
+            Output::Rust,
+            rename.to_string(),
+        ));
+    }
+    for conflict in &names.conflicts {
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Error,
+            &api.name,
+            conflict.endpoints.last().map(String::as_str),
+            Feature::GeneratedNameCollision,
+            Output::Rust,
+            conflict.to_string(),
+        ));
     }
 }
 
@@ -758,6 +786,14 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
                     api: &api.name,
                     endpoint: Some(&endpoint.id),
                     role: format!("the request struct of {}::{}", api.name, endpoint.id),
+                });
+            emitted
+                .entry(call_type_name(&format!("{}{suffix}", endpoint.id)))
+                .or_default()
+                .push(Owner {
+                    api: &api.name,
+                    endpoint: Some(&endpoint.id),
+                    role: format!("the call type of {}::{}", api.name, endpoint.id),
                 });
             if matches!(
                 endpoint.request,
@@ -1644,14 +1680,18 @@ mod tests {
         let first = group_member("First", None, vec![get("ListModels")]);
         let second = group_member("Second", None, vec![get("ListModels")]);
 
+        // The request struct and the call type each collide.
         let diagnostics = validate_rust_client(&[&first, &second]);
         assert_eq!(
             features(&diagnostics),
-            vec![(Severity::Error, Feature::GeneratedNameCollision)]
+            vec![(Severity::Error, Feature::GeneratedNameCollision); 2]
         );
-        assert_eq!(diagnostics[0].api, vec!["First", "Second"]);
-        assert_eq!(diagnostics[0].endpoint, None);
-        assert!(diagnostics[0].message.contains("`ListModelsRequest`"));
+        for diagnostic in &diagnostics {
+            assert_eq!(diagnostic.api, vec!["First", "Second"]);
+            assert_eq!(diagnostic.endpoint, None);
+        }
+        assert!(diagnostics[0].message.starts_with("`ListModelsCall` is generated for the call type"));
+        assert!(diagnostics[1].message.starts_with("`ListModelsRequest` is generated for the request struct"));
 
         // Separate modules keep separate namespaces.
         let elsewhere = RestApi {
