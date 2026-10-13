@@ -81,6 +81,7 @@ required-features = ["terminal-tests"]
 # its position fixtures, by `#[path]`; each test spells the file it reads.
 source-inputs = [
     "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+    "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
     "darkmatter/lib/tests/position_fixtures/mod.rs",
     "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]

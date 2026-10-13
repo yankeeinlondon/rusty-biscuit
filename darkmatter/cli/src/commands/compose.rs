@@ -725,14 +725,26 @@ fn apply_compose_baseline_schema(
     Ok(options.with_darkmatter_baseline_schema())
 }
 
+/// Environment variable whose truthy value switches the embedded baseline
+/// schema off; see [`disables_baseline_schema`] for the accepted values.
+pub(crate) const NO_BASELINE_SCHEMA_ENV: &str = "DARKMATTER_NO_BASELINE_SCHEMA";
+
+/// Reads [`NO_BASELINE_SCHEMA_ENV`] from the live process environment.
+///
 /// Shared with `md clean`, whose schema resolution is at full compose parity.
+/// `md schema validate` reads the variable from its captured request instead
+/// and applies [`disables_baseline_schema`] to that value.
 pub(crate) fn env_disables_baseline_schema() -> bool {
-    matches!(
-        std::env::var("DARKMATTER_NO_BASELINE_SCHEMA")
-            .ok()
-            .as_deref(),
-        Some("1" | "true" | "TRUE" | "yes" | "YES")
-    )
+    disables_baseline_schema(std::env::var(NO_BASELINE_SCHEMA_ENV).ok().as_deref())
+}
+
+/// Whether a [`NO_BASELINE_SCHEMA_ENV`] value disables the baseline schema.
+///
+/// Exactly `1`, `true`, `TRUE`, `yes`, and `YES` disable it; every other
+/// value, including other casings and padded spellings, and an absent
+/// variable leave it on.
+pub(crate) fn disables_baseline_schema(value: Option<&str>) -> bool {
+    matches!(value, Some("1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
 fn print_shell_command_report(
@@ -985,6 +997,17 @@ fn format_compose_perf_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disables_baseline_schema_accepts_exactly_the_documented_spellings() {
+        for value in ["1", "true", "TRUE", "yes", "YES"] {
+            assert!(disables_baseline_schema(Some(value)), "{value:?} disables");
+        }
+        for value in ["", "0", "false", "no", "True", "Yes", " yes", "yes ", "on"] {
+            assert!(!disables_baseline_schema(Some(value)), "{value:?} keeps the baseline");
+        }
+        assert!(!disables_baseline_schema(None), "an absent value keeps the baseline");
+    }
 
     #[test]
     fn warning_rows_put_each_extra_line_on_a_row_of_its_own() {

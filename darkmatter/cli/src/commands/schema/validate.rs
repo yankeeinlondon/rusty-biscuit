@@ -1,8 +1,9 @@
 //! `md schema validate` implementation.
 
 use crate::args::SchemaValidateFormat;
+use crate::commands::compose::{NO_BASELINE_SCHEMA_ENV, disables_baseline_schema};
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
-use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
+use crate::io::{DocumentArgumentError, OpenedArgument, open_argument, resolve_file_path};
 use crate::request::MdRequest;
 use darkmatter::markdown::errors::resolution_failure_name;
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
@@ -16,7 +17,9 @@ use darkmatter::markdown::schemas::{
 };
 use std::path::{Path, PathBuf};
 
-/// Environment variable used as a fallback baseline when `--schema` is absent.
+/// Environment variable naming a custom baseline schema, read from the
+/// captured request. Used when neither `--schema` nor `--no-baseline-schema`
+/// is given and `DARKMATTER_NO_BASELINE_SCHEMA` is not truthy.
 pub const BASELINE_SCHEMA_ENV: &str = "BASELINE_SCHEMA";
 
 /// Per-file validation outcome.
@@ -54,6 +57,7 @@ enum FileOutcome {
 pub fn run_validate(
     inputs: &[String],
     schema: Option<&Path>,
+    no_baseline_schema: bool,
     format: SchemaValidateFormat,
     quiet: bool,
     no_trigger_schemas: bool,
@@ -76,7 +80,7 @@ pub fn run_validate(
         std::process::exit(64);
     }
 
-    let api = match load_api(schema, request) {
+    let api = match load_api(schema, no_baseline_schema, request) {
         Ok(api) => api,
         Err(err) => {
             emit_schema_error(&err);
@@ -123,23 +127,65 @@ pub fn run_validate(
     Ok(())
 }
 
-/// Builds the [`DarkmatterSchemas`] entry point at the launch context,
-/// applying the CLI baseline flag or the snapshot's `BASELINE_SCHEMA`
-/// fallback. Each file re-anchors it on its own context.
-fn load_api(schema: Option<&Path>, request: &MdRequest) -> Result<DarkmatterSchemas, SchemaError> {
-    let baseline_path = schema
-        .map(PathBuf::from)
-        .or_else(|| request.snapshot().env().get(BASELINE_SCHEMA_ENV).map(PathBuf::from));
+/// Builds the [`DarkmatterSchemas`] entry point at the launch context with
+/// the selected baseline. Each file re-anchors it on its own context.
+///
+/// The first matching rule selects the baseline:
+///
+/// 1. `--no-baseline-schema`: none, ignoring `BASELINE_SCHEMA`.
+/// 2. `--schema <path>`: that custom baseline, even when
+///    `DARKMATTER_NO_BASELINE_SCHEMA` is truthy.
+/// 3. A truthy `DARKMATTER_NO_BASELINE_SCHEMA`: none, ignoring
+///    `BASELINE_SCHEMA`.
+/// 4. `BASELINE_SCHEMA`: that custom baseline.
+/// 5. Otherwise the embedded Darkmatter baseline.
+///
+/// Both variables come from the captured request, never the live process
+/// environment. A custom path is a file reference resolved in the launch
+/// context, like a document argument, and one that does not resolve or load
+/// is an error, never a fallback to the embedded baseline. Removing the
+/// baseline leaves document and trigger schemas active.
+fn load_api(
+    schema: Option<&Path>,
+    no_baseline_schema: bool,
+    request: &MdRequest,
+) -> Result<DarkmatterSchemas, SchemaError> {
+    let env = request.snapshot().env();
+    let selection = if no_baseline_schema {
+        Baseline::None
+    } else if let Some(path) = schema {
+        Baseline::Custom(path.to_path_buf())
+    } else if disables_baseline_schema(env.get(NO_BASELINE_SCHEMA_ENV).map(String::as_str)) {
+        Baseline::None
+    } else if let Some(path) = env.get(BASELINE_SCHEMA_ENV) {
+        Baseline::Custom(PathBuf::from(path))
+    } else {
+        Baseline::Embedded
+    };
 
     let context = request.launch_context().map_err(|error| SchemaError::Baseline {
         message: format!("{error:#}"),
         source: None,
     })?;
     let api = DarkmatterSchemas::new(context.clone());
-    match baseline_path {
-        Some(path) => api.with_baseline_from_file(path),
-        None => Ok(api),
+    match selection {
+        Baseline::None => Ok(api),
+        Baseline::Custom(path) => {
+            let resolved = resolve_file_path(&path, context).map_err(|error| SchemaError::Baseline {
+                message: format!("could not load baseline from `{}`: {error:#}", path.display()),
+                source: None,
+            })?;
+            api.with_baseline_from_file(resolved)
+        }
+        Baseline::Embedded => api.with_darkmatter_baseline_json_schema(),
     }
+}
+
+/// The baseline [`load_api`] selected.
+enum Baseline {
+    None,
+    Custom(PathBuf),
+    Embedded,
 }
 
 /// Validates a single file, capturing parse/schema failures separately so the
