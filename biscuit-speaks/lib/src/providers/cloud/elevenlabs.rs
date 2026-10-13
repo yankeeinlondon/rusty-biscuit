@@ -26,12 +26,10 @@ use std::path::PathBuf;
 
 use schematic_schema::elevenlabs::{
     CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
-    ListModelsRequest, ListVoicesRequest, ListVoicesResponse, ModelInfo, VoiceResponseModel,
+    ElevenLabsApi, ListModelsRequest, ListVoicesRequest, ListVoicesResponse, ModelInfo, VoiceResponseModel,
     VoiceSettings,
 };
-use schematic_schema::prelude::{
-    CallOptions, Credential, ElevenLabs, ElevenLabsClient, TransportError,
-};
+use schematic_schema::prelude::{CallOptions, Credential, ElevenLabs, TransportError};
 use schematic_schema::schematic_runtime::{ApiError, EndpointSpec, ErrorKind, NoDeclaredError};
 
 use crate::audio_cache::{CacheKey, write_atomic};
@@ -74,7 +72,7 @@ const VOICES_PAGE_SIZE: i64 = 100;
 /// ```
 pub struct ElevenLabsProvider {
     /// The schematic-generated ElevenLabs client.
-    client: ElevenLabsClient,
+    client: ElevenLabs,
     /// Default voice ID to use when none specified.
     default_voice_id: String,
     /// Default model ID to use.
@@ -136,7 +134,7 @@ impl ElevenLabsProvider {
                 provider: "elevenlabs".into(),
             })?;
 
-        let mut builder = ElevenLabs::builder().credentials(Credential::api_key(api_key));
+        let mut builder = ElevenLabs::new().credentials(Credential::api_key(api_key));
         if let Some(url) = base_url {
             builder = builder.base_url(url);
         }
@@ -302,7 +300,7 @@ impl ElevenLabsProvider {
     /// [`Self::map_api_error`] and [`Self::map_transport_error`].
     async fn send<R>(&self, request: R) -> Result<R::Success, TtsError>
     where
-        R: EndpointSpec<Api = ElevenLabs, Failure = NoDeclaredError>,
+        R: EndpointSpec<Api = ElevenLabsApi, Failure = NoDeclaredError>,
     {
         let response = self
             .client
