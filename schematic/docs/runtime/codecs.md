@@ -33,9 +33,10 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 }
 ```
 
-Because the codec is part of the request type, `client.send(request, …)`
-returns `Response<Vec<PullRequestSummary>, _>`, and the caller never names a response
-type or runs a decode step.
+Because the codec is part of the request type, awaiting
+`client.list_pull_requests("o", "r")` returns `Vec<PullRequestSummary>` (a
+`.full()` call returns `Response<Vec<PullRequestSummary>, _>`), and the
+caller never names a response type or runs a decode step.
 
 ```mermaid
 flowchart LR

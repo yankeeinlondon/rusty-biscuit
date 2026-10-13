@@ -1,26 +1,47 @@
 # Sending and Responses
 
-A generated client has two ways to send a request:
+A generated client has three ways to send a request:
 
-- **`client.send(request, &options)`** decodes the reply with the endpoint's
-  codec and returns a typed `Response` envelope.
+- **Awaiting a call**, such as `client.get_repository("o", "r").await`,
+  decodes the reply with the endpoint's codec and returns
+  `Result<T, CallError<E>>`: the value, or one error for every way the call
+  can fail.
+- **Awaiting a `.full()` call**, such as
+  `client.get_repository("o", "r").full().await`, decodes the same way and
+  returns a typed `Response` envelope with the reply's status, headers, and
+  request id, whatever the status was.
 - **`client.send_raw(request, &options)`** returns the reply's metadata and
   body bytes without decoding them.
 
-Both go through the same execution: credential resolution, the origin
+All three go through the same execution: credential resolution, the origin
 policy, redirect following, the timeout and deadline, and redaction. This
-page covers what they return and how to read it.
+page covers what they return and how to read it. How to create a client,
+pass optional values, and override settings per call is covered by
+[Calling an API](./calling-an-api.md).
 
 ## The typed send
 
+Awaiting a call is the short path when the value is all you need:
+
 ```rust
-use schematic_schema::github::GetRepositoryRequest;
+use schematic_schema::prelude::*;
+
+let client = GitHub::new();
+let repo = client.get_repository("rust-lang", "rust").await?; // CallError<E> on failure
+println!("{}", repo.full_name);
+```
+
+Chain `.full()`, last, when you need the status, a header such as
+`Retry-After`, or the request id of the reply, success or not:
+
+```rust
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{ErrorKind, Outcome};
 
 let client = GitHub::new();
 let response = client
-    .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
+    .get_repository("rust-lang", "rust")
+    .full()
     .await?; // TransportError: no response head arrived
 
 match &response.outcome {
@@ -37,13 +58,14 @@ match &response.outcome {
 }
 ```
 
-The success type is fixed by the request type, never chosen by the caller:
-`GetRepositoryRequest` always decodes into `RepositoryInfo`. A request built
-for one API does not compile when sent through another API's client.
+The success type is fixed by the endpoint, never chosen by the caller:
+`get_repository` (and its request type, `GetRepositoryRequest`) always
+decodes into `RepositoryInfo`. A request built for one API does not compile
+when sent through another API's client.
 
 ### The envelope
 
-`Response<T, E>` has two public fields, `meta` (a
+`Response<T, E>`, what a `.full()` call returns, has two public fields, `meta` (a
 [`ResponseMeta`](./metadata-and-redaction.md)) and `outcome`
 (`Outcome::Success(T)` or `Outcome::Failure(ApiError<E>)`), and these
 helpers:
@@ -57,13 +79,15 @@ helpers:
 | `is_decode_failure()` | whether the failure is `MalformedSuccess` |
 | `is_interrupted()` | whether the failure is `BodyInterrupted` |
 
-`into_result()` is the short form when only the value matters:
+When only the value matters, await the call without `.full()` rather than
+calling `into_result()`: the result is the same value, and a failure keeps
+its metadata inside [`CallError`](#callerror). `into_result()` is for code
+that already holds an envelope:
 
 ```rust
-let repo = client
-    .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
-    .await?
-    .into_result()?; // ApiError<E> on failure; the status and headers are gone
+let response = client.get_repository("rust-lang", "rust").full().await?;
+println!("{}", response.meta); // status and redacted request line
+let repo = response.into_result()?; // ApiError<E> on failure; the status and headers are gone
 ```
 
 Use `into_parts()`, or match on `outcome`, when you need the status, a
@@ -71,14 +95,16 @@ header such as `Retry-After`, or the request id of a failure.
 
 ## Where a result lands
 
-The governing rule: a send returns **`Ok`** if and only if an HTTP response
-head arrived. Every status, including a reply whose body could not be read
-or decoded, is inside the envelope with its raw bytes. A send returns
-**`Err(TransportError)`** only when no head arrived.
+The governing rule: a `.full()` call (and `send_raw`) returns **`Ok`** if
+and only if an HTTP response head arrived. Every status, including a reply
+whose body could not be read or decoded, is inside the envelope with its raw
+bytes. It returns **`Err(TransportError)`** only when no head arrived.
+Awaiting a call without `.full()` runs the same flow and then folds the
+result into a [`CallError`](#callerror).
 
 ```mermaid
 flowchart TD
-    A["client.send(request, &options)"] --> B{"Request assembles?<br/>(arguments, URL, headers)"}
+    A["await a .full() call"] --> B{"Request assembles?<br/>(arguments, URL, headers)"}
     B -->|no| E1["Err: InvalidArgument / InvalidUrl"]
     B -->|yes| C{"Origin policy allows<br/>the target URL?"}
     C -->|no| E2["Err: CrossOriginRejected"]
@@ -124,6 +150,51 @@ did arrive.
 An `InvalidArgument` reason names the argument but never quotes its value,
 which may be secret. The HTTP library's own error text is never kept,
 because it can include the unredacted URL.
+
+### `CallError`
+
+Awaiting a call without `.full()` returns `Result<T, CallError<E>>`. It is
+the envelope folded into one `Result`, with nothing thrown away:
+
+| `.full()` would return | Awaiting the call returns |
+| --- | --- |
+| `Ok(response)` with `Outcome::Success(value)` | `Ok(value)` |
+| `Ok(response)` with `Outcome::Failure(error)` | `Err(CallError::Api { error, meta })`, where `meta` is the envelope's `ResponseMeta`, boxed |
+| `Err(TransportError)` | `Err(CallError::Transport(error))` |
+
+So `CallError::Api` means a reply arrived (an error status, a body that was
+cut off or did not decode, a refusal by a response hook, or a refused or
+failed redirect) and carries the same `ApiError<E>` and `ResponseMeta` the
+envelope would have held. `CallError::Transport` means no head arrived.
+`request_meta()` returns the redacted `RequestMeta` from either variant: the
+request as assembled, or the hop that received the reply.
+
+`CallError` is `#[non_exhaustive]`, so a `match` on it outside the runtime
+needs a wildcard arm:
+
+```rust
+match client.get_repository("o", "r").await {
+    Ok(repo) => println!("{}", repo.full_name),
+    Err(CallError::Api { error, meta }) => {
+        // a reply arrived: status, headers, request id, and the raw body
+        eprintln!("{}: {} bytes", meta.status, error.body.len());
+    }
+    Err(CallError::Transport(error)) => eprintln!("no reply: {error}"),
+    Err(other) => eprintln!("{other}"),
+}
+```
+
+Its `Display` names the endpoint and, for a reply, the status and the
+redacted request; it carries no credential. It implements
+`std::error::Error`, and `source()` is the inner `TransportError` or
+`ApiError`, so the inner text is not repeated in the outer message. A
+`TransportError` converts into a `CallError` with `From`, so `?` on the
+result of a `.full()` call or `send_raw` works inside a function that
+returns `CallError<E>`.
+
+`ResponseMeta` has no public constructor, so code outside the runtime cannot
+build a `CallError::Api` by hand. Test those paths against a local fake
+server, such as one built with `wiremock`.
 
 ## Failure kinds inside the envelope
 
@@ -176,15 +247,17 @@ codecs built on it are **planned**; none ships today.
 
 ## The raw send
 
-`send_raw` skips decoding and hooks. No status counts as a failure, so a
-404 with its whole body is a complete `RawResponse`:
+`send_raw` skips decoding and hooks. It is the only send that takes a
+`CallOptions` value for its per-call settings. No status counts as a
+failure, so a 404 with its whole body is a complete `RawResponse`:
 
 ```rust
+use schematic_schema::github::GetRepositoryRequest;
 use schematic_schema::schematic_runtime::RawCompletion;
 
 let raw = client
     .send_raw(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
-    .await?; // the same TransportError cases as send
+    .await?; // the same TransportError cases as a call
 
 println!("{} with {} bytes", raw.status(), raw.body.len());
 if raw.is_complete() {
@@ -207,18 +280,15 @@ and `RawJsonError::Malformed` when a complete body does not parse.
 
 ## Many sends at once
 
-The futures returned by `send` and `send_raw` are boxed: the future you hold
-is one heap pointer, not the whole request state machine. Joining many sends
-in one future therefore needs no large stack, and callers do not need to box
-them:
+The futures a call becomes when awaited, and the future `send_raw` returns,
+are boxed: the future you hold is one heap pointer, not the whole request
+state machine. Joining many calls in one future therefore needs no large
+stack, and callers do not need to box them:
 
 ```rust
-use schematic_schema::github::{GetRepositoryRequest, ListPullRequestsRequest};
-
-let options = CallOptions::new();
 let (repo, pulls) = tokio::join!(
-    client.send(GetRepositoryRequest::new("o", "r"), &options),
-    client.send(ListPullRequestsRequest::new("o", "r"), &options),
+    client.get_repository("o", "r"),
+    client.list_pull_requests("o", "r"),
 );
 ```
 
@@ -231,7 +301,8 @@ configuration.
 | --- | --- | --- |
 | `ResponseMeta`, `RequestMeta`, `TransportError` (any form) | redacted | never printed |
 | `Display` of `Response`, `ApiError`, `RawResponse` | redacted | never printed; only the byte count |
-| `Debug` of `ApiError`, `RawResponse`, a decoded value | as the provider sent them | printed |
+| `Display` of `CallError` | redacted | never printed |
+| `Debug` of `ApiError`, `CallError`, `RawResponse`, a decoded value | as the provider sent them | printed |
 
 Body bytes and decoded provider values are kept unchanged on purpose, as
 evidence. A provider that echoes a credential in an error body (for example

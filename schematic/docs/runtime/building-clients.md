@@ -19,8 +19,12 @@ let client = GitHub::new()
 `new()` seeds the client with the API's definition (base URL, accepted
 credentials, environment fallback, cross-origin policy, secret names,
 request-id header) and its static default headers. Every setting and every
-send (`send`, `send_raw`, `check_link`) is an inherent method of the struct,
-so no trait import is needed.
+send is an inherent method of the struct, so no trait import is needed: one
+generated method per endpoint (`client.list_releases("o", "r")`), plus
+`send`, `send_raw`, and `check_link`. An endpoint method and
+`send(request)`, which takes a request object as its one argument, both
+return a call that sends when awaited; see
+[Calling an API](./calling-an-api.md).
 
 ## When settings are checked
 
@@ -28,7 +32,7 @@ Settings are validated together, once. Nothing invalid is replaced by a
 default: a bad setting is always reported.
 
 - **On the first call.** A client that was never validated validates itself
-  on its first `send`, `send_raw`, or `check_link`. An invalid setting fails
+  on its first awaited call, `send_raw`, or `check_link`. An invalid setting fails
   that call with `TransportErrorKind::InvalidClient(BuildError)`, before any
   network work.
 - **Earlier, if you ask.** `build()` validates now and returns the same

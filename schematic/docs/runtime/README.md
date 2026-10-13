@@ -3,15 +3,16 @@
 Every REST client in `schematic-schema` is a
 [`schematic-runtime`](../../runtime/README.md) client. Generated code only
 describes an API: a client struct such as `GitHub`, the only name a caller
-writes, and one request struct per endpoint. The hand-written runtime does
+writes, with one method per endpoint, and one request and call type per
+endpoint behind it. The hand-written runtime does
 everything else: it validates the client's settings, resolves credentials, sends the request, follows
 redirects, enforces timeouts, decodes the reply, and reports the result.
 
 These pages describe that runtime from the caller's side. You can:
 
-- send a typed request and get back one envelope that holds the decoded
-  value or the failure, **plus** the status, headers, and request id of the
-  reply, whatever the status was
+- call an endpoint and get its decoded value with one `.await?`, or ask for
+  one envelope that holds the decoded value or the failure, **plus** the
+  status, headers, and request id of the reply, whatever the status was
 - tell "the server answered with an error" apart from "the server never
   answered" with one `match`
 - supply credentials per call, per client, or from environment variables,
@@ -27,7 +28,6 @@ These pages describe that runtime from the caller's side. You can:
 ## A first send
 
 ```rust
-use schematic_schema::github::GetRepositoryRequest;
 use schematic_schema::prelude::*;
 
 #[tokio::main]
@@ -35,10 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Reads GITHUB_TOKEN or GH_TOKEN at send time; sends anonymously if neither is set.
     let client = GitHub::new();
 
-    let response = client
-        .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
-        .await?; // Err only when no HTTP response arrived
+    // One method per endpoint; nothing is sent until `.await`.
+    let repo = client.get_repository("rust-lang", "rust").await?; // CallError on failure
+    println!("{}", repo.full_name);
 
+    // `.full()` awaits to the whole envelope instead: status, headers, and
+    // request id for a reply of any status.
+    let response = client.get_repository("rust-lang", "rust").full().await?; // Err only when no HTTP response arrived
     println!("{}", response.meta); // status and redacted request line
     match response.data() {
         Some(repo) => println!("{}", repo.full_name),
@@ -52,9 +55,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | Page | Read it to learn |
 | --- | --- |
-| [Sending and responses](./sending-and-responses.md) | `send` and `send_raw`, the `Response` envelope, every `ErrorKind`, `TransportError`, codecs, and what is safe to log |
+| [Calling an API](./calling-an-api.md) | creating a client, endpoint methods, optional values, per-call overrides, `.full()`, `.build()?`, `CallError`, and when to use request objects |
+| [Sending and responses](./sending-and-responses.md) | awaiting a call, `.full()` and `send_raw`, the `Response` envelope, `CallError`, every `ErrorKind`, `TransportError`, codecs, and what is safe to log |
 | [Building clients](./building-clients.md) | `{Api}::new()` and its chained settings, when settings are validated, timeouts, proxies and TLS, `SharedTransport`, and every `BuildError` |
-| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), `CallOptions::anonymous()`, and why the runtime never retries |
+| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), `.anonymous()` on a call, and why the runtime never retries |
 | [Origins and redirects](./origins-and-redirects.md) | the cross-origin policies, how a redirect is followed hop by hop, and `check_link` |
 | [Deadlines and timeouts](./deadlines-and-timeouts.md) | the per-request timeout, a `Deadline` shared across sends, and stream bounds |
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |
@@ -66,10 +70,12 @@ How a request struct's fields become a URL, headers, and body is covered by
 
 ## Three rules that shape everything else
 
-1. **`Ok` means a response arrived.** A send returns `Ok` whenever an HTTP
-   response head (status line and headers) arrived, whatever the status and
-   whether or not the body could be read or decoded. It returns
-   `Err(TransportError)` only when no head arrived. See
+1. **`Ok` means a response arrived.** A `.full()` call or a `send_raw`
+   returns `Ok` whenever an HTTP response head (status line and headers)
+   arrived, whatever the status and whether or not the body could be read or
+   decoded. It returns `Err(TransportError)` only when no head arrived.
+   Awaiting a call directly folds both into one `CallError`, whose variants
+   keep the same distinction. See
    [Sending and responses](./sending-and-responses.md#where-a-result-lands).
 2. **The runtime never retries.** It sends each request once (following
    redirects within that one send). A retry, such as a second call without a

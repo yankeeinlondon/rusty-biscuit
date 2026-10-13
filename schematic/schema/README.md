@@ -42,28 +42,27 @@ Generated API outputs produced by `schematic-gen`.
 
 ## Quick Start
 
-Each REST API is one client struct (for example `OpenAI`): `OpenAI::new()` returns a usable client, and settings are chained onto it. Every endpoint is a request struct, and every request goes through the same `send`:
+Each REST API is one client struct (for example `OpenAI`): `OpenAI::new()` returns a usable client, and settings are chained onto it. Every endpoint is a method on that struct, so nothing beyond the prelude needs importing:
 
 ```rust
-use schematic_schema::openai::ListModelsRequest;
 use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAI::new().api_key(std::env::var("OPENAI_API_KEY")?);
 
-    let models = client
-        .send(ListModelsRequest::default(), &CallOptions::new())
-        .await? // TransportError: no response head arrived
-        .into_result()?; // ApiError, with the status and raw body
+    let models = client.list_models().await?; // CallError: no reply, or a failed one
     println!("{}", models.data.len());
+
+    let model = client.retrieve_model("gpt-4").await?; // required values are arguments
+    println!("{}", model.id);
     Ok(())
 }
 ```
 
-`send` returns a `Response { meta, outcome }` envelope for every reply that arrived, whatever its status; `into_result()` drops the metadata when only the value matters. Text endpoints decode to `String`, binary endpoints to `bytes::Bytes`, and empty ones to `()`. When no credential is supplied and the API has no environment fallback, the request is sent anonymously rather than failing.
+Awaiting an endpoint call returns the data or a `CallError`; `.full()` returns the `Response { meta, outcome }` envelope for every reply that arrived, whatever its status. Text endpoints decode to `String`, binary endpoints to `bytes::Bytes`, and empty ones to `()`. When no credential is supplied and the API has no environment fallback, the request is sent anonymously rather than failing.
 
-See the [`schematic-runtime` README](../runtime/README.md) and the [runtime topic pages](../docs/runtime/README.md) for credentials, timeouts, redirects, and `send_raw`.
+See [Calling an API](../docs/runtime/calling-an-api.md) for endpoint methods, setters, per-call overrides, and `CallError`, and the [`schematic-runtime` README](../runtime/README.md) and the [runtime topic pages](../docs/runtime/README.md) for credentials, timeouts, redirects, and `send_raw`.
 
 ## WebSocket Usage
 

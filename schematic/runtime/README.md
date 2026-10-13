@@ -7,7 +7,7 @@ The hand-written request runtime shared by every REST client that
 
 Generated code stays thin: per API it declares a client struct, a tag type,
 and an `ApiDefinition`, and per endpoint a request struct implementing
-`EndpointSpec`. Everything that executes a request lives here, written once
+`EndpointSpec`, plus an endpoint method and a call type that wrap it. Everything that executes a request lives here, written once
 and tested once instead of being regenerated into every API module:
 
 - a managed `Client<A>`, created infallibly and configured by chained
@@ -15,8 +15,12 @@ and tested once instead of being regenerated into every API module:
   `build()`, that sends only the requests of its own API
 - the `api_client!` macro, which gives each generated API struct those
   settings and sends as inherent methods, written once here
-- a typed `send` that returns one `Response` envelope for every reply that
-  arrived, and a `send_raw` that returns the bytes undecoded
+- a `Call` that nothing sends until it is awaited, which resolves to the
+  decoded value or a `CallError`, accepts per-call overrides (`anonymous`,
+  `credential`, `deadline`), and with `.full()` becomes a `FullCall` that
+  returns one `Response` envelope for every reply that arrived
+- a generic `send(request)` that returns the same `Call` for any request of
+  the API, and a `send_raw` that returns the bytes undecoded
 - credential resolution: per call, per client, from environment variables,
   or anonymous
 - redirect following under a per-API cross-origin policy, with the
@@ -35,7 +39,6 @@ off, so every request goes through the policy above.
 Most code uses the runtime through a generated client:
 
 ```rust
-use schematic_schema::github::GetRepositoryRequest;
 use schematic_schema::prelude::*;
 
 #[tokio::main]
@@ -44,43 +47,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .api_key(std::env::var("MY_TOKEN")?)
         .build()?; // optional: BuildError now instead of on the first send
 
-    let response = client
-        .send(GetRepositoryRequest::new("rust-lang", "rust"), &CallOptions::new())
-        .await?; // TransportError: no response head arrived
-
-    println!("{} (request id {:?})", response.meta.status, response.meta.request_id);
-    let repo = response.into_result()?; // ApiError, with the raw body
+    // CallError: no response head arrived, or a failed reply with its raw body
+    let repo = client.get_repository("rust-lang", "rust").await?;
     println!("{}", repo.full_name);
+
+    // `.full()` keeps the metadata: Ok whenever a response head arrived
+    let response = client.get_repository("rust-lang", "rust").full().await?;
+    println!("{} (request id {:?})", response.meta.status, response.meta.request_id);
     Ok(())
 }
 ```
 
 `schematic-schema` re-exports this crate as `schematic_schema::schematic_runtime`,
-and its prelude re-exports `CallOptions`, `Credential`, `Deadline`,
-`OriginPolicy`, `Response`, `RawResponse`, and `TransportError`.
+and its prelude re-exports `Call`, `CallError`, `CallOptions`, `Credential`,
+`Deadline`, `FullCall`, `OriginPolicy`, `RawResponse`, `Response`, and
+`TransportError`. [Calling an API](../docs/runtime/calling-an-api.md) walks
+through endpoint methods, setters, per-call overrides, and `CallError`.
 
 ## The Governing Rule
 
-A send returns `Ok` if and only if an HTTP response head arrived. Every
-status, including an undecodable or cut-off body, is reported inside the
+A `.full()` call returns `Ok` if and only if an HTTP response head arrived.
+Every status, including an undecodable or cut-off body, is reported inside the
 envelope with its raw bytes. `Err(TransportError)` means no head arrived: the
 request was refused before sending (invalid argument or URL, cross-origin
 target, expired deadline) or the connection, TLS handshake, or wait for the
 first head failed.
 
-```rust
-use schematic_schema::schematic_runtime::{ErrorKind, Outcome};
+Awaiting a call without `.full()` folds the same split into one error:
+`CallError::Transport` when no head arrived, and `CallError::Api` carrying the
+`ApiError` (with its raw body) and the `ResponseMeta` when a reply arrived but
+was not a decoded success. `CallError` is `#[non_exhaustive]`, so a `match`
+outside the runtime needs a wildcard arm:
 
-match client.send(request, &CallOptions::new()).await {
-    Err(transport) => eprintln!("no response: {transport}"),
-    Ok(response) => match response.outcome {
-        Outcome::Success(value) => { /* typed value */ }
-        Outcome::Failure(error) => match error.kind {
-            ErrorKind::Undeclared => eprintln!("{}: {} bytes", response.meta.status, error.body.len()),
-            ErrorKind::MalformedSuccess => { /* 2xx that did not decode */ }
-            _ => eprintln!("{error}"),
-        },
+```rust
+use schematic_schema::schematic_runtime::ErrorKind;
+
+match client.list_releases("rust-lang", "rust").await {
+    Ok(releases) => { /* typed value */ }
+    Err(CallError::Transport(transport)) => eprintln!("no response: {transport}"),
+    Err(CallError::Api { error, meta }) => match error.kind {
+        ErrorKind::Undeclared => eprintln!("{}: {} bytes", meta.status, error.body.len()),
+        ErrorKind::MalformedSuccess => { /* 2xx that did not decode */ }
+        _ => eprintln!("{error}"),
     },
+    _ => eprintln!("a failure added after this code was written"),
 }
 ```
 
@@ -91,6 +101,7 @@ explain each behavior with examples:
 
 | Topic | Page |
 | --- | --- |
+| endpoint methods, setters, per-call overrides, `Call`, `FullCall`, `CallError`, `.build()` | [Calling an API](../docs/runtime/calling-an-api.md) |
 | `send`, `send_raw`, the envelope, error kinds, codecs | [Sending and responses](../docs/runtime/sending-and-responses.md) |
 | client settings and when they are validated, `SharedTransport`, `BuildError` | [Building clients](../docs/runtime/building-clients.md) |
 | credential precedence and anonymous calls | [Credentials](../docs/runtime/credentials.md) |
@@ -107,14 +118,15 @@ every type.
 
 | Module | Contents |
 | --- | --- |
-| `client` | `Client` and its settings, `ApiDefinition`, `build`, `send`, `send_raw`, `check_link`, `DEFAULT_TIMEOUT`, `MAX_REDIRECTS` |
+| `client` | `Client` and its settings, `ApiDefinition`, `build`, `send` (returns a `Call`), `send_raw`, `check_link`, `DEFAULT_TIMEOUT`, `MAX_REDIRECTS` |
+| `call` | `Call`, `FullCall`, `CallError`, `CallFuture` |
 | `response` | `Response`, `Outcome`, `ApiError`, `ErrorKind`, `RedirectRefusal`, `FailureCategory`, `NoDeclaredError` |
 | `error` | `TransportError`, `TransportErrorKind`, `InvalidArgument`, `BuildError` |
 | `raw` | `RawResponse`, `RawCompletion`, `RawJsonError` |
 | `codec` | the `Decode` trait, `LiveBody`, and the `Json`, `Text`, `Binary`, `Empty` codecs |
 | `endpoint` | the `Api` and `EndpointSpec` contracts, `RequestParts`, `RequestBody`, `FormPart`, `ErrorBody` |
 | `credentials` | `Credential`, `AuthConfig`, `CredentialPlacement`, `EnvFallback` |
-| `options` | `CallOptions` |
+| `options` | `CallOptions`, the per-call settings for `send_raw` |
 | `deadline` | `Deadline` |
 | `origin` | `OriginPolicy` |
 | `hooks` | `HookError`, `SupportsHooks`, `HookStage` |
@@ -146,10 +158,12 @@ just -f schematic/justfile test-compile-fail  # the trybuild cases
   wiremock for wire observation, raw TCP listeners for cut-off bodies,
   stalled heads, and connection counting, and a local TLS server.
 - `tests/fixtures/compile_fail/` holds the misuses that must not compile,
-  each with its expected diagnostic: a request of another API, a mutator on
-  a non-JSON endpoint or typed by another value, an endpoint missing its
-  associated types, a `Declared` error for an endpoint that declares no
-  error body, and an any-origin policy spelled without its `danger_` name.
+  each with its expected diagnostic: a request of another API (directly or
+  through a generated API struct), a mutator on a non-JSON endpoint or typed
+  by another value, an endpoint missing its associated types, a `Declared`
+  error for an endpoint that declares no error body, an any-origin policy
+  spelled without its `danger_` name, a request change after `.full()`, and a
+  `CallError` match without a wildcard arm.
 
 ## License
 

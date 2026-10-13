@@ -70,32 +70,26 @@ schematic/
 ```
 
 Generated REST code only describes an API: a client struct such as
-`OpenAI`, the only name a caller writes, and one request struct per
-endpoint. Client settings, sending,
+`OpenAI`, the only name a caller writes, and per endpoint a method on it,
+a call type, and a request struct. Client settings, sending,
 credentials, redirects, timeouts, and the response envelope live once in
 `schematic-runtime`.
 
 ## Quick Start
 
 ```rust
-use schematic_schema::openai::{ListModelsRequest, RetrieveModelRequest};
 use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAI::new().api_key(std::env::var("OPENAI_API_KEY")?);
 
-    // List all models (no required params - use Default)
-    let models = client
-        .send(ListModelsRequest::default(), &CallOptions::new())
-        .await? // Err only when no HTTP response arrived
-        .into_result()?; // Err(ApiError) for any non-2xx or undecodable reply
+    // One method per endpoint; nothing is sent until `.await`
+    let models = client.list_models().await?; // Err(CallError) for no reply or a failed one
     println!("Found {} models", models.data.len());
 
-    // Required path parameters go through new(), or From<&str> for one parameter
-    let response = client
-        .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
-        .await?;
+    // Required values are arguments; `.full()` keeps the response metadata
+    let response = client.retrieve_model("gpt-4").full().await?;
     println!("{} (request id {:?})", response.meta.status, response.meta.request_id);
     if let Some(model) = response.data() {
         println!("Model: {}", model.id);
@@ -106,10 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-A send returns `Ok` with a `Response` envelope whenever the server
-answered, whatever the status; the envelope carries the decoded value or the
-failure with its raw body, plus the status, headers, and request id.
-`Err(TransportError)` means no response arrived. See
+Awaiting an endpoint call returns the decoded value, or a `CallError`:
+`CallError::Transport` when no response arrived, `CallError::Api` (with the
+status, headers, request id, and raw body) when the server answered with a
+failure. Adding `.full()` instead returns `Ok` with a `Response` envelope
+whenever the server answered, whatever the status, and `Err(TransportError)`
+only when no response arrived. See
+[Calling an API](./docs/runtime/calling-an-api.md) and
 [the runtime docs](./docs/runtime/README.md).
 
 ## WebSocket Quick Start
@@ -160,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Topic documentation lives in [`docs/`](./docs/):
 
-- [`docs/runtime/`](./docs/runtime/README.md) - sending requests and reading responses with a generated client
+- [`docs/runtime/`](./docs/runtime/README.md) - sending requests and reading responses with a generated client; start with [Calling an API](./docs/runtime/calling-an-api.md)
 - [`docs/generation/`](./docs/generation/request-side.md) - how request structs become HTTP requests, generation validation, and partial generation
 - [`docs/headers/`](./docs/headers/README.md) - credential precedence and the `Headers` builder
 - [`docs/io/`](./docs/io/) - OpenAPI and Postman import and export
@@ -193,7 +190,8 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
 - **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors, and a client accepts only its own API's requests
 - **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
-- **One response envelope**: every reply that arrived, whatever its status, is an `Ok(Response)` with the decoded value or the failure (raw body kept), plus status, headers, and request id; `Err(TransportError)` means no reply arrived
+- **One method per endpoint**: `client.list_models().await?` returns the decoded value or a `CallError`; optional values are chained setters
+- **One response envelope**: with `.full()`, every reply that arrived, whatever its status, is an `Ok(Response)` with the decoded value or the failure (raw body kept), plus status, headers, and request id; `Err(TransportError)` means no reply arrived
 - **Credentials**: Bearer, API Key (header, query, or cookie), Basic, and OAuth2 tokens, supplied per call, per client, or from env var fallback chains; a missing credential sends anonymously
 - **Safe redirects**: the runtime follows redirects itself under a per-API cross-origin policy and sends the credential only where that policy allows
 - **Deadlines**: a per-request timeout plus a `Deadline` shared across many sends
@@ -235,8 +233,11 @@ let client = OpenAI::new()
     .build()?; // optional: report a bad setting here instead of on the first call
 
 // A different credential for one call, or none at all
-let options = CallOptions::new().credential(Credential::access_token(user_token));
-let public = CallOptions::anonymous();
+let models = client
+    .list_models()
+    .credential(Credential::access_token(user_token))
+    .await?;
+let public = client.list_models().anonymous().await?;
 ```
 
 For OAuth2 APIs, obtain a token with `schematic-oauth` and pass it as an
@@ -250,7 +251,9 @@ let token = manager.get_valid_token().await?; // refreshes when expired
 let client = GitHub::new().credentials(Credential::access_token(token));
 ```
 
-The runtime never retries; a second attempt is an explicit second call. The
+The runtime never retries; a second attempt is an explicit second call.
+[Calling an API](./docs/runtime/calling-an-api.md) covers endpoint methods,
+per-call overrides, and `CallError`; the
 [runtime docs](./docs/runtime/README.md) cover the envelope and its failure
 kinds, credentials, redirects and origins, deadlines, hooks, raw sends, and
 redaction.

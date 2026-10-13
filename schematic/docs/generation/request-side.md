@@ -161,21 +161,21 @@ parameter described below.
 
 An endpoint declaring `ApiRequest::Text { content_type }` gets a
 `body: String` field; `ApiRequest::Binary { content_type }` gets a
-`body: Vec<u8>` field. Both are required by `new(...)` and become
+`body: Vec<u8>` field. Both are required by `new(...)`, and so are
+arguments of the endpoint method, and become
 `RequestBody::Raw` in `into_parts()`: the bytes are sent unchanged, with the
 declared content type as the `Content-Type` header.
 
 ```rust
-use schematic_schema::example::{SendNoteRequest, UploadBlobRequest};
-use schematic_schema::prelude::*;
+use schematic_schema::example::Example;
 
-let options = CallOptions::new();
+let client = Example::new();
 
 // Text: `ApiRequest::Text { content_type: "text/plain; charset=utf-8" }`
-client.send(SendNoteRequest::new("line one\nline two".to_string()), &options).await?;
+client.send_note("line one\nline two".to_string()).await?;
 
 // Binary: any bytes, including ones that are not UTF-8.
-client.send(UploadBlobRequest::new("name", vec![0x00, 0x9F, 0xFF]), &options).await?;
+client.upload_blob("name", vec![0x00, 0x9F, 0xFF]).await?;
 ```
 
 An empty `String` or `Vec<u8>` sends an empty body under the same content
@@ -278,9 +278,9 @@ placement (header, query, or cookie):
 
 ```mermaid
 flowchart TD
-    A["client.send(request, &options)"] --> B{"CallOptions::anonymous()?"}
+    A["await a call"] --> B{".anonymous() on the call?"}
     B -->|yes| N["Send without a credential<br/>(AuthMethod::Anonymous)"]
-    B -->|no| C{"Per-call credential?<br/>CallOptions::credential"}
+    B -->|no| C{"Per-call credential?<br/>.credential(..) on the call"}
     C -->|yes| U[Use it]
     C -->|no| D{"Client credential?<br/>api_key / credentials"}
     D -->|yes| U
@@ -295,14 +295,13 @@ flowchart TD
 ```
 
 ```rust
-use schematic_schema::example::{Example, ListThingsRequest};
+use schematic_schema::example::Example;
 use schematic_schema::prelude::*;
 
 let client = Example::new();
 
 // Per call: wins over the client credential and the environment.
-let keyed = CallOptions::new().credential(Credential::api_key("my key"));
-client.send(ListThingsRequest::default(), &keyed).await?;
+client.list_things().credential(Credential::api_key("my key")).await?;
 
 // Per client: used whenever a call supplies none.
 let client = Example::new().api_key("my key");
@@ -313,7 +312,7 @@ let client = Example::new().api_key("my key");
 let client = Example::new().env_order(["EXAMPLE_KEY", "EXAMPLE_KEY_2"]);
 
 // Explicitly anonymous: no per-call, client, or environment credential.
-client.send(ListThingsRequest::default(), &CallOptions::anonymous()).await?;
+client.list_things().anonymous().await?;
 ```
 
 - **Query.** The key is appended after the declared pairs and encoded once,

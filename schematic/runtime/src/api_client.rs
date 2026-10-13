@@ -13,7 +13,9 @@
 /// to call any of them.
 ///
 /// The invoking module adds what is specific to the API, such as its
-/// constants, `definition()`, and a `new()`.
+/// constants, `definition()`, a `new()`, and one method per endpoint. The
+/// generator renames an endpoint method whose name one of these methods
+/// already takes.
 ///
 /// ## Examples
 ///

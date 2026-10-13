@@ -32,7 +32,7 @@ After a redirect, `request` describes the last request sent, the hop that
 received the reply.
 
 ```rust
-let response = client.send(request, &CallOptions::new()).await?;
+let response = client.get_repository("o", "r").full().await?; // the whole envelope
 let meta = &response.meta;
 eprintln!(
     "{} {} via {} ({}), request id {:?}",
@@ -86,8 +86,9 @@ Body bytes and decoded values are evidence and are never altered:
 `ApiError::body`, `RawResponse::body`, a decoded declared error, and every
 success value are exactly what the provider sent. `Display` never prints a
 body, but `Debug` does, so a provider that echoes a credential in an error
-body exposes it through `Debug` logging. Prefer the `Display` form and the
-metadata for shared logs.
+body exposes it through `Debug` logging. Prefer the `Display` form (a
+`CallError`'s included, which names the endpoint, status, and redacted
+request) and the metadata for shared logs.
 
 A codec reading a live body sees the unredacted response headers; they are
 for decoding only and are never stored.

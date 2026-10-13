@@ -4,8 +4,9 @@ Two bounds limit how long a send can take:
 
 - the client's **per-request timeout**, set with `timeout(..)`
   (default `DEFAULT_TIMEOUT`, 30 s), which applies to every send; and
-- an optional **shared `Deadline`**, passed through `CallOptions`, which
-  bounds a whole operation made of several sends.
+- an optional **shared `Deadline`**, passed to each call with
+  `.deadline(&deadline)` (or to `send_raw` with `CallOptions::deadline`),
+  which bounds a whole operation made of several sends.
 
 ## One expiration per send
 
@@ -31,16 +32,17 @@ completed sends:
 ```rust
 use std::time::Duration;
 
-use schematic_schema::github::ListPullRequestsRequest;
 use schematic_schema::prelude::*;
 
 let deadline = Deadline::after(Duration::from_secs(20));
-let options = CallOptions::new().deadline(&deadline);
 
 let mut page = 1;
 loop {
-    let request = ListPullRequestsRequest::new("o", "r").with_page(page);
-    let reply = client.send(request, &options).await?; // each send: min(timeout, time left)
+    let pulls = client
+        .list_pull_requests("o", "r")
+        .page(page)
+        .deadline(&deadline)
+        .await?; // each send: min(timeout, time left)
     // … stop when the page is short …
     page += 1;
 }

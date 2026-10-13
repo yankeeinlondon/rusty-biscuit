@@ -8,9 +8,10 @@ Code generator that transforms REST and WebSocket API definitions into strongly-
 
 - Per API, one client struct named after the API (`OpenAI`), the only name a caller writes, wrapping `schematic_runtime::Client<OpenAIApi>`; an infallible `new()` that hands the runtime the API's base URL, credential placements, and policies; and a tag type (`OpenAIApi`) that the API's requests name, so the client sends only its own API's requests. The runtime's `api_client!` macro gives the struct every client-wide setting and send
 - Per endpoint, a request struct (with path, query, header, and cookie parameters as fields) implementing `schematic_runtime::EndpointSpec`, which names its API, its success type, and the codec that decodes the response
+- Per REST endpoint, an inherent method on the API struct (`list_models`, `retrieve_model`) that takes the required values and returns a `{Name}Call` (`RetrieveModelCall`): one setter per optional value plus the shared per-call forwards (`anonymous`, `credential`, `deadline`, `full`, `build`), sent when it is awaited
 - A compile-time check that the generated crate and the runtime it builds against agree on the runtime ABI
 
-Sending (`send`, `send_raw`), the response envelope, transport errors, credential resolution, redirects, deadlines, response hooks, and redaction all live in the runtime; see its crate documentation in [`runtime/src/lib.rs`](../runtime/src/lib.rs).
+Sending (`Call`, `FullCall`, the generic `send`, `send_raw`), the response envelope, `CallError` and transport errors, credential resolution, redirects, deadlines, response hooks, and redaction all live in the runtime; see its crate documentation in [`runtime/src/lib.rs`](../runtime/src/lib.rs).
 
 ## Installation
 
@@ -261,14 +262,14 @@ The generator produces per-API module files:
 ```
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI and its compile-time check, `pub use schematic_runtime`
-├── prelude.rs       # Each API's client struct, plus the runtime's CallOptions, Credential, Response, ...
+├── prelude.rs       # Each API's client struct, plus the runtime's Call, CallError, Credential, FullCall, Response, ...
 ├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, the Paginated marker trait
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 formatted lines stays one file
 ├── lmstudio.rs
 ├── openai/          # A larger module is split into a directory:
 │   ├── mod.rs       #   module docs, submodules, re-exports, each API's client struct and tag
-│   ├── requests.rs  #   per-endpoint request structs and their EndpointSpec impls
+│   ├── requests.rs  #   per-endpoint request structs, EndpointSpec impls, {Name}Call types, endpoint methods
 │   └── responses.rs #   (when the module has response types)
 ├── ollama/          # OllamaNative + OllamaOpenAI (combined, shared module)
 ├── emqx/            # EmqxBasic + EmqxBearer (combined, shared module)
@@ -405,7 +406,8 @@ impl schematic_runtime::Api for OpenAIApi {
 }
 
 // Every client-wide setting (`base_url`, `api_key`, `timeout`, …), `build`,
-// `send`, `send_raw`, and `check_link`, as one-line forwards.
+// the generic `send` (returns a `Call`), `send_raw`, and `check_link`, as
+// one-line forwards.
 schematic_runtime::api_client!(OpenAI, OpenAIApi);
 
 impl OpenAI {
@@ -504,8 +506,8 @@ What each part of the `EndpointSpec` impl means:
   envelope.
 - **`into_parts`** describes the request as a `RequestParts` struct, or
   returns an `InvalidArgument` (a JSON body that fails to serialize, a static
-  `Cookie` header that cannot be merged) that `send` reports before any
-  network work. See [Request-Side Inputs](../docs/generation/request-side.md).
+  `Cookie` header that cannot be merged) that the call reports, at `.build()`
+  or `.await`, before any network work. See [Request-Side Inputs](../docs/generation/request-side.md).
 
 `definition()` leaves out every setting equal to the runtime's default: a
 `same_origin` cross-origin policy, no extra secret names, no request-id
@@ -515,25 +517,76 @@ become `.default_header(..)` calls in `new()`; an API-level `Cookie` is
 folded into every endpoint's static headers instead, because the runtime
 refuses a default header that can carry a credential.
 
+Each REST endpoint also gets a method on the API struct and a call type that
+wraps the runtime's `Call` (abridged; `ListReleases` from GitHub, which has
+optional values):
+
+```rust
+/// A call to the `ListReleases` endpoint, returned by [`GitHub::list_releases`].
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListReleasesRequest>);
+
+impl<'a> ListReleasesCall<'a> {
+    // One setter per optional value, named after the request field without `with_`
+    pub fn page(self, value: i64) -> Self { ... }
+    pub fn per_page(self, value: i64) -> Self { ... }
+    // Shared per-call forwards to `schematic_runtime::Call`
+    pub fn anonymous(self) -> Self { ... }
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self { ... }
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self { ... }
+    pub fn full(self) -> schematic_runtime::FullCall<'a, GitHubApi, ListReleasesRequest> { ... }
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> { ... }
+}
+
+// `.await` resolves to Result<Success, CallError<Failure>>
+impl<'a> IntoFuture for ListReleasesCall<'a> { ... }
+
+impl GitHub {
+    /// List releases (linked to tags via tag_name)
+    ///
+    /// `GET /repos/{owner}/{repo}/releases`
+    /// ... `## Arguments` and `## Optional values` (links to the setters)
+    pub fn list_releases(
+        &self,
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+    ) -> ListReleasesCall<'_> {
+        ListReleasesCall(self.0.send(ListReleasesRequest::new(owner, repo)))
+    }
+}
+```
+
+The method is the endpoint id in snake case, and its arguments are the
+required values in the order `{Name}Request::new` takes them. A name that
+would collide is renamed rather than shadowed: an endpoint method that
+matches an API-struct method (`new`, `send`, `base_url`, …) gets an
+`_endpoint` suffix, and a setter that matches a call-type method (`full`,
+`build`, `credential`, …) gets a `_param` suffix, each reported as an
+`endpoint-method-rename` warning. See
+[Endpoint method names](../docs/generation/validation.md#endpoint-method-names).
+
 ## Using Generated Code
 
 ```rust
 use schematic_schema::prelude::*;
-use schematic_schema::openai::{ListModelsRequest, RetrieveModelRequest};
+use schematic_schema::openai::RetrieveModelRequest;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAI::new();
-    let options = CallOptions::new();
 
-    // `send` returns Ok(Response) whenever an HTTP response head arrived,
+    // An endpoint method: the data, or a CallError (no reply, or a failed one)
+    let models = client.list_models().await?; // ListModelsResponse
+    let model = client.retrieve_model("gpt-4").await?;
+
+    // `.full()` returns Ok(Response) whenever an HTTP response head arrived,
     // whatever its status; Err(TransportError) only when none did.
-    let response = client.send(ListModelsRequest::default(), &options).await?;
-    let models = response.into_result()?; // ListModelsResponse, or the ApiError
+    let response = client.list_models().full().await?;
 
-    // Type-safe construction with new(), or From<&str> for single-param requests
-    let model = client.send(RetrieveModelRequest::new("gpt-4"), &options).await?;
-    let model = client.send(RetrieveModelRequest::from("gpt-4"), &options).await?;
+    // The generic `send` takes a request object, for code written over many
+    // endpoints or a request built elsewhere; it returns the same kind of call
+    let model = client.send(RetrieveModelRequest::from("gpt-4")).await?;
 
     // Chain settings onto the client; `build()?` reports a bad one now
     // instead of on the first send, and returns the same `OpenAI`
@@ -547,9 +600,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`send_raw` returns the reply without decoding it. The envelope, its
-metadata, transport errors, deadlines, and redirects are described in the
-runtime's crate documentation ([`runtime/src/lib.rs`](../runtime/src/lib.rs)).
+`send_raw(request, &CallOptions)` returns the reply without decoding it.
+[Calling an API](../docs/runtime/calling-an-api.md) covers endpoint methods,
+setters, per-call overrides, and `CallError`. The envelope, its metadata,
+transport errors, deadlines, and redirects are described in the runtime's
+crate documentation ([`runtime/src/lib.rs`](../runtime/src/lib.rs)).
 
 ## Authentication Strategies
 
@@ -579,14 +634,16 @@ never read.
 
 Runtime precedence, for every placement:
 
-1. a per-call credential (`CallOptions::new().credential(..)`)
+1. a per-call credential (`.credential(..)` on the call)
 2. the client credential (`api_key(..)`, `basic_auth(..)`, or `credentials(..)` on the client)
 3. the first non-empty configured environment variable (the client's `env_order([..])` replaces the definition's order)
 4. none: the request is sent anonymously and its metadata records `AuthMethod::Anonymous`
 
 There is no missing-credential error; a server that requires one answers
-(typically with 401) inside the response envelope. `CallOptions::anonymous()`
-removes every credential source for one call. A credential is never
+(typically with 401) as a `CallError::Api`, or inside the `.full()` response
+envelope. `.anonymous()` on a call removes every credential source for that
+call; `.anonymous()` and `.credential(..)` replace each other, and the last
+one wins. A credential is never
 injected over a request value of the same name: a request that already sets
 the credential header, the API-key query parameter, or the API-key cookie
 fails with `TransportErrorKind::InvalidArgument` before anything is sent.
@@ -595,7 +652,10 @@ fails with `TransportErrorKind::InvalidArgument` before anything is sent.
 use schematic_schema::prelude::*;
 
 // Per call
-let options = CallOptions::new().credential(Credential::api_key("key"));
+let mrs = GitLab::new()
+    .list_merge_requests("group/project")
+    .credential(Credential::api_key("key"))
+    .await?;
 
 // Per client
 let client = GitLab::new().api_key("token");
@@ -1243,7 +1303,7 @@ The current test suite verifies:
 6. **Fresh-output guard** - The `slow_*` tests in `tests/l1/fresh_output_compile.rs` (`just test-fresh-output`, part of `just test`) generate fresh crates into temporary directories and:
     - compile the fixture APIs and run 19 wiremock tests that send through the runtime and assert the bytes each request puts on the wire, credential sourcing and refusal, codec selection, hooks, and definition settings (request-id header, secret names, cross-origin policy)
     - compile all 18 real APIs, including their WebSocket modules, with `cargo check --offline --locked`
-    - check, in one `cargo check --tests --keep-going` run, that 10 misuses fail to compile: a wrong success type, a request impl missing its codec, a non-request type, another API's request passed to `send`, `send_raw`, or `mutate_response`, a mutator on a text endpoint, and the removed `request` method, request enum, and `with_client_and_base_url` constructor
+    - check, in one `cargo check --tests --keep-going` run, that 15 misuses fail to compile: a wrong success type, a request impl missing its codec, a non-request type, another API's request passed to `send`, `send_raw`, `check_link`, or `mutate_response`, a mutator on a text endpoint, an endpoint setter after `.full()`, the data instead of the envelope expected from `.full()`, and the removed client alias, per-API builder, `request` method, request enum, and `with_client_and_base_url` constructor
     - build against a doctored runtime copy with another ABI and assert the build fails with the readable assertion message
     - compare the query request lines with a recorded baseline
 
