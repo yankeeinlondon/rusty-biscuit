@@ -262,6 +262,22 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
 
 ## Host conditions that look like repo failures
 
+- **`getcwd` for a removed directory directly under `$TMPDIR` takes about
+  9 s.** With the process cwd deleted, macOS `getcwd` falls back to searching
+  the parent's entries, and the shared `/var/folders/.../T/` made a sniff-cli
+  "unreadable cwd" test take 17–20 s (`std::env::current_dir()` measured
+  9.8 s there, 2 ms under `/private/tmp/...`, 70 µs inside an empty private
+  parent). Create the directory to delete inside its own `TempDir` and remove
+  only the child.
+- **CoreAudio client setup is serialized across processes.** The first
+  `AudioObjectGetPropertyData*` call in a process initializes the HAL
+  (`HALSystem::CheckOutInstance`), about 0.75 s of serial time each on this
+  host (seven third-party HAL plug-ins under `/Library/Audio/Plug-Ins/HAL`):
+  1 process 1.1 s, 3 together 2.4 s each, 6 together 4.6 s each, with under
+  0.2 s of user CPU apiece. A test suite whose tests each enumerate audio
+  devices therefore slows down by the count of such tests, not by core
+  count; keep the number of audio-enumerating tests small (sniff's `testing.md`).
+
 - **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
   not found`.** `libgit2-sys` links the system library when `pkg-config`
   finds a compatible one, and its build-script output records the versioned

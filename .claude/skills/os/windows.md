@@ -48,6 +48,32 @@ hold the rest:
   with `GIT_TRACE=<file>` on the child, which timestamps every process. Found
   2026-10-05: `wt list`'s refresh worker started 14 git processes per fetch
   and missed its 3 s wait on `windows-latest`.
+- **The first `gix` open in a process starts three processes** unless
+  `EXEPATH` is set: gix-path finds Git for Windows' system config by running
+  `git --exec-path` through `cmd\git.exe` with `CREATE_NO_WINDOW`, so the
+  launcher, the real `git.exe`, and a `conhost.exe` (once per process,
+  cached in a `LazyLock`). Git Bash sets `EXEPATH`; SSH, PowerShell, and CI
+  shells do not. Seen 2026-10-13 with `GIT_TRACE2_EVENT=<dir>` (one file per
+  git process, with `cmd_ancestry`): a `--exec-path` process whose parent
+  is a `git.exe` that wrote no trace of its own is the launcher. `wt` sets
+  `EXEPATH` to the launcher layout's `<top>` in `main` (worktree skill).
+  The same trap makes "read it in-process" a loss in a short-lived process
+  that opens no repository otherwise: one `rev-parse` becomes three.
+- **Defender is a quarter of the CPU a parallel test run uses on
+  `build-win-native`.** Measured 2026-10-13 (sampling per-process CPU over a
+  full `worktree-cli` cross-check run, 12 cores, 10 test threads): `MsMpEng`
+  120–145 CPU-s of roughly 550–600 used, with `SearchIndexer`, `System`, and
+  `svchost` another 80–90. Probe costs: about 5 ms of Defender CPU per
+  process start of an already-scanned image, 2–5 ms per fresh file written
+  under `%TEMP%`, and 31–36 ms per `git init` (its hooks samples and
+  config). Most of it is asynchronous, so it barely shows in a test run
+  alone (CPU about equal to wall) and shows as a 2–3× inflation in the full
+  parallel run, when every core is busy. The hosted `windows-latest` image
+  disables real-time monitoring and excludes `C:\` and `D:\`
+  (`Set-MpPreference -DisableRealtimeMonitoring $true` in
+  [actions/runner-images `Configure-WindowsDefender.ps1`](https://github.com/actions/runner-images/blob/main/images/windows/scripts/build/Configure-WindowsDefender.ps1)),
+  so this host is slower than CI per process. Do not change the host's
+  Defender settings; cut processes and fresh files.
 - **Every fresh file a fixture writes costs milliseconds, and reading it
   back costs more.** On `build-win-native` (2026-10-12), libgit2 writing a
   ~400-file fixture as loose objects took about 1.9 s, and `Index::add_all`
