@@ -54,3 +54,17 @@ report built from library types through the hidden
 they compare text with JSON for one observation and produce `unavailable`
 and `unsupported` outcomes on any host. The fixture scrubs inherited
 `SNIFF_*` variables, so set it per command.
+
+Keep each L1 test well under the 5 s budget on native Windows, where a fresh
+file costs milliseconds (`rust-testing`'s `test-speed.md`). Patterns already in
+use here: the shared walk's inventory cap is injected through
+`build_filesystem_system_view_with_cap`, so saturation tests use a cap of 48
+rather than writing 10,000 files, and a separate test pins that the production
+entry point does not use the test cap; repository-level docs tests build a
+small temporary Git workspace instead of hashing every Markdown file in the
+ambient monorepo (and `test_detect_completes_in_reasonable_time` runs
+`detect()`'s defaults with a fixture repository as `base_dir`); the `no_membership_field_shape_corroborates_…` matrix runs
+one test per row, with a guard test that every row in
+`MEMBERSHIP_SHAPE_ROWS` has one; and `build_large_monorepo` writes its Git
+objects through an in-memory pack and its churn commits without restaging
+the tree (identical commit IDs, about 2 s instead of 6.5 s on Windows).

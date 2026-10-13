@@ -1,7 +1,7 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
 use sniff::request::DetectionPlan;
-use sniff::{SniffConfig, detect, detect_with_config};
+use sniff::{SniffConfig, detect_with_config};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -11,8 +11,8 @@ mod fixtures;
 
 #[test]
 fn test_detect_returns_hardware_info() {
-    // OS + hardware only; the full convenience detect() path is exercised by
-    // test_detect_completes_in_reasonable_time.
+    // OS + hardware only; `detect()`'s full default configuration is exercised
+    // by test_detect_completes_in_reasonable_time.
     let result =
         sniff::detect_with_plan(DetectionPlan::new().without_network().without_filesystem())
             .unwrap();
@@ -73,8 +73,13 @@ fn test_detect_cargo_workspace() {
 #[test]
 fn test_detect_completes_in_reasonable_time() {
     // NFR-1: Fast path detection should complete in <300ms
+    //
+    // `detect()`'s defaults, anchored in a small repository rather than the
+    // process directory: from there the filesystem domain walks this whole
+    // monorepo, which took 5.4 s on native Windows with a cold file cache.
+    let (_dir, path) = fixtures::create_test_git_repo();
     let start = Instant::now();
-    let _ = detect();
+    let _ = detect_with_config(SniffConfig::default().base_dir(path));
     let elapsed = start.elapsed();
     let max_millis = if std::env::var("BISCUIT_CI_ENVIRONMENT").as_deref() == Ok("wsl2-ubuntu") {
         60_000
