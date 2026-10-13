@@ -1099,6 +1099,7 @@ impl<'a> ::core::future::IntoFuture for DeviceGetModelCall<'a> {
         DeviceGetModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1151,6 +1152,7 @@ impl<'a> ::core::future::IntoFuture for RemoteSendKeyCall<'a> {
         RemoteSendKeyRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1203,6 +1205,7 @@ impl<'a> ::core::future::IntoFuture for RemoteInputTextCall<'a> {
         RemoteInputTextRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1251,6 +1254,7 @@ impl<'a> ::core::future::IntoFuture for MusicGetStateCall<'a> {
         MusicGetStateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1299,6 +1303,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayOrPauseCall<'a> {
         MusicPlayOrPauseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1347,6 +1352,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayNextCall<'a> {
         MusicPlayNextRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1395,6 +1401,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayLastCall<'a> {
         MusicPlayLastRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1447,6 +1454,7 @@ impl<'a> ::core::future::IntoFuture for MusicSeekToCall<'a> {
         MusicSeekToRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1495,6 +1503,7 @@ impl<'a> ::core::future::IntoFuture for MusicGetInputOutputListCall<'a> {
         MusicGetInputOutputListRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1547,6 +1556,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetInputCall<'a> {
         MusicSetInputRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1599,6 +1609,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetOutputCall<'a> {
         MusicSetOutputRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1651,6 +1662,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetVolumeCall<'a> {
         MusicSetVolumeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1703,6 +1715,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetMuteCall<'a> {
         MusicSetMuteRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1751,6 +1764,7 @@ impl<'a> ::core::future::IntoFuture for PowerGetOptionsCall<'a> {
         PowerGetOptionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1803,6 +1817,7 @@ impl<'a> ::core::future::IntoFuture for PowerSetOptionCall<'a> {
         PowerSetOptionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1851,6 +1866,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetScreenBrightnessCall<'a> {
         SystemGetScreenBrightnessRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1903,6 +1919,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetScreenBrightnessCall<'a> {
         SystemSetScreenBrightnessRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1951,6 +1968,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetKnobBrightnessCall<'a> {
         SystemGetKnobBrightnessRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2003,6 +2021,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetKnobBrightnessCall<'a> {
         SystemSetKnobBrightnessRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2051,6 +2070,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetVuModeListCall<'a> {
         SystemGetVuModeListRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2103,6 +2123,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetVuModeCall<'a> {
         SystemSetVuModeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2151,6 +2172,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetSpectrumModeListCall<'a> {
         SystemGetSpectrumModeListRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2203,6 +2225,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetSpectrumModeCall<'a> {
         SystemSetSpectrumModeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -2255,6 +2278,7 @@ impl<'a> ::core::future::IntoFuture for SystemChangeVuDisplayCall<'a> {
         SystemChangeVuDisplayRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

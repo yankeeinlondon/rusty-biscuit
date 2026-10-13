@@ -460,6 +460,7 @@ impl<'a> ::core::future::IntoFuture for ChatCall<'a> {
         ChatRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -508,6 +509,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
         ListModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -552,6 +554,7 @@ impl<'a> ::core::future::IntoFuture for LoadModelCall<'a> {
         LoadModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -600,6 +603,7 @@ impl<'a> ::core::future::IntoFuture for UnloadModelCall<'a> {
         UnloadModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -648,6 +652,7 @@ impl<'a> ::core::future::IntoFuture for DownloadModelCall<'a> {
         DownloadModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -696,6 +701,7 @@ impl<'a> ::core::future::IntoFuture for GetDownloadStatusCall<'a> {
         GetDownloadStatusRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

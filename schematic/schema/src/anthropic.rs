@@ -355,6 +355,7 @@ impl<'a> ::core::future::IntoFuture for CreateMessageCall<'a> {
         CreateMessageRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -403,6 +404,7 @@ impl<'a> ::core::future::IntoFuture for CountTokensCall<'a> {
         CountTokensRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -451,6 +453,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
         ListModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -499,6 +502,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveModelCall<'a> {
         RetrieveModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

@@ -479,6 +479,7 @@ impl<'a> ::core::future::IntoFuture for GetDeviceInfoCall<'a> {
         GetDeviceInfoRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -527,6 +528,7 @@ impl<'a> ::core::future::IntoFuture for GetServerLogsCall<'a> {
         GetServerLogsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -579,6 +581,7 @@ impl<'a> ::core::future::IntoFuture for LaunchApplicationByIdCall<'a> {
         LaunchApplicationByIdRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -631,6 +634,7 @@ impl<'a> ::core::future::IntoFuture for LaunchApplicationByNameCall<'a> {
         LaunchApplicationByNameRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -679,6 +683,7 @@ impl<'a> ::core::future::IntoFuture for GetAppStatusCall<'a> {
         GetAppStatusRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -727,6 +732,7 @@ impl<'a> ::core::future::IntoFuture for CloseAppCall<'a> {
         CloseAppRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -775,6 +781,7 @@ impl<'a> ::core::future::IntoFuture for InstallAppCall<'a> {
         InstallAppRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

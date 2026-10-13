@@ -695,6 +695,7 @@ impl<'a> ::core::future::IntoFuture for GenerateNativeCall<'a> {
         GenerateNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -743,6 +744,7 @@ impl<'a> ::core::future::IntoFuture for ChatNativeCall<'a> {
         ChatNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -791,6 +793,7 @@ impl<'a> ::core::future::IntoFuture for EmbeddingsNativeCall<'a> {
         EmbeddingsNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -839,6 +842,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsNativeCall<'a> {
         ListModelsNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -887,6 +891,7 @@ impl<'a> ::core::future::IntoFuture for ShowModelNativeCall<'a> {
         ShowModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -935,6 +940,7 @@ impl<'a> ::core::future::IntoFuture for PullModelNativeCall<'a> {
         PullModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -983,6 +989,7 @@ impl<'a> ::core::future::IntoFuture for PushModelNativeCall<'a> {
         PushModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1031,6 +1038,7 @@ impl<'a> ::core::future::IntoFuture for CopyModelNativeCall<'a> {
         CopyModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1079,6 +1087,7 @@ impl<'a> ::core::future::IntoFuture for DeleteModelNativeCall<'a> {
         DeleteModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1127,6 +1136,7 @@ impl<'a> ::core::future::IntoFuture for CreateModelNativeCall<'a> {
         CreateModelNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1179,6 +1189,7 @@ impl<'a> ::core::future::IntoFuture for ListRunningModelsNativeCall<'a> {
         ListRunningModelsNativeRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1605,6 +1616,7 @@ impl<'a> ::core::future::IntoFuture for ChatCompletionsOaiCall<'a> {
         ChatCompletionsOaiRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1653,6 +1665,7 @@ impl<'a> ::core::future::IntoFuture for CompletionsOaiCall<'a> {
         CompletionsOaiRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1701,6 +1714,7 @@ impl<'a> ::core::future::IntoFuture for EmbeddingsOaiCall<'a> {
         EmbeddingsOaiRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1749,6 +1763,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsOaiCall<'a> {
         ListModelsOaiRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

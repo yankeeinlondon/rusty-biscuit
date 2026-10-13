@@ -753,6 +753,7 @@ impl<'a> ::core::future::IntoFuture for LoginCoreRestCall<'a> {
         LoginCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -805,6 +806,7 @@ impl<'a> ::core::future::IntoFuture for LogoutCoreRestCall<'a> {
         LogoutCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -857,6 +859,7 @@ impl<'a> ::core::future::IntoFuture for GetSystemInfoCoreRestCall<'a> {
         GetSystemInfoCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -909,6 +912,7 @@ impl<'a> ::core::future::IntoFuture for ExportBackupCoreRestCall<'a> {
         ExportBackupCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -961,6 +965,7 @@ impl<'a> ::core::future::IntoFuture for RestoreBackupCoreRestCall<'a> {
         RestoreBackupCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1013,6 +1018,7 @@ impl<'a> ::core::future::IntoFuture for UploadResourceCoreRestCall<'a> {
         UploadResourceCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1065,6 +1071,7 @@ impl<'a> ::core::future::IntoFuture for GetResourceCoreRestCall<'a> {
         GetResourceCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1121,6 +1128,7 @@ impl<'a> ::core::future::IntoFuture for InstallCustomIntegrationCoreRestCall<'a>
         InstallCustomIntegrationCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1177,6 +1185,7 @@ impl<'a> ::core::future::IntoFuture for UploadCustomIrCodeSetCoreRestCall<'a> {
         UploadCustomIrCodeSetCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1233,6 +1242,7 @@ impl<'a> ::core::future::IntoFuture for InstallCustomComponentCoreRestCall<'a> {
         InstallCustomComponentCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -1285,6 +1295,7 @@ impl<'a> ::core::future::IntoFuture for QueryLogsTextCoreRestCall<'a> {
         QueryLogsTextCoreRestRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

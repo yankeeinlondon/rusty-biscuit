@@ -374,6 +374,7 @@ impl<'a> ::core::future::IntoFuture for ListLlmModelsCall<'a> {
         ListLlmModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -430,6 +431,7 @@ impl<'a> ::core::future::IntoFuture for ListTextToImageModelsCall<'a> {
         ListTextToImageModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -482,6 +484,7 @@ impl<'a> ::core::future::IntoFuture for ListImageEditingModelsCall<'a> {
         ListImageEditingModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -534,6 +537,7 @@ impl<'a> ::core::future::IntoFuture for ListTextToSpeechModelsCall<'a> {
         ListTextToSpeechModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -590,6 +594,7 @@ impl<'a> ::core::future::IntoFuture for ListTextToVideoModelsCall<'a> {
         ListTextToVideoModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -646,6 +651,7 @@ impl<'a> ::core::future::IntoFuture for ListImageToVideoModelsCall<'a> {
         ListImageToVideoModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -876,6 +882,7 @@ impl<'a> ::core::future::IntoFuture for EvaluateCritPtCall<'a> {
         EvaluateCritPtRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }

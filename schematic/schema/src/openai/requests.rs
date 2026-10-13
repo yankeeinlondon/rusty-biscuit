@@ -19389,6 +19389,7 @@ impl<'a> ::core::future::IntoFuture for CreateSpeechCall<'a> {
         CreateSpeechRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19437,6 +19438,7 @@ impl<'a> ::core::future::IntoFuture for CreateTranscriptionCall<'a> {
         CreateTranscriptionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19485,6 +19487,7 @@ impl<'a> ::core::future::IntoFuture for CreateTranslationCall<'a> {
         CreateTranslationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19541,6 +19544,7 @@ impl<'a> ::core::future::IntoFuture for ListVoiceConsentsCall<'a> {
         ListVoiceConsentsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19589,6 +19593,7 @@ impl<'a> ::core::future::IntoFuture for CreateVoiceConsentCall<'a> {
         CreateVoiceConsentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19637,6 +19642,7 @@ impl<'a> ::core::future::IntoFuture for GetVoiceConsentCall<'a> {
         GetVoiceConsentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19685,6 +19691,7 @@ impl<'a> ::core::future::IntoFuture for UpdateVoiceConsentCall<'a> {
         UpdateVoiceConsentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19733,6 +19740,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVoiceConsentCall<'a> {
         DeleteVoiceConsentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19779,6 +19787,7 @@ impl<'a> ::core::future::IntoFuture for CreateVoiceCall<'a> {
         CreateVoiceRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19833,6 +19842,7 @@ impl<'a> ::core::future::IntoFuture for ListBatchesCall<'a> {
         ListBatchesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19879,6 +19889,7 @@ impl<'a> ::core::future::IntoFuture for CreateBatchCall<'a> {
         CreateBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19927,6 +19938,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveBatchCall<'a> {
         RetrieveBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -19973,6 +19985,7 @@ impl<'a> ::core::future::IntoFuture for CancelBatchCall<'a> {
         CancelBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20041,6 +20054,7 @@ impl<'a> ::core::future::IntoFuture for ListChatCompletionsCall<'a> {
         ListChatCompletionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20089,6 +20103,7 @@ impl<'a> ::core::future::IntoFuture for CreateChatCompletionCall<'a> {
         CreateChatCompletionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20137,6 +20152,7 @@ impl<'a> ::core::future::IntoFuture for GetChatCompletionCall<'a> {
         GetChatCompletionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20185,6 +20201,7 @@ impl<'a> ::core::future::IntoFuture for UpdateChatCompletionCall<'a> {
         UpdateChatCompletionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20233,6 +20250,7 @@ impl<'a> ::core::future::IntoFuture for DeleteChatCompletionCall<'a> {
         DeleteChatCompletionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20293,6 +20311,7 @@ impl<'a> ::core::future::IntoFuture for GetChatCompletionMessagesCall<'a> {
         GetChatCompletionMessagesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20341,6 +20360,7 @@ impl<'a> ::core::future::IntoFuture for CreateCompletionCall<'a> {
         CreateCompletionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20405,6 +20425,7 @@ impl<'a> ::core::future::IntoFuture for ListContainersCall<'a> {
         ListContainersRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20453,6 +20474,7 @@ impl<'a> ::core::future::IntoFuture for CreateContainerCall<'a> {
         CreateContainerRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20501,6 +20523,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerCall<'a> {
         RetrieveContainerRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20549,6 +20572,7 @@ impl<'a> ::core::future::IntoFuture for DeleteContainerCall<'a> {
         DeleteContainerRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20609,6 +20633,7 @@ impl<'a> ::core::future::IntoFuture for ListContainerFilesCall<'a> {
         ListContainerFilesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20657,6 +20682,7 @@ impl<'a> ::core::future::IntoFuture for CreateContainerFileCall<'a> {
         CreateContainerFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20705,6 +20731,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerFileCall<'a> {
         RetrieveContainerFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20753,6 +20780,7 @@ impl<'a> ::core::future::IntoFuture for DeleteContainerFileCall<'a> {
         DeleteContainerFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20805,6 +20833,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerFileContentCall<'a> {
         RetrieveContainerFileContentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20869,6 +20898,7 @@ impl<'a> ::core::future::IntoFuture for ListConversationItemsCall<'a> {
         ListConversationItemsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20921,6 +20951,7 @@ impl<'a> ::core::future::IntoFuture for CreateConversationItemsCall<'a> {
         CreateConversationItemsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -20973,6 +21004,7 @@ impl<'a> ::core::future::IntoFuture for GetConversationItemCall<'a> {
         GetConversationItemRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21021,6 +21053,7 @@ impl<'a> ::core::future::IntoFuture for DeleteConversationItemCall<'a> {
         DeleteConversationItemRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21069,6 +21102,7 @@ impl<'a> ::core::future::IntoFuture for CreateEmbeddingCall<'a> {
         CreateEmbeddingRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21129,6 +21163,7 @@ impl<'a> ::core::future::IntoFuture for ListEvalsCall<'a> {
         ListEvalsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21173,6 +21208,7 @@ impl<'a> ::core::future::IntoFuture for CreateEvalCall<'a> {
         CreateEvalRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21217,6 +21253,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalCall<'a> {
         GetEvalRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21261,6 +21298,7 @@ impl<'a> ::core::future::IntoFuture for UpdateEvalCall<'a> {
         UpdateEvalRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21305,6 +21343,7 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalCall<'a> {
         DeleteEvalRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21367,6 +21406,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunsCall<'a> {
         GetEvalRunsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21415,6 +21455,7 @@ impl<'a> ::core::future::IntoFuture for CreateEvalRunCall<'a> {
         CreateEvalRunRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21459,6 +21500,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunCall<'a> {
         GetEvalRunRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21507,6 +21549,7 @@ impl<'a> ::core::future::IntoFuture for CancelEvalRunCall<'a> {
         CancelEvalRunRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21555,6 +21598,7 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalRunCall<'a> {
         DeleteEvalRunRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21619,6 +21663,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemsCall<'a> {
         GetEvalRunOutputItemsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21667,6 +21712,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemCall<'a> {
         GetEvalRunOutputItemRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21727,6 +21773,7 @@ impl<'a> ::core::future::IntoFuture for ListFilesCall<'a> {
         ListFilesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21771,6 +21818,7 @@ impl<'a> ::core::future::IntoFuture for CreateFileCall<'a> {
         CreateFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21819,6 +21867,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveFileCall<'a> {
         RetrieveFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21863,6 +21912,7 @@ impl<'a> ::core::future::IntoFuture for DeleteFileCall<'a> {
         DeleteFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21911,6 +21961,7 @@ impl<'a> ::core::future::IntoFuture for DownloadFileCall<'a> {
         DownloadFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -21955,6 +22006,7 @@ impl<'a> ::core::future::IntoFuture for RunGraderCall<'a> {
         RunGraderRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22003,6 +22055,7 @@ impl<'a> ::core::future::IntoFuture for ValidateGraderCall<'a> {
         ValidateGraderRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22071,6 +22124,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningCheckpointPermissionsCall<
         ListFineTuningCheckpointPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22123,6 +22177,7 @@ impl<'a> ::core::future::IntoFuture for CreateFineTuningCheckpointPermissionCall
         CreateFineTuningCheckpointPermissionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22175,6 +22230,7 @@ impl<'a> ::core::future::IntoFuture for DeleteFineTuningCheckpointPermissionCall
         DeleteFineTuningCheckpointPermissionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22235,6 +22291,7 @@ impl<'a> ::core::future::IntoFuture for ListPaginatedFineTuningJobsCall<'a> {
         ListPaginatedFineTuningJobsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22283,6 +22340,7 @@ impl<'a> ::core::future::IntoFuture for CreateFineTuningJobCall<'a> {
         CreateFineTuningJobRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22331,6 +22389,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveFineTuningJobCall<'a> {
         RetrieveFineTuningJobRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22379,6 +22438,7 @@ impl<'a> ::core::future::IntoFuture for CancelFineTuningJobCall<'a> {
         CancelFineTuningJobRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22439,6 +22499,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningJobCheckpointsCall<'a> {
         ListFineTuningJobCheckpointsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22495,6 +22556,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningEventsCall<'a> {
         ListFineTuningEventsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22543,6 +22605,7 @@ impl<'a> ::core::future::IntoFuture for PauseFineTuningJobCall<'a> {
         PauseFineTuningJobRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22591,6 +22654,7 @@ impl<'a> ::core::future::IntoFuture for ResumeFineTuningJobCall<'a> {
         ResumeFineTuningJobRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22639,6 +22703,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageEditCall<'a> {
         CreateImageEditRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22685,6 +22750,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageCall<'a> {
         CreateImageRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22733,6 +22799,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageVariationCall<'a> {
         CreateImageVariationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22777,6 +22844,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
         ListModelsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22825,6 +22893,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveModelCall<'a> {
         RetrieveModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22871,6 +22940,7 @@ impl<'a> ::core::future::IntoFuture for DeleteModelCall<'a> {
         DeleteModelRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22919,6 +22989,7 @@ impl<'a> ::core::future::IntoFuture for CreateModerationCall<'a> {
         CreateModerationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -22979,6 +23050,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysListCall<'a> {
         AdminApiKeysListRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23027,6 +23099,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysCreateCall<'a> {
         AdminApiKeysCreateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23075,6 +23148,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysGetCall<'a> {
         AdminApiKeysGetRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23123,6 +23197,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysDeleteCall<'a> {
         AdminApiKeysDeleteRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23211,6 +23286,7 @@ impl<'a> ::core::future::IntoFuture for ListAuditLogsCall<'a> {
         ListAuditLogsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23275,6 +23351,7 @@ impl<'a> ::core::future::IntoFuture for ListOrganizationCertificatesCall<'a> {
         ListOrganizationCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23323,6 +23400,7 @@ impl<'a> ::core::future::IntoFuture for UploadCertificateCall<'a> {
         UploadCertificateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23375,6 +23453,7 @@ impl<'a> ::core::future::IntoFuture for ActivateOrganizationCertificatesCall<'a>
         ActivateOrganizationCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23427,6 +23506,7 @@ impl<'a> ::core::future::IntoFuture for DeactivateOrganizationCertificatesCall<'
         DeactivateOrganizationCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23479,6 +23559,7 @@ impl<'a> ::core::future::IntoFuture for GetCertificateCall<'a> {
         GetCertificateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23527,6 +23608,7 @@ impl<'a> ::core::future::IntoFuture for ModifyCertificateCall<'a> {
         ModifyCertificateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23575,6 +23657,7 @@ impl<'a> ::core::future::IntoFuture for DeleteCertificateCall<'a> {
         DeleteCertificateRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23651,6 +23734,7 @@ impl<'a> ::core::future::IntoFuture for UsageCostsCall<'a> {
         UsageCostsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23703,6 +23787,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveOrganizationDataRetentionCall<'a
         RetrieveOrganizationDataRetentionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23755,6 +23840,7 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationDataRetentionCall<'a> 
         UpdateOrganizationDataRetentionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23811,6 +23897,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupsCall<'a> {
         ListGroupsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23857,6 +23944,7 @@ impl<'a> ::core::future::IntoFuture for CreateGroupCall<'a> {
         CreateGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23905,6 +23993,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupCall<'a> {
         RetrieveGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23951,6 +24040,7 @@ impl<'a> ::core::future::IntoFuture for UpdateGroupCall<'a> {
         UpdateGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -23997,6 +24087,7 @@ impl<'a> ::core::future::IntoFuture for DeleteGroupCall<'a> {
         DeleteGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24057,6 +24148,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupRoleAssignmentsCall<'a> {
         ListGroupRoleAssignmentsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24105,6 +24197,7 @@ impl<'a> ::core::future::IntoFuture for AssignGroupRoleCall<'a> {
         AssignGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24153,6 +24246,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupRoleCall<'a> {
         RetrieveGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24201,6 +24295,7 @@ impl<'a> ::core::future::IntoFuture for UnassignGroupRoleCall<'a> {
         UnassignGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24261,6 +24356,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupUsersCall<'a> {
         ListGroupUsersRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24309,6 +24405,7 @@ impl<'a> ::core::future::IntoFuture for AddGroupUserCall<'a> {
         AddGroupUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24357,6 +24454,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupUserCall<'a> {
         RetrieveGroupUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24405,6 +24503,7 @@ impl<'a> ::core::future::IntoFuture for RemoveGroupUserCall<'a> {
         RemoveGroupUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24459,6 +24558,7 @@ impl<'a> ::core::future::IntoFuture for ListInvitesCall<'a> {
         ListInvitesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24503,6 +24603,7 @@ impl<'a> ::core::future::IntoFuture for InviteUserCall<'a> {
         InviteUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24551,6 +24652,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveInviteCall<'a> {
         RetrieveInviteRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24599,6 +24701,7 @@ impl<'a> ::core::future::IntoFuture for DeleteInviteCall<'a> {
         DeleteInviteRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24659,6 +24762,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectsCall<'a> {
         ListProjectsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24707,6 +24811,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectCall<'a> {
         CreateProjectRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24755,6 +24860,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectCall<'a> {
         RetrieveProjectRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24803,6 +24909,7 @@ impl<'a> ::core::future::IntoFuture for ModifyProjectCall<'a> {
         ModifyProjectRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24863,6 +24970,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectApiKeysCall<'a> {
         ListProjectApiKeysRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24911,6 +25019,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectApiKeyCall<'a> {
         RetrieveProjectApiKeyRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -24959,6 +25068,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectApiKeyCall<'a> {
         DeleteProjectApiKeyRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25007,6 +25117,7 @@ impl<'a> ::core::future::IntoFuture for ArchiveProjectCall<'a> {
         ArchiveProjectRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25067,6 +25178,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectCertificatesCall<'a> {
         ListProjectCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25115,6 +25227,7 @@ impl<'a> ::core::future::IntoFuture for ActivateProjectCertificatesCall<'a> {
         ActivateProjectCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25167,6 +25280,7 @@ impl<'a> ::core::future::IntoFuture for DeactivateProjectCertificatesCall<'a> {
         DeactivateProjectCertificatesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25219,6 +25333,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectDataRetentionCall<'a> {
         RetrieveProjectDataRetentionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25267,6 +25382,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectDataRetentionCall<'a> {
         UpdateProjectDataRetentionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25327,6 +25443,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectGroupsCall<'a> {
         ListProjectGroupsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25375,6 +25492,7 @@ impl<'a> ::core::future::IntoFuture for AddProjectGroupCall<'a> {
         AddProjectGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25427,6 +25545,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupCall<'a> {
         RetrieveProjectGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25475,6 +25594,7 @@ impl<'a> ::core::future::IntoFuture for RemoveProjectGroupCall<'a> {
         RemoveProjectGroupRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25527,6 +25647,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectHostedToolPermissionsCall
         RetrieveProjectHostedToolPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25579,6 +25700,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectHostedToolPermissionsCall<'
         UpdateProjectHostedToolPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25631,6 +25753,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectModelPermissionsCall<'a> 
         RetrieveProjectModelPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25683,6 +25806,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectModelPermissionsCall<'a> {
         UpdateProjectModelPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25735,6 +25859,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectModelPermissionsCall<'a> {
         DeleteProjectModelPermissionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25795,6 +25920,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectRateLimitsCall<'a> {
         ListProjectRateLimitsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25843,6 +25969,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectRateLimitsCall<'a> {
         UpdateProjectRateLimitsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25899,6 +26026,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectServiceAccountsCall<'a> {
         ListProjectServiceAccountsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25947,6 +26075,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectServiceAccountCall<'a> {
         CreateProjectServiceAccountRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -25999,6 +26128,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectServiceAccountCall<'a> {
         RetrieveProjectServiceAccountRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26047,6 +26177,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectServiceAccountCall<'a> {
         UpdateProjectServiceAccountRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26095,6 +26226,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectServiceAccountCall<'a> {
         DeleteProjectServiceAccountRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26159,6 +26291,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectSpendAlertsCall<'a> {
         ListProjectSpendAlertsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26207,6 +26340,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectSpendAlertCall<'a> {
         CreateProjectSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26255,6 +26389,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectSpendAlertCall<'a> {
         RetrieveProjectSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26303,6 +26438,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectSpendAlertCall<'a> {
         UpdateProjectSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26351,6 +26487,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectSpendAlertCall<'a> {
         DeleteProjectSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26407,6 +26544,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectUsersCall<'a> {
         ListProjectUsersRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26455,6 +26593,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectUserCall<'a> {
         CreateProjectUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26503,6 +26642,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectUserCall<'a> {
         RetrieveProjectUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26551,6 +26691,7 @@ impl<'a> ::core::future::IntoFuture for ModifyProjectUserCall<'a> {
         ModifyProjectUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26599,6 +26740,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectUserCall<'a> {
         DeleteProjectUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26655,6 +26797,7 @@ impl<'a> ::core::future::IntoFuture for ListRolesCall<'a> {
         ListRolesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26699,6 +26842,7 @@ impl<'a> ::core::future::IntoFuture for CreateRoleCall<'a> {
         CreateRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26747,6 +26891,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveRoleCall<'a> {
         RetrieveRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26791,6 +26936,7 @@ impl<'a> ::core::future::IntoFuture for UpdateRoleCall<'a> {
         UpdateRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26835,6 +26981,7 @@ impl<'a> ::core::future::IntoFuture for DeleteRoleCall<'a> {
         DeleteRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26899,6 +27046,7 @@ impl<'a> ::core::future::IntoFuture for ListOrganizationSpendAlertsCall<'a> {
         ListOrganizationSpendAlertsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -26951,6 +27099,7 @@ impl<'a> ::core::future::IntoFuture for CreateOrganizationSpendAlertCall<'a> {
         CreateOrganizationSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27003,6 +27152,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveOrganizationSpendAlertCall<'a> {
         RetrieveOrganizationSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27055,6 +27205,7 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationSpendAlertCall<'a> {
         UpdateOrganizationSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27107,6 +27258,7 @@ impl<'a> ::core::future::IntoFuture for DeleteOrganizationSpendAlertCall<'a> {
         DeleteOrganizationSpendAlertRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27195,6 +27347,7 @@ impl<'a> ::core::future::IntoFuture for UsageAudioSpeechesCall<'a> {
         UsageAudioSpeechesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27283,6 +27436,7 @@ impl<'a> ::core::future::IntoFuture for UsageAudioTranscriptionsCall<'a> {
         UsageAudioTranscriptionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27363,6 +27517,7 @@ impl<'a> ::core::future::IntoFuture for UsageCodeInterpreterSessionsCall<'a> {
         UsageCodeInterpreterSessionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27455,6 +27610,7 @@ impl<'a> ::core::future::IntoFuture for UsageCompletionsCall<'a> {
         UsageCompletionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27543,6 +27699,7 @@ impl<'a> ::core::future::IntoFuture for UsageEmbeddingsCall<'a> {
         UsageEmbeddingsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27631,6 +27788,7 @@ impl<'a> ::core::future::IntoFuture for UsageFileSearchCallsCall<'a> {
         UsageFileSearchCallsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27725,6 +27883,7 @@ impl<'a> ::core::future::IntoFuture for UsageImagesCall<'a> {
         UsageImagesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27813,6 +27972,7 @@ impl<'a> ::core::future::IntoFuture for UsageModerationsCall<'a> {
         UsageModerationsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27889,6 +28049,7 @@ impl<'a> ::core::future::IntoFuture for UsageVectorStoresCall<'a> {
         UsageVectorStoresRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -27981,6 +28142,7 @@ impl<'a> ::core::future::IntoFuture for UsageWebSearchCallsCall<'a> {
         UsageWebSearchCallsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28037,6 +28199,7 @@ impl<'a> ::core::future::IntoFuture for ListUsersCall<'a> {
         ListUsersRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28085,6 +28248,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveUserCall<'a> {
         RetrieveUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28129,6 +28293,7 @@ impl<'a> ::core::future::IntoFuture for ModifyUserCall<'a> {
         ModifyUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28173,6 +28338,7 @@ impl<'a> ::core::future::IntoFuture for DeleteUserCall<'a> {
         DeleteUserRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28233,6 +28399,7 @@ impl<'a> ::core::future::IntoFuture for ListUserRoleAssignmentsCall<'a> {
         ListUserRoleAssignmentsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28281,6 +28448,7 @@ impl<'a> ::core::future::IntoFuture for AssignUserRoleCall<'a> {
         AssignUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28329,6 +28497,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveUserRoleCall<'a> {
         RetrieveUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28377,6 +28546,7 @@ impl<'a> ::core::future::IntoFuture for UnassignUserRoleCall<'a> {
         UnassignUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28441,6 +28611,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectGroupRoleAssignmentsCall<'a> 
         ListProjectGroupRoleAssignmentsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28489,6 +28660,7 @@ impl<'a> ::core::future::IntoFuture for AssignProjectGroupRoleCall<'a> {
         AssignProjectGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28537,6 +28709,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupRoleCall<'a> {
         RetrieveProjectGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28585,6 +28758,7 @@ impl<'a> ::core::future::IntoFuture for UnassignProjectGroupRoleCall<'a> {
         UnassignProjectGroupRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28645,6 +28819,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectRolesCall<'a> {
         ListProjectRolesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28693,6 +28868,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectRoleCall<'a> {
         CreateProjectRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28741,6 +28917,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectRoleCall<'a> {
         RetrieveProjectRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28789,6 +28966,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectRoleCall<'a> {
         UpdateProjectRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28837,6 +29015,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectRoleCall<'a> {
         DeleteProjectRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28901,6 +29080,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectUserRoleAssignmentsCall<'a> {
         ListProjectUserRoleAssignmentsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28949,6 +29129,7 @@ impl<'a> ::core::future::IntoFuture for AssignProjectUserRoleCall<'a> {
         AssignProjectUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -28997,6 +29178,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectUserRoleCall<'a> {
         RetrieveProjectUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29045,6 +29227,7 @@ impl<'a> ::core::future::IntoFuture for UnassignProjectUserRoleCall<'a> {
         UnassignProjectUserRoleRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29093,6 +29276,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeCallCall<'a> {
         CreateRealtimeCallRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29141,6 +29325,7 @@ impl<'a> ::core::future::IntoFuture for AcceptRealtimeCallCall<'a> {
         AcceptRealtimeCallRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29189,6 +29374,7 @@ impl<'a> ::core::future::IntoFuture for HangupRealtimeCallCall<'a> {
         HangupRealtimeCallRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29237,6 +29423,7 @@ impl<'a> ::core::future::IntoFuture for ReferRealtimeCallCall<'a> {
         ReferRealtimeCallRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29285,6 +29472,7 @@ impl<'a> ::core::future::IntoFuture for RejectRealtimeCallCall<'a> {
         RejectRealtimeCallRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29333,6 +29521,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeClientSecretCall<'a> {
         CreateRealtimeClientSecretRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29381,6 +29570,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeSessionCall<'a> {
         CreateRealtimeSessionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29433,6 +29623,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeTranscriptionSessionCall<'
         CreateRealtimeTranscriptionSessionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29485,6 +29676,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeTranslationClientSecretCal
         CreateRealtimeTranslationClientSecretRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29533,6 +29725,7 @@ impl<'a> ::core::future::IntoFuture for CreateResponseCall<'a> {
         CreateResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29595,6 +29788,7 @@ impl<'a> ::core::future::IntoFuture for GetResponseCall<'a> {
         GetResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29643,6 +29837,7 @@ impl<'a> ::core::future::IntoFuture for DeleteResponseCall<'a> {
         DeleteResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29691,6 +29886,7 @@ impl<'a> ::core::future::IntoFuture for CancelResponseCall<'a> {
         CancelResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29755,6 +29951,7 @@ impl<'a> ::core::future::IntoFuture for ListInputItemsCall<'a> {
         ListInputItemsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29803,6 +30000,7 @@ impl<'a> ::core::future::IntoFuture for CreateUploadCall<'a> {
         CreateUploadRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29851,6 +30049,7 @@ impl<'a> ::core::future::IntoFuture for CancelUploadCall<'a> {
         CancelUploadRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29899,6 +30098,7 @@ impl<'a> ::core::future::IntoFuture for CompleteUploadCall<'a> {
         CompleteUploadRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -29947,6 +30147,7 @@ impl<'a> ::core::future::IntoFuture for AddUploadPartCall<'a> {
         AddUploadPartRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30011,6 +30212,7 @@ impl<'a> ::core::future::IntoFuture for ListVectorStoresCall<'a> {
         ListVectorStoresRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30059,6 +30261,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreCall<'a> {
         CreateVectorStoreRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30107,6 +30310,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreCall<'a> {
         GetVectorStoreRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30155,6 +30359,7 @@ impl<'a> ::core::future::IntoFuture for ModifyVectorStoreCall<'a> {
         ModifyVectorStoreRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30203,6 +30408,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVectorStoreCall<'a> {
         DeleteVectorStoreRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30251,6 +30457,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileBatchCall<'a> {
         CreateVectorStoreFileBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30299,6 +30506,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreFileBatchCall<'a> {
         GetVectorStoreFileBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30347,6 +30555,7 @@ impl<'a> ::core::future::IntoFuture for CancelVectorStoreFileBatchCall<'a> {
         CancelVectorStoreFileBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30415,6 +30624,7 @@ impl<'a> ::core::future::IntoFuture for ListFilesInVectorStoreBatchCall<'a> {
         ListFilesInVectorStoreBatchRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30483,6 +30693,7 @@ impl<'a> ::core::future::IntoFuture for ListVectorStoreFilesCall<'a> {
         ListVectorStoreFilesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30531,6 +30742,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileCall<'a> {
         CreateVectorStoreFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30579,6 +30791,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreFileCall<'a> {
         GetVectorStoreFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30631,6 +30844,7 @@ impl<'a> ::core::future::IntoFuture for UpdateVectorStoreFileAttributesCall<'a> 
         UpdateVectorStoreFileAttributesRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30679,6 +30893,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVectorStoreFileCall<'a> {
         DeleteVectorStoreFileRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30731,6 +30946,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveVectorStoreFileContentCall<'a> {
         RetrieveVectorStoreFileContentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30779,6 +30995,7 @@ impl<'a> ::core::future::IntoFuture for SearchVectorStoreCall<'a> {
         SearchVectorStoreRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30827,6 +31044,7 @@ impl<'a> ::core::future::IntoFuture for CreateConversationCall<'a> {
         CreateConversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30875,6 +31093,7 @@ impl<'a> ::core::future::IntoFuture for GetConversationCall<'a> {
         GetConversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30923,6 +31142,7 @@ impl<'a> ::core::future::IntoFuture for UpdateConversationCall<'a> {
         UpdateConversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -30971,6 +31191,7 @@ impl<'a> ::core::future::IntoFuture for DeleteConversationCall<'a> {
         DeleteConversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31019,6 +31240,7 @@ impl<'a> ::core::future::IntoFuture for GetorganizationspendlimitCall<'a> {
         GetorganizationspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31071,6 +31293,7 @@ impl<'a> ::core::future::IntoFuture for UpdateorganizationspendlimitCall<'a> {
         UpdateorganizationspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31123,6 +31346,7 @@ impl<'a> ::core::future::IntoFuture for DeleteorganizationspendlimitCall<'a> {
         DeleteorganizationspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31171,6 +31395,7 @@ impl<'a> ::core::future::IntoFuture for GetprojectspendlimitCall<'a> {
         GetprojectspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31219,6 +31444,7 @@ impl<'a> ::core::future::IntoFuture for UpdateprojectspendlimitCall<'a> {
         UpdateprojectspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31267,6 +31493,7 @@ impl<'a> ::core::future::IntoFuture for DeleteprojectspendlimitCall<'a> {
         DeleteprojectspendlimitRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31319,6 +31546,7 @@ impl<'a> ::core::future::IntoFuture for CreateanAPIkeyforaserviceaccountCall<'a>
         CreateanAPIkeyforaserviceaccountRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31371,6 +31599,7 @@ impl<'a> ::core::future::IntoFuture for CreatecontentprovenancecheckCall<'a> {
         CreatecontentprovenancecheckRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31427,6 +31656,7 @@ impl<'a> ::core::future::IntoFuture for ListVideosCall<'a> {
         ListVideosRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31473,6 +31703,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoCall<'a> {
         CreateVideoRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31521,6 +31752,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoCharacterCall<'a> {
         CreateVideoCharacterRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31569,6 +31801,7 @@ impl<'a> ::core::future::IntoFuture for GetVideoCharacterCall<'a> {
         GetVideoCharacterRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31617,6 +31850,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoEditCall<'a> {
         CreateVideoEditRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31665,6 +31899,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoExtendCall<'a> {
         CreateVideoExtendRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31709,6 +31944,7 @@ impl<'a> ::core::future::IntoFuture for GetVideoCall<'a> {
         GetVideoRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31755,6 +31991,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVideoCall<'a> {
         DeleteVideoRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31807,6 +32044,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveVideoContentCall<'a> {
         RetrieveVideoContentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31855,6 +32093,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoRemixCall<'a> {
         CreateVideoRemixRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31903,6 +32142,7 @@ impl<'a> ::core::future::IntoFuture for GetinputtokencountsCall<'a> {
         GetinputtokencountsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -31951,6 +32191,7 @@ impl<'a> ::core::future::IntoFuture for CompactconversationCall<'a> {
         CompactconversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32007,6 +32248,7 @@ impl<'a> ::core::future::IntoFuture for ListSkillsCall<'a> {
         ListSkillsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32053,6 +32295,7 @@ impl<'a> ::core::future::IntoFuture for CreateSkillCall<'a> {
         CreateSkillRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32097,6 +32340,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillCall<'a> {
         GetSkillRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32145,6 +32389,7 @@ impl<'a> ::core::future::IntoFuture for UpdateSkillDefaultVersionCall<'a> {
         UpdateSkillDefaultVersionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32191,6 +32436,7 @@ impl<'a> ::core::future::IntoFuture for DeleteSkillCall<'a> {
         DeleteSkillRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32239,6 +32485,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillContentCall<'a> {
         GetSkillContentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32299,6 +32546,7 @@ impl<'a> ::core::future::IntoFuture for ListSkillVersionsCall<'a> {
         ListSkillVersionsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32347,6 +32595,7 @@ impl<'a> ::core::future::IntoFuture for CreateSkillVersionCall<'a> {
         CreateSkillVersionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32395,6 +32644,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillVersionCall<'a> {
         GetSkillVersionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32443,6 +32693,7 @@ impl<'a> ::core::future::IntoFuture for DeleteSkillVersionCall<'a> {
         DeleteSkillVersionRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32491,6 +32742,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillVersionContentCall<'a> {
         GetSkillVersionContentRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32539,6 +32791,7 @@ impl<'a> ::core::future::IntoFuture for CancelChatSessionMethodCall<'a> {
         CancelChatSessionMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32587,6 +32840,7 @@ impl<'a> ::core::future::IntoFuture for CreateChatSessionMethodCall<'a> {
         CreateChatSessionMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32651,6 +32905,7 @@ impl<'a> ::core::future::IntoFuture for ListThreadItemsMethodCall<'a> {
         ListThreadItemsMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32699,6 +32954,7 @@ impl<'a> ::core::future::IntoFuture for GetThreadMethodCall<'a> {
         GetThreadMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32747,6 +33003,7 @@ impl<'a> ::core::future::IntoFuture for DeleteThreadMethodCall<'a> {
         DeleteThreadMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32815,6 +33072,7 @@ impl<'a> ::core::future::IntoFuture for ListThreadsMethodCall<'a> {
         ListThreadsMethodRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32867,6 +33125,7 @@ impl<'a> ::core::future::IntoFuture for BetaCreateResponseCall<'a> {
         BetaCreateResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32935,6 +33194,7 @@ impl<'a> ::core::future::IntoFuture for BetaGetResponseCall<'a> {
         BetaGetResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -32987,6 +33247,7 @@ impl<'a> ::core::future::IntoFuture for BetaDeleteResponseCall<'a> {
         BetaDeleteResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -33039,6 +33300,7 @@ impl<'a> ::core::future::IntoFuture for BetaCancelResponseCall<'a> {
         BetaCancelResponseRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -33091,6 +33353,7 @@ impl<'a> ::core::future::IntoFuture for BetaCompactconversationCall<'a> {
         BetaCompactconversationRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -33159,6 +33422,7 @@ impl<'a> ::core::future::IntoFuture for BetaListInputItemsCall<'a> {
         BetaListInputItemsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
@@ -33211,6 +33475,7 @@ impl<'a> ::core::future::IntoFuture for BetaGetinputtokencountsCall<'a> {
         BetaGetinputtokencountsRequest,
     > as ::core::future::IntoFuture>::Output;
     type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
     fn into_future(self) -> Self::IntoFuture {
         ::core::future::IntoFuture::into_future(self.0)
     }
