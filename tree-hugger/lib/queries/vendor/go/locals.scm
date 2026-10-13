@@ -35,6 +35,19 @@
   (type_spec
     name: (type_identifier) @local.definition.type)) @local.definition.type.context
 
+; Type aliases (`type A = B`), alone or grouped
+(type_declaration
+  (type_alias
+    name: (type_identifier) @local.definition.type_alias)) @local.definition.type_alias.context
+
+; Named fields of a named struct type. Embedded fields have no name, and the
+; fields of an anonymous `struct { … }` are not captured.
+(type_spec
+  type: (struct_type
+    (field_declaration_list
+      (field_declaration
+        name: (field_identifier) @local.definition.field) @local.definition.field.context)))
+
 ; reference
 (identifier) @local.reference
 
@@ -48,23 +61,27 @@
 (package_clause
   (package_identifier) @local.definition.namespace)
 
+; Imports: an alias (a blank `_` included, which binds nothing) is the
+; import, else the path (interpreted or raw string), whose last segment
+; names the package (a dot
+; import, which binds no package name, is on demand).
 ; Imports in grouped imports (import_spec_list)
 (import_spec_list
   (import_spec
-    name: (package_identifier) @local.definition.import))
+    name: [(package_identifier) (blank_identifier)] @local.definition.import))
 
 (import_spec_list
   (import_spec
-    path: (interpreted_string_literal) @local.definition.import))
+    path: [(interpreted_string_literal) (raw_string_literal)] @local.definition.import))
 
 ; Single import declarations
 (import_declaration
   (import_spec
-    name: (package_identifier) @local.definition.import))
+    name: [(package_identifier) (blank_identifier)] @local.definition.import))
 
 (import_declaration
   (import_spec
-    path: (interpreted_string_literal) @local.definition.import))
+    path: [(interpreted_string_literal) (raw_string_literal)] @local.definition.import))
 
 ; Call references
 ((call_expression

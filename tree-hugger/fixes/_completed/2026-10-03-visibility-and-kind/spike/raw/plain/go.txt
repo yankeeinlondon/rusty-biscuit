@@ -1,0 +1,47 @@
+  - const ExportedConstant go.go:17:7
+  - function ExportedFunction go.go:7:1
+  - type ExportedInterface go.go:34:1
+  - method ExportedMethod() string go.go:46:1
+  - type ExportedNamedType go.go:44:1
+  - type ExportedStruct { ExportedField int, packageField string } go.go:25:1
+  - var ExportedVariable go.go:21:5
+  - := localValue go.go:10:2
+  - method OtherExportedMethod() () go.go:52:1
+  - const packageConstant go.go:19:7
+  - function packageFunction(parameterValue int) int go.go:9:1
+  - type packageInterface go.go:38:1
+  - method packageMethod() () go.go:50:1
+  - type packageStruct { OtherExportedField int } go.go:30:1
+  - var packageVariable go.go:23:5
+  - parameter parameterValue go.go:9:22
+  - parameter receiver go.go:46:7
+  - parameter receiver go.go:50:7
+  - parameter receiver go.go:52:7
+  - namespace symbols go.go:2:9
+  - function ÉtéFunction go.go:15:1
+=== classes
+go.go (Go)
+  type ExportedStruct [25:1]
+    Instance Fields (2)
+      - ExportedField int
+      - packageField string
+  type packageStruct [30:1]
+    Instance Fields (1)
+      - OtherExportedField int
+  type ExportedInterface [34:1]
+  type packageInterface [38:1]
+  type ExportedNamedType [44:1]
+
+=== functions
+  - function ExportedFunction go.go:7:1
+  - method ExportedMethod() string go.go:46:1
+  - method OtherExportedMethod() () go.go:52:1
+  - function packageFunction(parameterValue int) int go.go:9:1
+  - method packageMethod() () go.go:50:1
+  - function ÉtéFunction go.go:15:1
+=== types
+  - type ExportedInterface go.go:34:1
+  - type ExportedNamedType go.go:44:1
+  - type ExportedStruct { ExportedField int, packageField string } go.go:25:1
+  - type packageInterface go.go:38:1
+  - type packageStruct { OtherExportedField int } go.go:30:1

@@ -33,6 +33,8 @@ initialize:
 - and when working with testing you will use the 'rust-testing' agent skill
 - while acting as orchestrator, you should instruct subagents to also use these agent skills
 
+::file "../_finish-before-exit.md"
+
 ::file "../_os.md"
 
 ::file "../_test-tiers.md"

@@ -57,6 +57,10 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # not applicable: test-toolkit has no real-terminal (Level-2) tests of its own —
 # it only supplies the `require_level!` gate that other areas' L2 tests call.
 test-l2:

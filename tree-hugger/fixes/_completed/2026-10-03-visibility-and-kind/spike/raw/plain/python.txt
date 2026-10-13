@@ -1,0 +1,51 @@
+  - method __init__(self, initial_value: int) -> None [in PlainWidget] python.py:28:5
+  - function _conventionally_private_function() -> None python.py:14:1
+  - method _conventionally_private_method(self) -> None [in PlainWidget] python.py:36:5
+  - field annotated_instance_field [in PlainWidget] python.py:22:5
+  - = annotated_instance_field_with_value [in PlainWidget] python.py:23:5
+  - = assigned_from_outside python.py:49:19
+  - = assigned_through_self [in PlainWidget] python.py:29:14
+  - = assigned_through_self [in PlainWidget] python.py:33:14
+  - function class_method(cls) -> "PlainWidget" [in PlainWidget] python.py:44:5
+  - field class_var_static_field [in PlainWidget] python.py:24:5
+  - = class_var_static_field_with_value [in PlainWidget] python.py:25:5
+  - parameter cls [in PlainWidget] python.py:44:22
+  - function free_function_assigning_attribute(target_object: PlainWidget) -> None python.py:48:1
+  - parameter initial_value [in PlainWidget] python.py:28:24
+  - method instance_method(self) -> int [in PlainWidget] python.py:32:5
+  - = local_value python.py:10:5
+  - = MODULE_CONSTANT python.py:18:1
+  - function module_function(parameter_value: int) -> int python.py:9:1
+  - parameter parameter_value python.py:9:21
+  - type PlainWidget { annotated_instance_field: int, annotated_instance_field_with_value: str, class_var_static_field: ClassVar[int], class_var_static_field_with_value: ClassVar[int] } python.py:21:1
+  - parameter self [in PlainWidget] python.py:28:18
+  - parameter self [in PlainWidget] python.py:32:25
+  - parameter self [in PlainWidget] python.py:36:40
+  - function static_method() -> "PlainWidget" [in PlainWidget] python.py:40:5
+  - parameter target_object python.py:48:39
+  - = unannotated_static_field [in PlainWidget] python.py:26:5
+  - = unannotated_static_field [in PlainWidget] python.py:30:14
+=== classes
+python.py (Python)
+  type PlainWidget [21:1]
+    Instance Methods (3)
+      - __init__(self, initial_value: int) -> None [in PlainWidget] [28:5]
+      - instance_method(self) -> int [in PlainWidget] [32:5]
+      - _conventionally_private_method(self) -> None [in PlainWidget] [36:5]
+    Instance Fields (4)
+      - annotated_instance_field: int
+      - annotated_instance_field_with_value: str
+      - class_var_static_field: ClassVar[int]
+      - class_var_static_field_with_value: ClassVar[int]
+
+=== functions
+  - method __init__(self, initial_value: int) -> None [in PlainWidget] python.py:28:5
+  - function _conventionally_private_function() -> None python.py:14:1
+  - method _conventionally_private_method(self) -> None [in PlainWidget] python.py:36:5
+  - function class_method(cls) -> "PlainWidget" [in PlainWidget] python.py:44:5
+  - function free_function_assigning_attribute(target_object: PlainWidget) -> None python.py:48:1
+  - method instance_method(self) -> int [in PlainWidget] python.py:32:5
+  - function module_function(parameter_value: int) -> int python.py:9:1
+  - function static_method() -> "PlainWidget" [in PlainWidget] python.py:40:5
+=== types
+  - type PlainWidget { annotated_instance_field: int, annotated_instance_field_with_value: str, class_var_static_field: ClassVar[int], class_var_static_field_with_value: ClassVar[int] } python.py:21:1

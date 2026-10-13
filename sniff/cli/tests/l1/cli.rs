@@ -2162,6 +2162,7 @@ fn expected_lockfile_structure_json() -> Value {
             "relative": relative,
             "package_area": name,
             "name": name,
+            "name_source": "manifest",
             "ecosystem": "cargo",
             "standard": "cargo-workspace",
             "provenance": "globbed",
@@ -10744,5 +10745,27 @@ fn test_repo_recent_commits_plain_is_the_joined_per_commit_blocks() {
     for block in &blocks {
         assert!(block.starts_with("- ["), "a block opens with its hash: {block:?}");
         assert!(!block.contains("**"), "plain output carries no markup: {block:?}");
+    }
+}
+
+#[test]
+fn package_identity_shipped_manifest_through_cli() {
+    let fixture = common::SniffCliFixture::named("sniff-package-identity");
+    let root = fixture.cwd();
+    std::fs::create_dir_all(root.join("packages/alpha")).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"private":true,"workspaces":["packages/*"]}"#).unwrap();
+    let shipped = include_str!("../../../lib/tests/fixtures/lockfiles/pnpm-9.15.9/workspace/packages/alpha/package.json");
+    for (content, expected) in [(shipped.to_string(), "alpha"), (shipped.replace("\"alpha\"", "\"   \""), "packages/alpha")] {
+        std::fs::write(root.join("packages/alpha/package.json"), content).unwrap();
+        let output = fixture.command().args(["repo", "structure", "--json"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["packages"].as_array().unwrap().len(), 1);
+        assert_eq!(value["packages"][0]["name"], expected);
+        if expected == "alpha" {
+            assert_eq!(value["packages"][0]["name_source"], "manifest");
+        } else {
+            assert!(value["packages"][0].get("name_source").is_none());
+        }
     }
 }

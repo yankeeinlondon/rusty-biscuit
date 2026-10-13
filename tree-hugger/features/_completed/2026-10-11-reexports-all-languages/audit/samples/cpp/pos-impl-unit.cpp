@@ -1,0 +1,2 @@
+module m;
+import other;

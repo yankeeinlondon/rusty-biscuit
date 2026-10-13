@@ -6235,6 +6235,8 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "repo-deps",
                 "research",
                 "sniff-cli",
+                # `hug --changed` asks sniff which paths Git reports changed.
+                "tree-hugger-cli",
                 "unchained-ai",
                 "worktree",
                 "worktree-cli",

@@ -1,0 +1,82 @@
+  - type AccessWidget { implicitPrivateField: int, firstPublicField: int, secondPublicField: int, staticMemberField: int, protectedField: int, explicitPrivateField: int } cpp.cpp:6:1
+  - function AccessWidget [in fixture_space] cpp.cpp:11:5
+  - function api() -> void cpp.cpp:81:17
+  - field explicitPrivateField [in fixture_space] cpp.cpp:25:9
+  - function fileStaticFunction() -> void cpp.cpp:79:13
+  - variable fileStaticVariable cpp.cpp:77:12
+  - field firstPublicField [in fixture_space] cpp.cpp:12:9
+  - method firstPublicMethod() -> void [in fixture_space] cpp.cpp:14:5
+  - namespace fixture_space cpp.cpp:4:11
+  - function functionWithLocalStatic() -> int cpp.cpp:83:5
+  - variable Green cpp.cpp:42:31
+  - function helper() -> int cpp.cpp:57:12
+  - function helper(helperValue: int) -> int cpp.cpp:59:5
+  - function helper(helperValue: long) -> int cpp.cpp:61:5
+  - parameter helperValue cpp.cpp:59:16
+  - parameter helperValue cpp.cpp:61:17
+  - function hiddenFunction() -> void cpp.cpp:66:6
+  - variable hiddenVariable cpp.cpp:64:5
+  - field implicitPrivateField [in fixture_space] cpp.cpp:7:9
+  - method implicitPrivateMethod() -> void [in fixture_space] cpp.cpp:8:5
+  - variable INLINE_LIMIT cpp.cpp:73:18
+  - type IntTypedef cpp.cpp:48:1
+  - variable LIMIT cpp.cpp:69:11
+  - variable localStaticCounter cpp.cpp:84:16
+  - variable localValue cpp.cpp:51:9
+  - function namespaceFunction(parameterValue: int) -> int [in fixture_space] cpp.cpp:50:5
+  - parameter parameterValue [in fixture_space] cpp.cpp:50:27
+  - variable PLAIN_GREEN cpp.cpp:44:30
+  - variable PLAIN_RED cpp.cpp:44:19
+  - enum PlainColor { PLAIN_RED, PLAIN_GREEN } cpp.cpp:44:1
+  - type PlainStruct { structPublicField: int, structPrivateField: int } cpp.cpp:29:1
+  - field protectedField [in fixture_space] cpp.cpp:21:9
+  - variable publicGlobal cpp.cpp:75:5
+  - variable Red cpp.cpp:42:26
+  - enum ScopedColor { Red, Green } cpp.cpp:42:1
+  - field secondPublicField [in fixture_space] cpp.cpp:13:9
+  - variable SHARED cpp.cpp:71:18
+  - type SizeAlias cpp.cpp:46:7
+  - method staticFactory() -> AccessWidget [in fixture_space] cpp.cpp:17:5
+  - field staticMemberField [in fixture_space] cpp.cpp:16:16
+  - field structPrivateField [in PlainStruct] cpp.cpp:34:9
+  - field structPublicField [in PlainStruct] cpp.cpp:30:9
+  - field unionFloatField [in fixture_space] cpp.cpp:39:11
+  - field unionIntField [in fixture_space] cpp.cpp:38:9
+=== classes
+cpp.cpp (C++)
+  type AccessWidget [6:1]
+    Static Fields (1)
+      - public staticMemberField: int
+    Instance Fields (5)
+      - implicitPrivateField: int
+      - public firstPublicField: int
+      - public secondPublicField: int
+      - protected protectedField: int
+      - private explicitPrivateField: int
+  type PlainStruct [29:1]
+    Instance Fields (2)
+      - structPublicField: int
+      - private structPrivateField: int
+  type SizeAlias [46:7]
+  type IntTypedef [48:1]
+
+=== functions
+  - function AccessWidget [in fixture_space] cpp.cpp:11:5
+  - function api() -> void cpp.cpp:81:17
+  - function fileStaticFunction() -> void cpp.cpp:79:13
+  - method firstPublicMethod() -> void [in fixture_space] cpp.cpp:14:5
+  - function functionWithLocalStatic() -> int cpp.cpp:83:5
+  - function helper() -> int cpp.cpp:57:12
+  - function helper(helperValue: int) -> int cpp.cpp:59:5
+  - function helper(helperValue: long) -> int cpp.cpp:61:5
+  - function hiddenFunction() -> void cpp.cpp:66:6
+  - method implicitPrivateMethod() -> void [in fixture_space] cpp.cpp:8:5
+  - function namespaceFunction(parameterValue: int) -> int [in fixture_space] cpp.cpp:50:5
+  - method staticFactory() -> AccessWidget [in fixture_space] cpp.cpp:17:5
+=== types
+  - type AccessWidget { implicitPrivateField: int, firstPublicField: int, secondPublicField: int, staticMemberField: int, protectedField: int, explicitPrivateField: int } cpp.cpp:6:1
+  - type IntTypedef cpp.cpp:48:1
+  - enum PlainColor { PLAIN_RED, PLAIN_GREEN } cpp.cpp:44:1
+  - type PlainStruct { structPublicField: int, structPrivateField: int } cpp.cpp:29:1
+  - enum ScopedColor { Red, Green } cpp.cpp:42:1
+  - type SizeAlias cpp.cpp:46:7

@@ -26,3 +26,16 @@
 ; Function call references
 (call_expression
   function: (identifier) @reference)
+
+; A method invoked through a field access (`obj.m()`, `p->m()`,
+; `obj.template m<T>()`): the callee name, an occurrence only
+(call_expression
+  function: (field_expression
+    field: [
+      (field_identifier) @reference.member
+      (template_method
+        name: (field_identifier) @reference.member)
+      (dependent_name
+        (template_method
+          name: (field_identifier) @reference.member))
+    ]))

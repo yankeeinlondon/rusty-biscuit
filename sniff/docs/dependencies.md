@@ -96,6 +96,13 @@ Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
   creation — plus a libgit2 differential-parity oracle. It must never become a
   production dependency; anything gix can do uses gix.
 
+`tree-hugger-cli` consumes `GitRepo::changed_paths` with sniff's default
+features disabled and no optional features enabled. Path-only status and
+direct tip comparison reuse the existing `revision`, `status`, `blob-diff`,
+`dirwalk`, and `excludes` gix features; no new backend dependency or feature
+is needed. Deleted paths remain in the API result so callers can decide
+whether a recreated file should be analyzed.
+
 ## Executable Lookup
 
 - **`which` (pinned to major `8`, `default-features = false`, `real-sys`).**

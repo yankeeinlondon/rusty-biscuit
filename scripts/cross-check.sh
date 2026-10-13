@@ -30,9 +30,11 @@
 # resolved over SSH before anything is shipped. Separate checkouts therefore
 # never share a clone or its target dir.
 #
-# Stale clones: before any leg starts, each selected host drops the clones this
-# origin host left there for worktrees that no longer exist here; see
-# `prepare_host`.
+# Clone pruning: before any leg starts, each selected host retires the clones
+# that are no longer needed: this host's clones whose worktree no longer exists
+# here, and any clone with no run in CROSS_CHECK_MAX_AGE_DAYS (default 3) days.
+# The rules live in `cross-check-hosts.sh`; `just cross-check-refresh` applies
+# them to every declared host on demand, with a before/after space report.
 #
 # Concurrency: two runs from the same checkout still share a clone. Each remote
 # run holds that clone's lock (`<clone dir>/.cross-check.lock`, a directory
@@ -114,22 +116,21 @@
 # --features terminal-tests level2_`) and the skip becomes a failure.
 #
 # The standing clones and their target dirs persist between runs so compile
-# caches are warm. Nothing sweeps them; see the `os` skill's build-hosts notes.
+# caches are warm, until the pruning rules above retire them.
 #
 # Usage:
 #   scripts/cross-check.sh [--os linux|windows|wsl|macos|all] <package> [nextest args...]
 set -euo pipefail
 
 LOCK_WAIT_SECS=1800
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=15)
 SCP=(scp -q -o BatchMode=yes -o ConnectTimeout=15)
 SCP_TREE=(scp -q -r -o BatchMode=yes -o ConnectTimeout=15)
 
-# Bash 3.2 (macOS /bin/bash) supports indexed arrays only.
-readonly linux=0 windows=1 wsl=2 macos=3
-ORDER=(linux windows wsl macos)
-declare -a HOST=([linux]="${BUILD_LINUX:-}" [windows]="${BUILD_WIN:-}" [wsl]="${BUILD_WSL:-}" [macos]="${BUILD_MACOS:-}")
-declare -a VAR=([linux]=BUILD_LINUX [windows]=BUILD_WIN [wsl]=BUILD_WSL [macos]=BUILD_MACOS)
+# The host table (HOST, VAR, ORDER, SSH), the calling host's identity, host
+# selection, and the clone-pruning rules `cross-check-refresh.sh` shares.
+# shellcheck source=cross-check-hosts.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cross-check-hosts.sh"
+
 # Which plan environment each host IS, and which native producer owns its
 # archive. Mirrors `.github/ci/environments.json`: only the WSL2 guest consumes
 # another environment's record.
@@ -141,10 +142,6 @@ declare -a CLONE_DIR=("" "" "" "")
 shell_args() {
     local arg
     for arg in "$@"; do printf '%q ' "$arg"; done
-}
-
-powershell_quote() {
-    printf "'%s'" "${1//\'/\'\'}"
 }
 
 powershell_args() {
@@ -159,15 +156,6 @@ powershell_args() {
 # native Windows. Linux and macOS legs prove nothing for the nightly's cells.
 is_rig() {
     [[ "$1" == "wsl" || "$1" == "windows" ]]
-}
-
-local_os() {
-    case "$(uname -s)" in
-        Darwin) echo macos ;;
-        Linux) if grep -qi microsoft /proc/version 2> /dev/null; then echo wsl; else echo linux; fi ;;
-        MINGW* | MSYS* | CYGWIN*) echo windows ;;
-        *) echo unknown ;;
-    esac
 }
 
 os_sel="all"
@@ -202,35 +190,7 @@ if [[ -z "${package}" ]]; then
     echo "cross-check: a package name is required (e.g. 'just cross-check biscuit-file')" >&2
     exit 2
 fi
-case "${os_sel}" in linux | windows | wsl | macos | all) ;; *)
-    echo "cross-check: --os must be linux, windows, wsl, macos, or all" >&2
-    exit 2
-    ;;
-esac
-
-# Resolve the requested OSes against what this machine declares available.
-# An explicit --os for an undeclared host is an error; `all` narrows to the
-# declared set minus the local OS and only errors when that set is empty.
-here="$(local_os)"
-declare -a want=("" "" "" "")
-skipped_local=""
-if [[ "${os_sel}" == "all" ]]; then
-    for os in "${ORDER[@]}"; do
-        [[ -n "${HOST[${os}]}" ]] || continue
-        if [[ "${os}" == "${here}" ]]; then skipped_local="${os}"; continue; fi
-        want[${os}]=1
-    done
-    if [[ -z "${want[*]// /}" ]]; then
-        echo "cross-check: no build host for an OS other than this one (${here}) is declared (set BUILD_LINUX, BUILD_WIN, BUILD_WSL, and/or BUILD_MACOS)" >&2
-        exit 2
-    fi
-else
-    if [[ -z "${HOST[${os_sel}]}" ]]; then
-        echo "cross-check: --os ${os_sel} requested but ${VAR[${os_sel}]} is not set" >&2
-        exit 2
-    fi
-    want[${os_sel}]=1
-fi
+select_hosts cross-check "${os_sel}"
 
 # Cargo build flags are what decides the mode. In archive mode the plan's
 # declared feature arguments are already baked into the archive and honoring an
@@ -283,48 +243,9 @@ base_sha="$(git rev-parse "${base_ref}")"
 
 # Per-run identity: names the shipped files on the host (unique, so two runs
 # can stage concurrently before one of them wins the lock) and labels the lock.
-short_host="$(hostname)"; short_host="${short_host%%.*}"
-# The id also names a Git ref below, and a host whose name carries `~`, `:`, or
-# a space would make `git update-ref` reject it.
-short_host="${short_host//[^A-Za-z0-9-]/-}"
+calling_host_identity
 run_id="${short_host}-$$-$(date +%s)"
-# One component of a clone directory's name. Lowercased: the Windows host's
-# file system is case-insensitive, and two spellings of one checkout must not
-# become two clones elsewhere.
-offset_part() {
-    local value="${1//[^A-Za-z0-9._-]/-}"
-    printf '%s' "${value}" | tr '[:upper:]' '[:lower:]'
-}
-if [[ "$(git rev-parse --path-format=absolute --git-dir)" \
-    == "$(git rev-parse --path-format=absolute --git-common-dir)" ]]; then
-    worktree="main"
-else
-    worktree="$(offset_part "$(basename "$(git rev-parse --show-toplevel)")")"
-fi
-# Runs of `-` collapse so the host part never contains `--`: the first `--` in
-# a clone directory's name is always the host/worktree separator, even for a
-# worktree whose own name contains one.
-origin_host="$(offset_part "${short_host}" | tr -s '-')"
 clone_offset="${origin_host}--${worktree}"
-# Every worktree of this repository that still exists here, spelled as its
-# clone directory's `<worktree>` part. The main checkout is listed first; an
-# entry git calls `prunable` has lost its directory and is gone.
-live_worktrees=()
-first_entry=1
-pending=""
-while IFS= read -r line; do
-    case "${line}" in
-        "worktree "*)
-            if ((first_entry)); then pending="main"; first_entry=0
-            else pending="$(offset_part "$(basename "${line#worktree }")")"; fi
-            ;;
-        prunable*) pending="" ;;
-        "")
-            [[ -n "${pending}" ]] && live_worktrees+=("${pending}")
-            pending=""
-            ;;
-    esac
-done < <(git worktree list --porcelain; echo)
 owner="${USER:-unknown}@${short_host} ${branch} ${base_sha:0:9} started $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # THE TESTED REVISION
@@ -425,107 +346,13 @@ else
     echo "  archive can carry the key this run would report; nothing here is publishable."
 fi
 
-# Prepare one host before any leg does work: remove the clones this origin host
-# left there for worktrees that no longer exist, then resolve (and create) this
-# checkout's clone directory and record it in CLONE_DIR.
-#
-# The coding dir is the host's own setting, so it is read on the host: a login
-# shell on Unix (the same environment the run itself gets) and the user
-# environment on Windows.
-#
-# Only `<this host>--*` directories are candidates, and one is removed only
-# when its worktree is not live here and its lock is not held. Removal is a
-# rename to `.cross-check-trash--<this host>--…` (instant, and the clone's name
-# is free at once) followed by a detached delete, because a Rust clone's
-# `target/` takes minutes to delete and no leg should wait on it. Nothing
-# reports whether that delete finishes, so every preparation also re-deletes
-# this origin's leftover trash. A rename that fails is reported and does not
-# stop the run.
-unix_prepare_script() {
-    cat <<EOF
-set -u
-coding="\${CODING_DIR:-\$HOME/coding}"
-mkdir -p "\$coding" && cd "\$coding" || exit 1
-coding="\$(pwd)"
-live=' ${live_worktrees[*]} '
-for dir in "\$coding"/'${origin_host}'--*/; do
-    [ -d "\$dir" ] || continue
-    dir="\${dir%/}"
-    tree="\${dir##*/}"
-    tree="\${tree#'${origin_host}'--}"
-    case "\$live" in *" \$tree "*) continue ;; esac
-    if [ -d "\$dir/.cross-check.lock" ]; then echo "stale-locked: \$dir"; continue; fi
-    if mv "\$dir" "\$coding/.cross-check-trash--\${dir##*/}-\$\$-\$(date +%s)"; then
-        echo "stale-removed: \$dir"
-    else
-        echo "stale-failed: \$dir"
-    fi
-done
-# Detached, so the SSH session ends without waiting for it.
-for trash in "\$coding"/.cross-check-trash--'${origin_host}'--*/; do
-    [ -d "\$trash" ] || continue
-    nohup rm -rf "\${trash%/}" < /dev/null > /dev/null 2>&1 &
-done
-dir="\$coding/${clone_offset}"
-mkdir -p "\$dir" || exit 1
-echo "clone-dir: \$dir"
-EOF
-}
-
-# The trash delete is started through WMI rather than as a child: Windows
-# OpenSSH ends a session's child processes with it. `\\?\` lifts the
-# 260-character path limit a deep `target\` exceeds.
-windows_prepare_script() {
-    local live="" name
-    for name in ${live_worktrees[@]+"${live_worktrees[@]}"}; do live+="'${name}',"; done
-    cat <<EOF
-\$ProgressPreference = 'SilentlyContinue'
-\$coding = if (\$env:CODING_DIR) { \$env:CODING_DIR } else { Join-Path \$env:USERPROFILE 'coding' }
-New-Item -ItemType Directory -Force -Path \$coding -ErrorAction Stop | Out-Null
-\$coding = (Resolve-Path -LiteralPath \$coding).Path
-\$live = @(${live%,})
-\$prefix = '${origin_host}--'
-foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory) {
-    if (-not \$entry.Name.StartsWith(\$prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
-    \$dir = \$entry.FullName
-    if (\$live -contains \$entry.Name.Substring(\$prefix.Length)) { continue }
-    if (Test-Path -LiteralPath (Join-Path \$dir '.cross-check.lock')) { Write-Output "stale-locked: \$dir"; continue }
-    \$trash = ".cross-check-trash--\$(\$entry.Name)-\$PID-\$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-    try { Rename-Item -LiteralPath \$dir -NewName \$trash -ErrorAction Stop; Write-Output "stale-removed: \$dir" }
-    catch { Write-Output "stale-failed: \$dir" }
-}
-foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory -Force) {
-    if (-not \$entry.Name.StartsWith(".cross-check-trash--\$prefix", [StringComparison]::OrdinalIgnoreCase)) { continue }
-    \$line = 'cmd.exe /c rd /s /q "\\\\?\\' + \$entry.FullName + '"'
-    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = \$line } | Out-Null
-}
-\$dir = Join-Path \$coding '${clone_offset}'
-New-Item -ItemType Directory -Force -Path \$dir -ErrorAction Stop | Out-Null
-Write-Output "clone-dir: \$dir"
-EOF
-}
-
+# Prepare one host before any leg does work: apply the clone-pruning rules
+# (`cross-check-hosts.sh`), then resolve and create this checkout's
+# clone directory and record it in CLONE_DIR.
 prepare_host() {
-    local os="$1" host="${HOST[$1]}" output dir line
-    if [[ "${os}" == "windows" ]]; then
-        # Encoded rather than inline: the command crosses the remote shell once
-        # more, and `$` does not reliably survive that on this host.
-        local encoded
-        encoded="$(windows_prepare_script | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
-        output="$("${SSH[@]}" "${host}" "powershell -NoProfile -EncodedCommand ${encoded}")" || return 1
-    else
-        output="$(unix_prepare_script | "${SSH[@]}" "${host}" "bash -ls")" || return 1
-    fi
-    output="$(printf '%s\n' "${output}" | tr -d '\r')"
-    while IFS= read -r line; do
-        case "${line}" in
-            "stale-removed: "*) echo "cross-check: removing stale clone ${host}:${line#stale-removed: } in the background (its worktree no longer exists here)" ;;
-            "stale-locked: "*) echo "cross-check: kept stale clone ${host}:${line#stale-locked: } — its lock is held" ;;
-            "stale-failed: "*) echo "cross-check: could not fully remove stale clone ${host}:${line#stale-failed: }; remove it by hand" >&2 ;;
-        esac
-    done <<< "${output}"
-    # The last marker line wins, so a chatty login profile cannot corrupt it.
-    dir="$(printf '%s\n' "${output}" | sed -n 's/^clone-dir: //p' | tail -n1)"
+    local os="$1" host="${HOST[$1]}" dir
+    prune_host cross-check "${os}" prepare "${clone_offset}" 0 || return 1
+    dir="${PRUNED_CLONE_DIR}"
     if [[ "${os}" == "windows" && ! "${dir}" =~ ^[A-Za-z]:\\ ]] || [[ "${os}" != "windows" && "${dir}" != /* ]]; then
         echo "cross-check: could not resolve the clone directory on ${host} (got: '${dir}')" >&2
         return 1

@@ -1,0 +1,117 @@
+{
+  "errors": [],
+  "groups": [
+    {
+      "package": null,
+      "stats": {
+        "by_kind": {
+          "Class": 8,
+          "Constant": 2,
+          "Constructor": 5,
+          "Enum": 1,
+          "EnumVariant": 2,
+          "Field": 10,
+          "Function": 18,
+          "Interface": 4,
+          "Method": 21,
+          "Module": 2,
+          "Namespace": 3,
+          "Property": 3,
+          "Trait": 1,
+          "Type": 4,
+          "TypeAlias": 2,
+          "Variable": 8
+        },
+        "by_language": {
+          "Bash": 3,
+          "C": 7,
+          "CSharp": 8,
+          "Cpp": 7,
+          "Go": 6,
+          "Java": 7,
+          "JavaScript": 5,
+          "Lua": 5,
+          "Perl": 4,
+          "Php": 5,
+          "Python": 5,
+          "Rust": 9,
+          "Scala": 6,
+          "Swift": 6,
+          "TypeScript": 8,
+          "Zsh": 3
+        },
+        "by_visibility": {
+          "Internal": 6,
+          "ModulePrivate": 4,
+          "Package": 1,
+          "Private": 5,
+          "Public": 53,
+          "Unknown": 25
+        },
+        "doc_coverage": {
+          "documented": 4,
+          "ratio": 0.05063291139240506,
+          "total": 79,
+          "unavailable": 15
+        },
+        "synthetic_exports": 0
+      }
+    }
+  ],
+  "package_root_dir": "<ROOT>",
+  "report_schema_version": 1,
+  "root_dir": "<ROOT>",
+  "stats": {
+    "by_kind": {
+      "Class": 8,
+      "Constant": 2,
+      "Constructor": 5,
+      "Enum": 1,
+      "EnumVariant": 2,
+      "Field": 10,
+      "Function": 18,
+      "Interface": 4,
+      "Method": 21,
+      "Module": 2,
+      "Namespace": 3,
+      "Property": 3,
+      "Trait": 1,
+      "Type": 4,
+      "TypeAlias": 2,
+      "Variable": 8
+    },
+    "by_language": {
+      "Bash": 3,
+      "C": 7,
+      "CSharp": 8,
+      "Cpp": 7,
+      "Go": 6,
+      "Java": 7,
+      "JavaScript": 5,
+      "Lua": 5,
+      "Perl": 4,
+      "Php": 5,
+      "Python": 5,
+      "Rust": 9,
+      "Scala": 6,
+      "Swift": 6,
+      "TypeScript": 8,
+      "Zsh": 3
+    },
+    "by_visibility": {
+      "Internal": 6,
+      "ModulePrivate": 4,
+      "Package": 1,
+      "Private": 5,
+      "Public": 53,
+      "Unknown": 25
+    },
+    "doc_coverage": {
+      "documented": 4,
+      "ratio": 0.05063291139240506,
+      "total": 79,
+      "unavailable": 15
+    },
+    "synthetic_exports": 0
+  }
+}

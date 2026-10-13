@@ -188,6 +188,12 @@ Positive criteria — comments worth their length:
 Update alongside code changes:
 
 - READMEs when public behavior changes
+    - **a README is only an overview, never the canonical document**: what
+      the package or CLI is, how to install it, a few examples, and links
+      into `docs/`. Command, flag and output references (for example a CLI
+      usage guide such as `tree-hugger/docs/cli.md`) live in the area's
+      `docs/` tree; a README that has grown into a reference is cut back to
+      an overview and its content moved there
 - the area's `docs/` topic pages when behavior changes; **the `docs/` tree is
   the current record of how a package behaves**, so a page that describes
   behavior that no longer exists, or omits behavior that does, is a defect of

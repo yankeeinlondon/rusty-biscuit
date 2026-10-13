@@ -28,7 +28,10 @@ configuring WSL itself; the `rust-testing` skill owns test design.
 
 Build hosts are declared by environment variables (`BUILD_LINUX`, `BUILD_WIN`,
 `BUILD_WSL`, `BUILD_MACOS`), each an SSH destination. A set variable means the
-host is available from this machine; unset means it is not. Never hardcode an
+host is available from this machine; unset means no destination is configured
+for the runner. If the user says a rig is available, inspect the SSH config
+for its documented OS role, verify connectivity, and supply the matching
+`BUILD_*` value for that invocation. Never hardcode an
 alias; check `env | grep '^BUILD_'` first and report which hosts you had.
 
 | Need | Use | Detail |

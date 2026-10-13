@@ -25,8 +25,18 @@
   name: (object_pattern
     (shorthand_property_identifier_pattern) @local.definition.var))
 
-(import_specifier
+; Imports: only the name each import binds: a default import, a
+; specifier's alias (else its name), `* as ns`. An aliased specifier's
+; original name (`a` in `{ a as b }`) is never bound.
+(import_clause
   (identifier) @local.definition.import)
+
+(import_specifier
+  name: (identifier) @local.definition.import
+  !alias)
+
+(import_specifier
+  alias: (identifier) @local.definition.import)
 
 (namespace_import
   (identifier) @local.definition.import)

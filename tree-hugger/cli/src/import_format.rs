@@ -24,30 +24,6 @@ pub(crate) fn group_imports(imports: &[ImportSymbol]) -> Vec<Vec<&ImportSymbol>>
     result
 }
 
-pub(crate) fn dedupe_import_group<'a>(imports: &'a [&'a ImportSymbol]) -> Vec<&'a ImportSymbol> {
-    let mut alias_originals = HashSet::new();
-    for import in imports {
-        if import.alias.is_some()
-            && let Some(original) = import.original_name.as_deref()
-        {
-            alias_originals.insert((import.source.as_deref(), original));
-        }
-    }
-
-    let mut result = Vec::new();
-    for import in imports {
-        let is_alias_shadow = import.alias.is_none()
-            && import.original_name.is_none()
-            && alias_originals.contains(&(import.source.as_deref(), import.name.as_str()));
-        if is_alias_shadow {
-            continue;
-        }
-        result.push(*import);
-    }
-
-    result
-}
-
 pub(crate) fn format_import_locations(imports: &[&ImportSymbol]) -> (String, usize) {
     let mut positions: Vec<(usize, usize)> = imports
         .iter()
@@ -138,71 +114,69 @@ pub(crate) fn format_python_import_group(imports: &[&ImportSymbol]) -> String {
         .filter_map(|import| import.source.as_deref())
         .collect();
 
-    let specs = |import: &ImportSymbol| {
-        if let Some(alias) = import.alias.as_deref() {
-            let original = import.original_name.as_deref().unwrap_or(&import.name);
-            format!("{} as {}", original, alias)
-        } else {
-            import.name.clone()
+    // An `import` statement entry binds its module (`import a`, `import a.b
+    // as c`, whose original is the module) or the module's first segment
+    // (`import a.b` binds `a`); a `from` entry binds a name of its module.
+    // An unaliased `from a.b import a` is indistinguishable from
+    // `import a.b` here and is shown as the latter.
+    let is_import_entry = |import: &ImportSymbol| {
+        let Some(source) = import.source.as_deref() else { return false };
+        match import.alias.as_deref() {
+            Some(_) => import.original_name.as_deref() == Some(source),
+            None => {
+                import.name == source
+                    || source.strip_prefix(import.name.as_str()).is_some_and(|rest| rest.starts_with('.'))
+            }
         }
     };
+    let import_spec = |import: &ImportSymbol| match import.alias.as_deref() {
+        Some(alias) => format!("{} as {}", import.original_name.as_deref().unwrap_or(&import.name), alias),
+        None => import.source.clone().unwrap_or_else(|| import.name.clone()),
+    };
+    let from_spec = |import: &ImportSymbol| match (import.original_name.as_deref(), import.alias.as_deref()) {
+        (Some("*"), _) => "*".to_string(),
+        (original, Some(alias)) => format!("{} as {}", original.unwrap_or(&import.name), alias),
+        _ => import.name.clone(),
+    };
 
-    if sources.len() == 1 {
+    if sources.len() == 1 && !imports.iter().all(|import| is_import_entry(import)) {
         let source = *sources.iter().next().unwrap();
-        let is_import_stmt = imports.iter().all(|import| {
-            import.source.as_deref() == Some(source)
-                && (import.name == source || import.original_name.as_deref() == Some(source))
-        });
-        let spec_list = imports
-            .iter()
-            .map(|import| specs(import))
-            .collect::<Vec<_>>()
-            .join(", ");
-        if is_import_stmt {
-            format!("import {}", spec_list)
-        } else {
-            format!("from {} import {}", source, spec_list)
-        }
+        let spec_list = imports.iter().map(|import| from_spec(import)).collect::<Vec<_>>().join(", ");
+        format!("from {} import {}", source, spec_list)
     } else {
-        let spec_list = imports
-            .iter()
-            .map(|import| specs(import))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let spec_list = imports.iter().map(|import| import_spec(import)).collect::<Vec<_>>().join(", ");
         format!("import {}", spec_list)
     }
 }
 
+/// `use` with each entry's whole path (`source::original as alias`,
+/// `source::*` for a glob), grouped under the shared source when every
+/// entry has the same one.
 pub(crate) fn format_rust_import_group(imports: &[&ImportSymbol]) -> String {
-    let source = imports.first().and_then(|import| import.source.as_deref());
-    let specs = imports
-        .iter()
-        .map(|import| {
-            if let Some(alias) = import.alias.as_deref() {
-                let original = import.original_name.as_deref().unwrap_or(&import.name);
-                let stripped = source
-                    .and_then(|src| original.strip_prefix(&format!("{}::", src)))
-                    .unwrap_or(original);
-                format!("{} as {}", stripped, alias)
-            } else {
-                import.name.clone()
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if let Some(source) = source {
-        if specs.len() == 1 {
-            let spec = &specs[0];
-            if spec.contains("::") {
-                format!("use {}", spec)
-            } else {
-                format!("use {}::{}", source, spec)
-            }
-        } else {
-            format!("use {}::{{{}}}", source, specs.join(", "))
+    let tail = |import: &ImportSymbol| {
+        let original = import.original_name.as_deref();
+        match (original, import.alias.as_deref()) {
+            (Some("*"), _) => "*".to_string(),
+            (original, Some(alias)) => format!("{} as {}", original.unwrap_or(&import.name), alias),
+            _ => import.name.clone(),
         }
-    } else {
-        format!("use {}", specs.join(", "))
+    };
+    // A glob's source is its whole path; the others' is their module.
+    let full = |import: &ImportSymbol| match import.source.as_deref() {
+        Some(source) => format!("{}::{}", source, tail(import)),
+        None => tail(import),
+    };
+
+    let first = imports.first().and_then(|import| import.source.as_deref());
+    let shared =
+        imports.len() > 1 && first.is_some() && imports.iter().all(|import| import.source.as_deref() == first);
+    if shared {
+        let tails = imports.iter().map(|import| tail(import)).collect::<Vec<_>>().join(", ");
+        return format!("use {}::{{{}}}", first.unwrap_or_default(), tails);
+    }
+    match imports {
+        [single] => format!("use {}", full(single)),
+        _ => format!("use {{{}}}", imports.iter().map(|import| full(import)).collect::<Vec<_>>().join(", ")),
     }
 }
 
@@ -212,7 +186,9 @@ pub(crate) fn format_go_import_group(imports: &[&ImportSymbol]) -> String {
         .map(|import| {
             let path = import.source.as_deref().unwrap_or(&import.name);
             let quoted = format!("\"{}\"", path);
-            if let Some(alias) = import.alias.as_deref() {
+            if import.original_name.as_deref() == Some("*") {
+                format!(". {}", quoted)
+            } else if let Some(alias) = import.alias.as_deref() {
                 format!("{} {}", alias, quoted)
             } else {
                 quoted
@@ -249,7 +225,13 @@ pub(crate) fn format_java_import_group(imports: &[&ImportSymbol]) -> String {
 pub(crate) fn format_csharp_import_group(imports: &[&ImportSymbol]) -> String {
     let specs = imports
         .iter()
-        .map(|import| import.source.as_deref().unwrap_or(&import.name).to_string())
+        .map(|import| {
+            let target = import.source.as_deref().unwrap_or(&import.name);
+            match import.alias.as_deref() {
+                Some(alias) => format!("{alias} = {target}"),
+                None => target.to_string(),
+            }
+        })
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -273,19 +255,17 @@ pub(crate) fn format_php_import_group(imports: &[&ImportSymbol]) -> String {
     format!("use {}", specs)
 }
 
+/// `import` with each entry's path (`a.b.C`), a rename as `a.D as E` and
+/// an on-demand import as `a.b.*` or `a.given`.
 pub(crate) fn format_scala_import_group(imports: &[&ImportSymbol]) -> String {
-    if let Some(source) = imports.first().and_then(|import| import.source.as_deref()) {
-        return format!("import {}", source);
-    }
-
     let specs = imports
         .iter()
         .map(|import| {
-            if let Some(alias) = import.alias.as_deref() {
-                let original = import.original_name.as_deref().unwrap_or(&import.name);
-                format!("{} => {}", original, alias)
-            } else {
-                import.name.clone()
+            let path = import.source.as_deref().unwrap_or(&import.name);
+            match (import.original_name.as_deref(), import.alias.as_deref()) {
+                (Some(opened @ ("*" | "given")), _) => format!("{}.{}", path, opened),
+                (_, Some(alias)) => format!("{} as {}", path, alias),
+                _ => path.to_string(),
             }
         })
         .collect::<Vec<_>>()
