@@ -4,17 +4,23 @@
   <tr>
     <td><img src="../assets/schematic-2.png" style="max-width='25%'" width=200px /></td>
     <td>
-      <p>This package includes four sub-packages which are all aligned to create strongly typed, ergonomic API clients:</p>
+      <p>This package area includes the sub-packages that together produce strongly typed, ergonomic API clients:</p>
       <ul>
         <li><code>define</code> - <i>provides primitives for defining an API, Request and Response schemas, and REST, Websocket, or Multi-part Form Endpoints</i></li>
         <li>
             <code>definitions</code> - <i>uses the primitives from <code>define</code> to define an API surface</i>
         </li>
         <li>
-            <code>gen</code> - <i>takes the definitions found in the <code>definitions</code> package and generates structs and enums to represent these API definitions including a fully functioning network client</i>
+            <code>gen</code> - <i>takes the definitions found in the <code>definitions</code> package and generates the request and response types for each API, plus WebSocket clients</i>
+        </li>
+        <li>
+            <code>runtime</code> - <i>the hand-written runtime every generated REST client sends through: credentials, redirects, timeouts, and the response envelope</i>
         </li>
         <li>
             <code>schema</code> - <i>this is where the finalized API and schema definition go for use by external libraries</i>
+        </li>
+        <li>
+            <code>oauth</code> - <i>obtains and refreshes OAuth2 tokens to pass to a client as credentials</i>
         </li>
       </ul>
       <p></p>
@@ -52,10 +58,10 @@ schematic/
                └──────────────┬──────────────┘
                               │
                               ▼
-               ┌─────────────────────────────┐
-               │      schematic-schema       │
-               │   (generated API clients)   │
-               └─────────────────────────────┘
+               ┌─────────────────────────────┐     ┌─────────────────────────────┐
+               │      schematic-schema       │────►│     schematic-runtime       │
+               │   (generated API clients)   │     │ (sends every REST request)  │
+               └─────────────────────────────┘     └─────────────────────────────┘
 
                               ┌─────────────────────────────┐
                               │      schematic-oauth        │
@@ -63,38 +69,49 @@ schematic/
                               └─────────────────────────────┘
 ```
 
+Generated REST code only describes an API: a marker type such as `OpenAI`,
+an `OpenAIClient` alias, and one request struct per endpoint. Sending,
+credentials, redirects, timeouts, and the response envelope live once in
+`schematic-runtime`.
+
 ## Quick Start
 
 ```rust
+use schematic_schema::openai::{ListModelsRequest, RetrieveModelRequest};
 use schematic_schema::prelude::*;
 
 #[tokio::main]
-async fn main() -> Result<(), SchematicError> {
-    let client = OpenAI::new();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = OpenAI::builder()
+        .credentials(Credential::access_token(std::env::var("OPENAI_API_KEY")?))
+        .build()?;
 
     // List all models (no required params - use Default)
-    let models: ListModelsResponse = client
-        .request(ListModelsRequest::default())
-        .await?;
-
+    let models = client
+        .send(ListModelsRequest::default(), &CallOptions::new())
+        .await? // Err only when no HTTP response arrived
+        .into_result()?; // Err(ApiError) for any non-2xx or undecodable reply
     println!("Found {} models", models.data.len());
 
-    // Retrieve a specific model - type-safe construction with new()
-    let model: Model = client
-        .request(RetrieveModelRequest::new("gpt-4"))
+    // Required path parameters go through new(), or From<&str> for one parameter
+    let response = client
+        .send(RetrieveModelRequest::from("gpt-4"), &CallOptions::new())
         .await?;
+    println!("{} (request id {:?})", response.meta.status, response.meta.request_id);
+    if let Some(model) = response.data() {
+        println!("Model: {}", model.id);
+    }
 
-    // Or use From<&str> for single-param requests
-    let model: Model = client
-        .request(RetrieveModelRequest::from("gpt-4"))
-        .await?;
-
-    // Access documentation URL
     println!("API docs: {:?}", OpenAI::DOCS_URL);
-    println!("Model: {}", model.id);
     Ok(())
 }
 ```
+
+A send returns `Ok` with a `Response` envelope whenever the server
+answered, whatever the status; the envelope carries the decoded value or the
+failure with its raw body, plus the status, headers, and request id.
+`Err(TransportError)` means no response arrived. See
+[the runtime docs](./docs/runtime/README.md).
 
 ## WebSocket Quick Start
 
@@ -139,8 +156,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [schematic-definitions](./definitions/) | Pre-built API definitions      | [README](./definitions/README.md) |
 | [schematic-gen](./gen/)                 | Code generator CLI/library     | [README](./gen/README.md)         |
 | [schematic-oauth](./oauth/)             | OAuth2 runtime library         | Token lifecycle, storage          |
-| [schematic-runtime](./runtime/)         | Request runtime library        | Managed client with typed send and raw send (`send_raw`), envelope, errors, redaction, credentials, deadline, cross-origin policy and redirect following, response hooks (`pre_response_json`, typed `mutate_response`); generated clients adopt it later (planned) |
+| [schematic-runtime](./runtime/)         | Request runtime library        | [README](./runtime/README.md)     |
 | [schematic-schema](./schema/)           | Generated API clients          | [README](./schema/README.md)      |
+
+Topic documentation lives in [`docs/`](./docs/):
+
+- [`docs/runtime/`](./docs/runtime/README.md) - sending requests and reading responses with a generated client
+- [`docs/generation/`](./docs/generation/request-side.md) - how request structs become HTTP requests, generation validation, and partial generation
+- [`docs/headers/`](./docs/headers/README.md) - credential precedence and the `Headers` builder
+- [`docs/io/`](./docs/io/) - OpenAPI and Postman import and export
 
 ## Available APIs
 
@@ -168,113 +192,68 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 ## Key Features
 
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
-- **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors
+- **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors, and a client accepts only its own API's requests
 - **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
-- **Automatic authentication**: Bearer, API Key, Basic, and OAuth2 auth with env var fallback chains
-- **Runtime configuration**: `DOCS_URL` constant on API structs, `variant()` builder for alternate environments
-- **Response hooks**: Pre-response JSON transformation and type-safe post-response mutation via `VariantBuilder`
-- **Proper error handling**: `MissingCredential` errors with documented error handling patterns
-- **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
-- **Multiple response types**: JSON, Text, Binary, and Empty responses with type-specific methods and `#[must_use]` attributes
+- **One response envelope**: every reply that arrived, whatever its status, is an `Ok(Response)` with the decoded value or the failure (raw body kept), plus status, headers, and request id; `Err(TransportError)` means no reply arrived
+- **Credentials**: Bearer, API Key (header, query, or cookie), Basic, and OAuth2 tokens, supplied per call, per client, or from env var fallback chains; a missing credential sends anonymously
+- **Safe redirects**: the runtime follows redirects itself under a per-API cross-origin policy and sends the credential only where that policy allows
+- **Deadlines**: a per-request timeout plus a `Deadline` shared across many sends
+- **Response hooks**: client-global JSON transformation (`pre_response_json`) and type-safe per-endpoint mutation (`mutate_response`)
+- **Redacted metadata**: request and response metadata never stores a credential, so it is safe to log
+- **Multiple response types**: JSON, Text, Binary, and Empty responses, each with its own success type (`T`, `String`, `bytes::Bytes`, `()`)
 - **Per-API modules**: Each API gets its own module file with configurable paths
 - **Prelude exports**: Convenient imports via `use schematic_*::prelude::*`
 - **Validation**: Pre-generation checks for naming collisions and configuration errors
 - **Doc examples**: Generated request structs include usage examples in doc comments
-- **Future-proof enums**: All public enums use `#[non_exhaustive]` for backward-compatible extension
+- **Future-proof enums**: Public enums that may grow are `#[non_exhaustive]`
 - **OpenAPI import**: Import any OpenAPI 3.x spec to generate a typed Rust client
 - **OpenAPI export**: Export existing API definitions to OpenAPI 3.0.3 specs (JSON or YAML)
 
-## Variant Builder & Response Hooks
+## Using a Generated Client
 
-The `variant()` builder creates alternate API client configurations with optional response hooks. This enables environment switching, staging/production setups, and response transformation.
-
-### Basic Variant
-
-```rust
-use schematic_define::UpdateStrategy;
-
-let client = OpenAI::new();
-
-// Simple environment switch
-let staging = client.variant_with(
-    "https://staging.api.com/v1",
-    vec!["STAGING_API_KEY".to_string()],
-    UpdateStrategy::NoChange,
-);
-```
-
-### Programmatic Authentication
-
-Inject tokens programmatically without requiring environment variables:
+Every REST API module exposes `{Api}::new()` for a client with every
+default and `{Api}::builder()` for one you adjust. Both return
+`Result<{Api}Client, BuildError>`.
 
 ```rust
-use schematic_define::Headers;
+use std::time::Duration;
 
-// Token from runtime source (Vault, OAuth, config file, etc.)
-let token = get_token_from_somewhere();
+use schematic_schema::openai::ListModelsRequest;
+use schematic_schema::prelude::*;
 
-// Create client with programmatic token - no env vars needed!
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token(token))
-    .build();
-```
-
-When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. No need to also set `AuthStrategy::None`.
-
-### OAuth2 Authentication
-
-For APIs using OAuth2, obtain a token via `schematic-oauth` and inject it programmatically:
-
-```rust
-use schematic_oauth::{OAuth2Manager, OAuth2RuntimeConfig, MemoryTokenStore};
-use schematic_define::Headers;
-
-// Configure OAuth2 manager from API's OAuth2Config
-let manager = OAuth2Manager::new(runtime_config, Box::new(MemoryTokenStore::new()));
-
-// Get a valid token (refreshes automatically if expired)
-let token = manager.get_valid_token().await?;
-
-// Inject into any API client
-let client = GitHub::new()
-    .variant_with_headers(Headers::default().use_bearer_token(token));
-```
-
-### Builder Pattern with Hooks
-
-```rust
-let staging = client.variant()
+let client = OpenAI::builder()
     .base_url("https://staging.api.com/v1")
-    .env_auth(vec!["STAGING_API_KEY".to_string()])
-    .auth_update(UpdateStrategy::NoChange)
-    // Pre-response: transform raw JSON before deserialization
-    .pre_response_json(|ctx, json| {
-        // Unwrap envelope: { "data": { ... } } → { ... }
-        if let Some(inner) = json.get("data").cloned() {
-            Ok(inner)
-        } else {
-            Ok(json)
-        }
-    })
-    // Post-response: mutate typed response after deserialization
-    .mutate_response::<ListModelsRequest>(|ctx, response| {
-        response.data.retain(|m| !m.id.contains("deprecated"));
+    .timeout(Duration::from_secs(10))
+    .credentials(Credential::access_token(token)) // used when a call supplies none
+    // Unwrap { "data": { ... } } before decoding, for every JSON reply
+    .pre_response_json(|_meta, json| Ok(json.get("data").cloned().unwrap_or(json)))
+    // Adjust one endpoint's decoded value
+    .mutate_response::<ListModelsRequest, _>(|_meta, models| {
+        models.data.retain(|model| !model.id.contains("deprecated"));
         Ok(())
     })
-    .build();
+    .build()?;
+
+// A different credential for one call, or none at all
+let options = CallOptions::new().credential(Credential::access_token(user_token));
+let public = CallOptions::anonymous();
 ```
 
-### Hook Types
+For OAuth2 APIs, obtain a token with `schematic-oauth` and pass it as an
+access token; the runtime does not run OAuth flows itself:
 
-| Hook | Signature | Runs |
-|------|-----------|------|
-| `pre_response_json` | `Fn(&ResponseContext, Value) → Result<Value>` | Before deserialization, on raw JSON |
-| `mutate_response::<R>` | `Fn(&ResponseContext, &mut R::Response) → Result<()>` | After deserialization, per-endpoint |
+```rust
+use schematic_oauth::{MemoryTokenStore, OAuth2Manager};
 
-- **`ResponseContext`** provides: `endpoint_id`, `method`, `path`, `url`, `status`, `headers`
-- **`EndpointSpec`** trait on request structs enables type-safe `mutate_response` registration
-- Hooks are stored in `Arc` and the variant is `Clone`-able
+let manager = OAuth2Manager::new(runtime_config, Box::new(MemoryTokenStore::new()))?;
+let token = manager.get_valid_token().await?; // refreshes when expired
+let client = GitHub::builder().credentials(Credential::access_token(token)).build()?;
+```
+
+The runtime never retries; a second attempt is an explicit second call. The
+[runtime docs](./docs/runtime/README.md) cover the envelope and its failure
+kinds, credentials, redirects and origins, deadlines, hooks, raw sends, and
+redaction.
 
 ## Artifact Generation
 
@@ -385,20 +364,20 @@ Exported specs include `x-schematic` extensions for round-trip fidelity (module 
 
 ### 1. Response Type Verification
 
-The generator produces different methods based on `ApiResponse` types:
+Each request struct's `EndpointSpec` impl takes its codec and success type from the endpoint's `ApiResponse`:
 
-| Response Type | Generated Method | Return Type |
-|---------------|------------------|-------------|
-| `ApiResponse::Json(schema)` | `request<T>()` | `Result<T, SchematicError>` |
-| `ApiResponse::Binary` | `request_bytes()` | `Result<bytes::Bytes, SchematicError>` |
-| `ApiResponse::Text` | `request_text()` | `Result<String, SchematicError>` |
-| `ApiResponse::Empty` | `request_empty()` | `Result<(), SchematicError>` |
+| Response Type | Codec (`type Decoder`) | Success type |
+|---------------|------------------------|--------------|
+| `ApiResponse::Json(schema)` | `schematic_runtime::Json<T>` | `T` |
+| `ApiResponse::Binary` | `schematic_runtime::Binary` | `bytes::Bytes` |
+| `ApiResponse::Text` | `schematic_runtime::Text` | `String` |
+| `ApiResponse::Empty` | `schematic_runtime::Empty` | `()` |
 
 **When adding endpoints with non-JSON responses:**
 
-1. **Verify the response type is correct** - Binary audio endpoints must use `ApiResponse::Binary`, not `ApiResponse::Json`
-2. **Test the generated code compiles** - Run `cargo check -p schematic-schema`
-3. **Run generation tests** - `schematic-gen` e2e tests verify response-method generation (`response.bytes()`, `response.text()`, etc.), but they do not exercise live provider HTTP behavior
+1. **Verify the response type is correct** - Binary audio endpoints must use `ApiResponse::Binary`, not `ApiResponse::Json`; a JSON codec on a binary endpoint gives callers the wrong success type and reports every reply as `MalformedSuccess`
+2. **Test the generated code compiles** - Run `cargo check --manifest-path schematic/schema/Cargo.toml` (the generated crate is outside the workspace)
+3. **Run generation tests** - `schematic-gen` e2e tests verify the codec each endpoint declares, but they do not exercise live provider HTTP behavior
 
 ### 2. Module Path Configuration
 
@@ -430,8 +409,10 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
 - ✅ The query strings the generated Gitea, GitLab, and OpenAI clients put on the wire match recorded request lines, captured by a local listener
 - ✅ Unit test coverage for individual generators
 
+- ✅ Freshly generated fixture APIs send through the runtime against local mocks: wire bytes, credentials, codecs, hooks, and definition settings
+- ✅ The runtime's own behavior (envelope, credentials, redirects, deadlines, raw sends, hooks, redaction) against loopback mocks, plus compile-fail cases for misuse
+
 **Current tests DO NOT verify:**
-- ❌ Runtime behavior of response decoding (binary responses actually call `.bytes()`)
 - ❌ Integration with real APIs
 - ❌ Runtime behavior of combined shared-module APIs
 
@@ -446,11 +427,11 @@ just -f schematic/justfile test
 # 2. Regenerate all schemas
 just -f schematic/justfile generate
 
-# 3. Verify generated code compiles
-cargo check -p schematic-schema
+# 3. Verify generated code compiles (schematic-schema is outside the workspace)
+cargo check --manifest-path schematic/schema/Cargo.toml
 
-# 4. For response type changes, manually verify correct method is generated:
-grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
+# 4. For response type changes, check the codec each endpoint declares:
+grep -rn "type Decoder" schematic/schema/src/
 ```
 
 ## Building
