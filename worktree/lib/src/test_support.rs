@@ -6,7 +6,7 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -110,8 +110,11 @@ fn has_branch(origin: &Path, branch: &str) -> bool {
 }
 
 /// This package's directory, read at run time so an archived test run on
-/// another host resolves its own copy rather than the producer's path.
-pub(crate) fn package_dir() -> PathBuf {
+/// another host resolves its own copy rather than the producer's path. Only
+/// the FSEvents and ReadDirectoryChangesW tests call it.
+#[cfg(any(target_os = "macos", windows))]
+pub(crate) fn package_dir() -> std::path::PathBuf {
+    use std::path::PathBuf;
     std::env::var_os("CARGO_MANIFEST_DIR")
         .filter(|dir| !dir.is_empty())
         .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
