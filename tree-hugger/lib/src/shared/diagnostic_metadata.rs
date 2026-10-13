@@ -141,11 +141,13 @@ pub struct DiagnosticMetadata {
     pub default_severity: crate::shared::DiagnosticSeverity,
     /// The effective severity after policy application.
     pub effective_severity: crate::shared::DiagnosticSeverity,
-    /// Whether this rule is enabled by default.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// Whether this rule is enabled by default. `false` is written by
+    /// omitting the key, so an absent key reads as `false`.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub is_enabled_by_default: bool,
     /// Whether this rule requires experimental semantics to be enabled.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// Written and read like `is_enabled_by_default`.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub requires_experimental_semantics: bool,
 }
 

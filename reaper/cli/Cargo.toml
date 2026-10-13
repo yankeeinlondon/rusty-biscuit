@@ -11,3 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 reaper = { path = "../lib" }
+
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"

@@ -20,6 +20,15 @@
   name: (name) @local.definition.enum) @local.scope @local.definition.enum.context
   (#set! definition.enum.scope "parent"))
 
+; Enum cases, unit and backed
+(enum_case
+  name: (name) @local.definition.enum_variant) @local.definition.enum_variant.context
+
+; Named namespaces, semicolon and braced; a global `namespace { … }` has no
+; name and declares none
+(namespace_definition
+  name: (namespace_name) @local.definition.namespace) @local.definition.namespace.context
+
 ; Methods - capture full node for signature extraction
 ((method_declaration
   name: (name) @local.definition.method) @local.scope @local.definition.method.context
@@ -38,7 +47,7 @@
 ; Definitions
 ;------------
 (simple_parameter
-  (variable_name
+  name: (variable_name
     (name) @local.definition.var))
 
 (foreach_statement
@@ -55,13 +64,28 @@
 
 (property_declaration
   (property_element
-    (variable_name
+    name: (variable_name
       (name) @local.definition.field)))
 
-; Imports (use statements)
+(const_declaration
+  (const_element
+    .
+    (name) @local.definition.constant))
+
+; Imports (use statements): only the name each clause binds, its alias or
+; else its path's last segment (`use A;`, `use A\B;`, `B` in
+; `use A\{B, C as D};`); a qualifier and an aliased original are reads.
+(namespace_use_clause
+  alias: (name) @local.definition.import)
+
+(namespace_use_clause
+  (name) @local.definition.import
+  !alias)
+
 (namespace_use_clause
   (qualified_name
-    (name) @local.definition.import))
+    (name) @local.definition.import)
+  !alias)
 
 ; References
 ;------------

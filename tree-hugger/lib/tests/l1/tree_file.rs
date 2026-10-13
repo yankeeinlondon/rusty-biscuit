@@ -5,8 +5,13 @@ use biscuit_test_harness::manifest_dir;
 use tempfile::TempDir;
 use tree_hugger::{ProgrammingLanguage, TreeFile, TreeHuggerError};
 
-#[test]
-fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
+crate::language_cases::language_tests!(parses_all_fixtures => check_parse_fixture);
+
+fn check_parse_fixture(language: ProgrammingLanguage) {
+    parse_fixture(language).expect("fixture parse and extraction");
+}
+
+fn parse_fixture(language: ProgrammingLanguage) -> Result<(), TreeHuggerError> {
     let fixtures = vec![
         ("sample.rs", ProgrammingLanguage::Rust, true),
         ("sample.js", ProgrammingLanguage::JavaScript, true),
@@ -26,7 +31,8 @@ fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
         ("sample.lua", ProgrammingLanguage::Lua, true),
     ];
 
-    for (file, language, expect_symbols) in fixtures {
+    assert!(fixtures.iter().any(|row| row.1 == language), "{language}: no fixture row");
+    for (file, language, expect_symbols) in fixtures.into_iter().filter(|row| row.1 == language) {
         let path = fixture_path(file);
         let tree_file = TreeFile::new(&path)?;
         assert_eq!(tree_file.language, language, "language mismatch for {file}");
@@ -334,7 +340,7 @@ fn emits_symbol_records_v2() -> Result<(), TreeHuggerError> {
     assert!(
         records
             .iter()
-            .all(|record| record.schema_version.major == 2)
+            .all(|record| record.schema_version.major == 5)
     );
 
     Ok(())
@@ -345,7 +351,7 @@ fn emits_symbol_index_v2_with_completed_passes() -> Result<(), TreeHuggerError> 
     let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
     let index = tree_file.symbol_index_v2()?;
 
-    assert_eq!(index.schema_version.major, 2);
+    assert_eq!(index.schema_version.major, 5);
     assert!(
         index
             .completed_passes
@@ -881,15 +887,15 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
         "GreetingService should be SymbolKind::Interface"
     );
 
-    // Check that GreetFn type alias is captured as Type
+    // Check that GreetFn type alias is captured as TypeAlias
     let greet_fn = symbols
         .iter()
         .find(|s| s.name == "GreetFn")
         .expect("should find GreetFn");
     assert_eq!(
         greet_fn.kind,
-        tree_hugger::SymbolKind::Type,
-        "GreetFn type alias should be SymbolKind::Type"
+        tree_hugger::SymbolKind::TypeAlias,
+        "GreetFn type alias should be SymbolKind::TypeAlias"
     );
 
     // Check that Status enum is captured as Enum, not Type
@@ -1069,13 +1075,22 @@ fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
     let tree_file = TreeFile::new(fixture_path("types.java"))?;
     let symbols = tree_file.symbols()?;
 
-    // Class should be Type (Java classes are the primary type mechanism)
+    // Class should be Class, so class filtering is consistent across languages
     let point = symbols.iter().find(|s| s.name == "Point");
     assert!(point.is_some(), "should find Point class");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "Java class should be SymbolKind::Type"
+        tree_hugger::SymbolKind::Class,
+        "Java class should be SymbolKind::Class"
+    );
+
+    // Interface should be Interface
+    let service = symbols.iter().find(|s| s.name == "GreetingService");
+    assert!(service.is_some(), "should find GreetingService interface");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger::SymbolKind::Interface,
+        "Java interface should be SymbolKind::Interface"
     );
 
     // Enum should be Enum
@@ -1122,13 +1137,13 @@ fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
         "C enum should be SymbolKind::Enum"
     );
 
-    // Typedef should be Type
+    // A typedef names another type: TypeAlias
     let alias = symbols.iter().find(|s| s.name == "PointAlias");
     assert!(alias.is_some(), "should find PointAlias typedef");
     assert_eq!(
         alias.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "C typedef should be SymbolKind::Type"
+        tree_hugger::SymbolKind::TypeAlias,
+        "C typedef should be SymbolKind::TypeAlias"
     );
 
     Ok(())
@@ -1148,13 +1163,13 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
         "C++ struct should be SymbolKind::Type"
     );
 
-    // Class should be Type
+    // Class should be Class, as in every language with a class keyword
     let greeter = symbols.iter().find(|s| s.name == "Greeter");
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger::SymbolKind::Type,
-        "C++ class should be SymbolKind::Type"
+        tree_hugger::SymbolKind::Class,
+        "C++ class should be SymbolKind::Class"
     );
 
     // Enum should be Enum
@@ -1616,19 +1631,8 @@ fn extracts_csharp_type_metadata() -> Result<(), TreeHuggerError> {
         "Status should have Success variant"
     );
 
-    // Interface should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "IGreetingService")
-        .expect("should find IGreetingService interface");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("IGreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "Greet"),
-        "IGreetingService should have Greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "IGreetingService", "Greet");
 
     // Record should have fields
     let person = symbols
@@ -1689,19 +1693,8 @@ fn extracts_swift_type_metadata() -> Result<(), TreeHuggerError> {
         "Greeter should have field prefix"
     );
 
-    // Protocol should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "GreetingService")
-        .expect("should find GreetingService protocol");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("GreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "GreetingService should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "GreetingService", "greet");
 
     Ok(())
 }
@@ -1730,19 +1723,8 @@ fn extracts_scala_type_metadata() -> Result<(), TreeHuggerError> {
         "Point should have parameter x"
     );
 
-    // Trait should have method signatures
-    let greeter = symbols
-        .iter()
-        .find(|s| s.name == "Greeter")
-        .expect("should find Greeter trait");
-    let meta = greeter
-        .type_metadata
-        .as_ref()
-        .expect("Greeter should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "Greeter should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "Greeter", "greet");
 
     Ok(())
 }
@@ -1767,19 +1749,8 @@ fn extracts_php_type_metadata() -> Result<(), TreeHuggerError> {
         "Greeter should have field prefix"
     );
 
-    // Interface should have method signatures
-    let service = symbols
-        .iter()
-        .find(|s| s.name == "GreetingService")
-        .expect("should find GreetingService interface");
-    let meta = service
-        .type_metadata
-        .as_ref()
-        .expect("GreetingService should have type_metadata");
-    assert!(
-        meta.fields.iter().any(|f| f.name == "greet"),
-        "GreetingService should have greet method"
-    );
+    // Type metadata lists only fields and properties.
+    assert_method_is_a_member_not_a_field(&symbols, "GreetingService", "greet");
 
     // Enum should have variants
     let status = symbols
@@ -2125,12 +2096,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find public greet method");
 
-    let sig = public_greet
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(public_greet.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        public_greet.visibility,
         Some(tree_hugger::Visibility::Public),
         "TypeScript public method should have Public visibility"
     );
@@ -2141,12 +2109,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "formatName")
         .expect("should find protected formatName method");
 
-    let sig = protected_method
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(protected_method.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        protected_method.visibility,
         Some(tree_hugger::Visibility::Protected),
         "TypeScript protected method should have Protected visibility"
     );
@@ -2157,12 +2122,9 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "log")
         .expect("should find private log method");
 
-    let sig = private_method
-        .signature
-        .as_ref()
-        .expect("should have signature");
+    assert!(private_method.signature.is_some(), "should have signature");
     assert_eq!(
-        sig.visibility,
+        private_method.visibility,
         Some(tree_hugger::Visibility::Private),
         "TypeScript private method should have Private visibility"
     );
@@ -2186,12 +2148,9 @@ fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
         })
         .expect("should find Greet method in interface");
 
-    let sig = interface_method
-        .signature
-        .as_ref()
-        .expect("interface method should have signature");
+    assert!(interface_method.signature.is_some(), "interface method should have signature");
     assert_eq!(
-        sig.visibility,
+        interface_method.visibility,
         Some(tree_hugger::Visibility::Public),
         "C# interface method should have inferred Public visibility"
     );
@@ -2215,12 +2174,9 @@ fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
         })
         .expect("should find greet method in interface");
 
-    let sig = interface_method
-        .signature
-        .as_ref()
-        .expect("interface method should have signature");
+    assert!(interface_method.signature.is_some(), "interface method should have signature");
     assert_eq!(
-        sig.visibility,
+        interface_method.visibility,
         Some(tree_hugger::Visibility::Public),
         "Java interface method should have inferred Public visibility"
     );
@@ -2970,8 +2926,9 @@ fn dead_code_is_empty_for_clean_file() {
 // Fallible diagnostics API
 // ============================================================================
 
-#[test]
-fn try_diagnostics_succeeds_for_all_languages() {
+crate::language_cases::language_tests!(try_diagnostics_succeeds_for_all_languages => check_try_diagnostics_succeeds_for_all_languages);
+
+fn check_try_diagnostics_succeeds_for_all_languages(language: ProgrammingLanguage) {
     // Every fixture's analyzer must run end-to-end; a failing query would now
     // surface as an error rather than a silently empty diagnostic list.
     for entry in fs::read_dir(fixture_path("")).unwrap() {
@@ -2979,7 +2936,7 @@ fn try_diagnostics_succeeds_for_all_languages() {
         if !path.is_file() {
             continue;
         }
-        if ProgrammingLanguage::from_path(&path).is_none() {
+        if ProgrammingLanguage::from_path(&path) != Some(language) {
             continue;
         }
 
@@ -3049,4 +3006,503 @@ fn forced_typescript_preserves_tsx_grammar() {
         tree_file.syntax_diagnostics().is_empty(),
         "TSX grammar should parse JSX without syntax errors"
     );
+}
+
+/// Type metadata lists only fields and properties: a method declared in an
+/// interface, protocol or trait is a standalone method of that type, never a
+/// field entry in its metadata.
+fn assert_method_is_a_member_not_a_field(
+    symbols: &[tree_hugger::SymbolInfo],
+    type_name: &str,
+    method_name: &str,
+) {
+    let owner = symbols
+        .iter()
+        .find(|s| s.name == type_name)
+        .unwrap_or_else(|| panic!("should find {type_name}"));
+    assert!(
+        owner
+            .type_metadata
+            .as_ref()
+            .is_none_or(|meta| meta.fields.iter().all(|f| f.name != method_name)),
+        "{type_name} metadata should not list its {method_name} method as a field"
+    );
+    let method = symbols
+        .iter()
+        .find(|s| s.name == method_name && s.container_name.as_deref() == Some(type_name))
+        .unwrap_or_else(|| panic!("should find {method_name} in {type_name}"));
+    assert_eq!(method.kind, tree_hugger::SymbolKind::Method, "{type_name}::{method_name}");
+}
+
+/// `(file, source, the referenced (line, column) of `xs`, its declared (line, column))`.
+type ReferencedRow = (&'static str, &'static str, &'static [(usize, usize)], &'static [(usize, usize)]);
+
+/// `R6-F3.X1` (diagnostics consumer): the older reference filter behind
+/// `referenced_symbols` (and so `unused-symbol`) reads a declaration's
+/// `value` field and a TS/JS parameter default as references, while the
+/// declared names stay excluded.
+#[test]
+fn initializer_and_default_values_are_referenced_symbols() {
+    let rows: [ReferencedRow; 4] = [
+        ("A.java", "class A {\n    int xs = 1; int ys = xs;\n    void g() { int k = xs; }\n}\n", &[(2, 26), (3, 24)], &[(2, 9)]),
+        ("a.ts", "const xs = 1;\nexport const k = xs;\nexport function g(a: number = xs) { return a; }\n", &[(2, 18), (3, 31)], &[(1, 7)]),
+        ("a.js", "const xs = 1;\nexport class C { f = xs; }\n", &[(2, 22)], &[(1, 7)]),
+        ("a.rs", "const xs: i32 = 1;\npub static K: i32 = xs;\n", &[(2, 21)], &[(1, 7)]),
+    ];
+    for (name, content, reads, declared) in rows {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, name, content);
+        let references = TreeFile::new(&path).unwrap().referenced_symbols().unwrap();
+        let positions: Vec<(usize, usize)> = references
+            .iter()
+            .filter(|reference| reference.name == "xs")
+            .map(|reference| (reference.range.start_line, reference.range.start_column))
+            .collect();
+        for read in reads {
+            assert!(positions.contains(read), "{name}: `xs` at {read:?} missing from {positions:?}");
+        }
+        for declaration in declared {
+            assert!(!positions.contains(declaration), "{name}: declared `xs` at {declaration:?} in {positions:?}");
+        }
+    }
+}
+
+/// `(file, source, the referenced (name, line, column) after line 1)`.
+type JavaReferencedRow = (&'static str, &'static str, &'static [(&'static str, usize, usize)]);
+
+/// `(name, original name, alias, source, line, column)` of an import.
+type ImportEntry<'a> = (&'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, usize, usize);
+
+/// `R7-F3` (diagnostics consumer): a qualified Java annotation or module
+/// service is read by `referenced_symbols` exactly like its unqualified
+/// control, and a file without an `import` imports nothing.
+#[test]
+fn java_qualified_annotations_and_services_are_referenced_symbols_not_imports() {
+    let rows: [JavaReferencedRow; 2] = [
+        (
+            "G.java",
+            "class A {}\n@p.q.A class G {}\n@A class H {}\n",
+            &[("p", 2, 2), ("q", 2, 4), ("A", 2, 6), ("A", 3, 2)],
+        ),
+        (
+            "module-info.java",
+            "module m {\n    uses C;\n    uses a.b.C;\n    provides C with D;\n    provides a.b.C with d.e.D;\n}\n",
+            &[
+                ("C", 2, 10),
+                ("a", 3, 10),
+                ("b", 3, 12),
+                ("C", 3, 14),
+                ("C", 4, 14),
+                ("D", 4, 21),
+                ("a", 5, 14),
+                ("b", 5, 16),
+                ("C", 5, 18),
+                ("d", 5, 25),
+                ("e", 5, 27),
+                ("D", 5, 29),
+            ],
+        ),
+    ];
+    for (name, content, expected) in rows {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, name, content);
+        let tree_file = TreeFile::new(&path).unwrap();
+
+        let imports = tree_file.imported_symbols().unwrap();
+        assert!(imports.is_empty(), "{name}: phantom imports {imports:#?}");
+
+        let references = tree_file.referenced_symbols().unwrap();
+        let positions: Vec<(&str, usize, usize)> = references
+            .iter()
+            .filter(|reference| reference.range.start_line > 1)
+            .map(|reference| (reference.name.as_str(), reference.range.start_line, reference.range.start_column))
+            .collect();
+        assert_eq!(positions, expected, "{name}: referenced symbols");
+    }
+}
+
+/// Public diagnostics references retain every independently expected Java
+/// qualified-name read, including all module directive operand roles.
+#[test]
+fn java_import_context_inventory_keeps_public_referenced_symbols() {
+    for &(label, content, reads, expected_imports) in super::symbols_occurrences::JAVA_QUALIFIED_REFERENCE_MATRIX {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, "Matrix.java", content);
+        let file = TreeFile::new(&path).unwrap();
+        let imports = file.imported_symbols().unwrap();
+        let imported: Vec<(&str, usize, usize)> = imports.iter().map(|import| {
+            (import.name.as_str(), import.range.start_line, import.range.start_column)
+        }).collect();
+        let expected_imported: Vec<(&str, usize, usize)> = expected_imports.iter().map(|&(name, _, _, line, column)| {
+            (name, line as usize, column as usize)
+        }).collect();
+        assert_eq!(imported, expected_imported, "{label}: imports");
+        let references = file.referenced_symbols().unwrap();
+        let actual: Vec<(&str, usize, usize)> = references.iter().filter(|reference| {
+            reads.iter().any(|&(line, ..)| line as usize == reference.range.start_line)
+        }).map(|reference| {
+            (reference.name.as_str(), reference.range.start_line, reference.range.start_column)
+        }).collect();
+        let expected: Vec<(&str, usize, usize)> = reads.iter().map(|&(line, column, name, _, _)| {
+            (name, line as usize, column as usize)
+        }).collect();
+        assert_eq!(actual, expected, "{label}: public referenced_symbols");
+    }
+}
+
+/// `TreeFile::imported_symbols` reports each commented import of
+/// `symbols_occurrences::COMMENTED_IMPORT_MATRIX` (review rows `R8-F1.nn`)
+/// exactly: a comment is never the original target, never ends the
+/// source path, and never decides whether a path segment is imported.
+#[test]
+fn commented_imports_report_their_bound_names() {
+    super::symbols_occurrences::for_each_import_row(|row| {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, &format!("source.{}", row.extension), row.source);
+        let file = TreeFile::new(&path).unwrap();
+        let imports = file.imported_symbols().unwrap();
+        let actual: Vec<super::symbols_occurrences::ExpectedImport<'_>> = imports
+            .iter()
+            .map(|import| {
+                (
+                    import.name.as_str(),
+                    import.alias.as_deref(),
+                    import.original_name.as_deref(),
+                    import.source.as_deref(),
+                    u32::try_from(import.range.start_line).expect("line"),
+                    u32::try_from(import.range.start_column).expect("column"),
+                )
+            })
+            .collect();
+        let expected: Vec<super::symbols_occurrences::ExpectedImport<'_>> = row.imports.to_vec();
+        assert_eq!(actual, expected, "{}: imported_symbols", row.label);
+    });
+}
+
+/// `R7-F3.S1`: every C# `using` directive is an import, with its original
+/// name only when an alias names a type by name.
+#[test]
+fn csharp_using_directives_report_every_directive() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "U.cs",
+        "using System;\nusing A.B;\nusing static C.D;\nusing E = F.G;\nglobal using H.I;\nusing X = A.B<C>;\nusing unsafe P = int*;\nusing global::System.Text;\nnamespace N { using L = M.N.O; }\n",
+    );
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<ImportEntry<'_>> = imports
+        .iter()
+        .map(|import| {
+            (
+                import.name.as_str(),
+                import.original_name.as_deref(),
+                import.alias.as_deref(),
+                import.source.as_deref(),
+                import.range.start_line,
+                import.range.start_column,
+            )
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            ("System", None, None, Some("System"), 1, 7),
+            ("B", None, None, Some("A.B"), 2, 9),
+            ("D", None, None, Some("C.D"), 3, 16),
+            ("E", Some("G"), Some("E"), Some("F.G"), 4, 7),
+            ("I", None, None, Some("H.I"), 5, 16),
+            ("X", Some("B"), Some("X"), Some("A.B<C>"), 6, 7),
+            ("P", None, Some("P"), Some("int*"), 7, 14),
+            ("Text", None, None, Some("global::System.Text"), 8, 22),
+            ("L", Some("O"), Some("L"), Some("M.N.O"), 9, 21),
+        ]
+    );
+}
+
+/// `R7-F3.S7`: a Swift selective import (`import struct Foo.Bar`, every
+/// selector keyword) is named by the name it binds, `Bar`, at that token,
+/// with its path as `source`; a whole-module import keeps its path as both.
+#[test]
+fn swift_selective_imports_report_their_bound_name() {
+    let dir = TempDir::new().unwrap();
+    let selectors = ["typealias", "struct", "class", "enum", "protocol", "let", "var", "func"];
+    let mut source = String::from("import Foundation\nimport Foo.Sub\n");
+    for selector in selectors {
+        source.push_str(&format!("import {selector} Foo.Bar\n"));
+    }
+    let path = create_temp_file(&dir, "I.swift", &source);
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<ImportEntry<'_>> = imports
+        .iter()
+        .map(|import| {
+            (
+                import.name.as_str(),
+                import.original_name.as_deref(),
+                import.alias.as_deref(),
+                import.source.as_deref(),
+                import.range.start_line,
+                import.range.start_column,
+            )
+        })
+        .collect();
+    let mut expected: Vec<ImportEntry<'_>> =
+        vec![("Foundation", None, None, Some("Foundation"), 1, 8), ("Foo.Sub", None, None, Some("Foo.Sub"), 2, 8)];
+    for (line, selector) in (3..).zip(selectors) {
+        expected.push(("Bar", None, None, Some("Foo.Bar"), line, 8 + selector.len() + 1 + 4));
+    }
+    assert_eq!(observed, expected);
+}
+
+/// `R7-F3.12`: a genuine Java import, ordinary or `static`, single or
+/// on demand, reports exactly its final segment.
+#[test]
+fn java_imports_report_only_their_final_segment() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "K.java",
+        "package z.y;\nimport a.b.C;\nimport a.b.*;\nimport static a.b.C.m;\nimport static a.b.C.*;\nimport d.e.f.g.H;\nclass K {}\n",
+    );
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<ImportEntry<'_>> = imports
+        .iter()
+        .map(|import| {
+            (
+                import.name.as_str(),
+                import.original_name.as_deref(),
+                import.alias.as_deref(),
+                import.source.as_deref(),
+                import.range.start_line,
+                import.range.start_column,
+            )
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            ("C", None, None, Some("a.b"), 2, 12),
+            ("b", Some("*"), Some("b"), Some("a.b"), 3, 10),
+            ("m", None, None, Some("a.b.C"), 4, 21),
+            ("C", Some("*"), Some("C"), Some("a.b.C"), 5, 19),
+            ("H", None, None, Some("d.e.f.g"), 6, 16),
+        ]
+    );
+}
+
+/// Asserts `file_name`'s exact import list.
+fn assert_import_entries(file_name: &str, source: &str, expected: &[ImportEntry<'_>]) {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, file_name, source);
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<ImportEntry<'_>> = imports
+        .iter()
+        .map(|import| {
+            (
+                import.name.as_str(),
+                import.original_name.as_deref(),
+                import.alias.as_deref(),
+                import.source.as_deref(),
+                import.range.start_line,
+                import.range.start_column,
+            )
+        })
+        .collect();
+    assert_eq!(observed, expected, "{file_name}");
+}
+
+/// `R7-F3.S6`: a Scala import reports only the names it binds: a path's
+/// last segment (never its qualifiers), each braced selector, a rename's
+/// new name (`original_name` the selected one) and, for an on-demand
+/// import (`*`, `_`, `given`), the last segment of the path it opens.
+#[test]
+fn scala_imports_report_only_their_bound_names() {
+    assert_import_entries(
+        "I.scala",
+        "import a.b.C\nimport a.{D, E => F, G as H}\nimport a.b.*\nimport c.d._\nimport e.given\nimport f.{given T, x => _}\nimport g.h, i.j\nobject O\n",
+        &[
+            ("C", None, None, Some("a.b.C"), 1, 12),
+            ("D", None, None, Some("a.D"), 2, 11),
+            ("F", Some("E"), Some("F"), Some("a.E"), 2, 19),
+            ("H", Some("G"), Some("H"), Some("a.G"), 2, 27),
+            ("b", Some("*"), Some("b"), Some("a.b"), 3, 10),
+            ("d", Some("*"), Some("d"), Some("c.d"), 4, 10),
+            ("e", Some("given"), Some("e"), Some("e"), 5, 8),
+            ("f", Some("given"), Some("f"), Some("f"), 6, 8),
+            ("h", None, None, Some("g.h"), 7, 10),
+            ("j", None, None, Some("i.j"), 7, 15),
+        ],
+    );
+}
+
+/// `R7-F3.S4`: `import a.b` binds only `a` (its `source` is the module
+/// `a.b`), an `import … as` binds its alias with the module as original, a
+/// `from` import binds each name or alias, `from __future__ import` is an
+/// import, and `from m import *` is an on-demand import named by the
+/// module's last segment (or the relative prefix).
+#[test]
+fn python_imports_report_only_their_bound_names() {
+    assert_import_entries(
+        "i.py",
+        "import a.b\nimport c.d as e, f\nfrom g.h import i as j, k\nfrom l import *\nfrom __future__ import annotations, division as dv\nfrom . import *\nfrom .m.n import *\n",
+        &[
+            ("a", None, None, Some("a.b"), 1, 8),
+            ("e", Some("c.d"), Some("e"), Some("c.d"), 2, 15),
+            ("f", None, None, Some("f"), 2, 18),
+            ("j", Some("i"), Some("j"), Some("g.h"), 3, 22),
+            ("k", None, None, Some("g.h"), 3, 25),
+            ("l", Some("*"), Some("l"), Some("l"), 4, 6),
+            ("annotations", None, None, Some("__future__"), 5, 24),
+            ("dv", Some("division"), Some("dv"), Some("__future__"), 5, 49),
+            (".", Some("*"), Some("."), Some("."), 6, 6),
+            ("n", Some("*"), Some("n"), Some(".m.n"), 7, 9),
+        ],
+    );
+}
+
+/// `R7-F3.S5`: a Rust import reports the name it binds, with the path it
+/// comes from as `source`: `use a;`, a nested list entry (`g::h`), an alias
+/// (`original_name` the aliased segment, also for `self as nn`), an
+/// `extern crate` alias, and the list path a `self` entry binds; a glob is
+/// an on-demand import named by its path's last segment.
+#[test]
+fn rust_imports_report_only_their_bound_names() {
+    assert_import_entries(
+        "i.rs",
+        "use a;\nuse b::*;\nuse c::{g::h, d, e as f};\nextern crate y as z;\nextern crate w;\nuse k::{self, l};\nuse m::n::{self as nn};\nuse ::o::p;\nuse crate::q::{r::{s, t::*}};\nuse u::{*};\npub use v as vv;\n",
+        &[
+            ("a", None, None, None, 1, 5),
+            ("b", Some("*"), Some("b"), Some("b"), 2, 5),
+            ("h", None, None, Some("c::g"), 3, 12),
+            ("d", None, None, Some("c"), 3, 15),
+            ("f", Some("e"), Some("f"), Some("c"), 3, 23),
+            ("z", Some("y"), Some("z"), None, 4, 19),
+            ("w", None, None, None, 5, 14),
+            ("k", None, None, None, 6, 5),
+            ("l", None, None, Some("k"), 6, 15),
+            ("nn", Some("n"), Some("nn"), Some("m"), 7, 20),
+            ("p", None, None, Some("::o"), 8, 10),
+            ("s", None, None, Some("crate::q::r"), 9, 20),
+            ("t", Some("*"), Some("t"), Some("crate::q::r::t"), 9, 23),
+            ("u", Some("*"), Some("u"), Some("u"), 10, 5),
+            ("vv", Some("v"), Some("vv"), None, 11, 14),
+        ],
+    );
+}
+
+/// Re-exports are detected for Rust `pub use` only: `is_reexport` is set on
+/// the name a `pub use` binds and on no plain `use`.
+#[test]
+fn rust_pub_use_alone_is_a_reexport() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "r.rs", "pub use a::B;\nuse c::D;\n");
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<(&str, bool)> = imports
+        .iter()
+        .map(|import| (import.name.as_str(), import.is_reexport))
+        .collect();
+    assert_eq!(observed, [("B", true), ("D", false)]);
+}
+
+/// `R7-F3.S3`: a PHP `use` clause reports the name it binds: its alias
+/// (`original_name` the path's last segment) or else its last segment,
+/// for a one-segment path, each clause of a group (`source` with the
+/// group's prefix), and `use function`/`use const`.
+#[test]
+fn php_use_clauses_report_their_bound_names() {
+    assert_import_entries(
+        "i.php",
+        "<?php\nuse A;\nuse B\\C as D;\nuse E\\{F, G as H};\nuse function I\\j;\nuse const K\\L as M;\nuse function N\\{o, p as q};\nuse \\R\\S;\n",
+        &[
+            ("A", None, None, Some("A"), 2, 5),
+            ("D", Some("C"), Some("D"), Some("B\\C"), 3, 12),
+            ("F", None, None, Some("E\\F"), 4, 8),
+            ("H", Some("G"), Some("H"), Some("E\\G"), 4, 16),
+            ("j", None, None, Some("I\\j"), 5, 16),
+            ("M", Some("L"), Some("M"), Some("K\\L"), 6, 18),
+            ("o", None, None, Some("N\\o"), 7, 17),
+            ("q", Some("p"), Some("q"), Some("N\\p"), 7, 25),
+            ("S", None, None, Some("\\R\\S"), 8, 8),
+        ],
+    );
+}
+
+/// TS/JS import sweep: a default import is an import, an aliased
+/// specifier reports only its alias (never the unbound original), and
+/// TypeScript's `import q = require("m")` and `import R = N.S` report the
+/// name they bind.
+#[test]
+fn ecma_imports_report_only_their_bound_names() {
+    let shared = "import d, { a as b, c } from \"m\";\nimport * as ns from \"m\";\nimport { default as y } from \"m\";\n";
+    let expected: &[ImportEntry<'_>] = &[
+        ("d", None, None, Some("m"), 1, 8),
+        ("b", Some("a"), Some("b"), Some("m"), 1, 18),
+        ("c", None, None, Some("m"), 1, 21),
+        ("ns", Some("*"), Some("ns"), Some("m"), 2, 13),
+        ("y", Some("default"), Some("y"), Some("m"), 3, 21),
+    ];
+    assert_import_entries("i.js", shared, expected);
+    let typescript = format!("{shared}import q = require(\"m\");\nimport R = N.S;\n");
+    let mut with_typescript = expected.to_vec();
+    with_typescript.extend([("q", None, None, Some("m"), 4, 8), ("R", Some("N.S"), Some("R"), None, 5, 8)]);
+    assert_import_entries("i.ts", &typescript, &with_typescript);
+}
+
+/// Go import sweep: a blank import is named `_` (it binds nothing, so the
+/// `unused-import` rule never reports it) and a dot import, which binds no
+/// package name, is on demand; ordinary and aliased imports are unchanged.
+#[test]
+fn go_blank_and_dot_imports_report_what_they_bind() {
+    let source = "package p\nimport \"fmt\"\nimport f2 \"a/b/fmt\"\nimport _ \"c/d\"\nimport . \"e/f\"\nimport (\n\t\"g/h\"\n\t_ \"l/m\"\n)\nfunc m() { fmt.X(); f2.Y() }\n";
+    assert_import_entries(
+        "i.go",
+        source,
+        &[
+            ("fmt", None, None, Some("fmt"), 2, 8),
+            ("f2", Some("fmt"), Some("f2"), Some("a/b/fmt"), 3, 8),
+            ("_", Some("d"), Some("_"), Some("c/d"), 4, 8),
+            ("f", Some("*"), Some("f"), Some("e/f"), 5, 10),
+            ("h", None, None, Some("g/h"), 7, 2),
+            ("_", Some("m"), Some("_"), Some("l/m"), 8, 2),
+        ],
+    );
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "i.go", source);
+    let unused: Vec<String> = TreeFile::new(&path)
+        .unwrap()
+        .lint_diagnostics()
+        .into_iter()
+        .filter(|diagnostic| diagnostic.rule.as_deref() == Some("unused-import"))
+        .map(|diagnostic| diagnostic.message)
+        .collect();
+    assert_eq!(unused, ["Imported symbol 'h' is never used"]);
+}
+
+/// A Go import path written as a raw string (`` `c/d` ``) is the same
+/// import as the interpreted `"c/d"`: named by its last segment, `source`
+/// the path without quotes, in every alias form (`R7-F3.X3`).
+#[test]
+fn go_raw_string_import_paths_match_interpreted_ones() {
+    assert_import_entries(
+        "r.go",
+        "package p\nimport `c/d`\nimport x `e/f`\nimport (\n\t`g/h`\n\t_ `i/j`\n\t. `k/l`\n\t\"m/n\"\n)\n",
+        &[
+            ("d", None, None, Some("c/d"), 2, 8),
+            ("x", Some("f"), Some("x"), Some("e/f"), 3, 8),
+            ("h", None, None, Some("g/h"), 5, 2),
+            ("_", Some("j"), Some("_"), Some("i/j"), 6, 2),
+            ("l", Some("*"), Some("l"), Some("k/l"), 7, 4),
+            ("n", None, None, Some("m/n"), 8, 2),
+        ],
+    );
+}
+
+
+#[test]
+fn unqualified_scala_renames_and_swift_operator_selectors_need_grammar_support() {
+    for (extension, source) in [("scala", "import C as D\n"), ("swift", "import func Foo.+\n")] {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, &format!("source.{extension}"), source);
+        let file = TreeFile::new(&path).unwrap();
+        assert!(!file.syntax_diagnostics().is_empty(), "{extension}: pinned grammar rejects {source}");
+    }
 }

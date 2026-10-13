@@ -267,6 +267,48 @@ resolution all resolve against the owning workspace's root — not the repo root
 `package_area` are re-framed to the repo-root catalog view. A nested Cargo workspace enriched
 against the outer root would report the wrong inherited versions.
 
+### Declared names and repeated ownership lookups
+
+A package's `name` is a display label. Check `name_source` when you need a
+manifest-backed identity: `PackageNameSource::Manifest` means a nonblank name
+was read from Cargo.toml, package.json, pyproject.toml, go.mod, or a standalone
+composer.json.
+`PathFallback` means the label came from the relative directory path. Other
+recognized manifests, such as requirements.txt, can establish a boundary
+without declaring a name that this reader supports. Blank names use fallback;
+nonblank names retain their written whitespace. Invalid TOML/JSON documents or
+wrong value types cannot declare a name. JSON duplicate names retain the
+existing last-wins behavior; TOML rejects duplicate keys. Go module directives
+accept quoted or bare path tokens, require a unique name, and reject unknown
+trailing directives or unclosed blocks; this is bounded identity discovery,
+not dependency-version validation.
+
+Serialized packages include `name_source: "manifest"` for declared names;
+the fallback value is omitted. An older serialized catalog without this field
+reads as `PathFallback`, because its name provenance cannot be proved.
+
+For many file lookups, borrow one catalog with `PackageOwnershipLookup`:
+
+```rust
+use sniff::filesystem::repo::{PackageNameSource, PackageOwnershipLookup};
+
+let owners = PackageOwnershipLookup::new(&repo);
+if let Some(package) = owners.package_for_path(&absolute_source_path) {
+    if package.name_source == PackageNameSource::Manifest {
+        println!("{}", package.name);
+    }
+}
+```
+
+The lookup normalizes boundaries once and returns the deepest package for an
+absolute native path. Root packages own their remaining descendants; `pkg-a`
+never claims `pkg-a2`. Relative paths and paths outside the catalog root have
+no owner. Resolve ownership before checking name usability: an unnamed nested
+package still owns its files. Directory aliases follow canonical identity,
+and duplicate aliases keep the first catalog entry. Missing files can still
+be assigned through an existing ancestor. `RepoInfo::package_for_dir` retains
+its existing single-lookup behavior.
+
 ### Lockfile Corroboration
 
 After layers are built, each one gets a `LockfileObservation` (`repo/lockfile/`) that compares the
@@ -354,6 +396,63 @@ side loads its blob or worktree file **once** and runs **one** diff; both the li
 optional unified hunks are derived from that single diff result. Whole-file adds and deletes are
 line-counted rather than diffed, so a stats-only request runs zero diffs, and counts-only,
 dirty-flag, and identity requests load no blobs at all.
+
+### Changed Paths
+
+`GitRepo::changed_paths(base)` answers "which repository-relative paths are changed?" with native
+paths only — no line statistics, no patch text, no rename similarity, no history, no inventory, and
+no network access.
+
+```rust
+use sniff::filesystem::git::{ChangedBase, GitRepo};
+
+let repo = GitRepo::discover(std::path::Path::new("."))?.unwrap();
+let paths = repo.changed_paths(ChangedBase::Omitted)?;      // uncommitted changes only
+let paths = repo.changed_paths(ChangedBase::Reference("main".into()))?; // plus committed differences from local main
+```
+
+The result is the **union** of four sources, deduplicated and sorted by path bytes:
+
+1. paths differing between the resolved base commit and `HEAD` — the two tips compared **directly**,
+   never through a merge-base, and only when the tips differ;
+2. staged paths (tree-to-index);
+3. unstaged paths (index-to-worktree);
+4. nonignored untracked paths.
+
+One status observation answers sources 2-4 **and** conflict detection. A path in several categories
+appears once. Whether a path still exists on disk is the caller's concern: a staged deletion still
+selects its path. File-type replacements (regular file to symlink or the reverse) count as
+modifications in both changed paths and all dirty/status-count projections.
+
+`ChangedBase` type-encodes the reference contract:
+
+- `Omitted` contributes no committed comparison, so an unborn `HEAD` (no first commit) is valid and
+  the result is pure working-tree status.
+- `Reference(token)` must resolve locally — no fetch runs — to exactly one commit; annotated tags
+  peel to the commit they name, and a tree or blob is rejected. Against an unborn `HEAD` the base is
+  compared with the empty current tree. `Reference("HEAD")` on an unborn repository is an error,
+  which is what keeps an explicit `HEAD` distinguishable from `Omitted`. A detached `HEAD` uses its
+  commit.
+
+Errors are failures, never empty results: a bare repository
+([`SniffError::BareRepository`](../lib/src/error.rs)), any unmerged index entry
+([`SniffError::MergeConflicts`](../lib/src/error.rs), naming every conflicted path anywhere in the
+repository), an unresolved or non-commit reference, and wrapped gix failures. Renames surface as
+delete/add pairs, and nothing inside a submodule or nested repository entry is descended into.
+
+Malformed or truncated indexes return `SniffError::Git` from status-bearing APIs,
+including changed paths, dirty checks, category counts, rich status, and detailed
+worktrees. An absent index and a valid empty index remain valid states. The shared
+index boundary contains upstream decoder panics; optional object-cache sizing skips
+unreadable indexes so identity, branches, tracking, and other metadata-only queries
+remain available. Committed-file and path-history APIs also need a readable index
+for gix attribute mappings and report typed failures; their compatibility wrappers
+retain empty-on-error behavior. The committed-only merge predictor builds its own
+attribute stack from captured trees and remains independent of the live index.
+For example, `changed_paths(ChangedBase::Omitted)` fails on a
+truncated index while `detect_with_request(&GitRequest::identity())` still reports
+the repository's branch. Existing compatibility wrappers retain their documented
+error-suppression behavior.
 
 ### Focused Git Metadata
 
@@ -472,7 +571,7 @@ HTTPS endpoints **sequentially**, stopping at the first strictly parsed IP — s
 attempt discloses the caller's address to exactly one endpoint. Response bodies never reach an error,
 log, or counter.
 
-A **bare repository** (no working directory) discovers successfully — its refs, HEAD, and objects are all readable, so `current_branch()`, `head_id()`, and commit queries stay valid. `GitRepo::is_bare()` reports the distinction, `repo_root()` falls back to the git directory, `try_current_worktree_name()` is `None`, and `merge_conflicts()` is empty (no index). Worktree-dependent APIs (`collect_changed_paths`, `detect_repo_identity_with_repo`) reject a bare repository with `NotARepository` rather than walking the git directory as if it were a source tree.
+A **bare repository** (no working directory) discovers successfully — its refs, HEAD, and objects are all readable, so `current_branch()`, `head_id()`, and commit queries stay valid. `GitRepo::is_bare()` reports the distinction, `repo_root()` falls back to the git directory, `try_current_worktree_name()` is `None`, and `merge_conflicts()` is empty (no index). Worktree-dependent APIs (`collect_changed_paths`, `detect_repo_identity_with_repo`) reject a bare repository with `NotARepository` rather than walking the git directory as if it were a source tree; `GitRepo::changed_paths` rejects one with `SniffError::BareRepository` for the same reason.
 
 ### Actual and Predicted Merge Conflicts
 

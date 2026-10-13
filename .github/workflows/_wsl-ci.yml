@@ -881,3 +881,42 @@ jobs:
         with:
           name: ${{ steps.cell.outputs.completion_artifact }}
           path: wsl-completion
+      # THE CELL'S DURABLE OBSERVATION, scheduled runs only. See the same
+      # step in `_package-ci.yml` for the reasoning: `github.event_name` is the
+      # CALLER's event, `!cancelled()` records an honest failure but nothing for
+      # a cancelled job, and the recorder never changes the cell's verdict.
+      #
+      # It runs on the Windows host, where the staged reports (`wsl-junit`) and
+      # the completion record (`wsl-completion`) already are after crossing the
+      # 9p mount, and the host's checkout is the tested revision. The producer
+      # described is the guest, so the host fields say Linux. A guest that died
+      # before staging leaves `wsl-junit` empty, and the recorder then refuses.
+      - name: Record this cell's observation
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          CELL: ${{ steps.cell.outputs.cell }}
+          GATE_OUTCOME: ${{ steps.l1.outcome }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py emit \
+            --plan ci-resolved-plan/resolved-plan.json \
+            --cell "$CELL" \
+            --stage wsl-junit \
+            --completion wsl-completion/completion.json \
+            --gate-outcome "$GATE_OUTCOME" \
+            --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --workflow "$GITHUB_WORKFLOW_REF" \
+            --host-os Linux \
+            --host-kernel "WSL2 Ubuntu guest on a hosted $RUNNER_OS runner" \
+            --out "$RUNNER_TEMP/observation/observation.json"
+      - name: Upload this cell's observation
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: observation-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.gate }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/observation
+          retention-days: 90
+          if-no-files-found: ignore

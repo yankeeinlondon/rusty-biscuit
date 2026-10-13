@@ -68,10 +68,15 @@ when investigating changes to external dependencies or hosted runners.
 
 On reuse, `scope` still runs, with `--proven-event pull_request`: the
 environments the pull request event schedules are recorded in the plan's
-`proven_environments` and planned nowhere, and only the environments the push
-event adds (Windows, per `environments.json`) receive cells. When the two
-events agree the plan is empty, `preflight`, the `area-ci` fan-out, and every
-rollup skip, and `ci-gate` folds those skipped results and passes. Advisory
+`proven_environments` and planned nowhere, and only environments the push
+event adds would receive cells. Today the two events schedule the same
+environments, so the plan is empty: `preflight`, the `area-ci` fan-out, and
+every rollup skip, and `ci-gate` folds those skipped results and passes.
+
+A pull request merged while its own run is queued or in progress is waited
+for: `reuse_validation.py check --wait-minutes 90` polls that run once a
+minute and reuses it when it finishes green on the same tree. Failure,
+cancellation, or a run still going after 90 minutes schedules normal CI. Advisory
 `ci-reporting` links the original PR run in either case. The `ci` workflow
 still completes on `main`, preserving Release-plz's existing successful-CI
 trigger. Runs predating receipt publication cannot be reused.
@@ -308,6 +313,30 @@ the outgoing head's exact tree on a clean remote worktree with no test filter.
 Any other run prints why it published nothing — it ships the developer's local
 tree, uncommitted work included, so most of its runs test a tree no head names.
 
+**Hosted observations.** On the nightly (`schedule` only), each hosted test producer
+(`_package-ci.yml` `test`, `_wsl-ci.yml` `wsl`) runs `scripts/ci/hosted_observations.py emit` after its
+completion step and uploads `observation-<package>-<gate>-<environment>` (90 days). A passing cell
+needs a succeeded gate and a completion record bound to this cell, head, run, and attempt; an honest
+failure with a real report is recorded without one; a cancelled, skipped, report-less, or unproven
+cell records nothing and the step says why (it is `continue-on-error`, so it never changes the
+cell's verdict). The `publish-observations` job in `ci.yml` (`schedule` only, `always()` so an
+unrelated failure or cancellation does not lose finished cells, `contents: write` + `actions: read`,
+outside `ci-gate`'s fold) downloads the run's `observation-*` artifacts, drops any that fail
+`schema.validate_observation`, and publishes the rest through `observation_notes.py` under
+`refs/notes/ci-local/<environment>` (`wsl2-ubuntu` cells under the WSL2 ref). `producer.kind` is
+`hosted`; `producer.host.label` is the environment, from which the discovery probe derives the
+conventional `junit-<package>-<gate>-<environment>` artifact name. `hosted_observations.gh_probe`
+is the `report_probe` for `verify_cells`: it downloads the producer run's artifact and credits the
+cell only when the cited bytes and proof digests match. A run whose publisher never ran is recovered
+automatically: the nightly's `scope` job runs `hosted_observations.py publish --recent --no-push`
+before it plans and verifies (the newest `RECOVERY_RUNS` = 5 completed scheduled `ci.yml` runs on `main`, any
+conclusion; recorded in its own checkout only, with its existing `actions: read`), and
+`publish-observations` runs `publish --recent` with a push from a full-history checkout. Expired
+artifacts and runs outside the window are not recovered; their cells execute.
+`hosted_observations.py publish --run-id N` republishes one run by hand. **Unverified:** that the repository ruleset lets `GITHUB_TOKEN` push
+`refs/notes/*` (a refusal fails the publisher step red and leaves the artifacts the only record),
+and behavior on a real cancellation or re-run attempt.
+
 ### Execution constraints
 
 Reuse qualifying passing evidence per required cell on every OS. If no
@@ -393,13 +422,17 @@ and its preflight runner, still cell-less, and is listed in
 (fixes/2026-09-18-ci-cadence, narrowed 2026-09-19): `ubuntu-latest` on
 `pull_request`, `push`, and `workflow_dispatch`; `macos-latest` the same,
 since the development Mac proves it on every push through the hook;
-`windows-latest` on `push` and `workflow_dispatch`; `wsl2-ubuntu` on
-`schedule` and `workflow_dispatch` only. So a pull request proves Linux and
-macOS, a push to `main` adds Windows, and the nightly `schedule` (08:00 UTC,
-`ci.yml`) runs WSL2 alone — over the packages that changed since the last
-successful nightly (`reuse_validation.py nightly-base`; the full workspace
-when there is none), with Linux compiling their archives and hosting nothing
-else. The `ci:all-os` label plans every environment for a pull request; it is
+`windows-latest` and `wsl2-ubuntu` on `schedule` and `workflow_dispatch`
+only. So a pull request and a push to `main` prove Linux and macOS, and the
+nightly `schedule` (08:00 UTC, `ci.yml`) runs native Windows and WSL2 — each
+over the packages that changed since the newest successful nightly that proved
+*that* environment (`reuse_validation.py nightly-anchors`; the full gated
+workspace, with a coded reason, when there is none), plus every cell current
+policy requires that the anchor did not certify under the same coverage
+contract, plus every certified cell that later published evidence contradicts
+(an unsuperseded qualifying failure, or an unordered pass and failure; the
+anchor's `reopened_cells`, `.github/ci/schemas/README.md`), with Linux compiling WSL2's
+archives and hosting nothing else. The `ci:all-os` label plans every environment for a pull request; it is
 read from the event payload, so it takes effect on the next push.
 
 `lint` and `check` are single-environment gates hosted on `ubuntu-latest`, so
@@ -573,6 +606,26 @@ would silently exempt a package and miss its first test.
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
 | `source-inputs` | string[] | `[]` | another package's source files this package's tests execute or read, by exact repository path; a change to one adds a narrowed `ubuntu-latest` L1 cell for the tests that spell it. Must exist, be source, and lie outside this package. See [`docs/cicd/test-inputs.md`](../../docs/cicd/test-inputs.md) |
 | `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so its consumer provisions the pinned toolchain where the environment has `cargo_toolchain`, and an environment without it renders a governed `ACCEPTED GAP` rather than a red cell |
+| `unimplemented` | string | absent | why a package that is not built yet has no tests. While its source holds no test, it gets no test cell; lint still runs. The first test schedules it normally, and the plan reports the marker as stale |
+
+`unimplemented` exists because a run of zero tests fails completion
+(`completion-expected-empty`): an empty test list looks exactly like a broken
+filter. The planner checks the claim on every run by scanning the package's
+own source (not `target/`) for `#[test]` and its path-qualified forms such as
+`#[tokio::test]`, the `rstest`, `test_case`, and `wasm_bindgen_test`
+attributes, `proptest!`, and any Rust file under `tests/`. Only a package that
+declares the marker is ever scanned, so a test the scan cannot recognize never
+drops coverage from an ordinary package.
+
+```toml
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"
+```
+
+The plan records `unimplemented: {reason, tests_found}` on the package. With
+`tests_found: false` the package's tiers are empty; with `true` it runs its
+declared tiers and the marker should be deleted. Until its first test, the
+package's compile coverage is Linux's lint (`clippy --all-targets`) alone.
 
 `requires-toolchain` is for the minority of suites that test the repository's
 own tooling — they open the workspace with `cargo metadata` or drive real
@@ -1383,8 +1436,9 @@ request scan must never be presented as a completed full-tree push scan.
 
 The scan scope itself travels on the plan as `archive_guard`; see
 [the schema README](schemas/README.md#resolved-plan). The guard is Linux-hosted
-and never forces Linux into an event that excludes it, so the WSL2-only nightly
-records `selected: false` rather than gaining a runner.
+and never forces Linux into an event that excludes it, so the nightly, where
+Linux only builds WSL2's archives, records `selected: false` rather than
+gaining a Linux cell.
 
 #### How the cell executes
 

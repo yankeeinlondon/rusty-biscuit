@@ -47,6 +47,16 @@ pub enum TreeHuggerError {
     #[error("No supported source files found in `{path}`")]
     NoSourceFiles { path: PathBuf },
 
+    /// A declaration writes more generic parameters than
+    /// `GenericParam::position` (`u16`) can number; positions are never
+    /// truncated.
+    #[error("`{symbol}` in `{path}` declares more than {max} generic parameters ({count})", max = u32::from(u16::MAX) + 1)]
+    TooManyGenericParameters {
+        path: PathBuf,
+        symbol: String,
+        count: usize,
+    },
+
     #[error("Ignore error: {0}")]
     Ignore(#[from] ignore::Error),
 }

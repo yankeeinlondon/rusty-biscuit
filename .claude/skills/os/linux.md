@@ -6,6 +6,15 @@ directory order, the process table, git history depth, or a Unicode glyph.
 WSL2 follows these Linux code paths; its archive-mode traps are in
 [wsl.md](wsl.md).
 
+## ARM Linux initialization requests an x86_64 toolchain
+
+- Cross 0.2.5 continues through workspace metadata and toolchain setup for
+  `cross --version`. On ARM Linux, that can request the pinned version of
+  `x86_64-unknown-linux-gnu` and fail rustup's non-host guard.
+- `scripts/ensure-ci-tools.sh` probes Cross from an empty temporary directory
+  so `just init` does not provision a container toolchain just to verify the
+  installed binary. Keep this probe outside Cargo workspaces.
+
 ## Hook fixtures red only on Ubuntu
 
 - Temporary repositories need **local** `user.name` and `user.email` for later

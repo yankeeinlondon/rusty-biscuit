@@ -6,6 +6,14 @@ use std::time::Duration;
 use biscuit_hash::blake3_hash;
 use serde::{Deserialize, Serialize};
 
+mod stored_evidence;
+mod stored_reexports;
+mod symbol_cache;
+
+pub use symbol_cache::{
+    CacheLookup, CacheMiss, CachedQueryResult, FingerprintInputs, SymbolCache,
+};
+
 use crate::shared::{
     AnalysisPass, Diagnostic, ExportRecord, FileSymbolIndex, ImportRecord, ProgrammingLanguage,
     SchemaVersion, SymbolRecord,
@@ -30,23 +38,40 @@ pub struct PassFingerprint {
 }
 
 impl PassFingerprint {
-    /// Computes a deterministic digest for the fingerprint fields.
+    /// Computes a deterministic digest for the fingerprint fields, through
+    /// [`canonical_digest`], so no two fingerprints share an encoding.
     pub fn digest(&self) -> String {
-        let canonical = format!(
-            "{}.{}{}|{}|{}|{}|{}|{}|{}|{}",
-            self.schema_version.major,
-            self.schema_version.minor,
-            self.tree_hugger_version,
-            self.grammar_version,
-            self.grammar_id,
-            self.query_hash,
-            self.rule_metadata_hash,
-            self.enabled_rules_hash,
-            self.config_hash,
-            self.external_tool_version.as_deref().unwrap_or("none")
-        );
-        blake3_hash(&canonical)
+        let schema = format!("{}.{}", self.schema_version.major, self.schema_version.minor);
+        let (has_tool, tool) = match &self.external_tool_version {
+            Some(version) => ("1", version.as_str()),
+            None => ("0", ""),
+        };
+        canonical_digest(&[
+            &schema,
+            &self.tree_hugger_version,
+            &self.grammar_version,
+            &self.grammar_id,
+            &self.query_hash,
+            &self.rule_metadata_hash,
+            &self.enabled_rules_hash,
+            &self.config_hash,
+            has_tool,
+            tool,
+        ])
     }
+}
+
+/// The BLAKE3 digest of `fields` in an unambiguous encoding: each field is
+/// written as its byte length, `:` and its bytes, so a separator inside a
+/// value cannot make two different field lists encode alike.
+pub fn canonical_digest(fields: &[&str]) -> String {
+    let mut canonical = String::new();
+    for field in fields {
+        canonical.push_str(&field.len().to_string());
+        canonical.push(':');
+        canonical.push_str(field);
+    }
+    blake3_hash(&canonical)
 }
 
 /// Legacy fingerprint for backward compatibility.
@@ -128,7 +153,7 @@ pub enum CacheUnit {
     /// Reference records from the bind pass.
     References {
         fingerprint: PassFingerprint,
-        // References are not yet stored in FileSymbolIndex; placeholder
+        // Unused: reference evidence is stored with the `SymbolCache` entry; placeholder
     },
     /// Diagnostics from any pass.
     Diagnostics {
@@ -362,7 +387,7 @@ impl InProcessCache {
                         stats.symbol_misses += 1;
                     }
                 }
-                AnalysisPass::Semantic | AnalysisPass::Docs => {
+                AnalysisPass::Semantic | AnalysisPass::Docs | AnalysisPass::Diagnostics => {
                     if info.hit {
                         stats.diagnostic_hits += 1;
                     } else {
@@ -397,6 +422,10 @@ impl InProcessCache {
     }
 }
 
+/// Distinguishes the temporary files of concurrent writers in one process
+/// (the process ID distinguishes processes).
+static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Persistent on-disk cache for cross-invocation caching.
 ///
 /// Stores serialized cache entries under a tool-owned user cache directory.
@@ -426,27 +455,59 @@ impl PersistentCache {
         Self::open(cache_dir, enabled)
     }
 
-    /// Reads a cached entry by key.
+    /// Reads a cached entry by key; a missing, unreadable or undecodable
+    /// entry is `None`.
     pub fn get<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
-        if !self.enabled {
-            return None;
-        }
-        let path = self.entry_path(key);
-        let bytes = std::fs::read(&path).ok()?;
+        let bytes = self.get_bytes(key).ok()??;
         serde_json::from_slice(&bytes).ok()
     }
 
-    /// Writes a cache entry.
+    /// Reads the raw bytes of the entry for `key`: `Ok(None)` when there is
+    /// no entry or the cache is disabled.
+    ///
+    /// ## Errors
+    ///
+    /// Returns any I/O error other than a missing file.
+    pub fn get_bytes(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        match std::fs::read(self.entry_path(key)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Writes a cache entry atomically: the bytes go to a temporary file in
+    /// the entry's directory, which is then renamed over the entry.
+    ///
+    /// A reader sees either the previous entry or the complete new one, never
+    /// a partial write. When several writers race, the last rename wins.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the directory, the temporary file or the rename
+    /// fails; the temporary file is removed and the previous entry is left as
+    /// it was.
     pub fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<(), CacheError> {
         if !self.enabled {
             return Ok(());
         }
-        let path = self.entry_path(key);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let bytes = serde_json::to_vec(value)?;
-        std::fs::write(&path, bytes)?;
+        let path = self.entry_path(key);
+        let directory = path.parent().unwrap_or(&self.cache_dir);
+        std::fs::create_dir_all(directory)?;
+        let temporary = directory.join(format!(
+            "{key}.{}.{}.tmp",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let written = std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, &path));
+        if let Err(error) = written {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -486,12 +547,10 @@ pub struct SymbolSnapshot {
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
     pub diagnostics: Vec<Diagnostic>,
-    pub created_at_epoch_ms: u64,
 }
 
 impl From<FileSymbolIndex> for SymbolSnapshot {
     fn from(index: FileSymbolIndex) -> Self {
-        let now = crate::shared::now_epoch_ms();
         Self {
             key: FileCacheKey {
                 file_path: index.file,
@@ -510,7 +569,6 @@ impl From<FileSymbolIndex> for SymbolSnapshot {
             imports: index.imports,
             exports: index.exports,
             diagnostics: index.diagnostics,
-            created_at_epoch_ms: now,
         }
     }
 }
@@ -524,9 +582,17 @@ impl From<SymbolSnapshot> for FileSymbolIndex {
             file_hash: snapshot.key.file_hash,
             completed_passes: snapshot.completed_passes,
             symbols: snapshot.symbols,
-            imports: snapshot.imports,
+            // The snapshot keeps no re-export report, so no marker survives.
+            imports: snapshot
+                .imports
+                .into_iter()
+                .map(|import| ImportRecord { reexported: false, ..import })
+                .collect(),
             exports: snapshot.exports,
             diagnostics: snapshot.diagnostics,
+            occurrences: Vec::new(),
+            reference_coverage: Vec::new(),
+            reexports: None,
         }
     }
 }
@@ -635,7 +701,7 @@ mod tests {
 
     fn sample_fingerprint() -> AnalyzerFingerprint {
         AnalyzerFingerprint {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::CURRENT,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_fingerprint: "g1".to_string(),
             query_fingerprint: "q1".to_string(),
@@ -682,7 +748,6 @@ mod tests {
             imports: Vec::new(),
             exports: Vec::new(),
             diagnostics: Vec::new(),
-            created_at_epoch_ms: 0,
         };
         cache.put(snapshot);
 
@@ -695,7 +760,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_digest_is_deterministic() {
         let fp = PassFingerprint {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::CURRENT,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),
@@ -713,7 +778,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_changes_with_tool_version() {
         let base = PassFingerprint {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::CURRENT,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),

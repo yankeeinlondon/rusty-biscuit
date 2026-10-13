@@ -318,6 +318,12 @@ their local reproduction recipes:
 - `cargo-fuzz` plus the nightly Rust toolchain on supported Unix hosts
 - `cross` and Bencher on Linux, where their owning workflows run
 
+On ARM Linux (including Linux VMs on Apple Silicon), initialization uses the
+native Rust toolchain. It checks `cross` outside the repository because Cross
+0.2.5 can attempt to install an x86_64 container toolchain even for
+`cross --version` inside a Cargo workspace. Cross-compilation toolchains are
+configured when running cross-compilation commands.
+
 Third-party GitHub Actions remain responsible for binaries used only inside
 the action implementation. A successful `just init` never treats a missing
 applicable command as a successful bootstrap.

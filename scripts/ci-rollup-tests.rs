@@ -4730,6 +4730,20 @@ fn plan_fields_match_the_frozen_contract() {
         );
     }
     assert!(plan["package"].get("package").is_some());
+    assert_eq!(
+        plan["document"]["coverage_anchors"].as_bool(),
+        Some(false),
+        "`coverage_anchors` is optional in the plan contract"
+    );
+    for field in [
+        "environment", "mode", "reason", "anchor", "policy_delta", "inherited_cells",
+        "reopened_cells",
+    ] {
+        assert!(
+            plan["coverage_anchor"].get(field).is_some(),
+            "the coverage anchor contract has no `{field}`"
+        );
+    }
 
     let origins: BTreeSet<&str> = contract["vocabulary"]["origins"]
         .as_array()
@@ -7462,4 +7476,285 @@ fn a_plan_from_another_schema_generation_is_refused_rather_than_audited() {
             "{error}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Audit of reused proof
+// ---------------------------------------------------------------------------
+
+/// Roll a plan up, then judge it, through the command surface.
+///
+/// `artifacts` lists `(directory, completion.json text)` pairs to stage. The
+/// rollup result stays a `Result` so a refusal is observable.
+fn audit_plan(
+    temp: &TempDir,
+    plan: &serde_json::Value,
+    artifacts: &[(&str, String)],
+    rollup_extra: &[&str],
+) -> (Result<i32>, Option<i32>, String) {
+    let root = temp.path().join("ci-artifacts");
+    fs::create_dir_all(&root).unwrap();
+    for (name, document) in artifacts {
+        write_completion(&root, name, document);
+    }
+    let plan_path = temp.path().join("resolved-plan.json");
+    fs::write(&plan_path, plan.to_string()).unwrap();
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        json!({"schema_version": ENVIRONMENTS_SCHEMA_VERSION, "environments": []}).to_string(),
+    )
+    .unwrap();
+    let baseline = temp.path().join("ci-baseline.toml");
+    fs::write(&baseline, "schema_version = 3\n").unwrap();
+    let results = temp.path().join("results.json");
+    let summary = temp.path().join("summary.md");
+
+    let rollup_args = Args::parse(
+        [
+            "--artifacts",
+            root.to_str().unwrap(),
+            "--plan",
+            plan_path.to_str().unwrap(),
+            "--environments",
+            environments.to_str().unwrap(),
+            "--out",
+            results.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .chain(rollup_extra.iter().copied())
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let rolled = cmd_rollup(&rollup_args);
+    if rolled.is_err() {
+        return (rolled, None, String::new());
+    }
+    let verdict_args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--baseline",
+            baseline.to_str().unwrap(),
+            "--producers",
+            "skipped",
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let verdict = cmd_verdict(&verdict_args).unwrap();
+    (rolled, Some(verdict), fs::read_to_string(&summary).unwrap_or_default())
+}
+
+fn nightly_plan(cells: Vec<serde_json::Value>) -> serde_json::Value {
+    json!({
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "head": FIXTURE_HEAD,
+        "packages": [{"package": "claudine"}],
+        "cells": cells,
+    })
+}
+
+fn reused_windows_cell() -> serde_json::Value {
+    plan_cell_json("claudine", "windows-latest", "L1", true)
+}
+
+fn refusal_of(plan: &serde_json::Value, temp: &TempDir) -> String {
+    let (rolled, _, _) = audit_plan(temp, plan, &[], &[]);
+    format!("{:#}", rolled.expect_err("the plan's reused proof is refused"))
+}
+
+#[test]
+fn an_all_reused_plan_is_judged_and_accounts_for_every_reused_cell() {
+    let temp = TempDir::new("all-reused");
+    let plan = nightly_plan(vec![
+        reused_windows_cell(),
+        plan_cell_json("claudine", "wsl2", "L1", true),
+    ]);
+    let (rolled, verdict, summary) = audit_plan(&temp, &plan, &[], &[]);
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(0), verdict, "{summary}");
+    let results = load_rollup(&temp.path().join("results.json")).unwrap();
+    assert_eq!(2, results.cells.len());
+    assert_eq!(2, results.accepted_evidence.len());
+    assert!(results.cells.iter().all(|cell| cell.state == CellState::Pass
+        && cell.origin.is_reused()
+        && cell.completion.is_none()));
+}
+
+#[test]
+fn a_gap_only_plan_is_judged_without_an_execution_row() {
+    let temp = TempDir::new("gap-only");
+    let plan = nightly_plan(vec![accepted_gap_cell_json(true, "2999-01-01")]);
+    let (rolled, verdict, summary) = audit_plan(&temp, &plan, &[], &[]);
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(0), verdict, "{summary}");
+    let results = load_rollup(&temp.path().join("results.json")).unwrap();
+    assert_eq!(1, results.cells.len());
+    assert_eq!(CellState::AcceptedGap, results.cells[0].state);
+}
+
+#[test]
+fn a_plan_with_no_cells_rolls_up_cleanly() {
+    let temp = TempDir::new("no-cells");
+    let plan = json!({"schema_version": PLAN_SCHEMA_VERSION, "packages": [], "cells": []});
+    let (rolled, verdict, summary) = audit_plan(&temp, &plan, &[], &[]);
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(0), verdict, "{summary}");
+}
+
+/// A completion record in the artifacts for a cell the plan reused is not this
+/// run's proof of it: it neither satisfies the cell nor is counted as the cell's
+/// execution, and it is refused as unplanned evidence.
+#[test]
+fn a_completion_record_from_another_run_never_counts_for_a_reused_cell() {
+    let temp = TempDir::new("reused-stale-completion");
+    let stale = completion_record(json!({"environment": "windows-latest", "run": 1})).to_string();
+    let plan = nightly_plan(vec![reused_windows_cell()]);
+    let (rolled, verdict, summary) = audit_plan(
+        &temp,
+        &plan,
+        &[("completion-claudine-L1-windows-latest", stale)],
+        &["--run-id", "999"],
+    );
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(EXIT_BLOCKED), verdict, "{summary}");
+    assert_eq!(vec!["completion-unplanned".to_owned()], blocking_rules(&summary));
+    let results = load_rollup(&temp.path().join("results.json")).unwrap();
+    let cell = &results.cells[0];
+    assert!(cell.completion.is_none(), "a reused cell owes no completion of this run");
+    assert!(cell.origin.is_reused(), "the cell must still read as reused");
+    assert_eq!(1, results.accepted_evidence.len());
+}
+
+#[test]
+fn a_reused_cell_without_evidence_is_refused_not_defaulted() {
+    for evidence in [None, Some(json!(null))] {
+        let temp = TempDir::new("reused-no-evidence");
+        let mut cell = reused_windows_cell();
+        match evidence {
+            Some(value) => cell["evidence"] = value,
+            None => {
+                cell.as_object_mut().unwrap().remove("evidence");
+            }
+        }
+        let error = refusal_of(&nightly_plan(vec![cell]), &temp);
+        assert!(error.contains("claudine") && error.contains("evidence"), "{error}");
+    }
+}
+
+#[rstest]
+#[case::wrong_type_outcome(json!({"outcome": 7}))]
+#[case::wrong_type_counts(json!({"counts": "3"}))]
+#[case::wrong_type_failed_tests(json!({"failed_tests": "boom"}))]
+#[case::wrong_type_duration(json!({"duration_s": "12"}))]
+#[case::unknown_outcome(json!({"outcome": "maybe"}))]
+#[case::pass_outcome_with_failing_counts(json!({"outcome": "pass", "counts": {"total": 3, "passed": 2, "failed": 1, "skipped": 0, "errored": 0}}))]
+fn malformed_reused_evidence_is_refused_not_defaulted(#[case] damage: serde_json::Value) {
+    let temp = TempDir::new("reused-malformed");
+    let mut cell = reused_windows_cell();
+    for (name, value) in damage.as_object().unwrap() {
+        cell["evidence"][name] = value.clone();
+    }
+    refusal_of(&nightly_plan(vec![cell]), &temp);
+}
+
+/// A cell the plan reuses can only have been produced off this run.
+#[rstest]
+#[case::cell_origin_ci("origin", json!("ci"))]
+#[case::cell_origin_none("origin", json!("none"))]
+#[case::cell_state_pending("state", json!("pending"))]
+fn a_reused_cell_cannot_claim_to_have_executed_in_this_run(
+    #[case] field: &str,
+    #[case] value: serde_json::Value,
+) {
+    let temp = TempDir::new("reused-claims-execution");
+    let mut cell = reused_windows_cell();
+    cell[field] = value;
+    let error = refusal_of(&nightly_plan(vec![cell]), &temp);
+    assert!(error.contains("reused") && error.contains("claudine"), "{error}");
+}
+
+#[test]
+fn evidence_naming_a_ci_origin_cannot_back_a_reused_cell() {
+    let temp = TempDir::new("reused-ci-evidence");
+    let mut cell = reused_windows_cell();
+    cell["evidence"]["origin"] = json!("ci");
+    let error = refusal_of(&nightly_plan(vec![cell]), &temp);
+    assert!(error.contains("reused") && error.contains("origin"), "{error}");
+}
+
+#[test]
+fn a_version_one_whole_environment_acceptance_still_reads_as_reused() {
+    let temp = TempDir::new("reused-v1");
+    let mut cell = reused_windows_cell();
+    cell["evidence"] = json!({"origin": "local", "evidence": "refs/notes/ci-local/windows-latest"});
+    let (rolled, verdict, summary) = audit_plan(&temp, &nightly_plan(vec![cell]), &[], &[]);
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(0), verdict, "{summary}");
+}
+
+fn anchored_plan_text(anchors: Option<serde_json::Value>) -> ResolvedPlan {
+    let mut document = json!({
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "change_inventory": serde_json::from_str::<serde_json::Value>(
+            change_inventory::FIXTURE_INVENTORY
+        ).unwrap(),
+        "source_packages": ["claudine"],
+        "reverse_dependencies": [],
+        "packages": [],
+        "cells": [],
+    });
+    if let Some(anchors) = anchors {
+        document["coverage_anchors"] = anchors;
+    }
+    serde_json::from_value(document).expect("the plan parses")
+}
+
+#[test]
+fn the_summary_lists_coverage_anchors_only_when_the_plan_has_them() {
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let anchors = json!([
+        {
+            "environment": "windows-latest", "mode": "incremental", "anchor": sha,
+            "reason": "certified-ancestor",
+            "source": {"kind": "nightly-certified", "run_id": 42, "head": sha},
+            "policy_delta": [{"package": "claudine", "gate": "L1"}],
+            "inherited_cells": [
+                {"package": "a", "gate": "L1"}, {"package": "b", "gate": "L1"}
+            ],
+            "reopened_cells": [{"package": "c", "gate": "L1"}],
+        },
+        {
+            "environment": "wsl2", "mode": "full", "anchor": null,
+            "reason": "bootstrap-no-run",
+            "source": {"kind": "none", "run_id": null, "head": null},
+            "policy_delta": [], "inherited_cells": [], "reopened_cells": [],
+        },
+    ]);
+    let with = render_report(Some(&anchored_plan_text(Some(anchors))), &[]);
+    assert!(with.contains("## Coverage anchors"), "{with}");
+    assert!(
+        with.contains("| windows-latest | incremental | certified-ancestor | `0123456` | 1 | 2 | 1 |"),
+        "{with}"
+    );
+    assert!(with.contains("| wsl2 | full | bootstrap-no-run | none | 0 | 0 | 0 |"), "{with}");
+
+    let without = render_report(Some(&anchored_plan_text(None)), &[]);
+    assert!(!without.contains("Coverage anchors"), "{without}");
+}
+
+#[test]
+fn a_plan_with_coverage_anchors_still_rolls_up() {
+    let temp = TempDir::new("anchored-rollup");
+    let mut plan = nightly_plan(vec![reused_windows_cell()]);
+    plan["coverage_anchors"] = json!([]);
+    let (rolled, verdict, summary) = audit_plan(&temp, &plan, &[], &[]);
+    assert_eq!(0, rolled.unwrap(), "{summary}");
+    assert_eq!(Some(0), verdict, "{summary}");
 }

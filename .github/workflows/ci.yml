@@ -2,12 +2,12 @@ name: ci
 
 # Dependency-aware CI for pull requests, pushes to main, and a nightly full
 # run. Each environment names the events that schedule it in
-# `.github/ci/environments.json`: a pull request proves Linux (and macOS,
-# normally from the hook's local evidence), a push to main adds Windows, and
-# the nightly run adds WSL2. A main push reuses successful PR validation only
-# with an identical tested tree and integration base, and then plans only the
-# environments the push event adds; missing evidence falls back to the normal
-# grid. Source-changed workspace
+# `.github/ci/environments.json`: a pull request and a push to main prove
+# Linux (and macOS, normally from the hook's local evidence), and the nightly
+# run proves native Windows and WSL2. A main push reuses successful PR
+# validation only with an identical tested tree and integration base, and then
+# plans nothing; it waits for a PR run still in progress, and missing evidence
+# falls back to the normal grid. Source-changed workspace
 # packages receive every gate; an unchanged direct reverse dependency receives
 # no area, no job, and no result cell, and is reported by name instead. The
 # result is fanned out one caller identity per selected package AREA, with each
@@ -30,12 +30,12 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The nightly WSL2 run. Which environments it plans is the environment
-  # table's decision, not this file's: `wsl2-ubuntu` alone names `schedule`
-  # in its `events` (fixes/2026-09-18-ci-cadence, narrowed by
-  # fixes/2026-09-19-nightly-scope). Its Linux producer joins the plan for
-  # its archives only, cell-less; Windows is proven by every push to `main`;
-  # macOS by the development Mac through the hook. The scope is what changed
+  # The nightly Windows and WSL2 run. Which environments it plans is the
+  # environment table's decision, not this file's: `windows-latest` and
+  # `wsl2-ubuntu` name `schedule` in their `events`
+  # (features/2026-10-08-windows-to-nightly). WSL2's Linux producer joins the
+  # plan for its archives only, cell-less; Linux and macOS are proven by pull
+  # requests and pushes, macOS by the development Mac through the hook. The scope is what changed
   # since the last successful nightly, so an unchanged workspace plans nothing.
   schedule:
     - cron: "0 8 * * *"
@@ -86,7 +86,9 @@ jobs:
   validation:
     name: Check reusable PR validation
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    # A PR merged before its own CI finished is waited for (up to 90 min, the
+    # long end of a pull request's duration) rather than re-run in full.
+    timeout-minutes: 100
     permissions:
       contents: read
       actions: read
@@ -101,21 +103,29 @@ jobs:
       - name: Verify prior PR validation
         id: reuse
         continue-on-error: true
-        timeout-minutes: 1
+        timeout-minutes: 95
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/reuse_validation.py check
+        run: python3 scripts/ci/reuse_validation.py check --wait-minutes 90
 
   scope:
     name: Determine affected scope
     needs: validation
     # Always, including on a reused PR validation: that reuse proves the
     # environments the pull request event schedules, and the push event may
-    # schedule more (Windows). Scope plans exactly the difference, which is
-    # nothing when the events agree — and then every job downstream skips as
-    # before.
+    # schedule more. Scope plans exactly the difference, which is nothing
+    # while the events agree — and then every job downstream skips.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    # `actions: read` is for reading Actions data: the nightly's anchor lookup
+    # (the run list, the per-environment certification artifacts, and a legacy
+    # run's jobs), the hosted-artifact probe behind evidence verification, and
+    # the nightly's recovery of earlier runs' observation artifacts. Nothing
+    # here writes anything remote; that recovery writes notes in this runner's
+    # own checkout only.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       scheduled_areas: ${{ steps.scope.outputs.scheduled_areas }}
       area_rows: ${{ steps.scope.outputs.area_rows }}
@@ -140,6 +150,9 @@ jobs:
       # revision out, so a consumer's tree is the tree its archive was bound
       # to and `ci-build` has nothing to refuse.
       head: ${{ steps.scope.outputs.head }}
+      # The environments a nightly plan anchored (`[]` on every other event),
+      # one certification each; read by `certify-nightly`.
+      coverage_environments: ${{ steps.scope.outputs.coverage_environments }}
       # When the plan became available. Every owner leg's queue time is measured
       # against it: an owner cannot start before the plan that names it exists,
       # so this — not the run's own creation — is the moment it became
@@ -172,8 +185,8 @@ jobs:
           # A reused PR validation proves the environments the pull request
           # event schedules; this push plans only the rest.
           PROVEN_BY_PULL_REQUEST: ${{ needs.validation.outputs.reuse }}
-          # For `nightly-base`: the newest successful nightly is read from
-          # the Actions API.
+          # For `nightly-anchors`: the newest successful nightly that proved
+          # each environment is read from the Actions API.
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -191,21 +204,48 @@ jobs:
               base="$PR_BASE"
               head="$PR_HEAD"
             elif [[ "$EVENT_NAME" == "schedule" ]]; then
-              # The nightly plans what changed since the last successful
-              # nightly on main (fixes/2026-09-19-nightly-scope). The first
-              # nightly, or one with no successful ancestor, has no base and
-              # plans the full workspace like a manual run.
-              base="$(python3 scripts/ci/reuse_validation.py nightly-base)"
-              head="$PUSH_HEAD"
-              if [[ -z "$base" ]]; then
-                base="0000000000000000000000000000000000000000"
+              # The nightly has no single comparison base: each scheduled
+              # environment is planned from the diff since the newest
+              # successful nightly that proved IT (or the full gated
+              # workspace, with a coded reason), so a WSL2-only history never
+              # shortens Windows' scope. The planner derives every diff
+              # itself from the anchors, and the plan records the all-zero
+              # "no single base" identity. A lookup failure degrades inside
+              # `nightly-anchors` to a visible full-scope fallback, never to
+              # a narrower plan.
+              python3 scripts/ci/reuse_validation.py nightly-anchors > nightly-anchors.json
+              # Earlier nightlies' finished hosted cells whose run never
+              # reached `publish-observations` (force-cancelled, lost runner,
+              # timed out) exist only as `observation-*` artifacts. Record the
+              # newest scheduled runs' ones in THIS checkout's notes (no push:
+              # this job writes nothing remote) BEFORE planning: the planner
+              # reopens an anchored cell that a recovered failure contradicts,
+              # and the verifier below vouches for recovered passes like any
+              # other observation. A failure here only costs reuse, so it
+              # warns and carries on.
+              recovery_status=0
+              GIT_AUTHOR_NAME='github-actions[bot]' \
+              GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+              GIT_COMMITTER_NAME='github-actions[bot]' \
+              GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+                python3 scripts/ci/hosted_observations.py publish \
+                  --repository "$GITHUB_REPOSITORY" --recent --no-push \
+                || recovery_status=$?
+              if (( recovery_status != 0 )); then
+                echo "::warning title=CI scope::recovering earlier nightlies' hosted observations ended with exit ${recovery_status}; a cell it could not recover executes"
               fi
+              base="0000000000000000000000000000000000000000"
+              head="$PUSH_HEAD"
             else
               base="$PUSH_BASE"
               head="$PUSH_HEAD"
             fi
 
-            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            if [[ "$EVENT_NAME" == "schedule" ]]; then
+              # The probe lets a hosted passing retry supersede a failure on
+              # a cell the anchor would otherwise lend this run.
+              scope_args=(--anchors nightly-anchors.json --artifact-repo "$GITHUB_REPOSITORY")
+            elif [[ -z "$base" || "$base" =~ ^0+$ ]]; then
               scope_args=(--all)
             else
               # One diff, two lists. `--name-status` is what separates a
@@ -233,7 +273,8 @@ jobs:
             event_args+=(--proven-event pull_request)
           fi
           # Ahead of the file list: after its `--` argparse reads everything,
-          # options included, as a path.
+          # options included, as a path. (A nightly's `--anchors` is the whole
+          # selection input: it carries no file list.)
           scope_args=(--plan-out resolved-plan.json --base "$base" --head "$head" "${event_args[@]}" "${scope_args[@]}")
 
           # A scope receipt on refs/notes/ci-local/scope that binds this
@@ -280,7 +321,7 @@ jobs:
             scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
           fi
           evidence_failure=""
-          if [[ "$EVENT_NAME" != "workflow_dispatch" && "$EVENT_NAME" != "schedule" ]]; then
+          if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
             # Per CELL, across every environment's notes ref at once: a macOS
             # receipt and a prior WSL cross-check receipt both contribute.
             # Each accepted cell has its EXECUTION omitted while staying a
@@ -301,6 +342,7 @@ jobs:
               --plan resolved-plan.json \
               --base "$base" \
               --head "$head" \
+              --artifact-repo "$GITHUB_REPOSITORY" \
               --rejections evidence-rejections.json > accepted-cells.json \
               || verifier_status=$?
             if (( verifier_status != 0 )); then
@@ -397,6 +439,7 @@ jobs:
             # checkout in this run is this value, and `ci-build` refuses any
             # checkout that is not `plan.head`.
             echo "head=$(jq -r '.head' resolved-plan.json)"
+            echo "coverage_environments=$(jq -c '[(.coverage_anchors // [])[].environment]' resolved-plan.json)"
           } >>"$GITHUB_OUTPUT"
 
           # Evidence provenance, read from the WRITTEN plan (the authority on
@@ -419,7 +462,7 @@ jobs:
               else "\($rejections | length) rejection(s): \(
                 [$rejections[] | split(":")[0]] | group_by(.) | map("\(.[0]) (\(length))") | join(", "))"
               end' resolved-plan.json)"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             validation_environments="n/a ($EVENT_NAME runs no verifier)"
           else
             consulted="$(git for-each-ref --format='%(refname:strip=3)' 'refs/notes/ci-local/' \
@@ -445,6 +488,8 @@ jobs:
             fi
             echo "| validation environments | ${validation_environments} |"
             echo "| reused passing cells | ${reused_passing} |"
+            echo "| cells (execute / reuse / accepted gap) | $(jq -r '[.cells[] | select(.execution == "execute")] | length' resolved-plan.json) / $(jq -r '[.cells[] | select(.execution == "reuse")] | length' resolved-plan.json) / $(jq -r '[.cells[] | select(.state == "accepted-gap")] | length' resolved-plan.json) |"
+            echo "| coverage anchors | $(jq -r '(.coverage_anchors // []) | if length == 0 then "n/a" else map("\(.environment): \(.reason)") | join("; ") end' resolved-plan.json) |"
             echo "| cells retained (evidence incomplete or rejected) | ${retained} |"
             echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
@@ -924,6 +969,154 @@ jobs:
             exit 1
           fi
           echo "ci-gate: every blocking job succeeded or was skipped"
+
+  # Publishes what a finished nightly proved, one artifact per anchored
+  # environment, so the next nightly can plan from it (`nightly-anchors`).
+  #
+  # It runs only on `schedule`, and only after the final gate passed, so a
+  # failed, cancelled, or incomplete run publishes nothing and is never a
+  # baseline. It still runs on an EMPTY plan: an unchanged head is certified
+  # with zero new cells. It is deliberately NOT in `ci-gate`'s `needs` (the
+  # gate stays a policy-free fold); a failure here fails the run instead, so
+  # a nightly that could not certify is not mistaken for a baseline either.
+  # No `name:`: a skipped matrix job is never labelled from its matrix.
+  # `actions: read` is for the audit-job count; nothing here writes checks or
+  # contents, which stay with the accepted-gaps publisher.
+  certify-nightly:
+    needs: [scope, ci-gate]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      needs.ci-gate.result == 'success' &&
+      needs.scope.result == 'success' &&
+      needs.scope.outputs.coverage_environments != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.scope.outputs.coverage_environments) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Build this environment's certification
+        id: certify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          GATE_RESULT: ${{ needs.ci-gate.result }}
+        run: |
+          set -euo pipefail
+          written="$(python3 scripts/ci/reuse_validation.py certify \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --out certifications \
+            --gate-result "$GATE_RESULT")"
+          name="$(jq -er --arg environment "$ENVIRONMENT" \
+            '.[] | select(.environment == $environment) | .name' <<<"$written")"
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+      # The artifact is looked up by exactly this name.
+      - name: Publish the certification
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.certify.outputs.name }}
+          path: certifications/${{ steps.certify.outputs.name }}/certification.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # Turns the observations this nightly's hosted producers uploaded into notes
+  # (`refs/notes/ci-local/<environment>`), so a later run can reuse a cell this
+  # one proved even when something else in this run failed.
+  #
+  # WHY IT IS A JOB OF ITS OWN. `package-ci` and `area-ci` keep
+  # `contents: read`; the one credential that can write a ref lives here, in a
+  # job that runs only on `schedule` (so only default-branch code, never pull
+  # request code), checks out the tested revision, and runs a script from that
+  # checkout. It writes only the notes refs, never a branch, and `accepted-gaps`
+  # stays the sole owner of `checks: write`.
+  #
+  # WHEN IT RUNS. `always()` so an unrelated red area, or a cancelled one,
+  # cannot lose a cell that finished: each producer uploads its observation
+  # before the area knows how it ended, and this job collects whatever exists.
+  # It is deliberately NOT in `ci-gate`'s `needs` (the gate stays a policy-free
+  # fold of what blocks a merge); a failure here fails the RUN instead, so a
+  # nightly whose proof could not be published is visibly red.
+  #
+  # WHEN IT DOES NOT RUN. On a cancelled run `always()` still schedules this
+  # job under a normal cancel, but a force-cancel, a lost runner, or the
+  # 15-minute limit leaves the observations as artifacts (90 days) with no
+  # note. Recovery is automatic and bounded: the next nightly's `scope` job
+  # records the newest `RECOVERY_RUNS` completed scheduled runs' observations
+  # locally before it plans, and this job's second step pushes them. A run
+  # older than that window is reached only by `publish --run-id N` by hand.
+  # Nothing is fabricated: an observation whose artifacts expired earns no
+  # credit, and its cell executes.
+  #
+  # UNVERIFIED. Whether the repository's rulesets let `GITHUB_TOKEN` push
+  # `refs/notes/*`. If they do not, the push is refused, the step fails red
+  # with "hosted observations are local to this runner; remote reuse
+  # unavailable", and the artifacts stay the only record.
+  # No `name:`: a skipped job is never labelled from its matrix.
+  publish-observations:
+    needs: [scope, area-ci]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      needs.scope.result == 'success' &&
+      needs.scope.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Full history: an earlier run's observation names that run's head,
+      # which must be present to carry a note.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+          fetch-depth: 0
+      # `git notes` needs a committer. This is the workflow's own identity, not
+      # an author's: nothing here is a commit anyone wrote.
+      - name: Publish this run's observations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py publish \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID"
+      # Pushes what the `scope` job could only record locally: earlier
+      # nightlies' observations whose own run never published them. `always()`
+      # so this run's publication failing does not also withhold theirs.
+      - name: Publish earlier nightlies' unpublished observations
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py publish \
+            --repository "$GITHUB_REPOSITORY" \
+            --recent
 
   # The run's reader-facing account of itself, in exactly three modes
   # (specification section 6): a reused whole-PR validation, a successful scope,

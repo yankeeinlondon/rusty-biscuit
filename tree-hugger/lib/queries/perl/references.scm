@@ -17,3 +17,7 @@
 ; Package-qualified identifiers
 (package_name
   (identifier) @reference)
+
+; A method invocation's name (`$obj->m()`, `Pkg->m()`), an occurrence only
+(method_invocation
+  function_name: (identifier) @reference.member)

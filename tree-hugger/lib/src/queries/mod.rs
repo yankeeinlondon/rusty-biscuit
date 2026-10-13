@@ -1,5 +1,4 @@
 pub mod compatibility;
-pub mod drift;
 pub mod inventory;
 pub mod provenance;
 
@@ -117,7 +116,10 @@ fn is_query_empty(source: &str) -> bool {
         .all(|line| line.trim().is_empty() || line.trim().starts_with(';'))
 }
 
-fn resolve_query_text(
+/// The effective text of `language`'s `kind` query: vendored queries with
+/// their inherited queries and overlays resolved, empty when the language has
+/// no patterns of that kind.
+pub(crate) fn resolve_query_text(
     language: ProgrammingLanguage,
     kind: QueryKind,
 ) -> Result<String, TreeHuggerError> {
@@ -357,27 +359,6 @@ fn comments_query_by_name(name: &str) -> Option<&'static str> {
     }
 }
 
-use crate::shared::DiagnosticSeverity;
-
-/// Maps rule IDs to their severity level.
-pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
-    match rule_id {
-        // Error-level rules (semantic)
-        "unreachable-code" | "invalid-syntax" | "undefined-variable" | "undefined-symbol" => {
-            DiagnosticSeverity::Error
-        }
-        // Warning-level rules (semantic)
-        "unused-variable" | "shadowed-variable" | "unused-symbol" | "unused-import"
-        | "dead-code" | "undefined-module" => DiagnosticSeverity::Warning,
-        // Warning-level rules (pattern)
-        "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
-        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" | "console-log"
-        | "print-call" | "fmt-println" => DiagnosticSeverity::Warning,
-        // Default to info
-        _ => DiagnosticSeverity::Info,
-    }
-}
-
 /// Generates a human-readable message for a lint rule.
 pub fn format_rule_message(rule_id: &str) -> String {
     match rule_id {
@@ -392,17 +373,14 @@ pub fn format_rule_message(rule_id: &str) -> String {
         "expect-call" => "Explicit expect() call".to_string(),
         "dbg-macro" => "Debug macro dbg!() call".to_string(),
         "eval-call" => "Use of eval() is discouraged".to_string(),
-        "exec-call" => "Use of exec() is discouraged".to_string(),
+        "exec-call" => "Dynamic code or command execution via exec() is discouraged".to_string(),
         "debugger-statement" => "Debugger statement found".to_string(),
         "breakpoint-call" => "Breakpoint call found".to_string(),
         "console-log" => "console.log() call found".to_string(),
         "print-call" => "print() call found".to_string(),
         "fmt-println" => "fmt.Println() call found".to_string(),
-        // Legacy rules (kept for compatibility)
-        "unused-variable" => "Potentially unused variable".to_string(),
-        "shadowed-variable" => "Variable shadows outer binding".to_string(),
+        // Registry alias of `dead-code`
         "unreachable-code" => "Unreachable code detected".to_string(),
-        "deprecated-syntax" => "Deprecated syntax".to_string(),
         _ => format!("Lint rule: {rule_id}"),
     }
 }
@@ -476,6 +454,48 @@ mod tests {
 
     fn default_grammar_ref(language: ProgrammingLanguage) -> (Language, &'static str) {
         (language.tree_sitter_language(), language.query_name())
+    }
+
+    use crate::language_cases::language_tests;
+    language_tests!(no_query_carries_a_predicate_the_runtime_does_not_enforce => check_enforced_predicates);
+
+    /// The tree-sitter runtime enforces only its built-in predicates and
+    /// returns every other one (`#has-ancestor?`, `#has-parent?`, …) as a
+    /// general predicate that no reader here applies, so a pattern carrying
+    /// one would match as if the condition held. Write the context into the
+    /// pattern's shape instead.
+    fn check_enforced_predicates(language: ProgrammingLanguage) {
+        let kinds = [
+            QueryKind::Locals,
+            QueryKind::Imports,
+            QueryKind::References,
+            QueryKind::Lint,
+            QueryKind::Comments,
+        ];
+        let (grammar, id) = default_grammar_ref(language);
+        for kind in kinds {
+            let query = query_for(
+                GrammarRef {
+                    language,
+                    grammar: &grammar,
+                    id,
+                },
+                kind,
+            )
+            .unwrap_or_else(|error| panic!("{} {kind}: {error}", language.name()));
+            for pattern in 0..query.pattern_count() {
+                let unenforced: Vec<&str> = query
+                    .general_predicates(pattern)
+                    .iter()
+                    .map(|predicate| predicate.operator.as_ref())
+                    .collect();
+                assert!(
+                    unenforced.is_empty(),
+                    "{} {kind} pattern {pattern}: unenforced predicates {unenforced:?}",
+                    language.name()
+                );
+            }
+        }
     }
 
     #[test]

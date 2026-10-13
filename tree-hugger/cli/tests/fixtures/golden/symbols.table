@@ -1,0 +1,174 @@
+┌────────────┬──────────┬────────────┬────────────────┬───────────┐
+│ Location   │ Kind     │ Visibility │ Name           │ Signature │
+├────────────┼──────────┼────────────┼────────────────┼───────────┤
+│ bash.sh:4  │ variable │            │ DEFAULT_TARGET │           │
+│ bash.sh:6  │ function │            │ build_target   │ ()        │
+│ bash.sh:11 │ function │            │ clean_target   │ ()        │
+└────────────┴──────────┴────────────┴────────────────┴───────────┘
+
+┌──────────┬────────────┬────────────────┬──────────────┬──────────────────────────┐
+│ Location │ Kind       │ Visibility     │ Name         │ Signature                │
+├──────────┼────────────┼────────────────┼──────────────┼──────────────────────────┤
+│ c.c:3    │ type       │                │ point        │ { x: int, y: int }       │
+│ c.c:4    │ field      │                │ x            │                          │
+│ c.c:5    │ field      │                │ y            │                          │
+│ c.c:8    │ type alias │                │ point_t      │                          │
+│ c.c:10   │ variable   │ module-private │ origin_count │                          │
+│ c.c:12   │ function   │ public         │ point_sum    │ (p: struct point) -> int │
+│ c.c:16   │ function   │ public         │ reset_origin │ () -> void               │
+└──────────┴────────────┴────────────────┴──────────────┴──────────────────────────┘
+
+┌───────────────┬───────────┬────────────┬────────────┬────────────────────────────┐
+│ Location      │ Kind      │ Visibility │ Name       │ Signature                  │
+├───────────────┼───────────┼────────────┼────────────┼────────────────────────────┤
+│ c_sharp.cs:3  │ namespace │            │ Multi      │                            │
+│ c_sharp.cs:5  │ class     │ public     │ Ledger     │ { total: int, Total: int } │
+│ c_sharp.cs:7  │ field     │ private    │ total      │                            │
+│ c_sharp.cs:9  │ property  │ public     │ Total      │                            │
+│ c_sharp.cs:11 │ method    │ public     │ Add        │ (amount: int) -> void      │
+│ c_sharp.cs:16 │ method    │ public     │ Empty      │ () -> Ledger               │
+│ c_sharp.cs:22 │ interface │ public     │ IAuditable │                            │
+│ c_sharp.cs:24 │ method    │ public     │ Audit      │ () -> void                 │
+└───────────────┴───────────┴────────────┴────────────┴────────────────────────────┘
+
+┌────────────┬─────────────┬────────────┬──────────┬───────────────────────────────┐
+│ Location   │ Kind        │ Visibility │ Name     │ Signature                     │
+├────────────┼─────────────┼────────────┼──────────┼───────────────────────────────┤
+│ cpp.cpp:3  │ namespace   │            │ geometry │                               │
+│ cpp.cpp:5  │ class       │            │ Vector   │ { x_: int, y_: int }          │
+│ cpp.cpp:7  │ constructor │ public     │ Vector   │ (x: int, y: int)              │
+│ cpp.cpp:9  │ method      │ public     │ length   │ () -> int                     │
+│ cpp.cpp:12 │ field       │ private    │ x_       │                               │
+│ cpp.cpp:13 │ field       │ private    │ y_       │                               │
+│ cpp.cpp:16 │ function    │ public     │ dot      │ (a: Vector, b: Vector) -> int │
+└────────────┴─────────────┴────────────┴──────────┴───────────────────────────────┘
+
+┌──────────────┬─────────────┬────────────┬────────────┬────────────────┐
+│ Location     │ Kind        │ Visibility │ Name       │ Signature      │
+├──────────────┼─────────────┼────────────┼────────────┼────────────────┤
+│ java.java:3  │ class       │ public     │ Counter    │ { count: int } │
+│ java.java:4  │ field       │ private    │ count      │                │
+│ java.java:6  │ constructor │ public     │ Counter    │ (start: int)   │
+│ java.java:10 │ method      │ public     │ increment  │ () -> void     │
+│ java.java:14 │ method      │ public     │ zero       │ () -> Counter  │
+│ java.java:19 │ interface   │ package    │ Resettable │                │
+│ java.java:20 │ method      │ public     │ reset      │ () -> void     │
+└──────────────┴─────────────┴────────────┴────────────┴────────────────┘
+
+┌──────────────────┬─────────────┬────────────┬───────────────┬───────────┐
+│ Location         │ Kind        │ Visibility │ Name          │ Signature │
+├──────────────────┼─────────────┼────────────┼───────────────┼───────────┤
+│ javascript.js:3  │ class       │ public     │ Button        │           │
+│ javascript.js:4  │ constructor │ public     │ constructor   │ (label)   │
+│ javascript.js:8  │ method      │ public     │ press         │ ()        │
+│ javascript.js:13 │ function    │ public     │ buildButton   │ ()        │
+│ javascript.js:17 │ variable    │ public     │ DEFAULT_LABEL │           │
+└──────────────────┴─────────────┴────────────┴───────────────┴───────────┘
+
+┌────────────┬──────────┬────────────────┬──────────────┬───────────┐
+│ Location   │ Kind     │ Visibility     │ Name         │ Signature │
+├────────────┼──────────┼────────────────┼──────────────┼───────────┤
+│ lua.lua:3  │ variable │ module-private │ M            │           │
+│ lua.lua:5  │ variable │ module-private │ default_size │           │
+│ lua.lua:7  │ function │                │ new_bag      │ (size)    │
+│ lua.lua:11 │ method   │                │ describe     │ ()        │
+│ lua.lua:15 │ function │ module-private │ helper       │ ()        │
+└────────────┴──────────┴────────────────┴──────────────┴───────────┘
+
+┌─────────────────┬───────────┬────────────┬─────────────┬──────────────┐
+│ Location        │ Kind      │ Visibility │ Name        │ Signature    │
+├─────────────────┼───────────┼────────────┼─────────────┼──────────────┤
+│ nested/go.go:2  │ namespace │            │ nested      │              │
+│ nested/go.go:5  │ type      │ public     │ Widget      │ { Size int } │
+│ nested/go.go:6  │ field     │ public     │ Size        │              │
+│ nested/go.go:9  │ method    │ public     │ Grow        │ (amount int) │
+│ nested/go.go:13 │ constant  │ public     │ MaxSize     │              │
+│ nested/go.go:15 │ function  │ public     │ BuildWidget │ () Widget    │
+└─────────────────┴───────────┴────────────┴─────────────┴──────────────┘
+
+┌─────────────────────┬─────────────┬────────────┬──────────────┬────────────────┐
+│ Location            │ Kind        │ Visibility │ Name         │ Signature      │
+├─────────────────────┼─────────────┼────────────┼──────────────┼────────────────┤
+│ nested/python.py:3  │ variable    │            │ MAX_SIZE     │                │
+│ nested/python.py:6  │ class       │            │ Gadget       │                │
+│ nested/python.py:9  │ constructor │            │ __init__     │ (self, size)   │
+│ nested/python.py:12 │ method      │            │ grow         │ (self, amount) │
+│ nested/python.py:16 │ function    │            │ build_gadget │ ()             │
+└─────────────────────┴─────────────┴────────────┴──────────────┴────────────────┘
+
+┌────────────┬──────────┬────────────┬───────────────┬───────────┐
+│ Location   │ Kind     │ Visibility │ Name          │ Signature │
+├────────────┼──────────┼────────────┼───────────────┼───────────┤
+│ perl.pl:2  │ module   │            │ Multi::Queue  │           │
+│ perl.pl:4  │ variable │            │ $default_size │           │
+│ perl.pl:6  │ function │            │ new_queue     │ ()        │
+│ perl.pl:11 │ function │            │ queue_size    │ ()        │
+└────────────┴──────────┴────────────┴───────────────┴───────────┘
+
+┌────────────┬──────────┬────────────┬──────────────┬───────────────────────┐
+│ Location   │ Kind     │ Visibility │ Name         │ Signature             │
+├────────────┼──────────┼────────────┼──────────────┼───────────────────────┤
+│ php.php:4  │ class    │ public     │ Account      │ { balance: int }      │
+│ php.php:6  │ field    │ private    │ balance      │                       │
+│ php.php:8  │ method   │ public     │ deposit      │ (amount: int) -> void │
+│ php.php:13 │ method   │ public     │ open         │ () -> Account         │
+│ php.php:19 │ function │ public     │ open_account │ () -> Account         │
+└────────────┴──────────┴────────────┴──────────────┴───────────────────────┘
+
+┌────────────┬──────────────┬────────────┬──────────────┬─────────────────────┐
+│ Location   │ Kind         │ Visibility │ Name         │ Signature           │
+├────────────┼──────────────┼────────────┼──────────────┼─────────────────────┤
+│ rust.rs:4  │ type         │ public     │ Widget       │ { size: u32 }       │
+│ rust.rs:5  │ field        │ public     │ size         │                     │
+│ rust.rs:9  │ method       │ public     │ new          │ (size: u32) -> Self │
+│ rust.rs:13 │ method       │ public     │ grow         │ (self, amount: u32) │
+│ rust.rs:18 │ enum         │ public     │ Shape        │ { Circle, Square }  │
+│ rust.rs:19 │ enum variant │ public     │ Circle       │                     │
+│ rust.rs:20 │ enum variant │ public     │ Square       │                     │
+│ rust.rs:23 │ constant     │ public     │ MAX_SIZE     │                     │
+│ rust.rs:25 │ function     │ public     │ build_widget │ () -> Widget        │
+└────────────┴──────────────┴────────────┴──────────────┴─────────────────────┘
+
+┌────────────────┬────────┬────────────┬───────┬──────────────────┐
+│ Location       │ Kind   │ Visibility │ Name  │ Signature        │
+├────────────────┼────────┼────────────┼───────┼──────────────────┤
+│ scala.scala:5  │ trait  │ public     │ Named │                  │
+│ scala.scala:6  │ method │ public     │ name  │ ()               │
+│ scala.scala:9  │ class  │ public     │ Tag   │ { name: String } │
+│ scala.scala:10 │ method │ public     │ upper │ () -> String     │
+│ scala.scala:13 │ module │ public     │ Tag   │                  │
+│ scala.scala:14 │ method │ public     │ empty │ () -> Tag        │
+└────────────────┴────────┴────────────┴───────┴──────────────────┘
+
+┌────────────────┬───────────┬────────────┬────────────┬──────────────────┐
+│ Location       │ Kind      │ Visibility │ Name       │ Signature        │
+├────────────────┼───────────┼────────────┼────────────┼──────────────────┤
+│ swift.swift:3  │ type      │ internal   │ Meter      │ { reading: Int } │
+│ swift.swift:4  │ field     │ internal   │ reading    │                  │
+│ swift.swift:6  │ method    │ internal   │ doubled    │ () -> Int        │
+│ swift.swift:11 │ interface │ internal   │ Readable   │                  │
+│ swift.swift:12 │ method    │ internal   │ read       │ () -> Int        │
+│ swift.swift:15 │ function  │ internal   │ buildMeter │ () -> Meter      │
+└────────────────┴───────────┴────────────┴────────────┴──────────────────┘
+
+┌──────────────────┬─────────────┬────────────┬─────────────┬────────────────────────┐
+│ Location         │ Kind        │ Visibility │ Name        │ Signature              │
+├──────────────────┼─────────────┼────────────┼─────────────┼────────────────────────┤
+│ typescript.ts:3  │ interface   │ public     │ Sized       │ { size: number }       │
+│ typescript.ts:4  │ property    │ public     │ size        │                        │
+│ typescript.ts:7  │ type alias  │ public     │ Size        │                        │
+│ typescript.ts:9  │ class       │ public     │ Panel       │ { size: Size }         │
+│ typescript.ts:10 │ property    │ public     │ size        │                        │
+│ typescript.ts:12 │ constructor │ public     │ constructor │ (size: Size)           │
+│ typescript.ts:16 │ method      │ public     │ grow        │ (amount: number): void │
+│ typescript.ts:21 │ function    │ public     │ buildPanel  │ (): Panel              │
+└──────────────────┴─────────────┴────────────┴─────────────┴────────────────────────┘
+
+┌────────────┬──────────┬────────────┬───────────────┬───────────┐
+│ Location   │ Kind     │ Visibility │ Name          │ Signature │
+├────────────┼──────────┼────────────┼───────────────┼───────────┤
+│ zsh.zsh:4  │ variable │            │ PROMPT_STYLE  │           │
+│ zsh.zsh:6  │ function │            │ render_prompt │ ()        │
+│ zsh.zsh:11 │ function │            │ reset_prompt  │ ()        │
+└────────────┴──────────┴────────────┴───────────────┴───────────┘
+

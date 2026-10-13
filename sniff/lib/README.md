@@ -680,6 +680,15 @@ unusable URL in a page costs the link and not the query.
 
 Detects monorepo standards, package structure, and acting binaries.
 
+Use `detect_repo_structure_or_root_package` when standalone projects should also
+produce a catalog. Check `package.name_source == PackageNameSource::Manifest`
+before treating a display label as declared identity. Build
+`PackageOwnershipLookup::new(&repo)` once for many `package_for_path` calls;
+an unnamed nested package still owns its files, and paths outside the root have
+no owner. Old serialized catalogs without name provenance read as `PathFallback`.
+See [package identity and ownership](../docs/sniff-library-architecture.md#declared-names-and-repeated-ownership-lookups).
+
+
 **Supported Standards:**
 
 - Cargo workspaces (Rust)
@@ -695,6 +704,8 @@ Detects monorepo standards, package structure, and acting binaries.
 **Key Types:**
 
 - `RepoInfo` - Repository metadata and packages
+- `PackageNameSource` - Distinguishes a declared manifest identity from a directory fallback label
+- `PackageOwnershipLookup` - Borrows one catalog for repeated deepest-owner lookups of absolute native paths
 - `MonorepoStandard` - Standard-based monorepo descriptor
 - `MonorepoLayer` - One membership layer: authority + orchestrators + packages
 - `LockfileObservation` - What a layer's lockfile says about its members (`LockfileStatus` + `LockfileReason`)

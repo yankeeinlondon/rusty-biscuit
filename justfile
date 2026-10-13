@@ -153,6 +153,27 @@ pre-push *selectors="":
 cross-check *args:
     @./scripts/cross-check.sh {{ args }}
 
+# Retire build-host clones that `cross-check` no longer needs (this host's
+# clones whose worktree is gone, and any clone with no run in
+# CROSS_CHECK_MAX_AGE_DAYS, default 3) on every declared host, and report each
+# host's free space and clone sizes before and the space reclaimed after.
+# Usage: just cross-check-refresh [--os linux|windows|wsl|macos|all] [--dry-run]
+cross-check-refresh *args:
+    @./scripts/cross-check-refresh.sh {{ args }}
+
+# run Level 1 tests for the clone-pruning rules cross-check and cross-check-refresh share
+cross-check-test:
+    @./scripts/cross-check-hosts-tests.sh
+
+# Seed the nightly's native Windows and WSL2 evidence on the BUILD_WIN and
+# BUILD_WSL rigs at a clean, pinned `main` checkout, publishing each cell as
+# it finishes. Rerun to resume; `--plan` previews without proving anything.
+# Level 1 cells only: a pending cell of another gate is reported `unsupported`
+# and left for the nightly, and the exit stays nonzero while it remains.
+# Usage: just ci-seed [--plan] [--os windows|wsl|all] [--package <name>]...
+ci-seed *args:
+    @python3 scripts/ci/seed.py {{ args }}
+
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
@@ -378,7 +399,7 @@ fuzz *args="":
 all *args="":
     @just _orchestrate all {{ args }}
 
-# validate that every curated package area defines the canonical 12-recipe set
+# validate that every curated package area defines the canonical 13-recipe set
 #
 # Parses each area's `justfile` directly with grep rather than spawning a
 # nested `just --summary` per area. The nested form is prone to hangs on
@@ -391,7 +412,7 @@ check-canonical *args="":
     set -euo pipefail
     failed_areas=()
     passed_areas=()
-    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    required=(sanity test slow-tests test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
 
     if [[ -z "{{ args }}" ]]; then
         target_areas=({{ areas }})
@@ -463,7 +484,7 @@ check-canonical *args="":
         exit 1
     fi
 
-# commits all the staged changes using model from COMMIT_MODEL or MODEL in OpenCode
+# commits all the staged changes with the agent and model set in prompts/commit.md
 # (under CI: a plain `git commit` with the message passed as the argument)
 commit *args="":
     #!/usr/bin/env bash
@@ -490,11 +511,10 @@ commit *args="":
 
     echo ""
     echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     echo ""
     echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
+    claudine compose prompts/commit.md -y {{ args }}
     just _speak "git commits completed in rusty-biscuit monorepo"
     sniff repo git-status 2>/dev/null || exit 0
     echo

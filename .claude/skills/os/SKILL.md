@@ -28,7 +28,10 @@ configuring WSL itself; the `rust-testing` skill owns test design.
 
 Build hosts are declared by environment variables (`BUILD_LINUX`, `BUILD_WIN`,
 `BUILD_WSL`, `BUILD_MACOS`), each an SSH destination. A set variable means the
-host is available from this machine; unset means it is not. Never hardcode an
+host is available from this machine; unset means no destination is configured
+for the runner. If the user says a rig is available, inspect the SSH config
+for its documented OS role, verify connectivity, and supply the matching
+`BUILD_*` value for that invocation. Never hardcode an
 alias; check `env | grep '^BUILD_'` first and report which hosts you had.
 
 | Need | Use | Detail |
@@ -88,10 +91,18 @@ environment's cell and how to record an execution ban.
 
 ## Standing rules
 
+- **CI cadence:** ordinary PRs and main pushes cover Linux/macOS; the
+  scoped nightly covers native Windows and WSL2. A Windows failure surfaces
+  in the nightly, after merge, and is fixed forward. `just ci-seed` proves
+  the nightly's cells on the rigs at a pinned `main` checkout, resumably; the
+  nightly reuses that proof per cell. Read `docs/topics/ci-cd.md`; WSL2 is
+  never native Windows evidence.
 - The Windows and WSL2 Level 2 CI cells are a **temporary policy gap**
   (`.github/ci/environments.json`, owner and expiry recorded there). Do not
   amend an acceptance criterion to exclude them; record the criterion as unmet
-  with provisioning as the required change.
+  with provisioning as the required change. When a gap is lifted, `just
+  ci-seed` still proves Level 1 only: it reports those cells `unsupported`
+  and the nightly runs them on hosted runners.
 - A cross-compile is compile evidence, never behavioral evidence. Say which
   one you have.
 - CI legs are compared within one environment only, on matched test

@@ -50,6 +50,55 @@ pub enum SniffError {
         path: PathBuf,
     },
 
+    /// The repository is bare, so it has no working tree or index to inspect.
+    #[error("bare repository has no working tree: {}", path.display())]
+    BareRepository {
+        /// The bare repository's root (its git directory).
+        path: PathBuf,
+    },
+
+    /// A changed-path base reference names no local object.
+    ///
+    /// No fetch or remote refresh is attempted to satisfy the lookup.
+    #[error("reference '{reference}' does not resolve to any object in {path}", path = .path.display())]
+    UnresolvedReference {
+        /// The reference token exactly as the caller supplied it.
+        reference: String,
+        /// Repository root the token was resolved against.
+        path: PathBuf,
+    },
+
+    /// A changed-path base reference resolves to an object that is not a
+    /// commit.
+    ///
+    /// Annotated tags are peeled first, so only a final tree or blob lands
+    /// here.
+    #[error(
+        "reference '{reference}' resolves to a {kind}, not a commit, in {path}",
+        path = .path.display()
+    )]
+    NonCommitReference {
+        /// The reference token exactly as the caller supplied it.
+        reference: String,
+        /// What the token resolved to: `"tree"` or `"blob"`.
+        kind: &'static str,
+        /// Repository root the token was resolved against.
+        path: PathBuf,
+    },
+
+    /// Unmerged (conflicted) index entries exist.
+    #[error(
+        "unresolved merge conflicts in {path}: {paths}",
+        path = .path.display(),
+        paths = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+    )]
+    MergeConflicts {
+        /// Repository root whose index holds the conflicts.
+        path: PathBuf,
+        /// Every conflicted repository-relative path, deduplicated and sorted.
+        paths: Vec<PathBuf>,
+    },
+
     /// The specified path is not a git repository.
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),

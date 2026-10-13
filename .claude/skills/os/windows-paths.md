@@ -102,6 +102,13 @@ with a path in the message. Processes and the environment are in
    preserves them; when a Windows-only failure shows a path missing one
    backslash, suspect Markdown escape handling, not path resolution.
 
+   Windows rejects C0 controls (including TAB and ESC) in filenames before
+   an output writer can observe them (`InvalidFilename`, error 123). For a
+   cross-platform filesystem fixture exercising control neutralization or
+   rejection, use a C1 control such as U+009B; test TAB/ESC cells directly at
+   the writer boundary without creating those filenames. Found in the
+   tree-hugger TSV/ctags export tests on the native Windows rig, 2026-10-08.
+
 6. **`$PWD` in a `shell: bash` step is an MSYS path; `$RUNNER_TEMP` in the
    same shell is a Windows one.** Git Bash answers `/d/a/repo/repo` for the
    checkout and `D:\a\_temp` for the temp directory, and a CI step routinely
@@ -133,6 +140,13 @@ with a path in the message. Processes and the environment are in
    literals so the macOS and Linux cells cover them too — `fs::canonicalize`
    only produces the verbatim form on Windows, so a fixture built from it is
    dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
+9. **On Unix `\` is a file-name character, and `to_portable_string` turns it
+   into `/`.** `back\slash.rs` becomes `back/slash.rs`, a different and
+   usually missing file. A test's expected path for such a file must keep
+   the native spelling on Unix (`cfg!(unix)` → `to_string_lossy`). A
+   `PathIdentity` route (`tree_hugger::portable_relative`) keeps each
+   component verbatim, so a scan-root-relative record path still holds the
+   literal `\`. Found 2026-10-08 in tree-hugger's ctags reader test.
 
 Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings
@@ -213,6 +227,24 @@ Compare against that, never against `to_string_lossy()`.
     drive); use `C:/repo/x.md` and expect `file:///C:/repo/x.md` there.
     Found 2026-10-09 in Darkmatter `resolves_repo_root_reference`,
     `meta_schema_reference_graph`, and the two `file://` diagnostic tests.
+
+14. **Native Windows filenames need not be valid Unicode.** A filename or
+    directory created with `OsStringExt::from_wide` can contain an unpaired
+    UTF-16 surrogate (U+D800 was created and read on the native Windows host,
+    2026-10-08). `to_string_lossy()` substitutes U+FFFD, naming a different
+    file. Treat that conversion as display only; a UTF-8 navigation export
+    must validate its native relative route before discarding code units.
+    Invalid code units confined to the scan root do not make the remaining
+    relative route invalid. Tree-hugger's public source/query APIs read these
+    files; an isolated tags-writer probe emitted eight nonexistent paths for
+    both a surrogate filename and a surrogate directory, while its root-only
+    control retained eight correct relative paths. Use native Windows `cfg`
+    tests and `OsStringExt::from_wide`, rather than assuming this input class
+    exists only on Linux. A surrogate-named directory also works as a child
+    process's `current_dir`, including `hug`'s Git discovery from it
+    (`symbols::export_ctags_paths::windows`, 2026-10-08), so a root-only
+    control can run through the real CLI.
+
 
 ## Worktree include links and junctions
 
