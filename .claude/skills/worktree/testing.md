@@ -211,9 +211,12 @@ on that one command: `list_prs::held(command)`,
   first (`gate.wait_for_runs(1)`, `origin.wait_for_requests`). With 300 ms
   the worker may not have recorded its attempt by the time the listing
   returns.
-- Keep `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
-  on the real 3 s path. Never set the variable in a `perf_` test: the
-  held-worker gates assert a wait of at least 3 s.
+- `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
+  waits 2.5 s (`HELD_BUDGET`): its head half must finish inside the wait
+  under suite load. The release wiring (real launch, 3 s, forced wait) is
+  pinned by `commands::list::tests::a_listing_launches_the_real_worker_and_waits_the_real_budgets`,
+  and the perf gates run the real 3 s. Never set the variable in a `perf_`
+  test: the held-worker gates assert a wait of at least 3 s.
 - A release-profile test run ignores the variable. Those tests then pass
   on the 3 s wait, only more slowly.
 

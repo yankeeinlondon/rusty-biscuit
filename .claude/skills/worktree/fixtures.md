@@ -36,9 +36,22 @@ wall-clock time on a shared host is noise.
   `fast-import` and then `reset --hard main`. Its branches therefore have no
   reflog. `wt` reads only the tracking ref's reflog, so that is safe; a
   fixture whose test reads a branch's reflog must use real commits.
-- **Copy a template only when it has no linked worktree.** A linked
-  worktree's admin files hold absolute paths, so a copy would point back at
-  the template. A plain repository holds none.
+- **A copied linked worktree must be relinked.** Its admin files hold
+  absolute paths, so a plain copy points back at the template.
+  `perf_support::MixedFixture` copies a per-binary template (main checkout
+  plus every linked worktree, built once by `mixed_template`), renames each
+  admin directory after its new checkout, writes both link files
+  (`<admin>/gitdir`, `<checkout>/.git`) to point at the copy, and then runs
+  one `git worktree repair <checkouts…>`, which rewrites them in Git's own
+  spelling (its realpath: `/private/var` on macOS, long names on Windows).
+  Write the links before `repair`: `repair` otherwise follows them back and
+  rewrites the template's own files. One `repair` replaces about fifteen
+  processes (`init`, `fast-import` and its `unpack-objects`, `reset`, and a
+  `worktree add` plus its `reset` child per branch).
+- **A template's commits are dated when it was built.** `wt list` dates the
+  tracking ref from its commit's committer date (`reflog --format=%ct`
+  prints the commit's date, not the reflog entry's), and tests read that
+  age, so `mixed_template` is keyed by a 30 s window and rebuilt after it.
 - `cli/tests/remove.rs` has its own helpers:
   - `configure` and `add_origin` append to `.git/config`.
   - `Fixture::commit` returns the new tip from the loose ref the commit
@@ -67,6 +80,17 @@ wall-clock time on a shared host is noise.
 - `perf_support`'s `serve_gitea_origin_one_commit_ahead` builds the served
   repository with a local `clone --bare` and writes refs as files (3
   processes, was 11).
+- `FakeGitea` answers git's smart HTTP itself where it can: the protocol-v2
+  `info/refs` advertisement after the first (it lists capabilities only),
+  and every `ls-refs` request (`ls_refs_answer`, refs read from the served
+  repository's files; parity-tested against `git upload-pack` in
+  `list_prs::the_stand_ins_ls_refs_answer_is_git_upload_packs`). Only a
+  `fetch` and anything it cannot read (a tag, an unborn `HEAD`) go through
+  `git http-backend`, three processes per request on Windows.
+- Lib `TestRepo::commit_in` reads the new tip in-process, and
+  `TestRepo::publish(branch)` stands in for `git push -q origin <branch>`:
+  origin borrows the repository's objects (`objects/info/alternates`) and
+  both refs are written as files.
 - `perf_support::worker_processes` reads command lines and working
   directories only for `wt` processes. Reading them for every process on the
   host made each 20 ms poll of a waiting test a full enumeration (13 ms on

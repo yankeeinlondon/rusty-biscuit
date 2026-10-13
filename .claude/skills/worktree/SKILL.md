@@ -79,8 +79,23 @@ facts and traps, not user docs.
   wait there. Branch tips (`RefTips::read_in`) and every graph history
   question (`graph::topology::Commits`) are read in-process too; count and
   fail them through `crate::questions`, not the process `recorder`
-  ([git-graph.md](git-graph.md)). A new read gets a parity test against the git command it
+  ([git-graph.md](git-graph.md)). So are a plain repository's worktree
+  listing (`git::worktree_list*`) and index entries
+  (`git::staged_entries_*`): call those, never `git worktree list
+  --porcelain` or `git ls-files --stage -z` directly. They leave anything
+  unusual (locked, prunable, bare, split or sparse index, `GIT_*`
+  overrides) to Git, so its wording stays authoritative. A new read gets a
+  parity test against the git command it
   replaces ([performance-testing](../../../worktree/docs/performance-testing.md#git-processes)).
+- **A test that acts at a chosen Git call** (a `git` shim on `PATH`) sets
+  `worktree::git::TEST_LIST_THROUGH_GIT_VAR`, or the read it waits for
+  never becomes a process (`cli/tests/remove_recovery.rs`).
+- **On Windows the first `gix` open in a process costs three process
+  creations** (gix-path's `git --exec-path` through the launcher, with a
+  hidden console) unless `EXEPATH` is set. `wt`'s `main` sets it
+  (`git::name_installation_for_gix`) and strips it from children. A test
+  helper that swaps one git process for an in-process read in a test
+  process that opens no repository otherwise trades one process for three.
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.
 - **The graph never substitutes what it cannot draw.** It marks the plan

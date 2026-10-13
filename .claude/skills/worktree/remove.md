@@ -518,7 +518,8 @@ every fact twice in a row. That deletes the copy record keyed by the
 quarantine path, not the original's; the lifecycle removes the original's
 copy record.
 
-**Git processes.** A clean removal starts 18 (36 before 2026-10-12): see
+**Git processes.** A clean removal starts 10 (18 before 2026-10-13, 36
+before 2026-10-12): see
 `worktree/docs/performance-testing.md#git-processes` for what each one is
 and the two tests that pin them. The tips `wt remove` compares
 (`remove::branch_tip`, `missing::recorded_head`, `default_target`), origin's
@@ -528,7 +529,10 @@ only when that read cannot answer (a missing branch keeps Git's own error).
 The CLI lists the worktrees once to find `base` and resolve the name
 (`lifecycle::resolve_target_in`), in both runs of a handoff. Every other
 listing and index read in the lifecycle is a deliberate re-read; do not
-merge one into another without the spec's say-so.
+merge one into another without the spec's say-so. The listings and
+`ls-files --stage -z` reads are answered in-process at their steps
+(`git::worktree_list_from`, `git::staged_entries_*`); the `--debug` index
+bindings and a listing of a `prunable` entry still run Git.
 
 ## Tests
 
