@@ -24,14 +24,23 @@ reviewed: false
 review_iterations: 0
 clarified: false
 implemented: false
-human_review: false
 depends_on:
     - 2026-10-12-schematic-runtime-envelope
 related:
     - 2026-10-20-type-constraints
 next_spec: 2026-10-13-schematic-pagination
+refresh_required: false
+human_review: false
 message_to_agent: |-
-  Draft created from 2026-10-12-schematic-runtime-envelope review 1, Item 1 ruling. The author approved the call shape in the Examples section during that review; treat it as Decided. The decisions D1–D4 were ruled on 2026-10-12 under the author's delegation, and each states its reason; apply them without pausing. This spec runs after the runtime-envelope repair (which delivers the one-name client struct, chained client settings, optional `.build()?`, and `.api_key()`) and before pagination, whose entry points build on the call types defined here.
+  Phase 1 (reconnaissance) is complete and changed no source file. Read the "## Phase 1" section of implementation-log.md before starting; the key points are:
+  - The runtime-envelope repair is UNCOMMITTED in this worktree (about 121 paths, including the untracked schematic/runtime/src/api_client.rs). Work on top of it. Never revert, stash, or reset it.
+  - Runtime facts confirmed: TransportError already carries `request: Box<RequestMeta>`, so ruling 1 needs no TransportError change. Every REST request type derives Clone, but EndpointSpec has no Clone bound, so put `R: Clone` on build() and on `impl Clone for Call` only. CallOptions::anonymous() is an associated constructor, not a method, so the call type needs a crate-internal way to set anonymous mode. Nothing asserts today that a send future is Send; add a compile-time Send assertion for Call's IntoFuture output.
+  - The generated API struct's field is private (`pub struct GitHub(Client<GitHubApi>)`), so endpoint methods must be emitted in the API's module or a child module.
+  - New ruling 13: name the call type after the request type, replacing the trailing `Request` with `Call` (ListClientsBasicRequest -> ListClientsBasicCall). A plain {EndpointId}Call collides across the two EMQX APIs and the two Ollama APIs, which share modules.
+  - Response types reach generated modules by `pub use schematic_definitions::<api>::*;`, and a local item silently shadows a glob import. The name resolver must check call-type names against those glob-imported names too.
+  - The shipped definitions produce an EMPTY D2 rename list (547 endpoints, 18 APIs). The full table is in endpoint-inventory.md. 121 endpoint methods take no arguments; 74 of those request types have no new() and use Default.
+  - gen/src/codegen/api_struct/{constructors,fields,request_method,variant}.rs and gen/src/codegen/client/ are undeclared dead files. Do not seed the reserved-name list from them.
+  - R8 baseline (Task 1.4) disables the kache wrapper and uses a fresh CARGO_TARGET_DIR. The Phase 4 "after" must repeat the exact commands in the log. New ruling 14: decide the D3 branch on the whole-command clean wall time (mean 43.4 s), and also report the schematic-schema unit time (mean 6.3 s), flagging it if the two readings would pick different branches.
 ---
 
 # Schematic endpoint methods
@@ -46,14 +55,14 @@ After the runtime-envelope work, calling an endpoint means knowing the name of a
 use schematic_schema::github::{GitHub, ListReleasesRequest};
 use schematic_schema::schematic_runtime::CallOptions;
 
-let client = GitHub::new()?;
+let client = GitHub::new();
 let releases = client
     .send(ListReleasesRequest::new("yankeeinlondon", "rusty-biscuit").with_per_page(10), &CallOptions::new())
     .await?
     .into_result()?;
 ```
 
-- **Nothing is discoverable.** Autocomplete on `client.` shows `send`, `send_raw`, and `check_link`, not the 30-odd GitHub endpoints or OpenAI's 265.
+- **Nothing is discoverable.** Autocomplete on `client.` shows `send`, `send_raw`, and `check_link`, not the 16 GitHub endpoints or OpenAI's 265.
 - **The basic path is noisy.** Every call passes `&CallOptions`, and getting the data takes two `?`.
 
 ## Examples (Decided)
@@ -178,6 +187,8 @@ Why this order:
 
 Why: forwards keep them inherent, so no trait import is needed, which is the point of this feature. They're generated, so they cost output size, not hand maintenance. The output size is counted in D3's measurement.
 
+**Note: shared helpers into the runtime (candidate).** Partial generation keeps two compatibility checks: the `schematic-runtime` ABI marker, and a byte comparison of the generated `shared.rs` and `ws_shared.rs`, which the marker does not cover. The direction set by `2026-10-12-schematic-runtime-envelope` review 1, item 6 is to move shared helpers into `schematic-runtime` as features touch them, until no generated shared helper file remains and the byte comparison can be deleted. Where this feature touches the `shared.rs` request helpers (`encode_cookie_value`, `combine_cookie_headers`, `FormFile`), consider moving them into the runtime rather than extending the generated file, and log the choice.
+
 ## Validation
 
 - `schematic-gen`, L1: generated-output assertions for a fixture API covering required arguments, optional setters, collisions (D2), and rustdoc content.
@@ -192,3 +203,25 @@ Why: forwards keep them inherent, so no trait import is needed, which is the poi
 ## Human review agenda
 
 None open. D1–D4 were ruled under the author's delegation. A reviewer should still flag any measurement or collision result that the D2 and D3 rules don't cover.
+
+## Refresh notes
+
+Verified after runtime-envelope review 3 on 2026-10-12:
+
+- In schematic-gen, [generate_api_struct](../../gen/src/codegen/api_struct/mod.rs) emits one API struct and an internal API tag. In schematic-runtime, [api_client!](../../runtime/src/api_client.rs) supplies its inherent settings and sends. `GitHub::new()` is infallible; `.build()` validates and returns the same `GitHub` type. The current call is still `send(request, &CallOptions)`; endpoint methods, call types, and `CallError` remain this feature's work.
+- In schematic-runtime, [Response::into_parts and ApiError](../../runtime/src/response.rs) define the existing evidence split: metadata belongs to `Response`, while `ApiError` carries only `kind` and `body`. `Response::into_result()` discards metadata. The decided combined-error `request_meta()` accessor therefore needs to retain metadata before that conversion; the existing API failure alone cannot supply it. This records the implementation baseline without changing the decided error shape.
+- The runtime and generator ABI constants are both `2`, in [schematic-runtime](../../runtime/src/lib.rs) and [schematic-gen](../../gen/src/lib.rs). Keep the runtime check and generated-shared-file comparison until no generated helper file remains, as already decided.
+- `schematic-schema` is excluded from the workspace. From the repository root, address it with `cargo build --manifest-path schematic/schema/Cargo.toml` (or the corresponding `cargo check` / nextest invocation), rather than a workspace-only `-p schematic-schema`. The decided measurement thresholds and fallback order are unchanged.
+- Buffered response elapsed time includes body reading, decoding, hooks, and redirects. A returned live stream's elapsed time stops when the decoder returns; subsequent reads retain their own timeout and deadline bounds. New call adapters must preserve these runtime results.
+
+## Refresh log
+
+### 2026-10-12 — Runtime-envelope review 3
+
+Source: `2026-10-12-schematic-runtime-envelope` review 3 and its implementation and repair logs.
+
+- Removed `?` from the current-client example because generated `new()` is now infallible.
+- Corrected the GitHub endpoint count from “30-odd” to the verified 16; OpenAI remains 265.
+- Added verified client, error-evidence, timing, ABI, and schema-command handoffs so implementation starts from the runtime that exists.
+- Set `refresh_required: false` and replaced the implementer note with the verified baseline. The decided requirements, error shape, collision rules, measurement policy, and pipeline order are unchanged.
+- Refreshed only this spec: its plan does not exist yet. There was no existing Refresh notes section or `parent` property; authority was checked against the runtime-envelope reviews and the parent macro review named by that feature.
