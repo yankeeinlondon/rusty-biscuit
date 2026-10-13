@@ -188,6 +188,11 @@ fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) ->
             type Output = <#runtime_call as ::core::future::IntoFuture>::Output;
             type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
 
+            // Without `#[inline]` this concrete impl makes the generated crate
+            // compile the runtime's send state machine for every endpoint;
+            // inlined, only the endpoints a dependent awaits are compiled, in
+            // that dependent, as with the generic `send`.
+            #[inline]
             fn into_future(self) -> Self::IntoFuture {
                 ::core::future::IntoFuture::into_future(self.0)
             }

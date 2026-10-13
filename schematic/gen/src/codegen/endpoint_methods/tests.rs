@@ -457,7 +457,7 @@ fn a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards() {
         "impl<'a>::core::future::IntoFutureforGetWidgetCall<'a>{\
          typeOutput=<schematic_runtime::Call<'a,WidgetsApi,GetWidgetRequest>as::core::future::IntoFuture>::Output;\
          typeIntoFuture=schematic_runtime::CallFuture<'a,Self::Output>;\
-         fninto_future(self)->Self::IntoFuture{::core::future::IntoFuture::into_future(self.0)}}",
+         #[inline]fninto_future(self)->Self::IntoFuture{::core::future::IntoFuture::into_future(self.0)}}",
     ] {
         assert!(code.contains(expected), "missing `{expected}` in:\n{code}");
     }
