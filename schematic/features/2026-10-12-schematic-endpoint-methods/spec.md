@@ -30,15 +30,29 @@ related:
     - 2026-10-20-type-constraints
 next_spec: 2026-10-13-schematic-pagination
 refresh_required: false
-human_review: false
+human_review: true
+human_review_items:
+  - |-
+    **Please confirm: no per-API on/off switches (feature flags) for the generated API crate. Branch A has been applied, pending your answer.**
+
+    This work gives every generated API client one method per endpoint, which made the generated crate (`schematic-schema`) slower to compile. The spec's rule (D3) says: if a clean debug build gets more than 25% slower, add one feature flag per API, so that a program using only ElevenLabs does not compile the other 17 APIs. The two ways of reading "the build" give different answers. You were asked before Phase 5, but no answer was recorded, so Phase 5 applied the plan's own rule (option A below). That changed no code, so it is easy to reverse. It matters before Phase 6 because Phase 6 edits the consumers (biscuit-speaks, sniff, and the homelab crates), and option B would also change their `Cargo.toml` files.
+
+    Measured on the development Mac (debug builds, old and new code built back to back):
+    - **The whole build command**, including dependencies every user compiles anyway: 45.5 s before, 47.5 s after, **+4.5%**.
+    - **The `schematic-schema` crate alone**, the only part this work changed: 6.4 s before, 8.5 s after, **+34%**.
+
+    Options:
+    - **A. Keep it as applied: no feature flags.** This uses the whole-command number, as the plan's ruling 14 and D3's literal wording do. *Pros:* nothing more to build, and consumers keep their current setup. *Cons:* about 2 s more on every clean build of every consumer, for every API whether it is used or not.
+    - **B. Switch to per-API feature flags.** This uses the crate-only number. *Pros:* a consumer compiles only the APIs it uses, which also helps as more APIs are added. *Cons:* a generator change, plus a `Cargo.toml` change in six consumer crates. In a whole-workspace build the flags merge, so the saving shows mainly when one package is built alone. If you choose B, it is cheapest to do before Phase 6.
+    - **C. Keep A now, and record per-API feature flags as a separate future item** to revisit if the API count or build times grow. *Pros:* this change stays small. *Cons:* the 2 s per clean build remains until then.
+
+    **Recommendation: A (or C if you want the idea tracked).** The extra wait a user actually sees is about 2 s on a build of about 46 s, well under 25%. Branch B's generator change and six consumer edits are out of proportion to that saving.
 message_to_agent: |-
-  Phase 3 (generator) is complete. Read "## Phase 3" in implementation-log.md first. Key points for Phase 4:
-  - schematic/schema/src is ALREADY regenerated with endpoint methods. It was committed by the pipeline in 97c5949a3. Task 4.1 is a review plus a re-run of `just generate` to confirm that nothing changes. Expect this layout churn: bitbucket, eversolo, gitea, github, gitlab, and huggingface crossed the 2,000-line split threshold and became `<module>/{mod,requests,responses}.rs`. Public paths are unchanged.
-  - Rename list: `schematic_gen::codegen::endpoint_methods::endpoint_method_renames(&apis)` returns `Vec<Rename>` (fields: api, endpoint, target, from, to, reason; Display gives one line). For the shipped definitions it is EMPTY, so Task 4.3 pins an empty list. Method names use schematic-define's `sanitize_rust_field_ident`, not the generator's `to_snake_case` that Phase 1's inventory used. Only the uncased OpenAI ids differ (for example `createan_apikeyforaserviceaccount`).
-  - Endpoint methods take the path params, in path order, then `body`. With no required values they start from `XRequest::default()`. Setters take the `with_*` types (`String`, `i64`, `bool`, `Vec<..>`), not `impl Into`. The call type is the request name with `Request` replaced by `Call`.
-  - The prelude now re-exports Call, CallError, and FullCall. Call types are not in the prelude; an endpoint method needs no import.
-  - R8 heads-up: generated source roughly doubled (41,610 to 78,634 lines; openai 19,703 to 38,438). The build time was not measured. Task 4.5 does that, and it may well land in D3 branch B. Apply ruling 14 (whole-command wall time decides, and report the unit time too).
-  - Still broken, as expected: schematic-schema's own tests (Task 4.2) and the biscuit-speaks, homelab, and sniff consumers (Phase 6).
+  Phase 5 is complete. Branch A was taken (chained setters, no per-API features) under ruling 14. No code changed in Phase 5. Read "## Phase 5" in implementation-log.md.
+  - The author has NOT yet confirmed A; the human_review item stays open. If the spec now records the author choosing B, run plan Tasks 5.B.1-5.B.4 before migrating consumers, because 5.B.2 edits the same consumer Cargo.toml files Phase 6 touches. Otherwise proceed with Phase 6 as planned.
+  - Phase 6 guidance from Phase 4 still holds: the schema tests (schematic/schema/tests/*.rs) are the worked examples. `.full().await` gives the Response envelope; plain `.await` gives `Result<Success, CallError<Failure>>`; match `CallError::Api { error, meta }` with a wildcard arm (CallError is #[non_exhaustive]); per-call settings `.credential(..)`, `.anonymous()`, `.deadline(&d)` come before `.full()`. `send_raw` still takes `(request, &CallOptions)`.
+  - Keep the generated `#[inline]` on each call type's `into_future`; it is what keeps the build-time increase small.
+  - Still broken, as expected: the biscuit-speaks, homelab, and sniff consumers.
 ---
 
 # Schematic endpoint methods

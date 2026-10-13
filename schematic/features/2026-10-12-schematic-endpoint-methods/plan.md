@@ -103,6 +103,37 @@ docs_updated_during_phase_3:
     - schematic/docs/generation/validation.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_4:
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - schematic-runtime
     - schematic-gen
@@ -303,11 +334,11 @@ All of it is in `schematic/gen/src/codegen` and `output/assemble`.
 
 ### Wave 8: Regenerate and verify
 
-- [ ] **Task 4.1: Regenerate.** Run the area's generate recipe (`just` in `schematic/`, near line 211 of its justfile) for all APIs. Review the diff for unexpected churn outside call types, methods, and re-exports.
-- [ ] **Task 4.2: Fix schema tests.** Migrate `schematic/schema/tests/*.rs` (GitHub, Hugging Face, Artificial Analysis, non-JSON endpoints) from `send(request, &CallOptions)` to endpoint methods. Keep at least one test per path that must remain on request objects (R6).
-- [ ] **Task 4.3: Pin the rename list.** Add a test (in `schematic-gen` L1, driven from the shipped definitions) asserting the exact rename list from Task 1.3. A new collision then fails the test and shows in review.
-- [ ] **Task 4.4: Build and lint.** Run the schema recipes from the `schematic` justfile for test and clippy. These use the generated manifest because `schematic-schema` is excluded from the workspace.
-- [ ] **Task 4.5: R8 "after".**
+- [x] **Task 4.1: Regenerate.** Run the area's generate recipe (`just` in `schematic/`, near line 211 of its justfile) for all APIs. Review the diff for unexpected churn outside call types, methods, and re-exports.
+- [x] **Task 4.2: Fix schema tests.** Migrate `schematic/schema/tests/*.rs` (GitHub, Hugging Face, Artificial Analysis, non-JSON endpoints) from `send(request, &CallOptions)` to endpoint methods. Keep at least one test per path that must remain on request objects (R6).
+- [x] **Task 4.3: Pin the rename list.** Add a test (in `schematic-gen` L1, driven from the shipped definitions) asserting the exact rename list from Task 1.3. A new collision then fails the test and shows in review.
+- [x] **Task 4.4: Build and lint.** Run the schema recipes from the `schematic` justfile for test and clippy. These use the generated manifest because `schematic-schema` is excluded from the workspace.
+- [x] **Task 4.5: R8 "after".**
     - Repeat Task 1.4 exactly: same host, commands, and profile.
     - Compute the percentage increase for clean and incremental builds, OpenAI alone, and crate size.
     - Apply D3 to the clean build: **25% or less** goes to Phase 5 branch A, and **more than 25%** goes to branch B.
@@ -323,19 +354,19 @@ The branch is chosen by Task 4.5. Exactly one branch runs. The unused branch's t
 
 ### Branch A: Increase is 25% or less
 
-- [ ] **Task 5.A.1: Close.** Log "chained setters kept; no feature flags needed". Nothing else changes. Go to Phase 6.
+- [x] **Task 5.A.1: Close.** Log "chained setters kept; no feature flags needed". Nothing else changes. Go to Phase 6.
 
 ### Branch B: Increase is more than 25%
 
-- [ ] **Task 5.B.1: Per-API features.**
+- [x] **Task 5.B.1: Per-API features.** *(not taken: Phase 5 took branch A)*
     - Add one Cargo feature per generated API to `schematic-schema`, default all on. Make the generator write the features and gate each API module and its prelude re-exports.
     - Update `gen/src/cargo_gen.rs`, the schema manifest, and tests that assert the manifest.
     - Regenerate and rebuild.
-- [ ] **Task 5.B.2: Switch consumers.** Set `default-features = false` and the needed features in each consumer's `Cargo.toml`: biscuit-speaks (`elevenlabs`), sniff (`gitlab` and others it uses), and the homelab crates. Update each consumer's `docs/dependencies.md` if feature use changes.
-- [ ] **Task 5.B.3: Measure the heaviest consumer.** Measure the clean debug dependent build of biscuit-speaks with ElevenLabs only, against its own baseline. Get that baseline by building biscuit-speaks with the pre-change generated tree (a throwaway worktree or a stash-free checkout of the baseline commit; do not use bare `git stash`).
+- [x] **Task 5.B.2: Switch consumers.** *(not taken: Phase 5 took branch A)* Set `default-features = false` and the needed features in each consumer's `Cargo.toml`: biscuit-speaks (`elevenlabs`), sniff (`gitlab` and others it uses), and the homelab crates. Update each consumer's `docs/dependencies.md` if feature use changes.
+- [x] **Task 5.B.3: Measure the heaviest consumer.** *(not taken: Phase 5 took branch A)* Measure the clean debug dependent build of biscuit-speaks with ElevenLabs only, against its own baseline. Get that baseline by building biscuit-speaks with the pre-change generated tree (a throwaway worktree or a stash-free checkout of the baseline commit; do not use bare `git stash`).
     - If the increase is 25% or less, keep chained setters and log it.
     - Otherwise do Task 5.B.4.
-- [ ] **Task 5.B.4: Options-struct fallback (only if needed).** Change Task 3.4's emission so the method takes `{Endpoint}Options { .. }` and keep the shared per-call methods. Update tests, regenerate, and re-run the Wave 8 checks. Log that the author should confirm this reading experience.
+- [x] **Task 5.B.4: Options-struct fallback (only if needed).** *(not taken: Phase 5 took branch A)* Change Task 3.4's emission so the method takes `{Endpoint}Options { .. }` and keep the shared per-call methods. Update tests, regenerate, and re-run the Wave 8 checks. Log that the author should confirm this reading experience.
 
 ### Checkpoint 5
 

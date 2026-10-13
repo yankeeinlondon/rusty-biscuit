@@ -102,6 +102,37 @@ docs_updated_during_phase_3:
     - schematic/docs/generation/validation.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/schema/tests/artificial_analysis_client.rs
+    - schematic/schema/tests/github_client.rs
+    - schematic/schema/tests/huggingface_client.rs
+    - schematic/schema/tests/non_json_endpoints.rs
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_4:
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - schematic-runtime
     - schematic-gen
@@ -546,3 +577,224 @@ While this phase's gates were running, an outside process (the pipeline's separa
 - `just test` and `just lint` pass for the `schematic` area, including `schematic-gen`.
 - Generating the fixture APIs produces a crate that compiles against the new runtime and sends correctly through endpoint methods. All 18 shipped APIs also generate, compile, and are committed.
 - Status: Phase 3 implementation complete, ready for review.
+
+## Phase 4
+
+Phase 4 confirms the regenerated `schematic-schema`, migrates its tests to endpoint methods, pins the rename list, and takes the R8 "after" measurement. The measurement found a large, avoidable cost in the generated code. A one-attribute generator fix removed most of it, and the crate was regenerated with that fix. Skills used: `rust-testing` (L1 placement, F-rungs) and `os` (no OS-specific code touched). Base for this phase's file lists: `74a74f453`.
+
+### Task 4.1: Regenerate and review churn
+
+- `cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman` (that is, `just generate` without its desktop notification) left the tree byte-identical to `97c5949a3`, the Phase 3 regeneration.
+- The churn review of `97c5949a3` against its parent:
+    - In the non-split modules, the only removed lines are module-doc examples (`client.send(XRequest::default(), &CallOptions::new())`), the matching `use …Request` doc lines, the `use super::XApi;` import that became `use super::{X, XApi};`, the prelude's old runtime re-export list, and the ABI 2 constant and its message.
+    - In the six modules that were split into directories (`bitbucket`, `eversolo`, `gitea`, `github`, `gitlab`, `huggingface`), a line-set comparison of the old single file against the union of the new `mod.rs`, `requests.rs`, and `responses.rs` shows exactly 2 lines missing per module. Both are the old doc-example lines.
+    - Nothing else was removed. Additions are call types, endpoint methods, docs, and re-exports.
+- Later in this phase the crate was regenerated once more for the `#[inline]` fix (see "Departure" below). That diff is exactly 547 inserted lines, one `#[inline]` per endpoint, across 15 files.
+
+### Task 4.2: Schema tests migrated
+
+All four REST test files now use endpoint methods. `ws_runtime.rs` has no REST sends. The patterns:
+
+| Need | Form used |
+| --- | --- |
+| Decoded data | `client.get_model("x").await` |
+| Envelope metadata (request id, status, headers, auth source) | `client.get_repository(o, r).full().await` |
+| Failure as data | `match client.x().await { Err(CallError::Api { error, meta }) => … }` |
+| Per-call credential | `.credential(Credential::access_token(..))` |
+| Anonymous call | `.anonymous()` |
+| Request objects (R6) | `client.send(ListPullRequestsRequest::new(..).with_state(..))` in `endpoint_method_and_generic_send_of_its_request_agree`; `send_raw(request, &CallOptions::anonymous())` in `non_json_endpoints.rs` (unchanged, because `send_raw` is outside this spec) |
+
+Tests were renamed only where the old name described the removed shape: `anonymous_call_options_send_no_credential_despite_client_and_env` is now `anonymous_call_sends_no_credential_despite_client_and_env`.
+
+Where an envelope test now also asserts the awaited `CallError`, its mock was widened from `.expect(1)` or `.up_to_n_times(1)` to 2.
+
+### Task 4.3: Rename list pinned
+
+`gen/tests/l1/output_validation.rs::live_definitions_endpoint_method_renames_are_pinned` runs over `resolve_all_apis()`, the shipped definitions. It checks:
+
+- **Control:** there are 18 REST APIs, every API resolves one name per endpoint, none is empty, and none has a conflict. An empty rename list is therefore a result, not a skipped input.
+- The rendered `endpoint_method_renames` lines equal `SHIPPED_ENDPOINT_METHOD_RENAMES`, which is **empty** as Phase 1 predicted.
+- `validate_rust_client` reports exactly as many `endpoint-method-rename` warnings as the list has, and no `generated-name-collision`.
+
+**Mutation check:** with a bogus entry in the const, the test fails (`left: []`). The const was then restored. `docs/generation/validation.md` now says the shipped list is pinned by a test.
+
+### Task 4.4: Build, test, and lint
+
+- `just test-schema`: 39 passed.
+- `just lint-schema` (clippy `--all-targets -D warnings`): clean.
+- `cargo test --doc` on the schema manifest: 0 doctests, because the examples are `text` blocks.
+
+### Task 4.5: R8 "after"
+
+**Method.** The host, toolchain, profile, and commands are the same as in Task 1.4: `RUSTC_WRAPPER` is disabled, each clean run builds into a fresh `CARGO_TARGET_DIR` outside the repository, and per-unit times come from `--timings` `UNIT_DATA`.
+
+The host was heavily shared during this phase. Load averages were 11–30 on 16 cores, from other sessions. A first unpaired attempt gave clean runs of 74.2 s, 53.6 s, and 52.4 s, which disagree by more than 10%. The baseline was therefore **re-measured back to back** with the after tree under the same load:
+
+- A throwaway detached worktree was created at `5bfe641f5`. Its `schema/src` is exactly Phase 1's 41,610 lines and 1,516,000 bytes.
+- Base and after were built interleaved (base, after, base, after).
+- The worktree was then removed. No `git stash` was used.
+
+The paired numbers replace the unpaired ones.
+
+**Before the fix (generation as committed in Phase 3), paired, load about 11–12:**
+
+| Measurement | Base | After | Change |
+| --- | --- | --- | --- |
+| Clean build, whole command (wall) | 42.88 s, 43.04 s | 52.23 s, 52.52 s | **+21.9%** |
+| `schematic-schema` unit | 6.14 s, 6.05 s | 15.91 s, 15.21 s | **+155%** |
+| Incremental after `touch src/lib.rs` | 1.80 s, 1.78 s | 2.84 s, 2.73 s | +56% |
+| OpenAI probe unit, from scratch | 2.87 s, 2.92 s | 7.56 s, 7.67 s | +163% |
+| Debug `libschematic_schema.rlib` | 42.8 MB | **254.9 MB** | ×6.0 |
+| Debug OpenAI probe rlib | 19.4 MB | 127.6 MB | ×6.6 |
+
+**Root cause.** Each generated call type has a concrete, non-generic `impl IntoFuture`. Its body instantiates the runtime's generic `Call::into_future`, and through it the whole `send_unboxed` async state machine, once per endpoint inside `schematic-schema`: 547 copies, compiled whether or not anyone calls them. Before this feature, the generic `send` was instantiated only in a dependent, and only for the endpoints that dependent used.
+
+Marking the generated `into_future` `#[inline]` moves that instantiation back to the awaiting dependent. Probe experiment on a copy of the OpenAI module:
+
+| Probe variant | Unit time | rlib |
+| --- | --- | --- |
+| as generated in Phase 3 | 8.5 s, 8.7 s | 127.6 MB |
+| `#[inline]` on `into_future` only | 4.0 s, 5.0 s | 32.7 MB |
+| `#[inline]` on every call-type method | 5.1 s, 7.4 s (noisy) | 23.7 MB |
+
+Inlining `into_future` alone recovers most of the cost, so only that line changed (see "Departure" below).
+
+**After the fix (final generated code), paired.** Rounds 3–4 are the decision pair. Their unchanged `schematic-definitions` unit took 30.1–31.0 s, matching Phase 1's 29.9 s, so load inflated them least.
+
+| Measurement | Base | After | Change |
+| --- | --- | --- | --- |
+| Clean build, whole command (wall), rounds 3–4 | 44.48 s, 46.47 s | 47.69 s, 47.36 s | **+4.5%** |
+| `schematic-schema` unit, rounds 3–4 | 6.39 s, 6.32 s | 8.51 s, 8.51 s | **+34%** |
+| `schematic-schema` unit, rounds 1–2 (load 15–28) | 6.62 s, 6.95 s | 12.04 s, 12.12 s | +78% |
+| Incremental after `touch src/lib.rs`, 3 pairs | 1.74 s, 1.69 s, 1.75 s | 2.28 s, 2.20 s, 2.18 s | +28% |
+| OpenAI probe unit (the `#[inline]`-only probe above, which is identical to the generated module) | 2.9 s | 4.0–5.0 s | +38% to +72% |
+| Debug `libschematic_schema.rlib` | 42.8 MB | 69.0 MB | +61% |
+
+Round 1–2 wall times are not reported. Load rose to 28 during them, and one base run (59.1 s) was slower than both after runs, so they cannot carry a comparison.
+
+**Source size (final):**
+
+| Scope | Lines | Bytes | Change in lines |
+| --- | --- | --- | --- |
+| Whole `schema/src` (42 files) | 79,181 | 3,196,068 | +90% |
+| REST only | 75,065 | — | +100% |
+| `openai/` | 38,703 | — | +96% |
+
+These are Phase 3's figures plus the 547 `#[inline]` lines (265 of them in `openai/`).
+
+**D3 branch: A (25% or less).** Under ruling 14, the whole-command clean build decides: +4.5% with the final code, and +21.9% even before the fix. The `schematic-schema` unit alone is +34% in the quietest pair, which is over 25%, so **the unit-only reading would choose branch B**. This is the disagreement ruling 14 said to flag. It is raised for the author in the spec's `human_review_items`. Phase 5 should not start until the author confirms the branch.
+
+Open questions for the author (ruling 11): release-profile builds and rust-analyzer latency were not measured. Neither was a consumer's dependent build: with `#[inline]`, the send state machine for each awaited endpoint compiles in the consumer, as it did before this feature.
+
+### Departure from the plan (spec untouched)
+
+**`#[inline]` on the generated `into_future`.** The plan's Phase 4 regenerates and measures; it does not change emission. The measurement showed that the Phase 3 emission compiled 547 unused async state machines. A one-attribute change in `gen/src/codegen/endpoint_methods/mod.rs` fixes the cause without changing behavior, so it was made here rather than carried into the D3 decision as an inflated number:
+
+- A `//` comment at the attribute in the generator explains why. It is not emitted into the generated code.
+- The token test `a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards` now expects `#[inline]`.
+- The crate was regenerated and every gate re-run.
+- The F3 compile test (`slow_real_apis_compile_offline`) re-proved that the committed tree equals fresh output.
+
+### Requirement-to-test mapping
+
+Boundaries:
+
+- The generated crate's public API against a wiremock server, through the real runtime. These are integration tests of the generated crate: fidelity F3 (real generated code, real HTTP stack, local fake peer), tier L1, run by `just test-schema`.
+- Generator output over the shipped definitions: F1, L1.
+
+| Behavior | Test |
+| --- | --- |
+| Endpoint method plus `.full()` exposes request id, status, headers, endpoint id, method, and URL | `github_client::success_metadata_carries_request_id_status_and_headers` |
+| An awaited failure is `CallError::Api` with kind, exact body, request id, status, and endpoint | `github_client::failure_metadata_carries_request_id_status_and_headers`, `huggingface_client::not_found_is_an_envelope_failure_with_status_and_body`, `artificial_analysis_client::missing_credential_sends_anonymously_and_returns_the_401` |
+| An undecodable 2xx is `CallError::Api` (`MalformedSuccess`), not a transport error | `github_client::undecodable_success_body_is_malformed_success_with_raw_bytes` |
+| A hook refusal on a 200 is `CallError::Api` (`Hook`) with the original body | `huggingface_client::refusing_hook_yields_hook_failure_with_original_body` |
+| Precedence through call-type setters: per-call `.credential` beats client beats env (primary, then secondary) beats anonymous | `github_client::credential_precedence_per_call_client_env_anonymous` |
+| `.anonymous()` sends no credential despite client and env, for both `.full()` and plain `.await` | `github_client::anonymous_call_sends_no_credential_despite_client_and_env` |
+| Redirect policy unchanged through endpoint methods | `github_client::redirects_follow_the_same_origin_policy` |
+| R6: the generic `send(request)` and the endpoint method reach the same URL (setters equal `with_*`) and decode the same data | `github_client::endpoint_method_and_generic_send_of_its_request_agree` |
+| `.build()` sends nothing; a built call is `Clone`; each awaited copy sends once | `github_client::a_built_call_sends_nothing_until_awaited_and_sends_once_per_copy` |
+| Text, binary, and empty codecs decode through endpoint methods (`()` for empty, both `.await` and `.full()`); a setter (`pagelen`) reaches the query | `non_json_endpoints::{text_endpoint_decodes_into_string, binary_endpoint_decodes_into_bytes, empty_endpoint_decodes_into_unit}` |
+| `send_raw` unchanged on request objects | `non_json_endpoints::send_raw_returns_status_headers_and_body_unchanged` |
+| Query and body serialization through endpoint methods and setters | `artificial_analysis_client::*` (query string present or absent, JSON body, null-field omission) |
+| Rename list pinned for the shipped definitions | `output_validation::live_definitions_endpoint_method_renames_are_pinned` |
+| `#[inline]` emitted on `into_future` | `codegen::endpoint_methods::tests::a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards` |
+| Committed tree equals fresh generation, and compiles | `fresh_output_compile::slow_real_apis_compile_offline` |
+
+`.build()` refusing an invalid argument is not exercised in `schematic-schema`. No shipped endpoint's encoding can fail from caller input, because path, query, and header values are strings or numbers, and bodies are typed structs that always serialize. It is covered at the runtime level (Phase 2, Task 2.6).
+
+The Input Robustness Matrix does not apply: no parser, manifest, or configuration reader changed. The passive corpus test over every shipped artifact is `slow_real_apis_compile_offline`, plus the new pinned-list test.
+
+### Gates run
+
+- `just test` in `schematic/`: 1924 passed, 12 skipped (tier-skipped, as in earlier phases). `test-fresh-output` passed 6 of 6, and `test-compile-fail` passed 1 of 1.
+- `just lint` in `schematic/`: exit 0.
+- `just test-schema`: 39 passed. `just lint-schema`: clean.
+- Cross-OS: not run. The changes are wiremock tests with no paths, processes, or `#[cfg]`, an `#[inline]` attribute, and a test over in-memory definitions. CI covers Linux and macOS on the pull request.
+- Not run, still expected to fail: the consumers biscuit-speaks, homelab, and sniff (Phase 6).
+- No pre-existing failures.
+
+### Checkpoint 4
+
+- The schema crate builds, its tests pass, the rename-list test passes, and both measurements and the D3 branch (A, pending the author's confirmation) are recorded.
+- Status: Phase 4 implementation complete, ready for review.
+
+## Phase 5
+
+Phase 5 applies the D3 decision that Task 4.5 measured. **Branch A was taken: chained setters kept; no feature flags needed.** No source, docs, or skill files changed in this phase. Base for this phase: `74a74f453` plus the uncommitted Phase 4 tree.
+
+### Branch decision
+
+- **Rule applied:** ruling 14, the literal reading of D3. The whole-command clean debug `cargo build -p schematic-schema` decides.
+- **Numbers behind it** (Task 4.5, paired rounds 3–4, final generated code with `#[inline]` on `into_future`):
+
+| Measurement | Base | After | Change | Branch by this reading |
+| --- | --- | --- | --- | --- |
+| Clean build, whole command (wall) | 44.48 s, 46.47 s | 47.69 s, 47.36 s | **+4.5%** | A |
+| `schematic-schema` unit alone | 6.39 s, 6.32 s | 8.51 s, 8.51 s | +34% | B |
+
+- **Final call style:** chained setters on the generated call type. For example, `gh.list_releases("o", "r").per_page(10).await?`. No per-API Cargo features and no `{Endpoint}Options` struct.
+
+### The author has not confirmed the branch yet
+
+Phase 4 raised the two-reading disagreement in the spec's `human_review_items` and said Phase 5 should wait for the author. This headless session found no answer: `human_review` was still `true`, and the spec carried no decision. Phase 5 went ahead with A for these reasons:
+
+- A is what the plan's own adopted rule (ruling 14) picks, and Phase 4's recommendation agrees.
+- A changes no code, so it costs nothing to reverse. If the author picks B, branch B (Tasks 5.B.1–5.B.4) can still run as written. Its only interaction with Phase 6 is the consumer `Cargo.toml` feature lines in Task 5.B.2, plus consumer call code if the 5.B.4 options-struct fallback were ever needed.
+
+The review item stays open in the spec, reworded to say that A has been applied and what switching to B would now cost.
+
+### Branch B tasks: not taken
+
+- Task 5.B.1 (per-API features): not taken.
+- Task 5.B.2 (switch consumers to `default-features = false`): not taken.
+- Task 5.B.3 (measure biscuit-speaks dependent build): not taken.
+- Task 5.B.4 (options-struct fallback): not taken.
+
+### Requirement-to-test mapping
+
+Phase 5 changed no behavior, so no test was added. The behavior that the branch keeps is already pinned:
+
+| Kept behavior | Existing test |
+| --- | --- |
+| Chained setters and shared per-call methods on each generated call type, with `#[inline]` on `into_future` | `codegen::endpoint_methods::tests::a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards` |
+| Committed `schema/src` equals fresh generation and compiles | `fresh_output_compile::slow_real_apis_compile_offline` |
+| Setters reach the wire through endpoint methods | `schematic-schema` tests `github_client::endpoint_method_and_generic_send_of_its_request_agree`, `artificial_analysis_client::*`, `non_json_endpoints::*` |
+| Schema manifest has no feature table (branch B absent) | Not asserted. Nothing generates features, so a test would only pin the absence. |
+
+The Input Robustness Matrix does not apply: no parser or configuration reader changed.
+
+### Gates run
+
+- `just test` in `schematic/`: exit 0. L1 1924 passed, 12 skipped (tier-skipped, as in earlier phases). `test-fresh-output` 6 of 6 passed, and `test-compile-fail` 1 of 1 passed.
+- `just test-schema`: exit 0, 39 passed.
+- `just lint` in `schematic/`: exit 0.
+- `just lint-schema`: exit 0.
+- Cross-OS: not run. No code changed.
+- Still expected to fail, not run: the consumers biscuit-speaks, homelab, and sniff (Phase 6).
+- No pre-existing failures.
+
+### Checkpoint 5
+
+- The log shows the branch (A), the numbers behind it, and the final call style (chained setters).
+- Schema tests and generator tests pass.
+- Status: Phase 5 implementation complete, ready for review. The author's confirmation of branch A is still open in the spec's `human_review_items`.
