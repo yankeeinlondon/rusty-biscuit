@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use biscuit_hash::blake3_hash;
 use serde::{Deserialize, Serialize};
@@ -12,10 +11,14 @@ use super::{
 
 mod facets;
 mod kinds;
+mod occurrences;
+mod reexports;
 mod types;
 
 pub use facets::*;
 pub use kinds::*;
+pub use occurrences::*;
+pub use reexports::*;
 pub use types::*;
 
 /// Top-level v2 symbol record.
@@ -25,6 +28,7 @@ pub struct SymbolRecord {
     pub id: SymbolId,
     pub language: ProgrammingLanguage,
     pub kind: SymbolKindV2,
+    pub scope: SymbolScope,
     pub identity: IdentityFacet,
     pub source: SourceFacet,
     pub visibility: VisibilityFacet,
@@ -39,6 +43,13 @@ pub struct SymbolRecord {
     pub relations: RelationFacet,
     #[serde(default)]
     pub semantics: SemanticFacet,
+    /// Present only when metrics were requested.
+    #[serde(
+        default,
+        deserialize_with = "facets::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metrics: Option<MetricsFacet>,
     pub provenance: ProvenanceFacet,
     pub kind_data: SymbolKindData,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -57,6 +68,10 @@ pub struct ImportRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub statement_span: Option<TextSpan>,
     pub symbol: SymbolRef,
+    /// Whether a `syntax` or `declared` re-export entry forwards this
+    /// import. Meaningful only when `FileSymbolIndex::reexports` was
+    /// computed; `false` for every record otherwise.
+    pub reexported: bool,
 }
 
 /// Export entry aligned to v2 relations.
@@ -83,6 +98,19 @@ pub struct FileSymbolIndex {
     pub exports: Vec<ExportRecord>,
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+    /// Every reference in the file, whatever kinds were selected; empty
+    /// unless `Capability::Occurrences` was computed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<Occurrence>,
+    /// The coverage of each owning region of the file, beside
+    /// `occurrences` (empty exactly when they were not computed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_coverage: Vec<ReferenceCoverage>,
+    /// The file's re-export report; `None` exactly when
+    /// `Capability::Reexports` was not computed, which is not the same as a
+    /// report with no entries.
+    #[serde(default, deserialize_with = "facets::present", skip_serializing_if = "Option::is_none")]
+    pub reexports: Option<ReexportReport>,
 }
 
 /// Deterministic stable symbol key used to derive `SymbolId`.
@@ -93,7 +121,23 @@ pub fn stable_symbol_key(
     qualified_or_name: &str,
     sibling_ordinal: u32,
 ) -> String {
-    let file_part = file.to_string_lossy().replace('\\', "/").trim().to_string();
+    stable_key_with_path(language, &stable_key_path(file), kind, qualified_or_name, sibling_ordinal)
+}
+
+/// The spelling of `file` a [`stable_symbol_key`] holds.
+pub(crate) fn stable_key_path(file: &Path) -> String {
+    file.to_string_lossy().replace('\\', "/").trim().to_string()
+}
+
+/// [`stable_symbol_key`] for a file whose [`stable_key_path`] is `file_part`,
+/// so a file's records spell their path once.
+pub(crate) fn stable_key_with_path(
+    language: ProgrammingLanguage,
+    file_part: &str,
+    kind: SymbolKindV2,
+    qualified_or_name: &str,
+    sibling_ordinal: u32,
+) -> String {
     format!(
         "{}::{}::{:?}::{}::{}",
         language.query_name(),
@@ -104,34 +148,41 @@ pub fn stable_symbol_key(
     )
 }
 
+/// `provenance.extractor_version` of every record: this crate's version
+/// and [`crate::file::EXTRACTOR_REVISION`].
+fn extractor_version() -> &'static str {
+    static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!("{}+rev.{}", env!("CARGO_PKG_VERSION"), crate::file::EXTRACTOR_REVISION)
+    });
+    &VERSION
+}
+
 /// Converts a stable symbol key to a deterministic `SymbolId`.
 pub fn symbol_id_from_stable_key(stable_key: &str) -> SymbolId {
     SymbolId(blake3_hash(stable_key))
 }
 
-/// Returns current unix timestamp in milliseconds.
-pub fn now_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
+// Every conversion below is a wildcard-free `match`, so a variant added on
+// one side fails to compile until the other side handles it.
 impl From<SymbolKind> for SymbolKindV2 {
     fn from(value: SymbolKind) -> Self {
         match value {
             SymbolKind::Function => Self::Function,
             SymbolKind::Method => Self::Method,
+            SymbolKind::Constructor => Self::Constructor,
             SymbolKind::Type => Self::Type,
+            SymbolKind::TypeAlias => Self::TypeAlias,
             SymbolKind::Class => Self::Class,
             SymbolKind::Interface => Self::Interface,
             SymbolKind::Enum => Self::Enum,
+            SymbolKind::EnumVariant => Self::EnumVariant,
             SymbolKind::Trait => Self::Trait,
             SymbolKind::Module => Self::Module,
             SymbolKind::Namespace => Self::Namespace,
             SymbolKind::Variable => Self::Variable,
             SymbolKind::Parameter => Self::Parameter,
             SymbolKind::Field => Self::Field,
+            SymbolKind::Property => Self::Property,
             SymbolKind::Macro => Self::Macro,
             SymbolKind::Constant => Self::Constant,
             SymbolKind::Unknown => Self::Unknown,
@@ -144,40 +195,58 @@ impl From<SymbolKindV2> for SymbolKind {
         match value {
             SymbolKindV2::Function => Self::Function,
             SymbolKindV2::Method => Self::Method,
+            SymbolKindV2::Constructor => Self::Constructor,
             SymbolKindV2::Type => Self::Type,
+            SymbolKindV2::TypeAlias => Self::TypeAlias,
             SymbolKindV2::Class => Self::Class,
             SymbolKindV2::Interface => Self::Interface,
             SymbolKindV2::Enum => Self::Enum,
+            SymbolKindV2::EnumVariant => Self::EnumVariant,
             SymbolKindV2::Trait => Self::Trait,
             SymbolKindV2::Module => Self::Module,
             SymbolKindV2::Namespace => Self::Namespace,
             SymbolKindV2::Variable => Self::Variable,
             SymbolKindV2::Parameter => Self::Parameter,
             SymbolKindV2::Field => Self::Field,
+            SymbolKindV2::Property => Self::Property,
             SymbolKindV2::Macro => Self::Macro,
             SymbolKindV2::Constant => Self::Constant,
-            _ => Self::Unknown,
+            SymbolKindV2::Unknown => Self::Unknown,
         }
     }
 }
 
-fn visibility_to_level(visibility: Option<Visibility>) -> VisibilityLevel {
-    match visibility {
-        Some(Visibility::Public) => VisibilityLevel::Public,
-        Some(Visibility::Protected) => VisibilityLevel::Protected,
-        Some(Visibility::Private) => VisibilityLevel::Private,
-        Some(Visibility::Internal) => VisibilityLevel::Internal,
-        None => VisibilityLevel::Unknown,
+impl From<Option<Visibility>> for VisibilityLevel {
+    fn from(value: Option<Visibility>) -> Self {
+        match value {
+            Some(Visibility::Public) => Self::Public,
+            Some(Visibility::Protected) => Self::Protected,
+            Some(Visibility::Private) => Self::Private,
+            Some(Visibility::Internal) => Self::Internal,
+            Some(Visibility::Package) => Self::Package,
+            Some(Visibility::Crate) => Self::Crate,
+            Some(Visibility::ModulePrivate) => Self::ModulePrivate,
+            Some(Visibility::ProtectedInternal) => Self::ProtectedInternal,
+            Some(Visibility::PrivateProtected) => Self::PrivateProtected,
+            None => Self::Unknown,
+        }
     }
 }
 
-fn level_to_visibility(level: VisibilityLevel) -> Option<Visibility> {
-    match level {
-        VisibilityLevel::Public => Some(Visibility::Public),
-        VisibilityLevel::Protected => Some(Visibility::Protected),
-        VisibilityLevel::Private => Some(Visibility::Private),
-        VisibilityLevel::Internal => Some(Visibility::Internal),
-        _ => None,
+impl From<VisibilityLevel> for Option<Visibility> {
+    fn from(value: VisibilityLevel) -> Self {
+        match value {
+            VisibilityLevel::Public => Some(Visibility::Public),
+            VisibilityLevel::Protected => Some(Visibility::Protected),
+            VisibilityLevel::Private => Some(Visibility::Private),
+            VisibilityLevel::Internal => Some(Visibility::Internal),
+            VisibilityLevel::Package => Some(Visibility::Package),
+            VisibilityLevel::Crate => Some(Visibility::Crate),
+            VisibilityLevel::ModulePrivate => Some(Visibility::ModulePrivate),
+            VisibilityLevel::ProtectedInternal => Some(Visibility::ProtectedInternal),
+            VisibilityLevel::PrivateProtected => Some(Visibility::PrivateProtected),
+            VisibilityLevel::Unknown => None,
+        }
     }
 }
 
@@ -251,9 +320,7 @@ fn field_data_from_field(field: &FieldInfo) -> FieldData {
         name: field.name.clone(),
         qualified_name: None,
         type_text: field.type_annotation.clone(),
-        visibility: field
-            .visibility
-            .map(|visibility| visibility_to_level(Some(visibility))),
+        visibility: field.visibility.map(|visibility| Some(visibility).into()),
         is_static: field.is_static,
         is_readonly: false,
         is_mutable: true,
@@ -276,7 +343,7 @@ fn type_kind_data(metadata: &Option<TypeMetadata>, kind: SymbolKind) -> SymbolKi
                 .iter()
                 .map(|variant| EnumVariantData {
                     name: variant.name.clone(),
-                    discriminant: None,
+                    discriminant: variant.discriminant.clone(),
                     tuple_fields: variant.tuple_fields.clone(),
                     struct_fields: variant
                         .struct_fields
@@ -303,14 +370,16 @@ fn type_kind_data(metadata: &Option<TypeMetadata>, kind: SymbolKind) -> SymbolKi
     })
 }
 
-fn modifiers_from_signature(signature: &Option<FunctionSignature>) -> Vec<Modifier> {
+fn modifiers_from_symbol(symbol: &SymbolInfo) -> Vec<Modifier> {
     let mut modifiers = Vec::new();
-    if signature
-        .as_ref()
-        .map(|value| value.is_static)
-        .unwrap_or(false)
-    {
+    if symbol.is_static {
         modifiers.push(Modifier::Static);
+    }
+    if symbol.is_static_storage {
+        modifiers.push(Modifier::StaticStorage);
+    }
+    if symbol.is_async {
+        modifiers.push(Modifier::Async);
     }
     modifiers
 }
@@ -341,28 +410,26 @@ fn declared_type_views(symbol: &SymbolInfo) -> TypeFacet {
 
 impl From<SymbolInfo> for SymbolRecord {
     fn from(value: SymbolInfo) -> Self {
+        let qualified_name = record_qualified_name(&value);
+        let stable_key = stable_symbol_key(value.language, &value.file, SymbolKindV2::from(value.kind), qualified_name, 0);
+        Self::with_stable_key(value, stable_key)
+    }
+}
+
+/// The qualified name a record of `value` carries: its own, else its name.
+pub(crate) fn record_qualified_name(value: &SymbolInfo) -> &str {
+    if value.qualified_name.is_empty() { &value.name } else { &value.qualified_name }
+}
+
+impl SymbolRecord {
+    /// The record of `value` whose identity is `stable_key` (and the ID it
+    /// hashes to): [`From<SymbolInfo>`] with the sibling ordinal the caller
+    /// already knows, so no other key is built.
+    pub(crate) fn with_stable_key(value: SymbolInfo, stable_key: String) -> Self {
         let kind = SymbolKindV2::from(value.kind);
         let declaration_span = text_span_from_range(&value.range);
-        let qualified_name = value
-            .container_name
-            .as_ref()
-            .map(|container| format!("{container}::{}", value.name));
-        let stable_key = stable_symbol_key(
-            value.language,
-            &value.file,
-            kind,
-            qualified_name.as_deref().unwrap_or(&value.name),
-            0,
-        );
-        let now = now_epoch_ms();
-
-        let level = value
-            .signature
-            .as_ref()
-            .and_then(|signature| signature.visibility)
-            .map_or(VisibilityLevel::Unknown, |visibility| {
-                visibility_to_level(Some(visibility))
-            });
+        let qualified_name = record_qualified_name(&value).to_string();
+        let level = VisibilityLevel::from(value.visibility);
 
         let mut comments = Vec::new();
         if let Some(raw_doc) = &value.doc_comment {
@@ -378,15 +445,17 @@ impl From<SymbolInfo> for SymbolRecord {
 
         let kind_data = if value.kind.is_function() {
             function_kind_data(&value.signature)
+        } else if value.kind == SymbolKind::TypeAlias {
+            SymbolKindData::TypeAlias(TypeAliasData::default())
         } else if value.kind.is_type() {
             type_kind_data(&value.type_metadata, value.kind)
-        } else if value.kind == SymbolKind::Field {
+        } else if matches!(value.kind, SymbolKind::Field | SymbolKind::Property) {
             SymbolKindData::Field(FieldData {
                 name: value.name.clone(),
                 qualified_name: None,
                 type_text: None,
                 visibility: Some(level),
-                is_static: false,
+                is_static: value.is_static,
                 is_readonly: false,
                 is_mutable: true,
                 is_optional: false,
@@ -404,17 +473,22 @@ impl From<SymbolInfo> for SymbolRecord {
         };
         let raw_doc = value.doc_comment.clone();
         let type_info = declared_type_views(&value);
+        let modifiers = modifiers_from_symbol(&value);
 
         Self {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::CURRENT,
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
+            scope: value.scope,
             identity: IdentityFacet {
                 name: value.name.clone(),
                 display_name: value.name,
                 qualified_name,
-                module_path: value.container_name,
+                is_namespace_rooted: value.is_namespace_rooted,
+                container_name: value.container_name,
+                container_kind: value.container_kind.map(SymbolKindV2::from),
+                keyword: None,
                 stable_key,
             },
             source: SourceFacet {
@@ -430,7 +504,9 @@ impl From<SymbolInfo> for SymbolRecord {
             },
             visibility: VisibilityFacet {
                 level,
-                is_exported: level == VisibilityLevel::Public,
+                // Export is decided by the declaration's syntax, never by its
+                // access level; `symbol_records()` and the bind pass set it.
+                is_exported: false,
                 is_reexported: false,
                 is_default_export: false,
                 is_imported: false,
@@ -439,6 +515,7 @@ impl From<SymbolInfo> for SymbolRecord {
                 is_synthetic: false,
                 is_deprecated: false,
                 is_experimental: false,
+                is_test: false,
             },
             docs: DocsFacet {
                 raw_doc,
@@ -446,16 +523,15 @@ impl From<SymbolInfo> for SymbolRecord {
                 parsed: None,
             },
             attributes: Vec::new(),
-            modifiers: modifiers_from_signature(&value.signature),
+            modifiers,
             type_info,
             relations: RelationFacet::default(),
             semantics: SemanticFacet::default(),
+            metrics: None,
             provenance: ProvenanceFacet {
                 extractor: "tree-sitter".to_string(),
-                extractor_version: env!("CARGO_PKG_VERSION").to_string(),
+                extractor_version: extractor_version().to_string(),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
-                created_at_epoch_ms: now,
-                updated_at_epoch_ms: now,
             },
             kind_data,
             extensions: BTreeMap::new(),
@@ -463,12 +539,8 @@ impl From<SymbolInfo> for SymbolRecord {
     }
 }
 
-fn signature_from_function_data(function: FunctionData) -> Option<FunctionSignature> {
-    if function.parameters.is_empty() && function.return_info.type_text.is_none() {
-        return None;
-    }
-
-    Some(FunctionSignature {
+fn signature_from_function_data(function: FunctionData, is_static: bool) -> FunctionSignature {
+    FunctionSignature {
         parameters: function
             .parameters
             .into_iter()
@@ -480,9 +552,8 @@ fn signature_from_function_data(function: FunctionData) -> Option<FunctionSignat
             })
             .collect(),
         return_type: function.return_info.type_text,
-        visibility: None,
-        is_static: false,
-    })
+        is_static,
+    }
 }
 
 fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadata> {
@@ -495,7 +566,7 @@ fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadat
                     name: field.name,
                     type_annotation: field.type_text,
                     doc_comment: field.docs,
-                    visibility: field.visibility.and_then(level_to_visibility),
+                    visibility: field.visibility.and_then(Option::<Visibility>::from),
                     is_static: field.is_static,
                 })
                 .collect(),
@@ -517,10 +588,11 @@ fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadat
                             name: field.name,
                             type_annotation: field.type_text,
                             doc_comment: field.docs,
-                            visibility: field.visibility.and_then(level_to_visibility),
+                            visibility: field.visibility.and_then(Option::<Visibility>::from),
                             is_static: field.is_static,
                         })
                         .collect(),
+                    discriminant: variant.discriminant,
                     doc_comment: variant.docs,
                 })
                 .collect(),
@@ -539,22 +611,51 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             return Err("symbol record name is empty");
         }
 
-        let signature = match value.kind_data.clone() {
-            SymbolKindData::Function(function) => signature_from_function_data(function),
-            _ => None,
+        let kind = SymbolKind::from(value.kind);
+        let is_static = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Static));
+        let is_static_storage = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::StaticStorage));
+        let is_async = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Async));
+
+        // Every function-like kind carries a signature, even with no
+        // parameters, so renderers print `tick()` rather than `tick`.
+        let signature = match (&value.kind_data, kind.is_function()) {
+            (SymbolKindData::Function(function), true) => {
+                Some(signature_from_function_data(function.clone(), is_static))
+            }
+            (_, true) => Some(FunctionSignature {
+                is_static,
+                ..FunctionSignature::new()
+            }),
+            (_, false) => None,
         };
 
         let type_metadata = type_metadata_from_kind_data(value.kind_data);
 
         Ok(Self {
             name,
-            kind: SymbolKind::from(value.kind),
+            kind,
+            scope: value.scope,
+            qualified_name: value.identity.qualified_name,
+            is_namespace_rooted: value.identity.is_namespace_rooted,
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
-            container_name: value.identity.module_path,
-            container_kind: None,
+            container_name: value.identity.container_name,
+            container_kind: value.identity.container_kind.map(SymbolKind::from),
             doc_comment: value.docs.raw_doc,
+            visibility: value.visibility.level.into(),
+            is_static,
+            is_static_storage,
+            is_async,
             signature,
             type_metadata,
         })
@@ -564,6 +665,100 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Any push order and repeats normalize to Static, StaticStorage, Async,
+    /// Const, Readonly, Unsafe, Mut, then distinct Custom values lexically,
+    /// and serialize in that order.
+    #[test]
+    fn modifiers_normalize_to_one_order_without_repeats() {
+        let custom = |value: &str| Modifier::Custom(value.to_string());
+        let mut modifiers = vec![
+            custom("virtual"),
+            Modifier::Mut,
+            custom("abstract"),
+            Modifier::Unsafe,
+            Modifier::Async,
+            custom("virtual"),
+            Modifier::Readonly,
+            Modifier::Static,
+            Modifier::Const,
+            Modifier::StaticStorage,
+            custom("final"),
+            Modifier::Async,
+            custom("override"),
+        ];
+        normalize_modifiers(&mut modifiers);
+        let expected = vec![
+            Modifier::Static,
+            Modifier::StaticStorage,
+            Modifier::Async,
+            Modifier::Const,
+            Modifier::Readonly,
+            Modifier::Unsafe,
+            Modifier::Mut,
+            custom("abstract"),
+            custom("final"),
+            custom("override"),
+            custom("virtual"),
+        ];
+        assert_eq!(modifiers, expected);
+        assert_eq!(
+            serde_json::to_string(&modifiers).expect("serialize"),
+            concat!(
+                r#"[{"type":"Static"},{"type":"StaticStorage"},{"type":"Async"},{"type":"Const"},"#,
+                r#"{"type":"Readonly"},{"type":"Unsafe"},{"type":"Mut"},"#,
+                r#"{"type":"Custom","value":"abstract"},{"type":"Custom","value":"final"},"#,
+                r#"{"type":"Custom","value":"override"},{"type":"Custom","value":"virtual"}]"#
+            )
+        );
+
+        let mut empty = Vec::new();
+        normalize_modifiers(&mut empty);
+        assert!(empty.is_empty());
+    }
+
+    /// Symbol IDs digest only the stable key (language, file, kind, qualified
+    /// name, ordinal), never the schema version or extractor revision, so a
+    /// version bump keeps every ID. Pinned literally across the 4.0 → 4.1 and
+    /// revision 17 → 18 bumps.
+    #[test]
+    fn symbol_ids_survive_schema_and_revision_bumps() {
+        let key = stable_symbol_key(
+            ProgrammingLanguage::Rust,
+            Path::new("src/lib.rs"),
+            SymbolKindV2::Function,
+            "hello",
+            0,
+        );
+        assert_eq!(key, "rust::src/lib.rs::Function::hello::0");
+        assert_eq!(symbol_id_from_stable_key(&key).0, "7d883dc4d6d958aff41b8871016c3cdea132b3b661b1a5da1a1923b30c86a7a4");
+    }
+
+    /// The key built from a file's spelled path once is the key built from
+    /// the path itself, separators, edge spaces and non-ASCII included; a
+    /// record converted with it holds that key and its ID.
+    #[test]
+    fn stable_key_with_path_is_stable_symbol_key() {
+        for (path, kind, name, ordinal) in [
+            ("src/lib.rs", SymbolKindV2::Function, "hello", 0),
+            ("C:\\work\\src\\lib.rs", SymbolKindV2::Method, "S::m", 3),
+            ("  dir/with space/ü.rs  ", SymbolKindV2::Field, "S.f", 1),
+            ("", SymbolKindV2::Unknown, "", 0),
+        ] {
+            let path = Path::new(path);
+            let expected = stable_symbol_key(ProgrammingLanguage::Rust, path, kind, name, ordinal);
+            assert_eq!(stable_key_with_path(ProgrammingLanguage::Rust, &stable_key_path(path), kind, name, ordinal), expected);
+        }
+        let symbol = sample_symbol();
+        let key = stable_symbol_key(symbol.language, &symbol.file, SymbolKindV2::from(symbol.kind), record_qualified_name(&symbol), 2);
+        let record = SymbolRecord::with_stable_key(symbol.clone(), key.clone());
+        assert_eq!(record.identity.stable_key, key);
+        assert_eq!(record.id, symbol_id_from_stable_key(&key));
+        let converted: SymbolRecord = symbol.into();
+        assert_eq!(converted.identity.stable_key, stable_symbol_key(record.language, &record.source.file_path, record.kind, &record.identity.qualified_name, 0));
+        assert_eq!(converted.provenance.extractor_version, record.provenance.extractor_version);
+        assert_eq!(record.provenance.extractor_version, format!("{}+rev.{}", env!("CARGO_PKG_VERSION"), crate::file::EXTRACTOR_REVISION));
+    }
 
     #[test]
     fn stable_key_and_id_are_deterministic() {
@@ -580,11 +775,36 @@ mod tests {
         assert_eq!(first.0.len(), 64);
     }
 
+    fn sample_symbol() -> SymbolInfo {
+        SymbolInfo {
+            name: "m".to_string(),
+            kind: SymbolKind::Method,
+            scope: SymbolScope::Member,
+            qualified_name: String::new(),
+            is_namespace_rooted: false,
+            range: CodeRange { start_line: 2, start_column: 5, end_line: 2, end_column: 6, start_byte: 14, end_byte: 15 },
+            language: ProgrammingLanguage::Rust,
+            file: Path::new("src\\a b.rs").to_path_buf(),
+            container_name: Some("S".to_string()),
+            container_kind: None,
+            doc_comment: None,
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
+            is_async: false,
+            signature: Some(FunctionSignature::new()),
+            type_metadata: None,
+        }
+    }
+
     #[test]
     fn symbol_record_round_trip_via_adapter() {
         let symbol = SymbolInfo {
             name: "hello".to_string(),
             kind: SymbolKind::Function,
+            scope: SymbolScope::Item,
+            qualified_name: "hello".to_string(),
+            is_namespace_rooted: false,
             range: CodeRange {
                 start_line: 1,
                 start_column: 1,
@@ -598,6 +818,10 @@ mod tests {
             container_name: None,
             container_kind: None,
             doc_comment: Some("Says hi".to_string()),
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
+            is_async: false,
             signature: Some(FunctionSignature::new()),
             type_metadata: None,
         };
@@ -614,6 +838,9 @@ mod tests {
         let symbol = SymbolInfo {
             name: "hello".to_string(),
             kind: SymbolKind::Function,
+            scope: SymbolScope::Item,
+            qualified_name: "hello".to_string(),
+            is_namespace_rooted: false,
             range: CodeRange {
                 start_line: 1,
                 start_column: 1,
@@ -627,6 +854,10 @@ mod tests {
             container_name: None,
             container_kind: None,
             doc_comment: Some("Says hi".to_string()),
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
+            is_async: false,
             signature: None,
             type_metadata: None,
         };
@@ -634,7 +865,7 @@ mod tests {
         let record: SymbolRecord = symbol.into();
         let json = serde_json::to_string(&record).expect("serialize");
         let parsed: SymbolRecord = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.schema_version, SchemaVersion::V2_0);
+        assert_eq!(parsed.schema_version, SchemaVersion::CURRENT);
         assert_eq!(parsed.identity.name, "hello");
     }
 }

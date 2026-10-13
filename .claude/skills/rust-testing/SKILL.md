@@ -121,6 +121,7 @@ Every curated package area defines these recipes, delegating to the shared
 |----------------|-------------------------------------------------------------------------|
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
 | `test`         | Full L1 suite.                                                          |
+| `slow-tests`   | Nextest's SLOW report over the `test` tier (local diagnostic).         |
 | `test-l2`      | Real-terminal tests; serial with a shared pane by default, parallel with `BISCUIT_L2_THREADS=N` — see [l2-tests.md](l2-tests.md). |
 | `test-l3`      | OS keyboard/mouse tests.                                                |
 | `test-browser` | Headless browser tests, one Chrome at a time (`-j 1`).                  |

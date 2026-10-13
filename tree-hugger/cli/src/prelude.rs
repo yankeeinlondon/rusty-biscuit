@@ -1,33 +1,36 @@
-//! Prelude export discovery and resolution.
+//! Prelude export discovery and resolution (`--prelude`).
+//!
+//! Resolution is the first of two scan phases: the prelude files are
+//! analyzed, their public re-exports are resolved against the modules they
+//! name, and every file analyzed on the way is kept in a request-local map
+//! the scan reuses, so no file is parsed twice. A target module outside the
+//! scan is analyzed on demand and never listed.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tree_hugger::{
-    CodeRange, ImportSymbol, ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile,
-    TreeHuggerError, has_package_manifest,
+    CodeRange, ImportRecord, ProgrammingLanguage, SymbolInfo, SymbolKind, SymbolKindData, SymbolScope,
+    SymbolQuery, SymbolRecord, TextSpan, TreeHuggerError, file_identity, has_package_manifest,
+    stable_symbol_key, symbol_id_from_stable_key,
 };
+
+use crate::scan::{Analyzed, Analyzer};
 
 /// Resolved prelude export filter data.
 #[derive(Debug, Clone)]
 pub(crate) struct PreludeFilter {
     /// Symbol names explicitly listed by prelude exports (plus PRELUDE env var).
     pub(crate) names: HashSet<String>,
-    /// Resolved prelude export symbols keyed by prelude file path.
-    pub(crate) exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>>,
+    /// Synthetic export records keyed by prelude file path: one per public
+    /// re-export, under its exported (alias) name, at its target's
+    /// declaration when resolved.
+    pub(crate) exports_by_file: HashMap<PathBuf, Vec<SymbolRecord>>,
     /// Names contributed only by the `PRELUDE` env var (no resolved metadata).
     ///
     /// These need to be filtered against file scans because they aren't
     /// represented in [`Self::exports_by_file`].
     pub(crate) env_only_names: HashSet<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedPreludeMetadata {
-    kind: SymbolKind,
-    doc_comment: Option<String>,
-    file: Option<PathBuf>,
-    range: Option<CodeRange>,
 }
 
 /// Resolves symbol names and direct export entries from a prelude module.
@@ -36,45 +39,54 @@ pub(crate) struct ResolvedPreludeMetadata {
 /// `{root}/src/prelude/mod.rs`, and direct child package roots such as
 /// `{root}/lib/src/prelude.rs`.
 ///
-/// Parses public `use` exports and merges any additional names from the
+/// Every file is analyzed with `query`, which must select every kind (a
+/// target is looked up among all of a module's declarations), and kept in
+/// `analyzed` for the scan to reuse. Merges any additional names from the
 /// `PRELUDE` environment variable (comma-separated).
-pub(crate) fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerError> {
+pub(crate) fn resolve_prelude_symbols(
+    root_dir: &Path,
+    analyzer: &Analyzer,
+    query: &SymbolQuery,
+    analyzed: &mut HashMap<PathBuf, Analyzed>,
+) -> Result<PreludeFilter, TreeHuggerError> {
     let mut names = HashSet::new();
-    let mut exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
-    let mut rust_symbol_cache: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
+    let mut exports_by_file: HashMap<PathBuf, Vec<SymbolRecord>> = HashMap::new();
 
     for candidate in discover_prelude_files(root_dir)? {
-        let tree_file = TreeFile::with_language(&candidate, None)?;
-        let source = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
-            path: candidate.clone(),
-            source,
-        })?;
-        let exports: Vec<ImportSymbol> = tree_file
-            .imported_symbols()?
-            .into_iter()
-            .filter(|import| is_prelude_export(import, &source))
+        // Keyed by identity so the scan finds the analysis under whatever
+        // spelling it lists the file.
+        let candidate = file_identity(&candidate);
+        // The export lines are read from the bytes the analysis read.
+        let source = match analyzed.get(&candidate) {
+            Some(_) => std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
+                path: candidate.clone(),
+                source,
+            })?,
+            None => {
+                let file = analyzer.read(&candidate)?;
+                let source = file.source().to_string();
+                analyzed.insert(candidate.clone(), analyzer.analyze_source(file, query)?);
+                source
+            }
+        };
+        let prelude = &analyzed[&candidate];
+        let language = prelude.result.index.language;
+        let exports: Vec<ImportRecord> = prelude
+            .result
+            .index
+            .imports
+            .iter()
+            .filter(|import| is_prelude_export(import, language, &source))
+            .cloned()
             .collect();
-        let mut resolved_exports = Vec::with_capacity(exports.len());
         let package_root =
             package_root_for_prelude_file(&candidate).unwrap_or_else(|| root_dir.to_path_buf());
 
-        for import in &exports {
+        let mut resolved_exports = Vec::with_capacity(exports.len());
+        for (ordinal, import) in exports.iter().enumerate() {
             names.insert(import.name.clone());
-            let metadata =
-                resolve_prelude_export_metadata(import, &package_root, &mut rust_symbol_cache)?
-                    .unwrap_or(ResolvedPreludeMetadata {
-                        kind: SymbolKind::Unknown,
-                        doc_comment: None,
-                        file: None,
-                        range: None,
-                    });
-            resolved_exports.push(symbol_from_prelude_export(
-                import,
-                metadata.kind,
-                metadata.doc_comment,
-                metadata.file,
-                metadata.range,
-            ));
+            let target = resolve_prelude_export(import, language, &package_root, analyzer, query, analyzed)?;
+            resolved_exports.push(synthetic_export(import, ordinal, &candidate, language, target));
         }
 
         exports_by_file.insert(candidate, resolved_exports);
@@ -83,7 +95,7 @@ pub(crate) fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, 
     let resolved_names: HashSet<String> = exports_by_file
         .values()
         .flatten()
-        .map(|symbol| symbol.name.clone())
+        .map(|symbol| symbol.identity.name.clone())
         .collect();
 
     let mut env_only_names = HashSet::new();
@@ -105,6 +117,21 @@ pub(crate) fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, 
         exports_by_file,
         env_only_names,
     })
+}
+
+/// `file`'s analysis from `analyzed`, analyzing it first if this run has
+/// not yet.
+fn analyzed_file<'a>(
+    file: &Path,
+    analyzer: &Analyzer,
+    query: &SymbolQuery,
+    analyzed: &'a mut HashMap<PathBuf, Analyzed>,
+) -> Result<&'a Analyzed, TreeHuggerError> {
+    if !analyzed.contains_key(file) {
+        let analysis = analyzer.analyze(file, query)?;
+        analyzed.insert(file.to_path_buf(), analysis);
+    }
+    Ok(&analyzed[file])
 }
 
 pub(crate) fn discover_prelude_files(root_dir: &Path) -> Result<Vec<PathBuf>, TreeHuggerError> {
@@ -156,15 +183,18 @@ pub(crate) fn package_root_for_prelude_file(path: &Path) -> Option<PathBuf> {
     }
 }
 
-pub(crate) fn is_prelude_export(import: &ImportSymbol, file_source: &str) -> bool {
-    if import.language != ProgrammingLanguage::Rust {
+/// Whether `import` re-exports: every import of a non-Rust prelude, and a
+/// Rust `use` only when the statement is `pub`.
+pub(crate) fn is_prelude_export(import: &ImportRecord, language: ProgrammingLanguage, file_source: &str) -> bool {
+    if language != ProgrammingLanguage::Rust {
         return true;
     }
 
-    let Some(statement_range) = import.statement_range.as_ref() else {
+    let Some(statement_span) = import.statement_span.as_ref() else {
         return true;
     };
-    let Some(statement) = file_source.get(statement_range.start_byte..statement_range.end_byte)
+    let Some(statement) =
+        file_source.get(statement_span.start_byte as usize..statement_span.end_byte as usize)
     else {
         return false;
     };
@@ -193,17 +223,30 @@ pub(crate) fn is_public_rust_use_statement(statement: &str) -> bool {
     false
 }
 
-pub(crate) fn resolve_prelude_export_metadata(
-    import: &ImportSymbol,
+/// What a prelude re-export resolved to.
+enum ExportTarget {
+    /// The target's declaration record.
+    Declaration(Box<SymbolRecord>),
+    /// A kind read from the module text, for a declaration the extractor
+    /// does not capture; its location stays unknown.
+    InferredKind(SymbolKind),
+    Unresolved,
+}
+
+fn resolve_prelude_export(
+    import: &ImportRecord,
+    language: ProgrammingLanguage,
     root_dir: &Path,
-    rust_symbol_cache: &mut HashMap<PathBuf, Vec<SymbolInfo>>,
-) -> Result<Option<ResolvedPreludeMetadata>, TreeHuggerError> {
-    if import.language != ProgrammingLanguage::Rust {
-        return Ok(None);
+    analyzer: &Analyzer,
+    query: &SymbolQuery,
+    analyzed: &mut HashMap<PathBuf, Analyzed>,
+) -> Result<ExportTarget, TreeHuggerError> {
+    if language != ProgrammingLanguage::Rust {
+        return Ok(ExportTarget::Unresolved);
     }
 
     let Some(source) = import.source.as_deref() else {
-        return Ok(None);
+        return Ok(ExportTarget::Unresolved);
     };
     let target_name = import_target_symbol_name(import);
 
@@ -211,26 +254,16 @@ pub(crate) fn resolve_prelude_export_metadata(
         if !candidate.is_file() {
             continue;
         }
+        let candidate = file_identity(&candidate);
 
-        if !rust_symbol_cache.contains_key(&candidate) {
-            let tree_file = TreeFile::with_language(&candidate, Some(ProgrammingLanguage::Rust))?;
-            let mut symbols = tree_file.exported_symbols()?;
-            if symbols.is_empty() {
-                symbols = tree_file.symbols()?;
-            }
-            rust_symbol_cache.insert(candidate.clone(), symbols);
-        }
-
-        if let Some(symbol) = rust_symbol_cache
-            .get(&candidate)
-            .and_then(|symbols| symbols.iter().find(|symbol| symbol.name == target_name))
-        {
-            return Ok(Some(ResolvedPreludeMetadata {
-                kind: symbol.kind,
-                doc_comment: symbol.doc_comment.clone(),
-                file: Some(symbol.file.clone()),
-                range: Some(symbol.range.clone()),
-            }));
+        // Exported declarations first, as the module's public surface; a
+        // module with none falls back to every declaration.
+        let records = &analyzed_file(&candidate, analyzer, query, analyzed)?.result.index.symbols;
+        let has_exports = records.iter().any(|record| record.visibility.is_exported);
+        if let Some(record) = records.iter().find(|record| {
+            (record.visibility.is_exported || !has_exports) && record.identity.name == target_name
+        }) {
+            return Ok(ExportTarget::Declaration(Box::new(record.clone())));
         }
 
         // Fallback for symbols not captured by tree-sitter symbol queries (e.g., some type aliases).
@@ -240,21 +273,17 @@ pub(crate) fn resolve_prelude_export_metadata(
                 source,
             })?;
         if let Some(kind) = infer_rust_decl_kind(&source_text, target_name) {
-            return Ok(Some(ResolvedPreludeMetadata {
-                kind,
-                doc_comment: None,
-                file: None,
-                range: None,
-            }));
+            return Ok(ExportTarget::InferredKind(kind));
         }
     }
 
-    Ok(None)
+    Ok(ExportTarget::Unresolved)
 }
 
-pub(crate) fn import_target_symbol_name(import: &ImportSymbol) -> &str {
+pub(crate) fn import_target_symbol_name(import: &ImportRecord) -> &str {
     let raw = import
-        .original_name
+        .symbol
+        .qualified_name
         .as_deref()
         .unwrap_or(import.name.as_str());
     raw.rsplit("::").next().unwrap_or(raw)
@@ -295,23 +324,81 @@ pub(crate) fn rust_module_source_candidates(root_dir: &Path, source: &str) -> Ve
     ]
 }
 
-pub(crate) fn symbol_from_prelude_export(
-    import: &ImportSymbol,
-    kind: SymbolKind,
-    doc_comment: Option<String>,
-    resolved_file: Option<PathBuf>,
-    resolved_range: Option<CodeRange>,
-) -> SymbolInfo {
-    SymbolInfo {
+/// The record a prelude lists for one re-export: the exported (alias) name,
+/// the target's kind, keyword, doc comment and declaration location when
+/// resolved (else the `use` itself), and nothing that belongs to the target
+/// alone (signature, members, container, access).
+///
+/// It is marked synthetic and re-exported, and its ID is derived from the
+/// prelude file and its position there, so it never borrows the target's ID
+/// while naming a different symbol.
+fn synthetic_export(
+    import: &ImportRecord,
+    ordinal: usize,
+    prelude_file: &Path,
+    language: ProgrammingLanguage,
+    target: ExportTarget,
+) -> SymbolRecord {
+    let (kind, file, span, doc_comment, keyword) = match &target {
+        ExportTarget::Declaration(record) => (
+            SymbolKind::from(record.kind),
+            record.source.file_path.clone(),
+            &record.source.declaration_span,
+            record.docs.raw_doc.clone(),
+            record.identity.keyword.clone(),
+        ),
+        ExportTarget::InferredKind(kind) => (*kind, prelude_file.to_path_buf(), &import.span, None, None),
+        ExportTarget::Unresolved => (
+            SymbolKind::Unknown,
+            prelude_file.to_path_buf(),
+            &import.span,
+            None,
+            None,
+        ),
+    };
+    let mut record = SymbolRecord::from(SymbolInfo {
         name: import.name.clone(),
         kind,
-        range: resolved_range.unwrap_or_else(|| import.range.clone()),
-        language: import.language,
-        file: resolved_file.unwrap_or_else(|| import.file.clone()),
+        // A re-export is a file-level name of the prelude.
+        scope: SymbolScope::Item,
+        qualified_name: import.name.clone(),
+        is_namespace_rooted: false,
+        range: code_range(span),
+        language,
+        file,
         container_name: None,
         container_kind: None,
         doc_comment,
+        visibility: None,
+        is_static: false,
+        is_static_storage: false,
+        is_async: false,
         signature: None,
         type_metadata: None,
+    });
+    record.kind_data = SymbolKindData::Unknown;
+    record.identity.keyword = keyword;
+    record.identity.stable_key = stable_symbol_key(
+        language,
+        prelude_file,
+        record.kind,
+        &format!("prelude-export::{}", import.name),
+        ordinal as u32,
+    );
+    record.id = symbol_id_from_stable_key(&record.identity.stable_key);
+    record.visibility.is_exported = true;
+    record.visibility.is_reexported = true;
+    record.visibility.is_synthetic = true;
+    record
+}
+
+fn code_range(span: &TextSpan) -> CodeRange {
+    CodeRange {
+        start_line: span.start.line as usize,
+        start_column: span.start.column as usize,
+        end_line: span.end.line as usize,
+        end_column: span.end.column as usize,
+        start_byte: span.start_byte as usize,
+        end_byte: span.end_byte as usize,
     }
 }

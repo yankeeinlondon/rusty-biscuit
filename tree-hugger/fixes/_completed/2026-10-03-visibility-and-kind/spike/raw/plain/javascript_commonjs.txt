@@ -1,0 +1,17 @@
+  - class CommonjsClass javascript_commonjs.js:14:1
+  - function commonjsExported javascript_commonjs.js:10:1
+  - function commonjsHelper javascript_commonjs.js:6:1
+  - method commonjsMethod [in CommonjsClass] javascript_commonjs.js:15:3
+  - const path javascript_commonjs.js:4:7
+=== classes
+javascript_commonjs.js (JavaScript)
+  class CommonjsClass [14:1]
+    Instance Methods (1)
+      - commonjsMethod [in CommonjsClass] [15:3]
+
+=== functions
+  - function commonjsExported javascript_commonjs.js:10:1
+  - function commonjsHelper javascript_commonjs.js:6:1
+  - method commonjsMethod [in CommonjsClass] javascript_commonjs.js:15:3
+=== types
+  - class CommonjsClass javascript_commonjs.js:14:1

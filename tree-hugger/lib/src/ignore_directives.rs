@@ -17,8 +17,9 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator, Tree};
 use crate::queries::{GrammarRef, QueryKind, query_for};
 use crate::shared::ProgrammingLanguage;
 
-/// Directive prefix for line-level ignores.
-const IGNORE_LINE_PREFIX: &str = "tree-hugger-ignore";
+/// Directive prefix for line-level ignores. Every directive starts with it,
+/// the file-level one included, so a source without it has none.
+pub(crate) const IGNORE_LINE_PREFIX: &str = "tree-hugger-ignore";
 
 /// Directive prefix for file-level ignores.
 const IGNORE_FILE_PREFIX: &str = "tree-hugger-ignore-file";

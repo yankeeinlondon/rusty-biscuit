@@ -1,0 +1,15 @@
+  - class ScriptClass javascript_script.js:8:1
+  - function scriptFunction javascript_script.js:4:1
+  - method scriptMethod [in ScriptClass] javascript_script.js:9:3
+  - var scriptVariable javascript_script.js:6:5
+=== classes
+javascript_script.js (JavaScript)
+  class ScriptClass [8:1]
+    Instance Methods (1)
+      - scriptMethod [in ScriptClass] [9:3]
+
+=== functions
+  - function scriptFunction javascript_script.js:4:1
+  - method scriptMethod [in ScriptClass] javascript_script.js:9:3
+=== types
+  - class ScriptClass javascript_script.js:8:1

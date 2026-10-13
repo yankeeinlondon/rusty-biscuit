@@ -18,7 +18,6 @@ pub mod shared;
 // Re-export query subsystem for consumers
 pub use queries::{
     compatibility::{CompatibilityRegistry, find_hook_predicates, find_unsupported_predicates},
-    drift::{DriftItem, DriftReport, check_all_drift, check_query_drift, summarize_drift},
     inventory::{CaptureEntry, LanguageInventory, NvimQuerySuite, QueryInventory, suite_for_kind},
     provenance::{QueryProvenance, TranslationStatus, all_query_provenance, query_provenance},
 };
@@ -26,6 +25,12 @@ pub use queries::{
 pub use builtins::is_builtin;
 pub use dead_code::{find_dead_code_after, is_terminal_statement};
 pub use error::TreeHuggerError;
+pub use analysis::counters::{WorkCounters, work_counters};
+pub use file::EXTRACTOR_REVISION;
+pub use file::naming::{NamingContext, lossless_portable_relative, portable_relative};
+pub use file::pattern::{NamePattern, glob_match};
+pub use file::query::{Capability, SymbolQuery, SymbolQueryResult};
+pub use file::source_file::{SourceFile, file_identity};
 pub use file::tree_file::TreeFile;
 pub use ignore_directives::IgnoreDirectives;
 pub use package::tree_package::{
@@ -33,3 +38,7 @@ pub use package::tree_package::{
 };
 pub use rule_registry::{RuleRegistry, RuleSelector};
 pub use shared::*;
+
+#[cfg(test)]
+#[path = "../tests/support/language_cases.rs"]
+mod language_cases;

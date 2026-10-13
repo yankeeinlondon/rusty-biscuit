@@ -68,6 +68,58 @@ pub(crate) fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<O
     }
 }
 
+/// Resolve a changed-paths base token to a commit id, following annotated
+/// tags to their target.
+///
+/// Resolution is local only: no fetch or remote refresh runs. A lightweight
+/// or annotated tag resolves to the commit it names; a token whose final
+/// object is a tree or blob is not a valid comparison base and is rejected as
+/// such, distinct from a token that names no object at all.
+///
+/// ## Errors
+///
+/// - [`SniffError::UnresolvedReference`] when the token names no local object.
+/// - [`SniffError::NonCommitReference`] when the token resolves but its final
+///   object is a tree or blob.
+/// - [`SniffError::Git`] for rev-parse, object-read, and peel failures.
+pub(crate) fn resolve_commit_base(
+    repo: &gix::Repository,
+    reference: &str,
+    repo_root: &Path,
+) -> Result<gix::ObjectId> {
+    let unresolved = || SniffError::UnresolvedReference {
+        reference: reference.to_owned(),
+        path: repo_root.to_path_buf(),
+    };
+    // An empty token is a missing reference, not a malformed SHA: generic
+    // rev parsing reports it as a too-short hex prefix, which would surface
+    // as an opaque Git failure instead of naming the reference.
+    if reference.is_empty() {
+        return Err(unresolved());
+    }
+    let Some(oid) = resolve_single_opt(repo, reference)? else {
+        return Err(unresolved());
+    };
+    let object = repo
+        .find_object(oid)
+        .map_err(|e| SniffError::git("object", e))?;
+    let peeled = object
+        .peel_tags_to_end()
+        .map_err(|e| SniffError::git("peel", e))?;
+    let kind = match peeled.kind {
+        gix::object::Kind::Commit => return Ok(peeled.id),
+        gix::object::Kind::Tree => "tree",
+        gix::object::Kind::Blob => "blob",
+        // `peel_tags_to_end` follows tags to a commit, tree, or blob only.
+        gix::object::Kind::Tag => unreachable!("peel_tags_to_end never returns a tag"),
+    };
+    Err(SniffError::NonCommitReference {
+        reference: reference.to_owned(),
+        kind,
+        path: repo_root.to_path_buf(),
+    })
+}
+
 /// Resolve a non-local-branch specifier to a starting commit id.
 ///
 /// A remote-tracking name (e.g. `origin/main`) is resolved by structured
@@ -417,16 +469,14 @@ pub fn get_commit_files_with_cache(
 
 /// Fallible variant of [`get_commit_files`].
 ///
-/// A missing or corrupt commit, tree, parent commit, parent tree, or diff
+/// A missing or corrupt commit, tree, parent commit, parent tree, index, or diff
 /// failure propagates as [`SniffError::Git`] rather than producing an empty or
 /// partial change list.
 pub(crate) fn get_commit_files_fallible(
     repo: &gix::Repository,
     commit_id: gix::ObjectId,
 ) -> Result<Vec<(PathBuf, DeltaKind)>> {
-    let mut cache = repo
-        .diff_resource_cache_for_tree_diff()
-        .map_err(|e| SniffError::git("diff", e))?;
+    let mut cache = super::open::tree_diff_cache(repo)?;
     get_commit_files_with_cache_fallible(repo, commit_id, &mut cache)
 }
 
@@ -470,6 +520,64 @@ pub(crate) fn get_commit_files_with_cache_fallible(
     // explicit sort keeps the contract regardless of internal ordering.
     result.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(result)
+}
+
+/// Native repository-relative paths whose entries differ between two commit
+/// tips, compared directly rather than through a merge-base.
+///
+/// `head` of `None` compares the base tree against the empty tree, which is
+/// how an unborn `HEAD` names "no current commit". Content, mode, and type
+/// changes all contribute; rename tracking is off, so a rename surfaces as a
+/// delete/add pair. Directory entries are skipped, and nothing inside a
+/// submodule entry is visited: a gitlink is one entry, not a descendable
+/// tree, so no repository boundary is crossed.
+///
+/// ## Errors
+///
+/// Returns [`SniffError::Git`] when either commit, its tree, or the diff
+/// itself cannot be read.
+pub(crate) fn tip_diff_paths(
+    repo: &gix::Repository,
+    base: gix::ObjectId,
+    head: Option<gix::ObjectId>,
+) -> Result<Vec<gix::bstr::BString>> {
+    let base_tree = commit_tree(repo, base)?;
+    let head_tree = match head {
+        Some(id) => commit_tree(repo, id)?,
+        None => repo.empty_tree(),
+    };
+
+    let mut platform = base_tree.changes().map_err(|e| SniffError::git("diff", e))?;
+    platform.options(|opts| {
+        opts.track_path().track_rewrites(None);
+    });
+
+    let mut paths = Vec::new();
+    let mut cache = super::open::tree_diff_cache(repo)?;
+    platform
+        .for_each_to_obtain_tree_with_cache(
+            &head_tree,
+            &mut cache,
+            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+                if change.entry_mode().is_tree() {
+                    return Ok(std::ops::ControlFlow::Continue(()));
+                }
+                paths.push(change.location().to_owned());
+                Ok(std::ops::ControlFlow::Continue(()))
+            },
+        )
+        .map_err(|e| SniffError::git("diff", e))?;
+    Ok(paths)
+}
+
+/// A commit's own tree.
+fn commit_tree(repo: &gix::Repository, commit_id: gix::ObjectId) -> Result<gix::Tree<'_>> {
+    repo.find_object(commit_id)
+        .map_err(|e| SniffError::git("object", e))?
+        .try_into_commit()
+        .map_err(|e| SniffError::git("object", e))?
+        .tree()
+        .map_err(|e| SniffError::git("tree", e))
 }
 
 /// Lines added and removed in one committed file change.
@@ -925,6 +1033,7 @@ const DIFF_CACHE_CLEAR_INTERVAL: usize = 1_000;
 /// exhausted history from a truncated scan.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
+/// The diff cache also requires a readable index for attribute mappings.
 ///
 /// Errors are suppressed: a corrupt revwalk, object, or ref store yields an
 /// empty result. For error propagation, use [`get_commits_for_path_fallible`].
@@ -991,9 +1100,7 @@ pub(crate) fn get_commits_for_path_fallible(
             .expect("collected when none supplied")
     });
 
-    let mut diff_cache = repo
-        .diff_resource_cache_for_tree_diff()
-        .map_err(|e| SniffError::git("diff", e))?;
+    let mut diff_cache = super::open::tree_diff_cache(repo)?;
 
     let capped = options.count > 0;
     let mut exhausted = true;

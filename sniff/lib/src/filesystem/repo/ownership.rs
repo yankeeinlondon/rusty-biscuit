@@ -11,6 +11,48 @@ use std::path::{Path, PathBuf};
 use super::detection::{canonicalize_path, normalize_path};
 use super::types::Package;
 
+/// Reusable deepest-component-prefix lookup borrowing one package catalog.
+///
+/// Package boundaries are normalized once. Alias precedence is catalog order,
+/// and name usability never changes ownership. Paths must be absolute; missing
+/// descendants are normalized through their existing ancestors.
+#[derive(Debug)]
+pub struct PackageOwnershipLookup<'a> {
+    packages: &'a [Package],
+    index: PackageOwnershipIndex,
+}
+
+impl<'a> PackageOwnershipLookup<'a> {
+    /// Capture boundaries from a catalog without rediscovering its packages.
+    pub fn new(repo: &'a super::types::RepoInfo) -> Self {
+        let packages = repo.packages.as_deref().unwrap_or(&[]);
+        Self { packages, index: PackageOwnershipIndex::from_packages(&repo.root, packages) }
+    }
+
+    /// Return the deepest owner of an absolute native file or directory path.
+    /// Relative paths and paths outside the observation root have no owner.
+    pub fn package_for_path(&self, path: &Path) -> Option<&'a Package> {
+        if !path.is_absolute() {
+            return None;
+        }
+        let mut ancestor = path;
+        let mut suffix = Vec::new();
+        while !ancestor.exists() {
+            suffix.push(ancestor.file_name()?);
+            ancestor = ancestor.parent()?;
+        }
+        let mut path = canonicalize_path(ancestor);
+        for component in suffix.into_iter().rev() {
+            path.push(component);
+        }
+        let path = normalize_path(&path);
+        if !path.starts_with(self.index.root()) {
+            return None;
+        }
+        self.packages.get(self.index.lookup_normalized(&path)?)
+    }
+}
+
 /// Deepest-prefix package lookup for one repository observation.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PackageOwnershipIndex {

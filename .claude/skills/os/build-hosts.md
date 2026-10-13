@@ -36,16 +36,42 @@ keep it set there.
 
 A clone is created only when a checkout first runs `cross-check`, so a host
 holds one clone (and one `target/`) per origin worktree that has used it, and
-no two worktrees ever share one. Before any leg starts, each selected host
-removes this origin host's `<host>--*` clones whose worktree no longer exists
-here (absent from `git worktree list`, or listed as `prunable`). Removal is a
-rename to `.cross-check-trash--<host>--…` followed by a detached delete (on
-Windows started through WMI, since OpenSSH kills a session's children, with a
-`\\?\` path for deep `target\` trees), so no leg waits on it; each run also
-re-deletes its origin's leftover trash. A clone whose lock is held is kept and
-reported; a rename that fails is reported and does not stop the run. Hosts not
-selected for a run are not pruned by it. The
-pre-2026-09-22 shared clones (`~/ci-verification`, `W:\ci-verification`) are
+no two worktrees ever share one. A clone's last use is the time of its
+`rusty-biscuit/.git/FETCH_HEAD`, which the `git fetch` at the start of every
+run rewrites; a clone that never fetched falls back to its directory's time.
+Before any leg starts, each selected host retires every clone whose lock is
+not held and that is either:
+
+- **stale:** a `<this host>--*` clone whose worktree no longer exists here
+  (absent from `git worktree list`, or listed as `prunable`). Only the calling
+  host can know this, so other hosts' clones are never judged stale.
+- **expired:** any clone, whatever its prefix, last used
+  `CROSS_CHECK_MAX_AGE_DAYS` (default 3) or more days ago. This is what clears clones of other or renamed calling hosts (e.g.
+  `mac--*` on `build-win-native`) and of live but idle worktrees.
+
+The run's own clone is never retired, and only directories that look like
+clones (a `rusty-biscuit` child) are candidates. Retiring is a rename
+to `.cross-check-trash--…` followed by a detached delete (on Windows started
+through WMI, since OpenSSH kills a session's children, with a `\\?\` path
+for deep `target\` trees), so no leg waits on it; every pass re-deletes any
+leftover trash. A clone whose lock is held is kept and reported; a rename that
+fails is reported and does not stop the run.
+
+A run prunes only the hosts it selects. `just cross-check-refresh [--os …]
+[--dry-run]` applies the same rules (`scripts/cross-check-hosts.sh`) to every
+declared host on demand. It reports each host's free space and every clone's
+size and days unused before, deletes synchronously, and reports what was
+removed and the space reclaimed after. `just cross-check-test` runs the rules'
+L1 tests.
+
+The build hosts do not offer post-quantum key exchange, so OpenSSH 10 clients
+print a three-line `** WARNING: connection is not using a post-quantum key
+exchange algorithm` on every connection. `cross-check` and the refresh pass
+`-o WarnWeakCrypto=no` when the local client accepts it (checked with
+`ssh -G`, which does not connect); older clients do not know the option and
+would refuse to connect with it.
+
+The pre-2026-09-22 shared clones (`~/ci-verification`, `W:\ci-verification`) are
 no longer used, and deleting them is the host owner's call.
 
 `cross-check` forwards `BISCUIT_TEST_REQUIRED_BACKENDS` from your shell to the

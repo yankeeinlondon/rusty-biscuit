@@ -1,0 +1,113 @@
+All selected declarations
+
+┌──────────────┬───────┐
+│ Kind         │ Count │
+├──────────────┼───────┤
+│ class        │     8 │
+│ constant     │     2 │
+│ constructor  │     5 │
+│ enum         │     1 │
+│ enum variant │     2 │
+│ field        │    10 │
+│ function     │    18 │
+│ interface    │     4 │
+│ method       │    21 │
+│ module       │     2 │
+│ namespace    │     3 │
+│ property     │     3 │
+│ trait        │     1 │
+│ type         │     4 │
+│ type alias   │     2 │
+│ variable     │     8 │
+└──────────────┴───────┘
+
+┌────────────────┬───────┐
+│ Visibility     │ Count │
+├────────────────┼───────┤
+│ internal       │     6 │
+│ module-private │     4 │
+│ package        │     1 │
+│ private        │     5 │
+│ public         │    53 │
+│ unknown        │    25 │
+└────────────────┴───────┘
+
+┌────────────┬───────┐
+│ Language   │ Count │
+├────────────┼───────┤
+│ Bash       │     3 │
+│ C          │     7 │
+│ C#         │     8 │
+│ C++        │     7 │
+│ Go         │     6 │
+│ Java       │     7 │
+│ JavaScript │     5 │
+│ Lua        │     5 │
+│ Perl       │     4 │
+│ PHP        │     5 │
+│ Python     │     5 │
+│ Rust       │     9 │
+│ Scala      │     6 │
+│ Swift      │     6 │
+│ TypeScript │     8 │
+│ Zsh        │     3 │
+└────────────┴───────┘
+
+Doc coverage: 4 of 79 documented (5.1%); 15 unavailable
+
+Unassigned
+
+┌──────────────┬───────┐
+│ Kind         │ Count │
+├──────────────┼───────┤
+│ class        │     8 │
+│ constant     │     2 │
+│ constructor  │     5 │
+│ enum         │     1 │
+│ enum variant │     2 │
+│ field        │    10 │
+│ function     │    18 │
+│ interface    │     4 │
+│ method       │    21 │
+│ module       │     2 │
+│ namespace    │     3 │
+│ property     │     3 │
+│ trait        │     1 │
+│ type         │     4 │
+│ type alias   │     2 │
+│ variable     │     8 │
+└──────────────┴───────┘
+
+┌────────────────┬───────┐
+│ Visibility     │ Count │
+├────────────────┼───────┤
+│ internal       │     6 │
+│ module-private │     4 │
+│ package        │     1 │
+│ private        │     5 │
+│ public         │    53 │
+│ unknown        │    25 │
+└────────────────┴───────┘
+
+┌────────────┬───────┐
+│ Language   │ Count │
+├────────────┼───────┤
+│ Bash       │     3 │
+│ C          │     7 │
+│ C#         │     8 │
+│ C++        │     7 │
+│ Go         │     6 │
+│ Java       │     7 │
+│ JavaScript │     5 │
+│ Lua        │     5 │
+│ Perl       │     4 │
+│ PHP        │     5 │
+│ Python     │     5 │
+│ Rust       │     9 │
+│ Scala      │     6 │
+│ Swift      │     6 │
+│ TypeScript │     8 │
+│ Zsh        │     3 │
+└────────────┴───────┘
+
+Doc coverage: 4 of 79 documented (5.1%); 15 unavailable

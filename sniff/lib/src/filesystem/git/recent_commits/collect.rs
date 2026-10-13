@@ -64,7 +64,8 @@ impl RecentCommits {
     /// - [`SniffError::NotAMonorepo`], [`SniffError::UnknownPackage`],
     ///   [`SniffError::AmbiguousPackage`], or [`SniffError::UnknownPackageArea`]
     ///   for a package or package-area filter the catalog cannot satisfy.
-    /// - [`SniffError::Git`] for unreadable refs, objects, or history.
+    /// - [`SniffError::Git`] for unreadable refs, objects, history, or the index
+    ///   used by committed diffs for attribute mappings.
     pub fn collect(repo: &GitRepo, options: &RecentCommitsOptions) -> Result<Self> {
         options.validate()?;
         let structure = if repo.is_bare() {
@@ -132,9 +133,7 @@ fn collect_from(
         .with_hidden(hidden)
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
-    let mut diff_cache = gix
-        .diff_resource_cache_for_tree_diff()
-        .map_err(|e| SniffError::git("diff", e))?;
+    let mut diff_cache = crate::filesystem::git::open::tree_diff_cache(gix)?;
 
     let mut candidates: Vec<Candidate> = Vec::new();
     for info_result in walk {

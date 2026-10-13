@@ -41,6 +41,7 @@ import schema  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "cross-check.sh"
+HOSTS_SCRIPT = ROOT / "scripts" / "cross-check-hosts.sh"
 PACKAGE = "alpha"
 
 #: What the stub planner writes wherever the real planner would write the head
@@ -314,6 +315,8 @@ class CrossCheckHarness(unittest.TestCase):
             bin_dir.mkdir()
             (repo / "scripts" / "ci").mkdir(parents=True)
             shutil.copyfile(SCRIPT, repo / "scripts" / "cross-check.sh")
+            # The script sources its clone-layout and pruning rules.
+            shutil.copyfile(HOSTS_SCRIPT, repo / "scripts" / "cross-check-hosts.sh")
             if publisher:
                 for module in (ROOT / "scripts" / "ci").glob("*.py"):
                     if module.name != "affected_scope.py" and not module.name.startswith("test_"):
@@ -923,7 +926,8 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
 
     A clone is `<host>--<worktree>`, and the host part never contains `--`,
     so the first `--` always separates the two and only this origin host's
-    clones are candidates.
+    clones are stale candidates. Every pass re-deletes all leftover trash,
+    whichever origin left it.
     """
 
     def test_a_clone_for_a_removed_worktree_is_deleted(self) -> None:
@@ -932,7 +936,8 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         self.assertNotIn(stale, run["remote_entries"])
         self.assertIn(
-            f"removing stale clone build-linux:{run['clone_dir'].rsplit('/', 1)[0]}/{stale} in the background",
+            f"removing clone build-linux:{run['clone_dir'].rsplit('/', 1)[0]}/{stale} in the background"
+            " (worktree no longer exists)",
             run["stdout"],
         )
         # Renamed to trash, then deleted detached: nothing of it remains.
@@ -952,7 +957,7 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         run = self.ship("linux", prepare=extra_worktree, remote_setup=lambda c: plant_clone(c, live))
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         self.assertIn(live, run["remote_entries"])
-        self.assertNotIn("stale clone", run["stdout"])
+        self.assertNotIn("removing clone", run["stdout"])
 
     def test_a_worktree_whose_directory_is_gone_counts_as_removed(self) -> None:
         # `git worktree list` still names it, marked `prunable`.
@@ -972,18 +977,20 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
             f"{host}-mini--main",  # another origin whose name extends this one
             f"other--{host}",
             "rusty-biscuit",
-            ".cross-check-trash--other--gone-1-1",  # another origin's trash
         )
+        others_trash = ".cross-check-trash--other--gone-1-1"
 
         def plant(coding: Path) -> None:
-            for name in others:
+            for name in (*others, others_trash):
                 plant_clone(coding, name)
 
         run = self.ship("linux", remote_setup=plant)
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         for name in others:
             self.assertIn(name, run["remote_entries"])
-        self.assertNotIn("stale clone", run["stdout"])
+        self.assertNotIn("removing clone", run["stdout"])
+        # Trash is never a candidate clone, but leftover trash is deleted whoever left it.
+        self.assertNotIn(others_trash, run["remote_entries"])
 
     def test_a_locked_stale_clone_is_kept_and_reported(self) -> None:
         stale = f"{origin_host()}--gone"
@@ -994,9 +1001,11 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
 
     def test_pruning_happens_before_anything_is_shipped(self) -> None:
         run = self.ship("linux")
-        tools = [c["tool"] for c in run["calls"]]
+        # `ssh -G` only resolves the client configuration; it never connects.
+        calls = [c for c in run["calls"] if "-G" not in c["argv"]]
+        tools = [c["tool"] for c in calls]
         self.assertEqual("ssh", tools[0])
-        self.assertEqual(["bash -ls"], run["calls"][0]["argv"][-1:])
+        self.assertEqual(["bash -ls"], calls[0]["argv"][-1:])
         self.assertIn("scp", tools[1:])
 
     def test_windows_prunes_under_the_same_rules(self) -> None:
@@ -1007,13 +1016,13 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         ).decode("utf-16-le")
         self.assertIn("$live = @('main')", command)
         self.assertIn(f"$prefix = '{origin_host()}--'", command)
-        self.assertIn("if ($live -contains $entry.Name.Substring($prefix.Length)) { continue }", command)
+        self.assertIn("-not ($live -contains $name.Substring($prefix.Length))", command)
         self.assertIn(".cross-check.lock", command)
         # Renamed at once, deleted outside the SSH session's job, past MAX_PATH.
         self.assertIn("Rename-Item -LiteralPath $dir -NewName $trash", command)
         self.assertIn("Invoke-CimMethod -ClassName Win32_Process -MethodName Create", command)
         self.assertIn('''rd /s /q "\\\\?\\''', command)
-        self.assertIn(f'".cross-check-trash--$prefix"', command)
+        self.assertIn('".cross-check-trash--$name-$PID-', command)
         self.assertNotIn("Remove-Item", command)
 
 class RigPublicationRunTests(CrossCheckHarness):
@@ -1376,7 +1385,11 @@ class RigPublicationContractTests(unittest.TestCase):
         if shutil.which("shellcheck") is None:
             self.skipTest("shellcheck is not installed")
         completed = subprocess.run(
-            ["shellcheck", "-S", "warning", str(SCRIPT)], capture_output=True, text=True
+            # `-x` follows the script's `source` of cross-check-hosts.sh, which
+            # assigns the globals it reads.
+            ["shellcheck", "-x", "-P", "SCRIPTDIR", "-S", "warning", str(SCRIPT)],
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(0, completed.returncode, completed.stdout)
 

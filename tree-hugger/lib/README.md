@@ -1,296 +1,64 @@
 # Tree Hugger Library
 
-Tree Hugger exposes Tree-sitter-based helpers for extracting symbols and diagnostics from files
-and packages.
+`tree-hugger` reads source files in 16 languages with
+[Tree-sitter](https://tree-sitter.github.io/) and reports what they declare,
+import, export and reference, along with lint and syntax diagnostics. It is
+the engine behind the [`hug` CLI](../cli/README.md).
 
-## TreeFile
+- **Symbols** with kind, location, container, visibility, signature and type
+  metadata, as a flat `SymbolInfo` or a full schema `SymbolRecord`.
+- **Selective analysis**: a `SymbolQuery` asks for only the kinds and work it
+  needs, and a persistent cache answers repeat queries without parsing.
+- **References** resolved through lexical scopes in Rust, TypeScript and
+  JavaScript, each with a confidence.
+- **Diagnostics**, ignore comments and oversized-file ("god file") analysis.
 
-The core API for file-level symbol extraction and diagnostics.
+## Install
 
-```rust
-use tree_hugger_lib::TreeFile;
+The crate is not published to crates.io; depend on it from Git:
 
-let file = TreeFile::new("src/lib.rs")?;
-
-// Symbol extraction
-let symbols = file.symbols()?;           // All symbols combined
-let v2_symbols = file.symbol_records()?; // Symbol Schema v2 parse records
-let v2_index = file.symbol_index_v2()?;  // Parse -> bind -> semantic -> docs pipeline output
-let imports = file.imported_symbols()?;  // Import statements
-let exports = file.exported_symbols()?;  // Exported symbols
-let locals = file.local_symbols()?;      // Local definitions
-let refs = file.referenced_symbols()?;   // All identifier usages
-let reexports = file.reexported_symbols()?; // Imports that are re-exported
-
-// Diagnostics
-let lint = file.lint_diagnostics();      // Pattern-based lint rules
-let syntax = file.syntax_diagnostics();  // Syntax/parse errors
-let all = file.diagnostics();            // Unified diagnostic format
-let dead = file.dead_code();             // Unreachable code detection
+```toml
+[dependencies]
+tree-hugger = { git = "https://github.com/yankeeinlondon/rusty-biscuit" }
 ```
 
-## TreePackage
+## Example
 
 ```rust
-use tree_hugger_lib::TreePackage;
+use tree_hugger::{TreeFile, TreeHuggerError};
 
-let package = TreePackage::new(".")?;
-let modules = package.modules();
-```
-
-## SymbolKind
-
-Symbols are categorized by kind, allowing consumers to distinguish between different type constructs:
-
-```rust
-pub enum SymbolKind {
-    Function,   // Regular functions
-    Method,     // Methods (functions with self/this)
-    Type,       // Structs, type aliases
-    Class,      // Class definitions
-    Interface,  // Interfaces, protocols
-    Enum,       // Enumeration types
-    Trait,      // Traits (Rust, Scala, PHP)
-    Module,     // Modules, namespaces
-    Namespace,  // Package/namespace declarations
-    Variable,   // Variables, locals
-    Parameter,  // Function parameters
-    Field,      // Struct/class fields
-    Macro,      // Macro definitions
-    Constant,   // Constants
-    Unknown,    // Unrecognized symbols
-}
-```
-
-### Language-Specific Mappings
-
-| Language | Type | Class | Interface | Enum | Trait |
-|----------|:----:|:-----:|:---------:|:----:|:-----:|
-| Rust | struct | - | - | enum | trait |
-| TypeScript | type alias | class | interface | enum | - |
-| Java | - | class | - | enum | - |
-| C# | struct, record | class | interface | enum | - |
-| C/C++ | struct | class (C++) | - | enum | - |
-| Swift | struct | class | protocol | enum* | - |
-| Scala | - | class | - | enum | trait |
-| PHP | - | class | interface | enum | trait |
-| Go | type | - | - | - | - |
-| Python | - | class | - | - | - |
-
-\* Swift enum is captured as Type due to grammar limitations; see Known Limitations.
-
-## Symbol Metadata
-
-Symbols include rich metadata when available:
-
-```rust
-pub struct SymbolInfo {
-    pub name: String,
-    pub kind: SymbolKind,
-    pub range: CodeRange,
-    pub language: ProgrammingLanguage,
-    pub file: PathBuf,
-    pub doc_comment: Option<String>,
-    pub signature: Option<FunctionSignature>,
-    pub type_metadata: Option<TypeMetadata>,
-}
-```
-
-### FunctionSignature
-
-For functions and methods:
-
-```rust
-pub struct FunctionSignature {
-    pub parameters: Vec<ParameterInfo>,
-    pub return_type: Option<String>,
-    pub visibility: Option<Visibility>,
-    pub is_static: bool,
-}
-```
-
-### TypeMetadata
-
-For type definitions:
-
-```rust
-pub struct TypeMetadata {
-    pub fields: Vec<FieldInfo>,           // Struct fields
-    pub variants: Vec<VariantInfo>,       // Enum variants
-    pub type_parameters: Vec<String>,     // Generic parameters
-}
-```
-
-## JSON Summaries
-
-The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
-used by the CLI but are also available to library consumers.
-
-Schema v2 output is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
-and `completed_passes` metadata for staged analysis.
-
-## Testing
-
-### Test Coverage Philosophy
-
-Tree Hugger prioritizes comprehensive cross-language test coverage. When working on this library:
-
-1. **Every language with type constructs must have type distinction tests** - If a language supports multiple type kinds (struct/enum, class/interface), tests must verify correct `SymbolKind` assignment.
-
-2. **Fixture files for all supported languages** - Each language should have `sample.*` and `types.*` fixtures exercising its features.
-
-3. **Regression tests are mandatory** - Bug fixes must include tests that would fail without the fix.
-
-4. **Diagnostics coverage** - Add regression tests for semantic lint rules and syntax diagnostics in `tests/l1/lint_diagnostics.rs` and `tests/l1/tree_file.rs`.
-
-### Running Tests
-
-```bash
-cargo test -p tree-hugger-lib
-```
-
-### Test Structure
-
-Integration tests compile into one `l1` test binary. `Cargo.toml` sets
-`autotests = false`, so a new file under `tests/l1/` runs only once
-`tests/l1/main.rs` declares it with `mod`; the `test_layout` gate fails
-otherwise. Language tests are in `tests/l1/tree_file.rs` and follow this
-pattern:
-
-```rust
-#[test]
-fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
-    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
-    let symbols = tree_file.symbols()?;
-
-    let point = symbols.iter().find(|s| s.name == "Point");
-    assert_eq!(point.unwrap().kind, SymbolKind::Type);
-
-    let message = symbols.iter().find(|s| s.name == "Message");
-    assert_eq!(message.unwrap().kind, SymbolKind::Enum);
-
+fn main() -> Result<(), TreeHuggerError> {
+    let file = TreeFile::new("src/shapes.rs")?;
+    for symbol in file.symbols()? {
+        println!("line {:<3} {} {}", symbol.range.start_line, symbol.kind, symbol.qualified_name);
+    }
     Ok(())
 }
 ```
 
-## Lint Diagnostics
-
-Tree Hugger provides semantic and pattern-based lint diagnostics for all 16 supported languages.
-
-### Getting Diagnostics
-
-```rust
-use tree_hugger_lib::TreeFile;
-
-let file = TreeFile::new("src/main.rs")?;
-let diagnostics = file.lint_diagnostics();
-
-for d in diagnostics {
-    println!("{}: {} ({})", d.range.start_line, d.message, d.severity);
-}
+```text
+line 4   type Point
+line 5   field Point::x
+line 11  method Point::norm
+line 22  function origin
 ```
 
-### Semantic Rules
+The output is trimmed; [the guide](../docs/library.md#quick-start) shows the full run.
 
-These rules analyze symbol definitions, imports, and references:
+## Documentation
 
-| Rule | Severity | Description | Default |
-|------|----------|-------------|---------|
-| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin | experimental |
-| `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
-| `unused-symbol` | Warning | Symbol defined but never referenced or exported | experimental |
-| `unused-import` | Warning | Imported symbol never used in the file | off (low confidence) |
-| `dead-code` | Warning | Code after unconditional return/throw/panic | on |
+- [Tree Hugger Overview](../docs/overview.md): what Tree Hugger does and
+  where to read next
+- [Using the Tree Hugger Library](../docs/library.md): the guide to this
+  crate, from the first example to queries, the cache, references,
+  diagnostics, god files and errors.
+- [Symbol Records](../docs/symbol-records.md): every field of a
+  `SymbolRecord`.
+- [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md):
+  how each language's declarations map to kinds and access levels.
+- [Scope-Aware References](../docs/references.md): occurrences, confidence
+  and coverage.
+- [Tree Hugger's Persistent Symbol Cache](../docs/cache-design.md): keys,
+  entries and invalidation.
 
-`unused-import` is off by default: without trait/type resolution a syntactic scan
-cannot see imports used only through trait methods (`Write` for `.write_all()`) or
-macros, so it has an irreducible false-positive rate. Enable with `--warn unused-import`.
-The `experimental` rules require `--experimental-semantics`.
-
-### Pattern Rules
-
-Language-specific pattern matching rules:
-
-| Language | Rule | Description | Default |
-|----------|------|-------------|---------|
-| **Rust** | `unwrap-call` | Explicit `.unwrap()` call | off (`restriction`) |
-| **Rust** | `expect-call` | Explicit `.expect()` call | off (`restriction`) |
-| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage | on |
-| **JavaScript/TypeScript** | `debugger-statement` | `debugger;` statement | on |
-| **JavaScript/TypeScript** | `eval-call` | Usage of `eval()` | on |
-| **Python** | `eval-call` | Usage of `eval()` | on |
-| **Python** | `exec-call` | Usage of `exec()` | on |
-| **Python** | `breakpoint-call` | Usage of `breakpoint()` | on |
-| **PHP** | `eval-call` | Usage of `eval()` | on |
-
-`unwrap-call` and `expect-call` are `restriction`-category rules: the construct is
-valid and deliberate, so they are silent by default. Enable them with `--warn <rule>`,
-`--deny <rule>`, or `--deny category:restriction`.
-
-### Ignore Directives
-
-Suppress diagnostics with comments:
-
-```rust
-// tree-hugger-ignore: unwrap-call
-let value = option.unwrap();  // This unwrap is not reported
-
-// tree-hugger-ignore
-let risky = data.unwrap();    // All rules ignored on next line
-
-// tree-hugger-ignore-file: unused-import
-// Ignores unused-import for the entire file
-```
-
-Supported comment styles: `//`, `#`, `--`, `;`
-
-### Builtin Detection
-
-Semantic rules avoid false positives by recognizing language builtins:
-
-```rust
-use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
-
-assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
-assert!(is_builtin(ProgrammingLanguage::Python, "print"));
-assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
-```
-
-## Builtins
-
-The library maintains builtin symbol databases for all 16 languages to avoid false positive "undefined symbol" diagnostics:
-
-```rust
-use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
-
-assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
-assert!(is_builtin(ProgrammingLanguage::Python, "print"));
-assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
-assert!(is_builtin(ProgrammingLanguage::Go, "make"));
-```
-
-## Dead Code Detection
-
-Control flow analysis detects unreachable code after terminal statements:
-
-```rust
-use tree_hugger_lib::{is_terminal_statement, find_dead_code_after, ProgrammingLanguage};
-
-// Detects terminal statements per language
-// Rust: panic!, unreachable!, todo!, unimplemented!, process::exit(), process::abort()
-// Go: panic(), os.Exit()
-// C/C++: exit(), abort(), _exit(), _Exit(), quick_exit()
-// Swift: fatalError(), preconditionFailure(), assertionFailure()
-// Perl: die, exit
-// Lua: error(), os.exit()
-```
-
-## Known Limitations
-
-### Swift Type Distinction
-
-Swift's tree-sitter grammar uses a single `class_declaration` node for struct, class, and enum declarations, differentiated by a `declaration_kind` field. Query-level predicates to distinguish these don't work reliably, so all are currently captured as `SymbolKind::Type`. Protocols are correctly captured as `SymbolKind::Interface`.
-
-### Go Interface Detection
-
-Go uses a single `type_declaration` for both struct and interface types. The library captures all as `SymbolKind::Type` since Go's type system treats them uniformly.
+Run the tests with `just test` from `tree-hugger/`.

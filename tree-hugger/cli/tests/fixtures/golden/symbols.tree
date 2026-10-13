@@ -1,0 +1,126 @@
+bash.sh
+  variable DEFAULT_TARGET [4:1]
+  function build_target() [6:1]
+  function clean_target() [11:1]
+
+c.c
+  struct point { x: int, y: int } [3:1]
+    field x [4:9]
+    field y [5:9]
+  type alias point_t [8:1]
+  module-private variable origin_count [10:12]
+  public function point_sum(p: struct point) -> int [12:5]
+  public function reset_origin() -> void [16:6]
+
+c_sharp.cs
+  namespace Multi [3:1]
+    public class Ledger { total: int, Total: int } [5:5]
+      private field total [7:21]
+      public property Total [9:9]
+      public method Add(amount: int) -> void [11:9]
+      public method Empty() -> Ledger [16:9]
+    public interface IAuditable [22:5]
+      public method Audit() -> void [24:9]
+
+cpp.cpp
+  namespace geometry [3:11]
+    class Vector { x_: int, y_: int } [5:1]
+      public constructor Vector(x: int, y: int) [7:5]
+      public method length() -> int [9:5]
+      private field x_ [12:9]
+      private field y_ [13:9]
+    public function dot(a: Vector, b: Vector) -> int [16:5]
+
+java.java
+  public class Counter { count: int } [3:1]
+    private field count [4:17]
+    public constructor Counter(start: int) [6:5]
+    public method increment() -> void [10:5]
+    public method zero() -> Counter [14:5]
+  package interface Resettable [19:1]
+    public method reset() -> void [20:5]
+
+javascript.js
+  public class Button [3:8]
+    public constructor constructor(label) [4:3]
+    public method press() [8:3]
+  public function buildButton() [13:8]
+  public const DEFAULT_LABEL [17:14]
+
+lua.lua
+  module-private local M [3:7]
+    function new_bag(size) [7:1]
+    method describe() [11:1]
+  module-private local default_size [5:7]
+  module-private function helper() [15:1]
+
+nested/go.go
+  namespace nested [2:9]
+  public type Widget { Size int } [5:1]
+    public field Size [6:2]
+    public method Grow(amount int) [9:1]
+  public const MaxSize [13:7]
+  public function BuildWidget() Widget [15:1]
+
+nested/python.py
+  variable MAX_SIZE [3:1]
+  class Gadget [6:1]
+    constructor __init__(self, size) [9:5]
+    method grow(self, amount) [12:5]
+  function build_gadget() [16:1]
+
+perl.pl
+  module Multi::Queue [2:1]
+    my $default_size [4:4]
+    function new_queue() [6:1]
+    function queue_size() [11:1]
+
+php.php
+  public class Account { balance: int } [4:1]
+    private field balance [6:18]
+    public method deposit(amount: int) -> void [8:5]
+    public method open() -> Account [13:5]
+  public function open_account() -> Account [19:1]
+
+rust.rs
+  public struct Widget { size: u32 } [4:1]
+    public field size [5:9]
+    public method new(size: u32) -> Self [9:5]
+    public method grow(self, amount: u32) [13:5]
+  public enum Shape { Circle, Square } [18:1]
+    public enum variant Circle [19:5]
+    public enum variant Square [20:5]
+  public const MAX_SIZE [23:11]
+  public function build_widget() -> Widget [25:1]
+
+scala.scala
+  public trait Named [5:1]
+    public method name() [6:3]
+  public class Tag { name: String } implements Named [9:1]
+    public method upper() -> String [10:3]
+  public module Tag [13:1]
+    public method empty() -> Tag [14:3]
+
+swift.swift
+  internal struct Meter { reading: Int } [3:1]
+    internal var reading [4:9]
+    internal method doubled() -> Int [6:5]
+  internal interface Readable [11:1]
+    internal method read() -> Int [12:5]
+  internal function buildMeter() -> Meter [15:1]
+
+typescript.ts
+  public interface Sized { size: number } [3:8]
+    public property size [4:3]
+  public type alias Size [7:8]
+  public class Panel { size: Size } implements Sized [9:8]
+    public property size [10:3]
+    public constructor constructor(size: Size) [12:3]
+    public method grow(amount: number): void [16:3]
+  public function buildPanel(): Panel [21:8]
+
+zsh.zsh
+  typeset PROMPT_STYLE [4:12]
+  function render_prompt() [6:1]
+  function reset_prompt() [11:1]
+

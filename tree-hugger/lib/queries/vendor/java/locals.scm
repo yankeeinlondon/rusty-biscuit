@@ -51,12 +51,20 @@
 (method_declaration) @local.scope
 
 ; DEFINITIONS
+; A dotted package name is a `scoped_identifier`, not an `identifier`.
 (package_declaration
-  (identifier) @local.definition.namespace)
+  [
+    (identifier)
+    (scoped_identifier)
+  ] @local.definition.namespace)
 
 ; Classes - capture full node for context
 (class_declaration
-  name: (identifier) @local.definition.type) @local.definition.type.context
+  name: (identifier) @local.definition.class) @local.definition.class.context
+
+; Interfaces - capture full node for context
+(interface_declaration
+  name: (identifier) @local.definition.interface) @local.definition.interface.context
 
 ; Records - capture full node for context
 (record_declaration
@@ -69,6 +77,15 @@
 ; Methods - capture full node for signature extraction
 (method_declaration
   name: (identifier) @local.definition.method) @local.definition.method.context
+
+; Explicit constructors; a record's compact constructor has no parameter list
+; and is not captured.
+(constructor_declaration
+  name: (identifier) @local.definition.constructor) @local.definition.constructor.context
+
+; Enum constants
+(enum_constant
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
 
 (local_variable_declaration
   declarator: (variable_declarator
@@ -90,11 +107,23 @@
 (lambda_expression
   parameters: (identifier) @local.definition.parameter) ; x -> ...
 
-((scoped_identifier
-  (identifier) @local.definition.import)
-  (#has-ancestor? @local.definition.import import_declaration))
+; The imported name is the final segment of the import's own path, so the
+; capture is import-scoped by shape (the runtime does not enforce upstream's
+; `#has-ancestor?`, which let every qualified annotation, module name and
+; module directive operand become an import).
+(import_declaration
+  [
+    (scoped_identifier
+      name: (identifier) @local.definition.import)
+    (identifier) @local.definition.import
+  ])
 
 (field_declaration
+  declarator: (variable_declarator
+    name: (identifier) @local.definition.field))
+
+; Interface constants (implicitly public static final)
+(constant_declaration
   declarator: (variable_declarator
     name: (identifier) @local.definition.field))
 

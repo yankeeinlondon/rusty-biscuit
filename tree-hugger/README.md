@@ -16,190 +16,82 @@ tree-hugger
 ├── lib - library APIs for symbol and diagnostic extraction
 ```
 
+- [Tree Hugger CLI](./cli/README.md): the `hug` command
+- [Tree Hugger Library](./lib/README.md): the `tree-hugger` crate
+
+## Install
+
+```bash
+cargo install --path tree-hugger/cli   # from the repository root
+just install                           # or, from tree-hugger/
+```
+
 ## Supported Languages
 
-| Language   | Functions | Types | Imports | Exports | Type Distinction                       |
-|------------|:---------:|:-----:|:-------:|:-------:|----------------------------------------|
-| Rust       | Yes       | Yes   | Yes     | Yes     | struct, enum, trait                    |
-| TypeScript | Yes       | Yes   | Yes     | Yes     | type, interface, enum, class           |
-| JavaScript | Yes       | Yes   | Yes     | Yes     | class                                  |
-| Go         | Yes       | Yes   | Yes     | -       | type (struct/interface)                |
-| Python     | Yes       | Yes   | Yes     | -       | class                                  |
-| Java       | Yes       | Yes   | Yes     | -       | class, enum, record                    |
-| C#         | Yes       | Yes   | -       | -       | class, struct, interface, enum, record |
-| C          | Yes       | Yes   | -       | -       | struct, enum                           |
-| C++        | Yes       | Yes   | -       | -       | class, struct, enum                    |
-| Swift      | Yes       | Yes   | Yes     | -       | type, interface (protocol)             |
-| Scala      | Yes       | Yes   | -       | -       | class, trait, module, enum             |
-| PHP        | Yes       | Yes   | -       | -       | class, interface, trait, enum          |
-| Perl       | Yes       | -     | -       | -       | (minimal support)                      |
-| Bash       | Yes       | -     | -       | -       | -                                      |
-| Zsh        | Yes       | -     | -       | -       | -                                      |
-| Lua        | Yes       | -     | -       | -       | -                                      |
+Tree Hugger reports functions in all 16 languages, and types and imports
+where the language has them:
 
-## Symbol Kinds
+| Language   | Type kinds                             | Imports |
+|------------|----------------------------------------|:-------:|
+| Rust       | struct, enum, trait, alias             | Yes     |
+| TypeScript | type alias, interface, enum, class     | Yes     |
+| JavaScript | class                                  | Yes     |
+| Go         | type (struct/interface), alias         | Yes     |
+| Python     | class                                  | Yes     |
+| Java       | class, interface, enum, record         | Yes     |
+| C#         | class, struct, interface, enum, record | Yes     |
+| C          | struct, union, enum, typedef alias     | -       |
+| C++        | class, struct, union, enum, alias      | -       |
+| Swift      | type, interface (protocol), alias      | Yes     |
+| Scala      | class, trait, module, enum, alias      | Yes     |
+| PHP        | class, interface, trait, enum          | Yes     |
+| Perl       | package (module)                       | -       |
+| Bash       | -                                      | -       |
+| Zsh        | -                                      | -       |
+| Lua        | -                                      | -       |
 
-Tree Hugger distinguishes between different kinds of type definitions where the language supports it:
-
-- **Type** - Generic type definition (structs in Rust/C/C++/Swift/Go, type aliases in TypeScript)
-- **Class** - Class definitions (C#, Swift, Scala, PHP, Python, Java)
-- **Interface** - Interface/protocol definitions (TypeScript, C#, Swift, PHP)
-- **Enum** - Enumeration types (Rust, TypeScript, Java, C#, C/C++, Swift, Scala, PHP)
-- **Trait** - Trait definitions (Rust, Scala, PHP)
-- **Module** - Module/namespace definitions (Scala objects, Rust modules)
+Each declaration gets a **kind** (Function, Method, Class, Interface, Enum,
+Trait, TypeAlias, Field and so on), kept as distinct as the language allows.
+[Symbol Kinds, Visibility and `static`](./docs/symbol-kinds-and-visibility.md)
+lists exactly what each language reports.
 
 ## Using the CLI
 
-**Syntax:** `hug <COMMAND> <...filter>`
-
-`hug` now scans all supported source files by default. Positional filters are optional and
-classified as:
-
-- file filters (path-like / extension-like tokens) that narrow scanned files
-- symbol filters (name globs) for `functions`, `types`, `symbols`, and `classes`
-
-### Commands
-
-- `functions` - list functions and methods
-- `types` - list type definitions (includes structs, enums, classes, interfaces, traits)
-- `symbols` - list all discovered symbols
-- `imports` - list imported symbols
-- `classes` - list classes with members (static/instance partitioning)
-- `lint` - run lint and syntax diagnostics
-- `god-files` - identify oversized source files that are strong candidates for refactoring
-
-### Options
-
-- `--language <LANG>` - override language detection (`js`/`javascript`, `ts`/`typescript`, `cpp`/`c++`, `c-sharp`/`c#`)
-- `--exclude-files <GLOB>` - exclude files matching glob patterns
-- `--exclude-symbols <GLOB>` - exclude symbol names matching glob patterns
-- `--json` - output JSON format
-- `--plain` - disable colors and hyperlinks
-- `--group-by-file` - group symbol output by file
-- `--group-by-module` - group symbol output by module (directory scope)
-- `--sort-by-kind` - sort symbols by kind then name
-- `--sort-by-module` - sort symbols by module then other keys
-
-### Examples
+The `hug` binary lists declarations, references, imports and diagnostics, and
+finds oversized files:
 
 ```bash
-# Scan all source files and list symbols whose names contain `cache`
-hug symbols cache
-
-# Restrict to one file and one symbol pattern
-hug functions tree-hugger/lib/tests/fixtures/sample.rs greet
-
-# Exclude test files and private helper symbols
-hug symbols "src/**/*.rs" --exclude-files "**/tests/**" --exclude-symbols "*_internal*"
-
-# List imports as JSON
-hug imports --json "tree-hugger/lib/tests/fixtures/**/*.js"
-
-# List types showing struct vs enum distinction
-hug types "src/main.rs" --plain
-# Output:
-#   - type Cli { ... } [21:8]
-#   - enum Command { ... } [64:6]
-#   - type OutputConfig { ... } [122:8]
-
-# List classes with members
-hug classes "src/**/*.ts" --name MyClass
-
-# Run lint diagnostics only
-hug lint "src/**/*.rs" --lint-only
+hug symbols                         # every declaration in the nearest package
+hug functions --changed --json      # functions in uncommitted files, as JSON
+hug refs parse --callers 'src/**'   # who calls `parse`
+hug lint 'src/**/*.rs'              # lint and syntax diagnostics
 ```
 
-## JSON Output
+[Using the `hug` CLI](./docs/cli.md) is the reference for every command and
+option.
 
-When `--json` is selected, output includes v2 schema metadata and pass-aware symbol indexes:
+## Documentation
 
-- `schema_version` - active symbol schema version (`2.0`)
-- `root_dir` - the directory scanned
-- `language` - primary language for the run
-- `files` - command-specific v1-compatible `FileSummary` list
-- `symbol_indexes` - per-file `FileSymbolIndex` with staged pass metadata
+The [`docs/`](./docs/) pages are the reference; this README is only an
+overview.
 
-Each `FileSummary` includes:
-
-- `file`, `language`, `hash`
-- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field
-- `imports` (for `imports` and `symbols`)
-- `exports` (for `symbols`)
-- `locals` (for `symbols`)
-- `lint`, `syntax`
-
-### Example JSON Output
-
-```json
-{
-  "name": "Message",
-  "kind": "Enum",
-  "range": { "start_line": 11, "start_column": 10, ... },
-  "language": "Rust",
-  "doc_comment": "Message types for the application.",
-  "type_metadata": {
-    "variants": [
-      { "name": "Quit" },
-      { "name": "Write", "tuple_fields": ["String"] },
-      { "name": "Move", "struct_fields": [{ "name": "x", "type_annotation": "i32" }] }
-    ]
-  }
-}
-```
-
-## Query Vendoring
-
-Tree Hugger vendors `nvim-treesitter` query files in `tree-hugger/lib/queries/vendor/<lang>/` and uses
-`locals.scm` for symbol discovery and imports. Captures follow a naming scheme including:
-
-| Capture                       | SymbolKind |
-|-------------------------------|------------|
-| `@local.definition.function`  | Function   |
-| `@local.definition.method`    | Method     |
-| `@local.definition.type`      | Type       |
-| `@local.definition.class`     | Class      |
-| `@local.definition.interface` | Interface  |
-| `@local.definition.enum`      | Enum       |
-| `@local.definition.trait`     | Trait      |
-| `@local.definition.module`    | Module     |
-| `@local.definition.namespace` | Namespace  |
-| `@local.definition.import`    | (imports)  |
-
-Additional languages may be added by vendoring the corresponding `locals.scm` file. Currently,
-Perl lacks an upstream `locals.scm`, so symbol extraction for Perl is minimal until a query is added.
-
-## Testing
-
-Tree Hugger maintains comprehensive test coverage across all supported languages to ensure correct symbol extraction and type distinction.
-
-### Test Coverage Requirements
-
-**IMPORTANT:** When modifying tree-sitter queries or symbol extraction logic, ensure tests cover:
-
-1. **Type distinction tests** - Verify that different type constructs (struct vs enum, class vs interface) are correctly identified with distinct `SymbolKind` values
-1. **Cross-language parity** - All typed languages should have fixture files that exercise their type system features
-1. **Regression tests** - Any bug fix should include a test that would catch the bug if it recurs
-1. **Diagnostics coverage** - Lint and syntax diagnostics should include regression tests for representative languages
-
-### Running Tests
-
-```bash
-# Run all library tests
-cargo test -p tree-hugger-lib
-
-# Run CLI tests
-cargo test -p tree-hugger-cli
-
-# Run a specific test
-cargo test -p tree-hugger-lib -- distinguishes_rust_struct_from_enum
-```
-
-### Test Fixtures
-
-Test fixtures are located in `lib/tests/fixtures/` and include:
-
-- `sample.*` - Basic syntax for each language (functions, classes)
-- `types.*` - Type system features (struct, enum, interface, trait)
-- `generics.*` - Generic/parameterized types
-
-Each language with type variability should have a `types.*` fixture that tests all its type constructs.
+- [Tree Hugger Overview](./docs/overview.md): **start here**: what Tree Hugger
+  does, its core ideas, and which page to read next
+- [Using the `hug` CLI](./docs/cli.md): every command, option, output format
+  and exit status
+- [Using the Tree Hugger Library](./docs/library.md): the Rust API
+- [Symbol Reports](./docs/symbol-reports.md): the declaration commands in depth
+- [Symbol Records](./docs/symbol-records.md): what each record holds
+- [Symbol Kinds, Visibility and `static`](./docs/symbol-kinds-and-visibility.md)
+- [Scope-Aware References](./docs/references.md): occurrences and `hug refs`
+- [Re-exports](./docs/reexports.md): what each language forwards, and how
+  complete the report is
+- [Declared Type Relations](./docs/type-relations.md) and
+  [Cyclomatic Complexity](./docs/cyclomatic-complexity.md)
+- [Tree Hugger's Persistent Symbol Cache](./docs/cache-design.md)
+- [Tree-sitter Queries](./docs/queries.md): the query files behind every
+  report, and what is vendored from nvim-treesitter
+- [Testing Tree Hugger](./docs/testing.md): running the tests, for
+  contributors
+- [Release Notes](./docs/release-notes.md): what changed, with before/after
+  examples

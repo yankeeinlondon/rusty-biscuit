@@ -1,4 +1,4 @@
-//! Tests to verify lint queries compile correctly for all languages.
+//! Query compilation checks for every supported language and query kind.
 
 use tree_hugger::ProgrammingLanguage;
 use tree_hugger::queries::{GrammarRef, QueryKind, query_for};
@@ -8,51 +8,15 @@ use tree_sitter::Query;
 /// kind. A broken `references.scm` previously slipped through because only
 /// `lint.scm` and `comments.scm` were covered, which let semantic analysis
 /// silently fail for PHP, Perl, and Zsh.
-#[test]
-fn test_all_queries_compile_for_all_languages() {
-    const LANGUAGES: &[ProgrammingLanguage] = &[
-        ProgrammingLanguage::Rust,
-        ProgrammingLanguage::JavaScript,
-        ProgrammingLanguage::TypeScript,
-        ProgrammingLanguage::Go,
-        ProgrammingLanguage::Python,
-        ProgrammingLanguage::Java,
-        ProgrammingLanguage::Php,
-        ProgrammingLanguage::Perl,
-        ProgrammingLanguage::Bash,
-        ProgrammingLanguage::Zsh,
-        ProgrammingLanguage::C,
-        ProgrammingLanguage::Cpp,
-        ProgrammingLanguage::CSharp,
-        ProgrammingLanguage::Swift,
-        ProgrammingLanguage::Scala,
-        ProgrammingLanguage::Lua,
-    ];
-    const KINDS: &[QueryKind] = &[
-        QueryKind::Locals,
-        QueryKind::Imports,
-        QueryKind::Exports,
-        QueryKind::References,
-        QueryKind::Lint,
-        QueryKind::Comments,
-    ];
-
-    for &language in LANGUAGES {
-        let grammar = language.tree_sitter_language();
-        let grammar_ref = GrammarRef {
-            language,
-            grammar: &grammar,
-            id: language.query_name(),
-        };
-        for &kind in KINDS {
-            assert!(
-                query_for(grammar_ref, kind).is_ok(),
-                "{language} {kind} query should compile"
-            );
-        }
-    }
+fn assert_query_compiles(language: ProgrammingLanguage, kind: QueryKind) {
+    let grammar = language.tree_sitter_language();
+    let grammar_ref = GrammarRef {
+        language,
+        grammar: &grammar,
+        id: language.query_name(),
+    };
+    assert!(query_for(grammar_ref, kind).is_ok(), "{language} {kind} query should compile");
 }
-
 fn test_query_compiles(language: ProgrammingLanguage, query_text: &str) {
     let ts_language = language.tree_sitter_language();
     let result = Query::new(&ts_language, query_text);
@@ -335,4 +299,46 @@ fn test_lua_comments_query_compiles() {
         ProgrammingLanguage::Lua,
         include_str!("../../queries/lua/comments.scm"),
     );
+}
+
+mod test_all_queries_compile_for_all_languages {
+    use super::*;
+    macro_rules! language_query_tests {
+        ($($module:ident => $language:ident),* $(,)?) => {
+            const LANGUAGES: &[ProgrammingLanguage] = &[$(ProgrammingLanguage::$language),*];
+            $(mod $module {
+                use super::*;
+                query_kind_tests!(ProgrammingLanguage::$language;
+                    locals => Locals, imports => Imports, exports => Exports,
+                    references => References, lint => Lint, comments => Comments);
+            })*
+        };
+    }
+    macro_rules! query_kind_tests {
+        ($language:expr; $($test:ident => $kind:ident),* $(,)?) => {
+            $(#[test] fn $test() { assert_query_compiles($language, QueryKind::$kind); })*
+        };
+    }
+    language_query_tests! {
+        rust => Rust,
+        javascript => JavaScript,
+        typescript => TypeScript,
+        go => Go,
+        python => Python,
+        java => Java,
+        php => Php,
+        perl => Perl,
+        bash => Bash,
+        zsh => Zsh,
+        c => C,
+        cpp => Cpp,
+        csharp => CSharp,
+        swift => Swift,
+        scala => Scala,
+        lua => Lua,
+    }
+    #[test]
+    fn every_language_is_scheduled() {
+        assert_eq!(LANGUAGES, ProgrammingLanguage::all());
+    }
 }
