@@ -134,10 +134,53 @@ source_files_during_phase_5: []
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/samsung_tv.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_6:
+    - homelab/docs/eversolo-design.md
+    - sniff/docs/repos/repo-tech-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_7:
+    - schematic/runtime/src/api_client.rs
+docs_updated_during_phase_7:
+    - schematic/README.md
+    - schematic/schema/README.md
+    - schematic/runtime/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/sending-and-responses.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/codecs.md
+    - schematic/docs/generation/request-side.md
+docs_created_during_phase_7:
+    - schematic/docs/runtime/calling-an-api.md
+skills_files_updated_during_phase_7:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/homelab/SKILL.md
 packages:
     - schematic-runtime
     - schematic-gen
     - schematic-schema
+    - biscuit-speaks
+    - sniff
+    - homelab
 ---
 
 # Schematic endpoint methods implementation plan
@@ -379,16 +422,16 @@ The branch is chosen by Task 4.5. Exactly one branch runs. The unused branch's t
 
 Each task runs in its own subagent and edits only its package. Each migrates from request objects plus `send` to endpoint methods, except where generic code needs R6. Each subagent must treat the session as non-interactive and must not commit.
 
-- [ ] **Task 6.1: biscuit-speaks.** `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs`. Replace `CallOptions`, `EndpointSpec`, and `ApiError` handling with `CallError` matching. Keep its error mapping equivalent. Update `biscuit-speaks/docs/dependencies.md` if imports change.
-- [ ] **Task 6.2: sniff.** `sniff/lib/src/remote/gitlab.rs` and the other `remote` clients. The `FocusedProviderClient` may be generic over requests, so keep R6 there and say why in a comment only if non-obvious.
-- [ ] **Task 6.3: homelab.** `homelab/lib/src/{rest,samsung_tv,eversolo}.rs` and the `eversolo-integration`, `arcam-amp-integration`, `sony-receiver-integration`, and `unfolded-integration-helper` crates, where they use the generated clients. These files already have uncommitted edits in the working tree. Read the current state before editing and do not revert unrelated changes.
-- [ ] **Task 6.4: Others.** Handle any consumer Task 1.5 found, such as `model-citizen`, if still a consumer. Otherwise record "none".
+- [x] **Task 6.1: biscuit-speaks.** `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs`. Replace `CallOptions`, `EndpointSpec`, and `ApiError` handling with `CallError` matching. Keep its error mapping equivalent. Update `biscuit-speaks/docs/dependencies.md` if imports change.
+- [x] **Task 6.2: sniff.** `sniff/lib/src/remote/gitlab.rs` and the other `remote` clients. The `FocusedProviderClient` may be generic over requests, so keep R6 there and say why in a comment only if non-obvious.
+- [x] **Task 6.3: homelab.** `homelab/lib/src/{rest,samsung_tv,eversolo}.rs` and the `eversolo-integration`, `arcam-amp-integration`, `sony-receiver-integration`, and `unfolded-integration-helper` crates, where they use the generated clients. These files already have uncommitted edits in the working tree. Read the current state before editing and do not revert unrelated changes.
+- [x] **Task 6.4: Others.** Handle any consumer Task 1.5 found, such as `model-citizen`, if still a consumer. Otherwise record "none". *(none: `model-citizen` depends only on `schematic-definitions`)*
 
 ### Wave 10: Per-package validation (parallel, after Wave 9)
 
-- [ ] **Task 6.5: Test and lint.** For each migrated package area, run `just test` and `just lint`.
+- [x] **Task 6.5: Test and lint.** For each migrated package area, run `just test` and `just lint`.
     - L2 is not needed. If a consumer's L2 suite exercises these clients, run `just test-l2` without taking window focus.
-- [ ] **Task 6.6: Old pattern gone.** `grep` the repo, excluding `target` and the generated crate, for `CallOptions::new()` and `.send(` next to generated request types. Every remaining hit must be generic code (R6) or a comment explaining it.
+- [x] **Task 6.6: Old pattern gone.** `grep` the repo, excluding `target` and the generated crate, for `CallOptions::new()` and `.send(` next to generated request types. Every remaining hit must be generic code (R6) or a comment explaining it.
 
 ### Checkpoint 6
 
@@ -398,16 +441,16 @@ Each task runs in its own subagent and edits only its package. Each migrates fro
 
 ### Wave 11: Docs (parallel)
 
-- [ ] **Task 7.1: New page.**
+- [x] **Task 7.1: New page.**
     - Add `schematic/docs/runtime/calling-an-api.md` and link it from `schematic/docs/runtime/README.md`.
     - Write for a developer new to the repository. Lead with what the reader can do.
     - Cover creating a client, client-wide settings (base URL override, `api_key`, timeout, proxy), calling an endpoint with required and optional values, per-call overrides, `.full()`, `.build()?`, and when to use request objects.
     - Use the GitHub and OpenAI examples from the spec, a compact example per rule, and a Mermaid diagram of the call lifecycle (method, chained settings, `.build()`, `.await` or `.full()`, result or `CallError`).
     - Follow repo doc rules: kinded frontmatter if the surrounding pages use it, and **never name or link a feature or fix**.
-- [ ] **Task 7.2: Fix existing pages.** Update every page that shows `send(request, &CallOptions)` or `into_result()` as the primary path: `docs/runtime/sending-and-responses.md`, `building-clients.md`, `credentials.md`, `deadlines-and-timeouts.md`, `hooks.md`, `metadata-and-redaction.md`, `origins-and-redirects.md`, and `docs/generation/request-side.md`. Add `CallError` to the error documentation. These pages have uncommitted edits, so edit surgically.
-- [ ] **Task 7.3: READMEs and dependencies.** Update `schematic/README.md`, `schematic/schema/README.md`, and `schematic/docs/dependencies.md` if any crate or feature changed (Branch B).
-- [ ] **Task 7.4: Skills.** Update `.claude/skills/schematic-define` (and nested `schematic` pages) so the described call shape and `CallError` are current. Add D2 collision behavior where the skill describes generated names. Update the `os` skill only if an OS-specific fact was learned.
-- [ ] **Task 7.5: Comment pass.** For every symbol whose behavior changed (`Client::send`, `api_client!`, `CallOptions`, `ABI`, module docs), fix its `///`, `//!`, and inline comments per the Drift Maintenance rules. Report any drift found and how it was resolved.
+- [x] **Task 7.2: Fix existing pages.** Update every page that shows `send(request, &CallOptions)` or `into_result()` as the primary path: `docs/runtime/sending-and-responses.md`, `building-clients.md`, `credentials.md`, `deadlines-and-timeouts.md`, `hooks.md`, `metadata-and-redaction.md`, `origins-and-redirects.md`, and `docs/generation/request-side.md`. Add `CallError` to the error documentation. These pages have uncommitted edits, so edit surgically.
+- [x] **Task 7.3: READMEs and dependencies.** Update `schematic/README.md`, `schematic/schema/README.md`, and `schematic/docs/dependencies.md` if any crate or feature changed (Branch B).
+- [x] **Task 7.4: Skills.** Update `.claude/skills/schematic-define` (and nested `schematic` pages) so the described call shape and `CallError` are current. Add D2 collision behavior where the skill describes generated names. Update the `os` skill only if an OS-specific fact was learned.
+- [x] **Task 7.5: Comment pass.** For every symbol whose behavior changed (`Client::send`, `api_client!`, `CallOptions`, `ABI`, module docs), fix its `///`, `//!`, and inline comments per the Drift Maintenance rules. Report any drift found and how it was resolved.
 
 ### Checkpoint 7
 

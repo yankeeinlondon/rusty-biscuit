@@ -133,10 +133,53 @@ source_files_during_phase_5: []
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - homelab/lib/src/eversolo.rs
+    - homelab/lib/src/rest.rs
+    - homelab/lib/src/samsung_tv.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_6:
+    - homelab/docs/eversolo-design.md
+    - sniff/docs/repos/repo-tech-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_7:
+    - schematic/runtime/src/api_client.rs
+docs_updated_during_phase_7:
+    - schematic/README.md
+    - schematic/schema/README.md
+    - schematic/runtime/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/sending-and-responses.md
+    - schematic/docs/runtime/building-clients.md
+    - schematic/docs/runtime/credentials.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/codecs.md
+    - schematic/docs/generation/request-side.md
+docs_created_during_phase_7:
+    - schematic/docs/runtime/calling-an-api.md
+skills_files_updated_during_phase_7:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/headers.md
+    - .claude/skills/homelab/SKILL.md
 packages:
     - schematic-runtime
     - schematic-gen
     - schematic-schema
+    - biscuit-speaks
+    - sniff
+    - homelab
 ---
 
 # Implementation Log for 2026-10-12-schematic-endpoint-methods (8 phases)
@@ -798,3 +841,209 @@ The Input Robustness Matrix does not apply: no parser or configuration reader ch
 - The log shows the branch (A), the numbers behind it, and the final call style (chained setters).
 - Schema tests and generator tests pass.
 - Status: Phase 5 implementation complete, ready for review. The author's confirmation of branch A is still open in the spec's `human_review_items`.
+
+## Phase 6
+
+Phase 6 moves the in-repo consumers (R9) from request objects plus `send(request, &CallOptions)` to endpoint methods. Base: `e0a566ae3` plus this phase's uncommitted tree. D3 branch A still holds; the author's confirmation remains open in the spec's `human_review_items`, and nothing in this phase depends on it (switching to B would add only consumer `Cargo.toml` feature lines).
+
+Each consumer was migrated by its own subagent (Wave 9), then all three packages were re-validated together on the final tree (Wave 10). The re-run was needed because biscuit-speaks depends on sniff and the subagents ran concurrently.
+
+### Task 6.1: biscuit-speaks
+
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs` lost its private generic `send<R: EndpointSpec<..>>` helper. Calls are now `create_speech(voice_id, body)`, `list_voices().page_size(..)` (plus `.page_token(..)` only when a next-page token exists), `list_models()`, and `create_sound_effect(body)`, each `.await.map_err(Self::map_call_error)`.
+- `map_call_error(CallError<NoDeclaredError>) -> TtsError` only routes errors to the existing, unchanged mappers: `Transport` → `map_transport_error`, and `Api { error, meta }` → `map_api_error(meta.status.as_u16(), &error)`. So 402 is still `PaidPlanRequired`, `MalformedSuccess` is still "Failed to parse response", and other statuses are still "API error ({status})".
+- `CallError` is `#[non_exhaustive]`, so the match has a wildcard arm. It maps to `TtsError::HttpError { provider: "elevenlabs", message: other.to_string() }`; `CallError`'s `Display` is redacted. No current variant reaches it.
+- `errors.rs`, `docs/dependencies.md`, and the docs were unchanged: none named the runtime types or the old shape.
+
+### Task 6.2: sniff
+
+- `Replies::value` (`sniff/lib/src/remote/envelope.rs`) now classifies `Result<T, CallError<E>>`: `Transport` → the existing `transport`, `Api { error, meta }` → the existing `failure(&meta, &error)`. Neither `failure` nor `status` changed. The wildcard arm becomes `RemoteApi { status: 0 }` with the redacted message. `transport` and `failure` are now private to the module. The module docs were updated to describe data-or-`CallError` (drift fix).
+- GitHub, GitLab, Gitea, and Bitbucket callers read like `REPLIES.value(self.client.list_pull_requests(owner, repo).state(s).await)`. Request counts and call order are unchanged.
+- **GitHub `list_workflow_runs` anonymous retry:** the call is built once; the first send is `call.clone().await` and the retry is `call.anonymous().await`, under the same condition as before (an API error with status 401 or 403, sent with a credential). This is the R5 "a built call is `Clone`" path used for real.
+- Deliberately ignored errors (truncated-tree continuations, Bitbucket downloads) use `let Ok(..) = call.await else { continue }` and `.unwrap_or_else(..)`. Bitbucket `list_issues` still turns a 404 into an empty list.
+- `FocusedProviderClient` never used schematic, so no R6 generic send was needed anywhere in sniff.
+- Comments naming generated request types now name the endpoint methods. `sniff/docs/repos/repo-tech-design.md` showed the old shape in "Common Pattern" and "Anonymous requests and the one retry"; both were rewritten to match the code.
+
+- **Skill drift fixed:** `.claude/skills/sniff/remote-and-repository.md` described `client.send(req, &CallOptions::default())` and the `CallOptions::anonymous()` retry. It now describes endpoint methods, `REPLIES.value(..)` over `Result<T, CallError<E>>`, and the cloned `call.anonymous()` retry. The `schematic-define` skill still shows the old shape; that is Task 7.4.
+
+### Task 6.3: homelab
+
+- `homelab/lib/src/rest.rs` was not kept generic: it only served two private `send<R>` wrappers, and both now call endpoint methods. `into_result` was replaced by `impl From<CallError<NoDeclaredError>> for RestError`, with the same mapping: transport → `Transport`; undeclared error status → `Status { status, body }`; any other reply failure (decode) → `Response { status, error }`.
+- **Deviation worth review:** the forced wildcard arm maps to a new public variant `RestError::Call(CallError<NoDeclaredError>)`. sniff and biscuit-speaks instead fold that arm into an existing variant. Nothing produces `Call` today, and nothing in `homelab/` matches `RestError` exhaustively. The alternative (`.full().await` with the old exhaustive envelope match) adds no variant but avoids the plain `.await` shape R9 asks for. Left as is; recorded for the author.
+- `eversolo.rs` (24 request-type imports and the generic helper removed) and `samsung_tv.rs` (all seven REST endpoints) are now `Ok(self.client.<endpoint>(..).<setter>(..).await?)`, with `From<CallError<NoDeclaredError>>` for `EversoloError` and `SamsungTvError`.
+- `homelab/docs/eversolo-design.md` replaced the old `send(request, &CallOptions::default())` sentence with an endpoint-method example, dropped the outdated request-type import block, and added the `Call` row to the error table.
+- Confirmed not REST consumers: `eversolo-integration`, `arcam-amp-integration`, and `sony-receiver-integration` only call `WsConnectionContext::send` (WebSocket); `unfolded-integration-helper` has no `.send(`.
+- The subagent ran `rustfmt` on `eversolo.rs` and `samsung_tv.rs` after `rustfmt --check` showed changes only in lines it wrote. `cargo fmt` was not run.
+
+### Task 6.4: others
+
+None. `model-citizen` depends only on `schematic-definitions`. A fresh `Cargo.toml` scan found no consumer of `schematic-schema` or `schematic-runtime` outside `schematic/` beyond biscuit-speaks, sniff, and the five homelab crates.
+
+### Task 6.6: old pattern audit
+
+- `grep` for `CallOptions` and `into_result(` across every `.rs` file outside `schematic/` and `target/`: **no hits**. The same grep over non-schematic Markdown, excluding plans, features, fixes, and skills: no hits.
+- Remaining hits inside `schematic/` (outside the generated `schema/src`) are all legitimate:
+  - `send_raw(request, &CallOptions)`, which still takes options;
+  - `Response::into_result` on the `.full()` envelope (schema tests, `fresh_output_compile`);
+  - R6 generic-send tests (`client.send(Request).full()` in `fresh_output_compile`, runtime `tests/l1/*`, compile-fail fixtures);
+  - the generator's unrelated `Report::into_result` (`gen/src/pipeline.rs`, `output_validation.rs`);
+  - historical review spikes under `schematic/reviews/`.
+- The old shape still appears in `schematic/README.md` and the `schematic/docs/` pages; those are Phase 7 (Tasks 7.2 and 7.3).
+
+### Requirement-to-test mapping
+
+Behavior changed: each consumer's call path and its `CallError` → domain-error mapping. The boundary is crate-to-crate (consumer → generated client → runtime → HTTP), so every row is covered through the consumer's public API against a local fake server (wiremock or local listener), at L1. No row needed a real network or terminal.
+
+| Behavior | Test(s) |
+| --- | --- |
+| biscuit-speaks transport failure → `HttpError`, key redacted | `elevenlabs_http::transport_failure_maps_to_http_error_without_key`, `api_key_never_appears_in_error_display_or_debug` |
+| biscuit-speaks 402 → `PaidPlanRequired` with body | `list_voices_raw_maps_402_to_paid_plan_required_with_body`, `generate_audio_maps_402_to_paid_plan_required_with_body` |
+| biscuit-speaks other error status | `list_models_maps_500_to_http_error_with_status_and_body` |
+| biscuit-speaks 2xx decode failure | `list_models_maps_malformed_success_body_to_parse_error` |
+| biscuit-speaks conditional `.page_token(..)` setter reaches the wire | `list_voices_raw_follows_page_token_and_aggregates` |
+| sniff transport failure | `a_sent_token_never_appears_in_a_transport_error` |
+| sniff 401 / 404 / 429 per provider | `error_401_unauthorized`, `error_404_not_found`, `error_429_rate_limited` (GitHub, GitLab, Gitea, Bitbucket) |
+| sniff 403 classification | `error_403_rate_limited_in_body`, `error_403_with_a_spent_quota_is_rate_limited`, `error_403_without_rate_limit_evidence_keeps_the_body` |
+| sniff 5xx keeps status and body | **added:** `remote_providers::github_tests::error_5xx_keeps_its_status_and_body` (no public-path test existed) |
+| sniff undecodable vs interrupted 2xx body | `an_undecodable_body_and_an_interrupted_body_are_reported_distinctly` |
+| sniff cloned built call retried anonymously | `github_list_workflow_runs_retries_anonymously_when_token_gets_{401,403}`, `..._is_not_retried_when_an_anonymous_request_is_rejected` |
+| sniff Bitbucket special cases | `list_issues_returns_empty_when_disabled`, `get_tags_and_releases_treats_a_failed_downloads_listing_as_empty` |
+| homelab transport | `eversolo::client_tests::a_connection_closed_before_any_reply_is_an_error`, `samsung_tv::rest_tests::an_https_client_does_not_speak_plain_http` |
+| homelab error status with body | `eversolo::client_tests::a_non_success_status_is_an_error_carrying_status_and_body`, `samsung_tv::rest_tests::empty_endpoints_fail_on_a_non_success_status` |
+| homelab decode failure | `eversolo::client_tests::a_malformed_success_body_is_an_error`; **added:** `samsung_tv::rest_tests::an_undecodable_success_body_is_a_response_error` |
+| homelab success paths (setters reach the wire) | `set_volume_returns_the_decoded_json_reply`, `get_server_logs_returns_the_text_body`, `empty_endpoints_succeed_on_a_success_status` |
+
+- Not covered by a test: the wildcard `CallError` arm in each consumer. No current variant reaches it. A unit test cannot build a `CallError::Api` either, because `ResponseMeta` is `#[non_exhaustive]` with no public constructor.
+- Both added tests sit in declared, L1-selected targets: the sniff `tests/l1` binary, and the homelab lib's unit-test module. Neither path has a tier marker.
+- The Input Robustness Matrix does not apply: no parser or configuration reader changed.
+
+### Gates run (final combined tree, macOS)
+
+- `sniff`: `just test` exit 0, 3375 run, 3375 passed, 33 skipped. `just lint` exit 0.
+- `biscuit-speaks`: `just test` exit 0, 505 run, 505 passed, 19 skipped (existing `#[ignore]` live-API tests). `just lint` exit 0.
+- `homelab`: `just test` exit 0, 243 run, 243 passed, 8 skipped (all pre-existing), plus frontend vitest 22 of 22. `just lint` exit 0 (clippy `-D warnings` on all seven crates, and oxlint).
+- L2: not run. No L2 suite exercises these clients. biscuit-speaks's only L2 file does not touch ElevenLabs, and homelab's `test-l2` is a not-applicable stub.
+- Cross-OS: not run. The change is a pure Rust API migration with no `#[cfg]`, path, process, or filesystem code, so CI's Linux and macOS cells are enough.
+- No pre-existing failures.
+
+### Checkpoint 6
+
+- All consumers build and pass their tests, and the grep audit is clean (remaining hits are R6, `send_raw`, the `.full()` envelope, or unrelated).
+- Status: Phase 6 implementation complete, ready for review.
+
+## Phase 7
+
+Phase 7 brings the documentation and agent skills in line with endpoint methods (R10) and fixes comment drift. Base: `e0a566ae3` plus the uncommitted Phase 6 tree. D3 branch A still holds, and the author's confirmation is still open in the spec's `human_review_items`. Nothing in this phase depends on that answer, because the call shape is identical under A and B.
+
+The orchestrator wrote one verified fact brief from the code (`runtime/src/call.rs`, `client.rs`, `api_client.rs`, the generated `github/requests.rs` and `prelude.rs`). Three foreground subagents then worked from it in parallel: the runtime and generation pages (Task 7.2), the READMEs (Task 7.3), and the skills (Task 7.4). The orchestrator wrote the new page (Task 7.1) and did the comment pass (Task 7.5), then checked the subagents' diffs against the generated code.
+
+### Task 7.1: New page
+
+- `schematic/docs/runtime/calling-an-api.md` covers:
+    - what the reader can do;
+    - a Mermaid diagram of the call's life: method, chained settings, optional `.build()?`, then `.await` (data or `CallError`) or `.full().await` (envelope or `TransportError`);
+    - creating a client and its client-wide settings (`base_url`, `api_key`, `timeout`, `proxy`, and the client's own `.build()?`);
+    - required arguments and optional setters;
+    - the per-call methods table, with the `_param` and `_endpoint` renames linked to `validation.md#endpoint-method-names`;
+    - `CallError`, with the wildcard arm and the `wiremock` testing note that Phase 6 asked for;
+    - `.full()`, `.build()?`, the cloned-call retry, and when to use request objects (R6, `send(request)`, `send_raw`).
+- It is linked first in `docs/runtime/README.md`, and linked from both crate READMEs, `schematic/README.md`, and the `sending-and-responses`, `building-clients`, and skill pages.
+- **Departure from the spec's examples (spec untouched):** the spec's `gh.create_issue(..)` example is illustrative, since GitHub's 16 shipped endpoints are read-only. The page uses real endpoints instead: `list_releases`, `get_repository`, `list_pull_requests`, `list_workflow_runs`, and OpenAI's `list_models` and `retrieve_model`. The `.build()?` example uses `list_releases(..).per_page(10)`.
+- Two errors in the first draft were caught by checking against the code and fixed. The draft said OpenAI reads `OPENAI_API_KEY`, but the OpenAI definition has no environment fallback. It also said required arguments follow path order; they are path values, then required query or header values, then a required body. Setters take the field's exact type (for example `state(value: String)`), so the examples write `"open".to_string()`.
+- The surrounding pages carry no kinded frontmatter, so the new page has none.
+
+### Task 7.2: Existing pages
+
+- `sending-and-responses.md` now describes three ways to send: await a call, await a `.full()` call, and `send_raw`.
+    - It has a new `### CallError` section with a table that maps each `.full()` result to the matching awaited result. The section covers `request_meta()`, `Display` and `source`, `From<TransportError>`, the wildcard arm, and testing through a fake server.
+    - The `into_result()` text is reworded as the tool for code that already holds an envelope. The Mermaid entry node now reads "await a .full() call". The `tokio::join!` example joins calls directly.
+    - The safe-to-log table now lists `CallError`'s `Display` as redacted and its `Debug` as printing bodies.
+- `credentials.md`:
+    - The Mermaid nodes and examples now use `.credential(..)` and `.anonymous()` on the call.
+    - The anonymous retry example builds the call once, awaits `call.clone()`, then awaits `call.anonymous()`. This is the same shape sniff uses.
+- `deadlines-and-timeouts.md` passes the deadline with `.deadline(&deadline)` on a call, or with `CallOptions::deadline` for `send_raw`.
+- `building-clients.md` adds the generated endpoint methods to the list of inherent methods and gives the one-argument `send(request)`.
+- `metadata-and-redaction.md` and `codecs.md` use `.full().await` where they need the envelope.
+- `docs/runtime/README.md` updates its example, the intro, the "You can" bullet, rule 1, and the Credentials row.
+- `generation/request-side.md` converts the fixture examples to endpoint methods (`send_note`, `upload_blob`, `list_things().credential(..)`) and fixes its Mermaid nodes.
+- `hooks.md` and `origins-and-redirects.md` had no old-shape content and were not changed.
+
+### Task 7.3: READMEs and dependencies
+
+- `schematic/README.md` and `schema/README.md` have Quick Starts using `list_models().await?` and `retrieve_model(..)`, with `CallError` as the error type. The README credential examples chain `.credential(..)` and `.anonymous()`.
+- `runtime/README.md`:
+    - The feature bullets, example, prelude list (checked against the generated `prelude.rs`), and rule section are updated, and the match example now has the wildcard arm.
+    - The module table gains a `call` row, and `options` is now described as being for `send_raw`.
+- `gen/README.md`:
+    - It gains an overview bullet and an abridged `ListReleasesCall` / `GitHub::list_releases` output example with the rename rules, and its usage and credential-precedence sections no longer use `CallOptions`.
+    - **Drift found and fixed:** the compile-fail list said 10 misuses, but `gen/tests/l1/fresh_output_compile.rs` asserts 15. The list was rewritten to match the test.
+- `docs/dependencies.md`: no change. No crate was added or removed in this feature. The `schematic-runtime` dependency differences against `main` come from earlier runtime-envelope commits and are already recorded. Branch B was not taken, so no features were added.
+
+### Task 7.4: Skills
+
+- `schematic-define/SKILL.md` and `schematic/SKILL.md`:
+    - The call shape is current: `.await` gives `Result<_, CallError<_>>`, followed by `.full()`, `.build()?`, the one-argument `send`, and `send_raw`.
+    - The wildcard-arm note is in both, and `schematic/SKILL.md` has a troubleshooting row for `endpoint-method-rename` and `generated-name-collision`.
+- `schematic/gen.md` has a new "Endpoint Methods and Call Types" section covering naming, the D2 renames (`_endpoint`, `_param`, the reserved `pages`, `fetch_page`, and `collect_all`, and keywords), the diagnostics, and the pinned rename-list test. Its ABI example was stale at **1** and now says 3.
+- `schematic/headers.md` updates its per-call credential example.
+- **Drift found and fixed:** `.claude/skills/homelab/SKILL.md` named a `rest::into_result` helper that Phase 6 removed. It now describes `From<CallError<NoDeclaredError>> for RestError`.
+- The sniff skill was already current from Phase 6. The `os` skill was not changed, because no OS-specific fact was learned.
+- Both schematic-define SKILL.md entry points were already over the 200-line target before this phase (298 and 267 lines) and are now 308 and 287. Trimming them would mean moving existing content, which is outside this phase.
+
+### Task 7.5: Comment pass
+
+| Symbol | State | Action |
+| --- | --- | --- |
+| `Client::send`, `send_unboxed`, `send_raw` (`client.rs`) | current since Phase 2 | none |
+| `CallOptions` (`options.rs`), `Deadline` module docs | current: "for a raw send" | none |
+| `ABI` (runtime `lib.rs`, gen `RUNTIME_ABI`) | current: 3 | none |
+| runtime crate docs (`lib.rs` `//!`) | current: `Call`, `FullCall`, `CallError`, governing rule | none |
+| `Response::into_result` | accurate ("discarding the metadata") | none |
+| `api_client!` | **drift:** said the invoking module adds constants, `definition()`, and `new()`, and omitted the generated endpoint methods | added "and one method per endpoint", plus the rename note |
+| generator `codegen/mod.rs`, `endpoint_methods/names.rs`, gen `lib.rs` `//!` | current since Phase 3 | none |
+| generated `prelude.rs` and module docs | current (emitted by Phase 3's generator) | none |
+
+A grep of `//` comments under `runtime`, `gen/src`, `schema/src`, `schema/tests`, `define`, and `definitions` for `CallOptions`, `into_result`, `send(request, `, and `&options` found only legitimate hits: `send_raw` options, the prelude re-export list, and OpenAPI export `options`.
+
+### Old-shape audit after this phase
+
+- `grep "CallOptions\|into_result\|&options"` over `schematic/docs/runtime`, `schematic/docs/generation`, the four READMEs, and `.claude/skills` leaves only these hits:
+    - `send_raw(request, &CallOptions)`;
+    - `Response::into_result` on a `.full()` envelope, which is explicitly described as secondary;
+    - the prelude re-export list and the module table;
+    - the generator's OpenAPI `&options`.
+- Every relative link in the touched Markdown resolves, including the `#callerror` and `#endpoint-method-names` anchors.
+- No touched `docs/` page names a feature or fix: `grep "2026-..-..-"` finds nothing. One existing pointer in the skill, `schematic/reviews/2026-07-31-macro-review`, is a review rather than a feature or fix, and is not on a `docs/` page.
+
+### Requirement-to-test mapping
+
+Phase 7 changed one source line, a `///` comment on `api_client!`, and documentation. It changed no behavior, so no test was added. The documented behavior is already pinned:
+
+| Documented behavior | Existing test |
+| --- | --- |
+| `.await` gives data or `CallError`; `.full()` gives the envelope | runtime `tests/l1/call.rs`; schema `github_client::success_metadata_carries_request_id_status_and_headers`, `failure_metadata_carries_request_id_status_and_headers` |
+| `CallError` needs a wildcard arm | compile-fail fixture `call_error_match_needs_a_wildcard` |
+| `.full()` must be chained last | compile-fail fixture `request_change_after_full` |
+| `.build()` sends nothing; a built call is `Clone` and sends once per await | `github_client::a_built_call_sends_nothing_until_awaited_and_sends_once_per_copy` |
+| `.build()` refuses an invalid argument | runtime `tests/l1/call.rs` (Phase 2, Task 2.6) |
+| `.anonymous()` and `.credential(..)` precedence | `github_client::credential_precedence_per_call_client_env_anonymous`, `anonymous_call_sends_no_credential_despite_client_and_env` |
+| Generic `send(request)` matches the endpoint method | `github_client::endpoint_method_and_generic_send_of_its_request_agree` |
+| The cloned-call anonymous retry | sniff `github_list_workflow_runs_retries_anonymously_when_token_gets_{401,403}` |
+| The rename list (empty) for shipped definitions | `output_validation::live_definitions_endpoint_method_renames_are_pinned` |
+| The `api_client!` doc example | runtime doctest (1 passed) |
+
+The Markdown examples are not compiled. They were checked by hand against the generated signatures: endpoint names, argument counts, setter types, response field names (`RepositoryInfo::full_name`, `ResponseMeta::{status, request_id}`), and `ErrorKind: Display`. The Input Robustness Matrix does not apply, because no parser or configuration reader changed.
+
+### Gates run
+
+- `just test` in `schematic/`: exit 0. L1: 1924 passed, 12 skipped (tier-skipped, as in earlier phases). `test-fresh-output`: 6 of 6 passed. `test-compile-fail`: 1 of 1 passed.
+- `just lint` in `schematic/`: exit 0.
+- `cargo test --doc -p schematic-runtime`: 1 passed.
+- Cross-OS: not run. The phase changed docs and one comment.
+- Consumers (biscuit-speaks, sniff, homelab): not re-run. Their source did not change in this phase, and the only edit near them is the homelab skill line.
+- No pre-existing failures.
+
+### Checkpoint 7
+
+- Every doc statement checked matches the code, and no `docs/` page names a feature or fix.
+- Status: Phase 7 implementation complete, ready for review. The author's confirmation of D3 branch A is still open.
