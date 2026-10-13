@@ -27,6 +27,18 @@ pub fn dasherize(branch: &str) -> String {
         .join("-")
 }
 
+/// An age in the units `wt` shows everywhere: `less than 1 min` below a
+/// minute, then minutes below an hour, hours below two days, then days.
+pub fn age_text(seconds: u64) -> String {
+    let minutes = seconds / 60;
+    match minutes {
+        0 => "less than 1 min".to_string(),
+        1..=59 => format!("{minutes} min"),
+        60..=2879 => format!("{} h", minutes / 60),
+        _ => format!("{} days", minutes / 1440),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -891,7 +891,7 @@ fn ages_use_the_pr_age_units() {
         (2 * 86_400 - 60, "47 h"),
         (2 * 86_400, "2 days"),
     ] {
-        assert_eq!(list_table::age_text(seconds), text, "{seconds} s");
+        assert_eq!(worktree::util::age_text(seconds), text, "{seconds} s");
     }
 }
 

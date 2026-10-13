@@ -8,7 +8,7 @@
 
 use std::process::Child;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -71,9 +71,19 @@ pub(super) fn escalation_signal(interactive: bool, count: u8) -> i32 {
 /// handlers that never signal the child. Here it is counted, and
 /// [`ChildInterrupts::arm`] forwards it to the child and the wait loop
 /// announces it.
+///
+/// It also ends the child when Claudine itself is told to end: a SIGHUP (the
+/// terminal closed) or SIGTERM is forwarded to the child, which leads its own
+/// process group and would otherwise outlive Claudine as an orphan. Once the
+/// child is reaped, dropping this re-raises that signal, so Claudine still
+/// ends from it rather than continuing to a sequence's next step.
 pub(crate) struct ChildInterrupts {
     ladder: Arc<Ladder>,
+    end_handlers: Vec<signal_hook::SigId>,
 }
+
+/// The signals that end Claudine and so must end its child first.
+const END_SIGNALS: [i32; 2] = [libc::SIGHUP, libc::SIGTERM];
 
 /// State shared with the SIGINT handler: atomics only, so the handler stays
 /// async-signal-safe.
@@ -89,6 +99,8 @@ struct Ladder {
     /// kernel may have recycled.
     child_exited: AtomicBool,
     child_in_own_pgroup: bool,
+    /// The first of [`END_SIGNALS`] received; `0` while none has been.
+    ended_by: AtomicI32,
 }
 
 impl Ladder {
@@ -107,6 +119,17 @@ impl Ladder {
             libc::kill(-(child_pid as i32), signal);
         }
     }
+
+    /// Pass the received end signal to the child, if it is known and alive.
+    /// Called from the handler and from `arm`; a second delivery is harmless.
+    fn forward_end(&self) {
+        let signal = self.ended_by.load(Ordering::SeqCst);
+        let child_pid = self.child_pid.load(Ordering::SeqCst);
+        if signal == 0 || child_pid == 0 || self.child_exited.load(Ordering::SeqCst) {
+            return;
+        }
+        send_signal_to_child(child_pid, self.child_in_own_pgroup, signal);
+    }
 }
 
 impl ChildInterrupts {
@@ -122,6 +145,7 @@ impl ChildInterrupts {
             interactive: AtomicBool::new(true),
             child_exited: AtomicBool::new(false),
             child_in_own_pgroup,
+            ended_by: AtomicI32::new(0),
         });
         let handler = Arc::clone(&ladder);
         unsafe {
@@ -133,7 +157,17 @@ impl ChildInterrupts {
                 handler.forward(press);
             })
         }?;
-        Ok(Self { ladder })
+        let mut end_handlers = Vec::with_capacity(END_SIGNALS.len());
+        for signal in END_SIGNALS {
+            let handler = Arc::clone(&ladder);
+            end_handlers.push(unsafe {
+                signal_hook::low_level::register(signal, move || {
+                    let _ = handler.ended_by.compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst);
+                    handler.forward_end();
+                })
+            }?);
+        }
+        Ok(Self { ladder, end_handlers })
     }
 
     /// Point the ladder at the spawned child and deliver any press that
@@ -150,6 +184,7 @@ impl ChildInterrupts {
         if presses > 0 {
             self.ladder.forward(presses);
         }
+        self.ladder.forward_end();
     }
 
     fn presses(&self) -> &AtomicU8 {
@@ -162,6 +197,21 @@ impl ChildInterrupts {
 
     fn child_in_own_pgroup(&self) -> bool {
         self.ladder.child_in_own_pgroup
+    }
+}
+
+impl Drop for ChildInterrupts {
+    fn drop(&mut self) {
+        for id in self.end_handlers.drain(..) {
+            signal_hook::low_level::unregister(id);
+        }
+        let signal = self.ladder.ended_by.load(Ordering::SeqCst);
+        if signal != 0 {
+            // With this run's handlers gone, the default action ends Claudine
+            // the way the signal asked; a handler left by an earlier child
+            // has been unregistered the same way, so none absorbs it.
+            let _ = signal_hook::low_level::emulate_default_handler(signal);
+        }
     }
 }
 
