@@ -64,12 +64,14 @@ The variable turns a missing-backend skip into a failure.
     (`$Host.UI.RawUI.GetBufferContents`), since ConPTY's output stream is a
     repaint, not text in order;
   - a third case runs `wt remove --force-worktree` from the base repo while a
-    windowless `ping` stands in the worktree, and asserts exit 4 with files,
-    registration, and branch intact.
+    windowless `ping` stands in the worktree, and asserts the usage refusal
+    (exit 3, naming `PING.EXE`; Sniff reports the held directory as an open
+    handle there) with files, registration, and branch intact.
   - It needs no terminal backend, so **CI never runs it**: `windows-latest`
     hosts none of `l2-backends` and the L2 cell is an accepted gap. Run it with
     `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell`
-    and read the durations (about 5 s each; a skip is 0.0x s).
+    and read the durations (7–8 s each since the removal lifecycle, measured
+    2026-10-12; a skip is 0.0x s).
 
 ## `wt list`
 

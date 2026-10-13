@@ -1,7 +1,10 @@
 # `wt remove` lifecycle, recovery, and retry (`remove::lifecycle`)
 
 Implementation facts for the contention-aware removal. User-facing behavior
-is in `worktree/docs/cli/remove.md`; the pieces it calls are in
+is in `worktree/docs/cli/remove.md` ("Deleting the checkout", "What `wt
+remove` refuses to move", "Recovery records and retry", and the exit-code
+table); a change to an exit class or a refusal updates those sections and the
+README's exit-code table together. The pieces it calls are in
 [remove.md](remove.md) (store, journal, move) and
 [observation.md](observation.md) (observer, inventory, deletion engine).
 
@@ -90,6 +93,50 @@ registration from the admin `gitdir` (`registration_state`), then:
   the request; saved approvals are never reused.
 - **A completed record** is `StoreError::Completed` from `inspect`,
   `resume`, and `reopen`, and `pending()` skips it.
+
+## How `wt remove` drives it (`cli/src/commands/remove/`)
+
+- **Resolution:** `run` calls `resolve_target`, not `find_worktree`. Only-live
+  ambiguity becomes the old `WorktreeError::AmbiguousWorktree` (exit 1); any
+  ambiguity involving a pending record is `recovery::ambiguous_markup`
+  (exit 3). For `Pending`, `inspect` first: `NotStarted`/`MovedUnassociated`
+  → `release_unstarted`, then resolve again as live; `Quarantined`/
+  `ContentRemoved` → the live entry at the record's quarantine (found by
+  `canonical` path) with `Facts::retry` set; `CheckoutRemoved` → a synthetic
+  `WorktreeEntry` at the original (`Facts::branch_only`); anything else →
+  `recovery::inspection_markup` (exit 3). A retry never repairs (an unlinked
+  quarantine refuses before `prepare`) and never hands off (a cwd inside the
+  quarantine is exit 4).
+- **Every existing checkout is fingerprinted** before the report
+  (`Facts::reported`), because `Approval` needs one; `Approval.tip` is
+  `Facts::head`. The old `files_unchanged` recheck is gone: the lifecycle's
+  `recheck` does it after discovery.
+- **`execute`:** a first-attempt missing directory goes to
+  `execute_record_only` (no Sniff, no lifecycle). Everything else builds
+  `BranchActions` (local only for `BranchStep::Delete`, remote only for
+  `RemoteState::Present` with `--force-remote`) and calls `remove_checkout`,
+  or `resume` with `approval` (a quarantine) or `record` (a `Missing`
+  quarantine). A `RemoteState` other than `Present` is still reported by
+  `delete_on_origin(.., already_deleted = true)` after a successful removal
+  (exit 1 for `Unavailable`, as before).
+- **Output:** `Removal::Refused` → `recovery::refusal_error` (usage refusals
+  through `usage::usage_refusal`); `Finished` with `ExitClass::Success` → the
+  old completion lines; anything else → `WorktreeError::RemovalFailed`
+  with `recovery::stopped_markup`. Nothing reaches stdout, so no `cd:` or
+  `remove-handoff:` follows a failure. The handoff's second run sets
+  `Facts::reported` from the verified fresh state, then runs the same
+  `execute`, so the decisive usage query is in the second run.
+- **`Environment::interrupted` is `|| false`:** no Ctrl-C handler is installed
+  (no signal crate is a dependency of `worktree-cli`).
+- **Binary tests:** `cli/tests/remove_recovery.rs` stops a real removal with a
+  `git` shim on `PATH` that writes once a `.wt-remove-*` sibling exists (Git
+  runs association and verification calls right after the move). A writer at
+  `git worktree remove` or `diff-index` is too late: the last original/
+  quarantine check is at the start of `unregister_quarantine`, so such a write
+  passes as the documented concurrent-write limit. Use
+  `assert_cmd::cargo::cargo_bin("wt")`, not `env!("CARGO_BIN_EXE_wt")`:
+  cross-check and CI run nextest archives, where the compile-time path does
+  not exist.
 
 ## Tests (`lifecycle/tests.rs`)
 

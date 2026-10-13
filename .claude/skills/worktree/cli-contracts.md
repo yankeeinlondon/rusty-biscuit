@@ -39,10 +39,10 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
 | Code | Meaning |
 | ---- | ------- |
 | 0 | done, or `Cancelled` |
-| 1 | failure |
+| 1 | failure, including `WorktreeError::RemovalFailed` (a removal that stopped after the move, or failed before it) |
 | 2 | clap usage error (clap owns it) |
-| 3 | `WorktreeError::RefusedToLoseWork`, `WorktreeError::NotARealDirectory` |
-| 4 | `WorktreeError::BlockedByEnvironment`, `WorktreeError::DirectoryInUse` |
+| 3 | `WorktreeError::RefusedToLoseWork` |
+| 4 | `WorktreeError::BlockedByEnvironment` |
 
 - Exit 3 and 4 promise **nothing removed**, not "nothing changed". `wt remove`
   repairs an unlinked worktree's `.git` link before any consent, and that
@@ -51,9 +51,12 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
   refusal or cancellation after a successful repair says the restored link was
   left in place. Never print "nothing was changed" on those paths.
 - Mapping lives in `cli/src/exit.rs`.
-- `RefusedToLoseWork` and `BlockedByEnvironment` carry Prose markup that
-  `main.rs` prints as-is. Other errors (including `DirectoryInUse`, whose
-  message names the processes) are escaped with `Prose::escape_text`.
+- `RefusedToLoseWork`, `BlockedByEnvironment`, and `RemovalFailed` carry
+  Prose markup that `main.rs` prints as-is after one blank line. Other errors
+  are escaped with `Prose::escape_text`.
+- `wt remove` maps the lifecycle's `ExitClass`, never its outcome, to these
+  variants (`commands/remove/recovery.rs::refusal_error`): `Refused` → 3,
+  `Blocked` → 4, `Failure` → `RemovalFailed`.
 - `env::is_interactive()` means stdin **and** stderr are terminals and `CI` is
   unset or empty. Stdout is never consulted.
 

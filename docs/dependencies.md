@@ -1157,6 +1157,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: audio, macos, platform_
 
+- [fsevent-sys](https://github.com/octplane/fsevent-rust) _v4.1_ [📄](https://docs.rs/fsevent-sys)
+
+    _Raw FSEvents and Core Foundation declarations. `worktree` uses it (macOS only) for `wt remove`'s activity observer, including `FSEventStreamFlushSync` for its marker-confirmed checks._
+
+    _Tags: ffi, macos, filesystem, watch_
+
+- [inotify](https://github.com/hannobraun/inotify) _v0.11_ [📄](https://docs.rs/inotify)
+
+    _Linux inotify bindings (default features off, so no tokio stream). `worktree` uses it (Linux only) for `wt remove`'s activity observer, one watch per checkout directory._
+
+    _Tags: linux, filesystem, watch_
+
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
     _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`, and for the quarantine move's no-replacement renames (`renameat2`, `renamex_np`)._
@@ -1171,7 +1183,7 @@ This is a Rust workspace with the following modules:
 
 - [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
 
-    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`) and `FileIdInfo` directory identities. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, and its `ReadDirectoryChangesW` activity observer. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
 
     _Tags: ffi, windows, platform_
 

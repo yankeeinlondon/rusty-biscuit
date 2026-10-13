@@ -97,23 +97,20 @@ code touches the network.
 - Git runs through `git::git_from(base, dir, ..)` (`git -C`, cwd = base). `run`
   calls `set_current_dir(base)` right after resolving the target, so neither
   `wt` nor a git child holds the worktree on Windows.
-- `remove::remove_worktree` first runs `check_no_processes`
-  (`sniff::os::processes_working_in`: processes whose current directory is in
-  the worktree, the caller and its ancestors excluded) on every OS, then on
-  Windows `check_not_in_use` (rename to a sibling and back, which also catches
-  open files). Either is `WorktreeError::DirectoryInUse { path, processes }`
-  (`processes` empty for the probe), exit 4, with no override flag. `run` also
-  checks before the report so nothing is asked and then refused.
-- On macOS and Linux git deletes under a writer's feet; its recursive delete
-  stops at the first failure yet has already unregistered the worktree.
-  `finish_unregistered` retries `remove_dir_all` three times, else
-  `WorktreeError::FolderNotFullyRemoved` (exit 1, branch and origin untouched).
+- A checkout that exists is removed by `remove::lifecycle` after the
+  questions ([lifecycle.md](lifecycle.md) has the order and the CLI wiring).
+  Usage is checked there, once, right before the move; nothing checks it
+  before the report. The old `remove_worktree`/`check_no_processes`/
+  `check_not_in_use` (Windows rename probe)/`finish_unregistered` path and
+  the `DirectoryInUse`, `FolderNotFullyRemoved`, `LockProbeRenameBack`, and
+  `NotARealDirectory` errors are gone.
 
 ## Concurrent writers during removal
 
 A GitNexus watcher can recreate `.gitnexus/` while Git deletes the checkout.
-Git then fails with `Directory not empty` after unregistering the worktree; the
-CLI stops before deleting the branch. Observed on macOS with a recipe-started
+Git then failed with `Directory not empty` after unregistering the worktree
+(the behavior before the removal lifecycle); the CLI stopped before deleting
+the branch. Observed on macOS with a recipe-started
 `gitnexus analyze <target> --watch`: only regenerated index files remained.
 The registry sweep in `just gitnexus` runs on its next invocation, so it does
 not prevent this race. Stop the target's verified watcher process group before
@@ -206,9 +203,9 @@ must call it before any inventory.
   every entry and returns `Other(OtherCondition::Link)` for a link even when
   Git reads through it. That one check is what `prepare`, both handoff runs,
   and `wt list` rely on. Repair adds `Postcondition::NotADirectory` (every
-  Git-side postcondition resolves links and passes), and `remove_worktree`
-  refuses with `WorktreeError::NotARealDirectory` (exit 3) unless the path is
-  a real directory immediately before Git runs. Only the final component
+  Git-side postcondition resolves links and passes), and the lifecycle's
+  `plan_move` refuses (`MoveRefusal::NotARealDirectory`, exit 3) unless the
+  path is a real directory immediately before the move. Only the final component
   counts: an ancestor alias such as macOS `/tmp` stays healthy. Tests make
   the link with `replace_with_link` (a junction on Windows, which needs no
   privilege).
@@ -250,7 +247,7 @@ must call it before any inventory.
   only thing standing between consent and discarding staged work written after
   the report; `--force-worktree` approves the reported state, never a newer
   one. Then it runs plain `git worktree remove <path>`
-  with no `--force` and no `check_not_in_use`, and deletes the copy record
+  with no `--force`, and deletes the copy record
   only after Git succeeds. Branch steps stay with the caller.
 - Git receives paths as `OsStr` (`git::git_from_output`), never through a
   lossy `String`.
@@ -264,9 +261,13 @@ must call it before any inventory.
 - `Facts` carries the `CheckoutState`. For `Missing`, `inventory` stays empty
   and is never read: `situation()`, the report (`report::missing_markup`), the
   discard question, and `refusal_markup` all branch on `facts.missing()`
-  first. A missing target never hands off, and `execute` runs
-  `remove_missing_record` instead of `remove_worktree`.
-- `remove_local_branch(base, branch, expected_tip)` refuses with
+  first. A missing target never hands off, never queries Sniff, and
+  `execute` runs `remove_missing_record` (`execute_record_only`) instead of
+  the lifecycle. A pending removal whose quarantine is gone but still
+  registered also prepares as `Missing`, but goes through `resume` with a
+  `RecordApproval`.
+- `remove_local_branch(base, branch, expected_tip)` (called by the lifecycle,
+  or by `execute_record_only`) refuses with
   `WorktreeError::BranchMoved` (exit 1, after the worktree is gone) when the
   tip is no longer `Facts::head`, the tip the tier and any approval were
   decided on.
