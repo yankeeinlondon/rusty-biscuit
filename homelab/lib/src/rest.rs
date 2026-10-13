@@ -67,10 +67,7 @@ where
     A: Api,
     R: EndpointSpec<Api = A, Failure = NoDeclaredError>,
 {
-    // Boxed: the runtime's send future is several KB, and eversolo-integration
-    // joins up to eight of them inside larger futures, which overflowed a
-    // 2 MiB stack in debug builds when held inline.
-    into_result(Box::pin(client.send(request, &CallOptions::default())).await)
+    into_result(client.send(request, &CallOptions::default()).await)
 }
 
 /// Turns a send result into the success value or a [`RestError`].
