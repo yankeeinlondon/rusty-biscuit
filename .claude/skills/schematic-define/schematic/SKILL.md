@@ -129,8 +129,9 @@ match github.get_repository("owner", "repo").await {
 }
 ```
 
-`.build()?` encodes a call without sending it (the same checks run again at
-`.await`). For generic code over request objects, `client.send(request)` takes
+`.build()?` checks a call's arguments without sending it, running the send's
+own first-hop preparation (encoding, headers, credential kind and placement)
+with the call's per-call credential; the same checks run again at `.await`. For generic code over request objects, `client.send(request)` takes
 one `{Endpoint}Request` and returns the same kind of call; `send_raw(request,
 &CallOptions)` skips decoding and is the only API that takes `CallOptions`.
 Details: `schematic/docs/runtime/calling-an-api.md`.

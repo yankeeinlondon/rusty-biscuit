@@ -240,7 +240,8 @@ pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListRelea
 impl<'a> ListReleasesCall<'a> {
     pub fn page(self, value: i64) -> Self;       // request.with_page(value)
     pub fn per_page(self, value: i64) -> Self;   // request.with_per_page(value)
-    // anonymous, credential, deadline, full, build
+    // anonymous, credential, deadline, full, build; `full` comes after the
+    // setters, which its `FullCall` does not have
 }
 
 let releases = github.list_releases("owner", "repo").per_page(10).await?;

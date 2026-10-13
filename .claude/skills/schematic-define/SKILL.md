@@ -154,8 +154,9 @@ When updating docs or examples that touch generated clients:
   `Result<Success, CallError<Failure>>`; chain one setter per optional value,
   then `.anonymous()`/`.credential(..)`/`.deadline(&d)` as needed. `.full()`
   (chained last) yields the `Response` envelope (`Ok` whenever a response head
-  arrived, `Err(TransportError)` otherwise); `.build()?` checks the request
-  without sending. `CallError` is `#[non_exhaustive]`, so a `match` needs a
+  arrived, `Err(TransportError)` otherwise); `.build()?` checks the call's
+  arguments (encoding, headers, credential kind and placement) without
+  sending. `CallError` is `#[non_exhaustive]`, so a `match` needs a
   `_ =>` arm
 - `client.send(request)` (one argument) returns the same kind of call for a
   `{Endpoint}Request` object, for generic code; `send_raw(request,
