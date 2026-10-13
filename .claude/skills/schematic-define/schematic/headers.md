@@ -2,6 +2,11 @@
 
 The `Headers` builder provides a fluent API for constructing HTTP headers with secure credential handling.
 
+**Scope.** Generated **WebSocket** clients carry a `Headers` in their public
+`headers` field and send `headers.build()` when connecting. Generated **REST**
+clients do not use `Headers` at all: they send through `schematic-runtime`,
+which takes `Credential`s (see "Generated Clients" below).
+
 ## Quick Start
 
 ```rust
@@ -42,10 +47,13 @@ println!("{:?}", secret);  // SensitiveString("***")
 let value = secret.as_str();  // "my-secret-token"
 ```
 
-Security features:
-- **Redacted Debug output**: Prevents secrets from appearing in logs
-- **No PartialEq/Eq**: Prevents timing attacks in comparisons
-- **Clone support**: Can be safely cloned
+What it guarantees, and no more:
+- **Redacted Debug output**: prints `SensitiveString("***")`
+- **No `Display`**: it cannot be printed by accident
+
+It has no `PartialEq`/`Eq` (values simply cannot be compared; this is not a
+timing-attack defense) and no zeroize-on-drop; `as_str()` and `into_inner()`
+expose the value.
 
 ### EnvList
 
@@ -77,6 +85,7 @@ let mapping = EnvMapping {
     basic_user: None,
     basic_pass: None,
     api_key: None,
+    ..Default::default() // the oauth_* fields
 };
 
 // Basic authentication
@@ -85,6 +94,7 @@ let mapping = EnvMapping {
     basic_user: Some(EnvList::single("API_USERNAME")),
     basic_pass: Some(EnvList::single("API_PASSWORD")),
     api_key: None,
+    ..Default::default() // the oauth_* fields
 };
 
 // API key with custom header
@@ -96,6 +106,7 @@ let mapping = EnvMapping {
         names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_KEY"]),
         header: "Authorization".to_string(),
     }),
+    ..Default::default()
 };
 ```
 
@@ -170,60 +181,80 @@ if builder.has_authorization() {
 }
 ```
 
-## Integration with Generated Clients
+## Generated Clients
 
-Use `Headers` with the variant builder for programmatic authentication:
+### WebSocket clients
+
+A generated WebSocket client creates its `Headers` with the API's
+`EnvMapping` attached but does not resolve it. Set explicit auth, or call
+`from_env()` / `try_from_env()`, before connecting:
 
 ```rust
-use schematic_define::Headers;
-use schematic_schema::OpenAI;
+use schematic_schema::elevenlabs_ws::ElevenLabsTTSWs;
 
-// Token from runtime source (Vault, OAuth, config file, etc.)
-let token = get_token_from_somewhere();
-
-// Create client with programmatic token
-let client = OpenAI::new()?
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token(token))
-    .build();
+let mut api = ElevenLabsTTSWs::new();
+api.headers = api.headers.clone().use_api_key(key, "xi-api-key"); // explicit
+// or
+api.headers = api.headers.clone().try_from_env()?;               // from the mapping
 ```
 
-When `Headers` has authorization set via `use_bearer_token()` or `use_basic_auth()`, the generated client skips environment variable lookup. This enables:
+### REST clients
 
-- **Multi-tenant applications**: Different credentials per tenant
-- **Token rotation**: Refresh tokens from a vault at runtime
-- **Testing**: Inject mock credentials without setting env vars
-- **OAuth flows**: Use tokens obtained from OAuth providers
+REST clients take a `schematic_runtime::Credential` instead, per call or per
+client; the runtime reads the environment fallback itself at send time and
+sends anonymously when nothing resolves (there is no missing-credential
+error):
+
+```rust
+use schematic_schema::prelude::*;
+
+let token = get_token_from_somewhere(); // Vault, OAuth, config file, ...
+let client = OpenAI::builder()
+    .credentials(Credential::access_token(token))
+    .build()?;
+let options = CallOptions::new().credential(Credential::access_token(other_token));
+```
+
+This covers multi-tenant credentials, token rotation, test credentials, and
+OAuth tokens. Precedence and refusal rules: `schematic/docs/runtime/credentials.md`.
 
 ## Error Handling
 
 ```rust
 use schematic_define::HeaderError;
 
-let result = builder.build();
-match result {
-    Ok(headers) => { /* use headers */ }
-    Err(HeaderError::InvalidHeaderName(name)) => {
-        eprintln!("Bad header name: {}", name);
-    }
+// Strict env resolution reports which variables to set
+let builder = match builder.try_from_env() {
+    Ok(builder) => builder,
     Err(HeaderError::MissingCredential(vars)) => {
         eprintln!("Set one of: {:?}", vars);
+        return;
     }
-    _ => { /* other errors */ }
+    Err(other) => panic!("{other}"),
+};
+
+// build() validates header names
+match builder.build() {
+    Ok(headers) => { /* use headers */ }
+    Err(HeaderError::InvalidHeaderName(name)) => eprintln!("Bad header name: {}", name),
+    Err(_) => { /* other errors */ }
 }
 ```
 
 | Error | Cause |
 |-------|-------|
-| `InvalidHeaderName` | Non-ASCII or invalid characters in header name |
+| `InvalidHeaderName` | Non-ASCII or invalid characters in header name (`build()`) |
 | `InvalidHeaderValue` | Invalid characters in header value |
 | `MissingEnv` | Single env var not set |
-| `MissingCredential` | None of the fallback chain vars set |
+| `MissingCredential` | `try_from_env()` found none of a fallback chain's vars set |
+
+These are `Headers` errors only. A REST send never fails for a missing
+credential; it is sent anonymously.
 
 ## Best Practices
 
 1. **Use SensitiveString for secrets**: Never log raw credentials
 2. **Prefer fallback chains**: Support multiple env var names
-3. **Check has_authorization()**: Skip env lookup when auth is programmatic
+3. **Check has_explicit_auth()**: env resolution is skipped once any explicit auth is set
 4. **Use try_from_env() in production**: Fail fast on missing credentials
 5. **Use from_env() in development**: Permissive for easier iteration

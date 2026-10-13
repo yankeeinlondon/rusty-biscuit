@@ -206,8 +206,8 @@ impl MyApi {
 
 Sending is `client.send(request, &CallOptions::new())` (or `send_raw`);
 credentials, base URL, timeout, env order, and response hooks are set on
-`builder()`. See `schematic/gen/README.md` and the runtime crate docs
-(`schematic/runtime/src/lib.rs`).
+`builder()`. See `schematic/gen/README.md` and the runtime topic pages
+(`schematic/docs/runtime/`).
 
 ## Validation
 

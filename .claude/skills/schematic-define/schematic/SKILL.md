@@ -11,10 +11,10 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 
 | Package | Purpose |
 |---------|---------|
-| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `Headers`, `ApiRequest`, `ApiResponse` |
+| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `CrossOrigin`, `Headers` (WebSocket clients), `ApiRequest`, `ApiResponse` |
 | `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
-| `schematic-runtime` | Hand-written request runtime: managed `Client<A>` (built from an `ApiDefinition` through `ClientBuilder`, optional `SharedTransport`) and its typed `send(request, &CallOptions)`, which follows redirects itself hop by hop under the API's `OriginPolicy` (same_origin default; `allow_origins`, `allow_without_credentials`, `danger_allow_any`, `deny`; `ClientBuilder::cross_origin` may only tighten it; the credential goes only to the base origin or a listed origin; at most `MAX_REDIRECTS` = 10; a refused redirect is `RedirectRefused`, a later hop with no head `RedirectFailed` keeping the last 3xx), plus `Client::check_link::<R>(&Url)` for next-page links and absolute request URLs checked before sending (`CrossOriginRejected`); `Response` envelope, `ApiError`/`ErrorKind`, `TransportError`, redacted `RequestMeta`/`ResponseMeta` (`SecretNames`); `AuthConfig`/`CredentialPlacement`/`EnvFallback` and `Credential` (per call → client → first non-empty env var → anonymous); `Deadline`; codecs `Json`, `Text`, `Binary`, `Empty`; the `EndpointSpec` and `Decode` contracts; `Client::send_raw` (same execution core as `send`, returns `RawResponse { meta, body, completion }` with `RawCompletion::{Complete, BodyInterrupted, RedirectRefused, RedirectFailed}`, any 4xx/5xx is `Complete`, `json::<T>()` refuses an incomplete body, no hooks); response hooks on `ClientBuilder` — `pre_response_json` (client-global) and `mutate_response::<R>` (typed by `R::Success`, needs `R::Decoder: SupportsHooks`, implemented only by `Json`, so text/binary/empty mutators do not compile), run on 2xx JSON only in the order parse → global → decode → mutator, keyed by API + endpoint id; a hook returns `HookError` (text discarded) → `ErrorKind::Hook` with the original bytes. Every generated REST client is a `Client<Api>` of this runtime |
+| `schematic-runtime` | Hand-written runtime every generated REST client is a `Client<Api>` of: builder (`SharedTransport`, tighten-only `OriginPolicy`), typed `send` → `Response` envelope (`Ok` iff a response head arrived, else `TransportError`), `send_raw` → `RawResponse`, credentials (per call → client → env → anonymous), redirects hop by hop (`MAX_REDIRECTS`, `check_link`), shared `Deadline`, codecs `Json`/`Text`/`Binary`/`Empty`, JSON hooks, redacted metadata. Never retries; `send` futures are boxed. Docs: `schematic/docs/runtime/` |
 | `schematic-schema` | Generated clients (auto-generated, do not edit): per API a marker type, `{Api}Client` alias, and per endpoint a request struct implementing `EndpointSpec` |
 
 ## CLI Commands
@@ -154,14 +154,18 @@ pub fn define_my_api() -> RestApi {
         base_url: "https://api.example.com/v1".to_string(),
         docs_url: Some("https://docs.example.com".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec!["MY_API_KEY".to_string()],
         env_username: None,
         headers: vec![],
         endpoints: vec![/* ... */],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: None,
-        params: None,
+        cross_origin: CrossOrigin::same_origin(), // redirects and next-page links
+        request_id_header: None,                  // e.g. Some("x-request-id".to_string())
+        secret_names: vec![],                     // extra names never stored in metadata
     }
 }
 ```
@@ -179,6 +183,7 @@ Endpoint {
     response: ApiResponse::json_type("User"),
     headers: vec![],
     params: None,
+    oauth_scopes: None,
 }
 
 // POST with JSON body
@@ -191,6 +196,7 @@ Endpoint {
     response: ApiResponse::json_type("User"),
     headers: vec![],
     params: None,
+    oauth_scopes: None,
 }
 
 // File upload with multipart form
@@ -206,6 +212,7 @@ Endpoint {
     response: ApiResponse::json_type("FileMetadata"),
     headers: vec![],
     params: None,
+    oauth_scopes: None,
 }
 ```
 
@@ -243,7 +250,8 @@ grep -rn "type Decoder" schematic/schema/src/
 - [Definitions Package](./definitions.md) - Pre-built API catalog
 - [Generator Package](./gen.md) - Code generation, import command
 - [OpenAPI Support](./openapi.md) - Import/export OpenAPI specs
-- [Headers Builder](./headers.md) - Programmatic auth, env resolution
+- [Headers Builder](./headers.md) - `Headers` for WebSocket clients, env resolution
+- Runtime topic pages: `schematic/docs/runtime/` - envelope, credentials, redirects, deadlines, hooks, redaction
 
 ## Troubleshooting
 

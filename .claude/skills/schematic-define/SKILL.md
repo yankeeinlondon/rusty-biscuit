@@ -14,7 +14,7 @@ Use this skill when working in `schematic/define` or when updating docs/tests th
 - `RestApi`, `Endpoint`, `RestMethod`
 - `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`
 - `ApiRequest`, `ApiResponse`, `FormField`, `Schema`
-- `Headers`, `EnvMapping`, `EnvList`, `SensitiveString`
+- `Headers` (credential headers of generated WebSocket clients; REST clients use runtime `Credential`s), `EnvMapping`, `EnvList`, `SensitiveString`
 - OpenAPI vendor extension models (`x-schematic`)
 
 Code generation lives in `schematic-gen`, request execution in the hand-written `schematic-runtime`, and the generated clients in `schematic-schema`, but this crate defines the contracts they consume.
@@ -185,7 +185,8 @@ x-schematic:
 
 Keep these aligned when docs/examples mention built-in APIs:
 
-- OpenAI: 265 endpoints, 1394 types, bearer auth via `OPENAI_API_KEY`. **Generated**
+- OpenAI: 265 endpoints, 1394 types, bearer auth; the imported definition has
+  no env mapping, so the client reads **no** variable (pass a `Credential`). **Generated**
   from `schematic/specs/openai/openapi.yaml` — never hand-edit
   `definitions/src/openai/`; re-run `just -f schematic/justfile import-openai`.
   Excludes the deprecated Assistants family (`/assistants`, `/threads`).
@@ -193,7 +194,7 @@ Keep these aligned when docs/examples mention built-in APIs:
 - EMQX Basic: 36 endpoints, basic auth via `EMQX_API_KEY` + `EMQX_API_SECRET`
 - EMQX Bearer: 38 endpoints, bearer auth via `EMQX_TOKEN`
 - GitHub: 16 endpoints, bearer auth via `GITHUB_TOKEN` or `GH_TOKEN`
-- Gitea: 14 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
+- Gitea: 16 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
 
 ## Update Workflow
 
@@ -204,6 +205,7 @@ Keep these aligned when docs/examples mention built-in APIs:
    - `schematic/define/README.md`
    - `schematic/definitions/README.md`
    - `schematic/docs/headers/README.md`
+   - `schematic/docs/runtime/` (when credential, origin, or request-id behavior changes)
    - `schematic/docs/io/openapi-extensions.md`
    - `schematic/gen/README.md`
    - `schematic/schema/README.md`
@@ -272,14 +274,15 @@ They do not validate live provider HTTP integration behavior.
 Read these as needed:
 
 - `schematic/define/README.md` (authoritative type-level behavior)
-- `schematic/docs/headers/README.md` (programmatic auth patterns)
+- `schematic/docs/headers/README.md` (credential precedence: REST runtime vs WebSocket `Headers`)
 - `schematic/docs/io/openapi-extensions.md` (extension schema and examples)
 - `schematic/gen/README.md` (generated marker types and `EndpointSpec` contracts)
 - `schematic/docs/generation/request-side.md` (query, header, cookie, body, and credential placement)
-- `schematic/runtime/src/lib.rs` (sending, response envelope, credentials, hooks)
+- `schematic/docs/runtime/README.md` (sending, response envelope, credentials, redirects, deadlines, hooks, redaction)
 - `schematic/schema/README.md` (generated crate)
 - `schematic/definitions/README.md` (built-in API catalog)
 
 For legacy detailed notes that may still be useful, see:
 
-- `.claude/skills/schematic/define.md`
+- [`schematic/define.md`](./schematic/define.md) and the other pages in
+  [`schematic/`](./schematic/SKILL.md)

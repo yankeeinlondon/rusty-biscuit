@@ -4,17 +4,17 @@ Pre-built REST API definitions using `schematic-define` primitives.
 
 ## Available APIs
 
-| API | Function | Endpoints | Auth | Key Env Var |
+| API | Function | Endpoints | Auth | Env vars the client reads (in order) |
 |-----|----------|-----------|------|-------------|
 | Anthropic | `define_anthropic_api()` | 4 | `ApiKey { header: "X-Api-Key" }` | `ANTHROPIC_API_KEY` |
-| OpenAI | `define_openai_api()` | 3 | `BearerToken` | `OPENAI_API_KEY` |
-| HuggingFace Hub | `define_huggingface_hub_api()` | 28+ | `BearerToken` | `HUGGINGFACE_API_KEY` |
-| ElevenLabs REST | `define_elevenlabs_rest_api()` | 45+ | `ApiKey { header: "xi-api-key" }` | `ELEVEN_LABS_API_KEY` |
+| OpenAI | `define_openai_api()` | 265 | `BearerToken` | none (imported definition has no env mapping; pass a `Credential`) |
+| HuggingFace Hub | `define_huggingface_hub_api()` | 26 | `BearerToken` | `HF_TOKEN`, `HUGGING_FACE_API_KEY`, `HF_API_KEY` |
+| ElevenLabs REST | `define_elevenlabs_rest_api()` | 42 | `ApiKey { header: "xi-api-key" }` | `ELEVEN_LABS_API_KEY`, `ELEVENLABS_API_KEY` |
 | ElevenLabs WebSocket | `define_elevenlabs_websocket_api()` | 2 | `ApiKey` | `ELEVEN_LABS_API_KEY` |
 | Ollama Native | `define_ollama_native_api()` | 11 | `None` | (local) |
 | Ollama OpenAI | `define_ollama_openai_api()` | 4 | `None` | (local) |
-| EMQX Basic | `define_emqx_basic_api()` | 30+ | `Basic` | `EMQX_USER`, `EMQX_PASSWORD` |
-| EMQX Bearer | `define_emqx_bearer_api()` | 32+ | `BearerToken` | `EMQX_API_KEY` |
+| EMQX Basic | `define_emqx_basic_api()` | 36 | `Basic` | username `EMQX_API_KEY`, password `EMQX_API_SECRET` |
+| EMQX Bearer | `define_emqx_bearer_api()` | 38 | `BearerToken` | `EMQX_TOKEN` |
 
 ## Anthropic API
 

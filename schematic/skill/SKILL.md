@@ -11,6 +11,7 @@ description: |-
         - `schematic-definitions`
         - `schematic-define`
         - `schematic-gen`
+        - `schematic-runtime`
         - and `schematic-schema`
 ---
 
@@ -21,7 +22,7 @@ The **Schematic** packages in the **rusty-biscuit** monorepo are designed to:
 - help you design/describe an API surface
 - provide code _generation_ utilities to convert a "definition" into an API Client
 
-The four packages involved in this process are:
+The five packages involved in this process are:
 
 - `schematic-definitions` - this is where we define the API definitions
 
@@ -40,6 +41,10 @@ The four packages involved in this process are:
     For more details on the primitives defined in **schematic-gen** choose from any of the links below:
     
     ::toc-linking ../gen/README.md level=h2
+
+- `schematic-runtime` - the hand-written runtime every generated REST client sends through: the managed client and its builder, `send`/`send_raw`, the `Response` envelope (`Ok` iff a response head arrived, else `TransportError`), credentials, redirects under the cross-origin policy, deadlines, JSON hooks, and redaction. It never retries
+
+    For more details read [the runtime README](../runtime/README.md) and the topic pages in [`docs/runtime/`](../docs/runtime/README.md)
 
 - `schematic-schema` is the package that callers will look for API client definitions in
 
