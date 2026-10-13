@@ -375,7 +375,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     for endpoint in &api.endpoints {
         let id = Some(endpoint.id.as_str());
 
-        // Endpoint ids become type and variant identifiers.
+        // Endpoint ids become request and form struct identifiers.
         if let Err(reason) = check_type_ident(&endpoint.id) {
             diagnostics.push(error(
                 id,
@@ -400,7 +400,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     }
 }
 
-/// Returns why `name` cannot be used as a generated type or variant name.
+/// Returns why `name` cannot be used as a generated type name.
 ///
 /// Emitters pass these names to `format_ident!`, which panics on anything
 /// [`syn::Ident`] rejects: an empty string, a leading digit, punctuation, or

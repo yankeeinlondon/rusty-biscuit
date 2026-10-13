@@ -2,7 +2,7 @@
 //!
 //! Both kinds reuse the query parameter type mapping and become `Option<T>`
 //! fields with `with_*` builders; `required` is not enforced. They are sent
-//! in the headers element of `RequestParts`, never in the query:
+//! in the `headers` field of `RequestParts`, never in the query:
 //!
 //! - a set header parameter replaces any endpoint header with the same name
 //!   (case-insensitive); an unset one leaves it alone. Array elements are
@@ -94,8 +94,8 @@ pub(super) fn generate_named_builder_methods(
     quote! { #(#methods)* }
 }
 
-/// Generates the expression or statements that produce `into_parts`'s
-/// headers element.
+/// Generates the expression or statements that produce the `headers` field
+/// of `into_parts`'s `RequestParts`.
 ///
 /// With no header or cookie parameters, and at most one static `Cookie`
 /// header, this is the plain list of the endpoint's static headers.

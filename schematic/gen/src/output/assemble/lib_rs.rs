@@ -11,14 +11,6 @@ use crate::output::options::OutputOptions;
 use crate::output::ws_modules::ws_definition_modules;
 
 /// Assembles the lib.rs content for the schema crate.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-///
-/// ## Returns
-///
-/// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let mut module_decls: Vec<_> = apis
@@ -163,15 +155,6 @@ fn runtime_compatibility() -> TokenStream {
 ///
 /// This is similar to `assemble_lib_rs` but supports options like including
 /// a types module for imported APIs.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-/// * `options` - Output generation options
-///
-/// ## Returns
-///
-/// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let module_decls: Vec<_> = apis

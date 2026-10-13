@@ -93,10 +93,6 @@ fn shared_import(apis: &[&RestApi]) -> TokenStream {
 }
 
 /// Assembles an API module with configurable options.
-///
-/// ## Returns
-///
-/// A TokenStream containing the complete API module code.
 pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
     let module_path = get_module_path(api);
     let requests = api_requests(api, &module_path);
@@ -128,7 +124,7 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
     }
 }
 
-/// Assembles the API module code (e.g., openai.rs): module documentation,
+/// Assembles the API module code (e.g., anthropic.rs): module documentation,
 /// the re-exported definition types, the API's marker type and client, and
 /// its request structs.
 pub fn assemble_api_module(api: &RestApi) -> TokenStream {

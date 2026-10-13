@@ -70,7 +70,7 @@ pub fn make_api_with_endpoint(
 ///
 /// ## Arguments
 ///
-/// * `id` - Endpoint identifier (becomes struct/enum variant name)
+/// * `id` - Endpoint identifier (becomes the request struct name)
 /// * `method` - HTTP method
 /// * `path` - URL path (may contain `{param}` placeholders)
 /// * `request` - Optional request body schema

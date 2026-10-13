@@ -13,7 +13,7 @@
 //! schema/src/
 //! ├── lib.rs              # Module declarations, runtime ABI check, re-exports
 //! ├── shared.rs           # Request-side helpers (cookies, FormFile, Paginated)
-//! ├── openai.rs           # Small API module (single file)
+//! ├── anthropic.rs        # Small API module (single file)
 //! ├── emqx/               # Large API module (split directory)
 //! │   ├── mod.rs          #   API markers and clients, re-exports, submodules
 //! │   ├── requests.rs     #   Request structs and their EndpointSpec impls

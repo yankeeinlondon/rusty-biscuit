@@ -126,7 +126,8 @@ pub fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream
 /// percent-encoded unless written `{+name}`); any query written into the path
 /// template stays in it untouched. `query` holds the declared query parameters
 /// as unencoded `(name, value)` pairs in declaration order, one pair per array
-/// element. Encoding happens once, in the generated `append_query_pairs`.
+/// element. The runtime client percent-encodes them once, when it builds the
+/// URL.
 pub fn generate_path_format(
     path: &str,
     path_params: &[&str],

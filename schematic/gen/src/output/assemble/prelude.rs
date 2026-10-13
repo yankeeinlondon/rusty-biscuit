@@ -8,14 +8,6 @@ use super::helpers::get_module_path;
 use crate::output::ws_modules::ws_definition_modules;
 
 /// Assembles the prelude.rs content for the schema crate.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-///
-/// ## Returns
-///
-/// A TokenStream containing the prelude.rs code.
 pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
     assemble_prelude_with_options(apis, true)
 }

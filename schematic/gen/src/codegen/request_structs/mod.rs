@@ -69,7 +69,7 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 /// }
 ///
 /// // Generated struct:
-/// #[derive(Debug, Clone, Default)]
+/// #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 /// pub struct RetrieveModelRequest {
 ///     pub model: String,
 /// }
@@ -144,7 +144,6 @@ pub fn generate_request_struct_with_options(
     };
     let has_body = body_type_name.is_some();
 
-    // Generate struct fields
     let path_param_fields = path_params::generate_path_param_fields(&path_params);
     let query_param_fields = query_params::generate_query_param_fields(&query_params);
     let header_param_fields =
@@ -153,10 +152,8 @@ pub fn generate_request_struct_with_options(
         named_params::generate_named_param_fields(&cookie_params, ParamLocation::Cookie);
     let body_field = body::generate_body_field(endpoint);
 
-    // Generate derives (Default only if no body or body type implements Default)
     let derives = derives::generate_derives(has_body);
 
-    // Generate Default impl if we have a body (manual impl needed)
     let default_impl =
         body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
 
@@ -188,7 +185,6 @@ pub fn generate_request_struct_with_options(
     let endpoint_spec_impl =
         endpoint_spec::generate_endpoint_spec_impl(&struct_name, api_marker, endpoint, into_parts_body);
 
-    // Generate doc comments with example section
     let doc_lines = generate_doc_comment_with_example(
         &endpoint.id,
         &struct_name_str,
@@ -199,7 +195,6 @@ pub fn generate_request_struct_with_options(
         module_path,
     );
 
-    // Combine all fields
     let all_fields = if has_body {
         quote! {
             #path_param_fields
