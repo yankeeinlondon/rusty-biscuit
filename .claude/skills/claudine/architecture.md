@@ -44,7 +44,7 @@ claudine/lib/src/
 ├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── interrupt.rs  → Process-scoped user-interrupt state
-├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from
+├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from; each `InvocationContext` is a view of one document (`enter_document(DocumentEnvironment)`, `capture_document()`; `document_environment.rs` holds `DocumentEnvironment`/`EnvironmentSource`)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── messaging/    → Outbound messaging route resolution and delivery
@@ -542,6 +542,26 @@ environment to resolve a reference or seed `ctx.*`. `InvocationContext::capture`
 `capture_at`, and `capture_for_wrapper` take the snapshot, and completion's
 `ScopeContext` takes its directory and home.
 
+The snapshot's environment is the launched document's. Every later document (a
+sequence step, a serial or parallel group leg, a `proxy` target) captures its
+own map once, before its `initialize`, through
+`InvocationContext::capture_document()`, which reads the `EnvironmentSource`
+the CLI installed (`request::document_environment_source()`, pinning `PWD` to
+the launch value) and returns `enter_document(map)`: a view whose request map,
+launch `FileResolutionContext` map (and the `VAULT`-selected tree root), and
+child baseline all come from that map, while home, launch CWD, repository and
+host evidence, caches, and the launch `@` scope stay shared. Without an
+installed source the library re-enters the launch map; it never reads the
+process. Every consumer of the document (`env.*`, `ctx` environment values,
+lazy `current`, file references, `SCHEMAS_DIR`, model selection, loop settings,
+shell approval, and shell children through the view's `DocumentShellRunner`
+and Darkmatter's `ComposeOptions::with_shell_child_environment`) reads that
+view. Sequence tasks re-resolve preflight-approved `shell:`/`setup:`/`teardown:`
+text under their own map and refuse changed text
+(`CompositionError::SequenceShellApprovalChanged`,
+`sequence/preflight/reapproval.rs`). See `docs/topics/composition.md`
+("One Environment per Document").
+
 Every `FileResolutionContext` comes from Darkmatter's builder or derives from a
 built one:
 
@@ -659,8 +679,12 @@ owns orchestration. The split follows the two execution phases:
 - `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
   `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
   document, keeping a canonical-path ancestry stack so a cycle reports its whole
-  chain. Resolves shell bytes under an early-binding-only lookup so
-  approved == executed.
+  chain. Resolves shell bytes under an early-binding-only lookup and the
+  launch environment so approved == executed. `preflight/reapproval.rs`
+  (`PreflightApproval`, `compose_shell_text`) re-resolves each interpolating
+  task command under the task's own document environment before any stage
+  runs and refuses changed text (`SequenceShellApprovalChanged`); interim until
+  shell template approval lands.
 - `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
   `Err`: continuation is the scheduler's `fail_fast` decision, not an error
   escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a

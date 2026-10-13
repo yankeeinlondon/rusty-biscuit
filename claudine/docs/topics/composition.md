@@ -1230,11 +1230,11 @@ The composition completion engine consults `$schema` when the cursor sits on a s
 
 Plain `ctx.*` in a composed document describes the caller's **launch context** — the directory Claudine was invoked from and the repository/package-area facts projected from it — never the prompt document's storage location and never the mutable process CWD (which the wrapper deliberately moves to the repo root).
 
-- **One owner.** The launch anchor and the launch repository/topology/environment/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
+- **One owner.** The launch anchor and the launch repository/topology/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread), together with the environment of the document that context is a view of (see [One Environment per Document](#one-environment-per-document)). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
 - **`ctx.cwd` is invocation state.** Darkmatter exposes the absolute, portable launch directory through its no-I/O `Invocation` context group. Supplied invocation evidence never rediscovers the process CWD; ambient compatibility capture reports `null` with a partial-capture diagnostic if its one boundary read fails.
 - **Caller file parameters retain their authoring anchor.** Darkmatter materializes only overrides whose selected effective schema arm is `file` or `file(eager)`. Lazy local values retain the first unprobed candidate, eager values select the first existing file, recursive lazy values are rejected, and remote lazy values remain URLs. The raw override stays in the input layer while effective frontmatter and expressions receive the anchored absolute value, so later document handoffs cannot reinterpret the caller's relative text.
 - **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Each run prepares one target-adjusted early-binding snapshot after provider/model resolution — a new document epoch — and reuses that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event of the run. Only the groups the run's composed tree names are captured, so a run that names no Git fact observes no Git state.
-- **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, documents, and the environment are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`.
+- **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, and documents are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`. The environment sits between the two: each document captures it once and every run of that document reuses it (see [One Environment per Document](#one-environment-per-document)).
 
   ```md
   ---
@@ -1251,11 +1251,130 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **A staged document reads its root before `initialize`.** A document that declares `initialize` captures what its root page names — text, frontmatter, lifecycle blocks, and body — before `initialize` runs, and follows no include until afterwards. The post-`initialize` reread stays in the same run: a group already observed is reused, never observed again. **The one exception is an include.** An included file cannot be read before `initialize`, which may be what creates it, so a group that an include is the first to name is captured on first demand, after `initialize`, and held for the rest of the run.
 - **Parallel groups share at launch and refresh on re-entry.** Before any sibling starts, a parallel group captures the union of what its tasks and their prompt documents name, once, and every sibling's first run starts from that view of the working tree. A sibling that retries, resumes, proxies, or begins another loop iteration is a new run and observes the working tree as it is then, including what its siblings changed. Sharing covers Git evidence only: each task layers its own resolved `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` over it.
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Git working-state observations are counted apart from stable discovery, per group, and the `--perf` note lists them as `volatile observations [...]`: one per requesting run, never more. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
-- **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
+- **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the document's captured environment, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
 - **`current.*` is the lazy root.** It is a Darkmatter reserved root, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's notification fields and stack sees the same value, and the next event observes afresh. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh. `current_env` is an ordinary frontmatter property, not a root. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/l1/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
+
+## One Environment per Document
+
+Every document Claudine runs reads **one environment map**, captured once when
+that document starts and kept for its whole lifecycle. Within a document,
+`{{ env.X }}`, a `{{X}}/file.md` reference, and `echo $X` in a shell command
+always agree. Two documents in one invocation may see different values, because
+each captured its own.
+
+These are documents, and each captures its own map before its `initialize`:
+
+| Document | Captures |
+| --- | --- |
+| The launched document (`claudine compose`, `inline-compose`, `sequence`) | once, at launch |
+| Each sequence step and its task | when the step starts |
+| Each serial group leg | when the leg starts |
+| Each parallel group leg | before any leg of the group starts, in declaration order |
+| Each `proxy` target | after the target is resolved, before it is prepared |
+
+These are not new documents, so they reuse the map of the document they belong
+to: transcluded files, loop iterations, `retry` and `resume` attempts, lifecycle
+events and their handlers, and `finalize`.
+
+```md
+---
+notes: "{{ env.NOTES_DIR }}/today.md"
+start:
+    stack:
+        - action:
+              - shell: "ls $NOTES_DIR"
+              - proxy: ./summarize.md
+---
+::file {{NOTES_DIR}}/index.md
+```
+
+The `notes` value, the transcluded `index.md`, and the `ls` in the `start`
+stack all read the router's `NOTES_DIR`, on every retry and loop iteration of
+the router. `summarize.md` captures its own map when the `proxy` fires, and its
+`{{ env.NOTES_DIR }}` reads that map. In an ordinary run Claudine's environment
+does not change between documents, so successive maps hold the same values; the
+contract is what keeps each document self-consistent when they do differ.
+
+Every consumer in a document reads its map:
+
+- `env.*`, the environment values in `ctx` (`ctx.agent`, `ctx.model`), and the
+  lazy `current.*` evidence;
+- env-expanded file references, schema roots (`SCHEMAS_DIR`), and transclusion;
+- model selection, loop settings, and shell approval;
+- shell children: `::shell`, `::shell-block`, frontmatter `$( … )`, lifecycle
+  `shell` actions, and a task's `shell:`, `setup:`, and `teardown:` commands.
+  A child starts from the document's map, not from Claudine's process, and only
+  the variables the document's map changes relative to the launch map are
+  rewritten; the home variables are never rewritten.
+
+A child shell's `export` changes nothing outside that child, so it cannot move
+a later document's environment. Claudine itself rewrites `PWD` when it switches
+a child's working directory, so a captured map keeps the launch value of `PWD`;
+that bookkeeping is never read as a changed environment.
+
+```mermaid
+flowchart TD
+    L["launch: capture map L"] --> P["sequence preflight<br/>approves shell text under L<br/>plans models under L"]
+    P --> S1["step 1: capture map A"]
+    S1 --> C1{"approved text resolves<br/>the same under A?"}
+    C1 -->|yes| R1["run step 1<br/>(env, files, shells, model read A)"]
+    C1 -->|no| X1["refuse before anything runs"]
+    R1 -.->|"proxy fires"| T["target: capture map T<br/>before its initialize"]
+    R1 --> S2["step 2 is a parallel group"]
+    S2 --> G1["leg 1: capture map B1"]
+    S2 --> G2["leg 2: capture map B2"]
+    G1 --> C2["each leg re-checks its approved text,<br/>then runs under its own map"]
+    G2 --> C2
+```
+
+### Approval under a later document's map
+
+Sequence preflight approves every `shell:`, `setup:`, and `teardown:` command
+before any step runs, so it resolves them under the launch map. When a later
+task captures its own map, it resolves each approved command again under that
+map, before any of its stages runs:
+
+- identical text runs as approved;
+- changed text is refused with `CompositionError::SequenceShellApprovalChanged`,
+  which names the command, the approved and resolved text, and the variables
+  that changed. Nothing in the task runs.
+
+```text
+preflight (launch map TARGET=staging):  shell: deploy {{ env.TARGET }}  approved as "deploy staging"
+step 2 (its map TARGET=prod):           resolves to "deploy prod"  refused: changed TARGET
+```
+
+A preflight approval covers only the exact text it approved. **Planned:**
+approval of the command template, so that a later task's changed text can run
+without a refusal. Prompt and step documents are unaffected: they already
+approve the exact text they are about to run when they run it.
+
+### Model selection under a later document's map
+
+Preflight plans every step's model under the launch map, because the review
+screen and `--dry-run` need the plan before any step runs. When a step or group
+leg starts, an environment-derived model is selected again from its own map,
+and that model is the one that runs. A model given with `--model` or confirmed
+on the review screen stands. The provider is never selected again, because no
+environment variable chooses it. A `proxy` target selects under its own map as
+part of its preparation. See [Sequences — Phase 1](flow-control/sequences.md#phase-1--static-preflight).
+
+### In code
+
+`InvocationContext` is a view of one document. `enter_document(DocumentEnvironment)`
+returns a view whose environment-dependent state (the request snapshot map, the
+launch `FileResolutionContext` map and the tree root it selects, and the child
+baseline) all come from the new map; home, launch CWD, repository and host
+evidence, caches, and the launch `@` scope stay shared. `capture_document()`
+captures a map from the installed `EnvironmentSource`
+(`with_environment_source`); with none installed it re-enters the launch map,
+so the library never reads the process. `document_environment()` and
+`DocumentEpoch::environment()` expose the map, `shell_runner()` gives the
+document's shell runner, and `InvocationWorkSnapshot::document_environment_captures`
+counts one capture for the launch document plus one per entered document.
 
 ## Document Handoffs and the Equivalence Contract
 
@@ -1563,8 +1682,8 @@ Sequences use one unified step/task model. A task declares exactly one executabl
 
 Execution has two phases:
 
-1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved and approved byte-for-byte.
-2. **Just-in-time execution** re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible.
+1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved under the launch environment and approved byte-for-byte.
+2. **Just-in-time execution** captures each step's (or group leg's) own environment, then re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible. A task whose approved command resolves to different text under its own environment is refused before it runs (see [One Environment per Document](#one-environment-per-document)).
 
 `outputs` is the sole task-output accumulator. Groups may run serially or in parallel with bounded `max_parallel`, snapshot isolation, declaration-ordered mutation merge, and all-siblings-complete failure handling. Parallel groups reject write-back collisions during preflight; group-level loops remain unsupported until commit semantics are defined.
 
@@ -1609,7 +1728,7 @@ The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select P
 
 ### Request-Owned Context
 
-The `claudine` binary reads its process exactly once, when it dispatches a command: Darkmatter's `RequestSnapshot::from_process()` records the launch directory, HOME, and environment, and every later step works from that snapshot. Canonical wrappers and composition commands create one `InvocationContext` from it before resolving the first source. It freezes the launch CWD, HOME, environment, launch repository evidence, and launch `FileResolutionContext`, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
+The `claudine` binary reads its process exactly once, when it dispatches a command: Darkmatter's `RequestSnapshot::from_process()` records the launch directory, HOME, and the launched document's environment, and every later step works from that snapshot; a later document captures only its own environment (see [One Environment per Document](#one-environment-per-document)). Canonical wrappers and composition commands create one `InvocationContext` from it before resolving the first source. It freezes the launch CWD, HOME, launch repository evidence, and launch `FileResolutionContext`, holds the current document's environment, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
 
 Every file-resolution context comes from Darkmatter's builder or is derived from one built context. Claudine registers its prompt conventions (`prompts/`, `.claudine/`, and the user-tier `~/.claudine` rows) as extra `@` roots on the snapshot, so the builder adds them to every context:
 
@@ -1626,7 +1745,7 @@ flowchart LR
 
 A context is never optional. Preparation, preflight, lifecycle and loop expressions, sequence sources, hook `when` conditions, completion, and system prompts all take one, and a compose runs on a `ComposeRequest` that pairs the options with it. The variables a run layers onto `ctx` (`AGENT`, `MODEL`, `YOLO`) are added to that request's environment, so an expression, `env.*`, and a `{{VAR}}` file reference read the same values. No step falls back to the process directory, HOME, or environment.
 
-Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the same environment and repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream; evidence the owner could not supply remains a partial-capture diagnostic rather than an ambient probe. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
+Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the document's environment and the invocation's repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream; evidence the owner could not supply remains a partial-capture diagnostic rather than an ambient probe. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
 
 Repository observations are request-local, not a process-global cache, and are keyed per worktree identity — the worktree root plus its worktree-specific Git directory, so linked worktrees stay distinct — with topology initialized once per distinct repository even when parallel sequence tasks enter it together. Same-repository sources reuse launch topology; multiple sources in one sibling worktree share one additional observation and topology probe; exact non-repository directories cache explicit absence, and a typed discovery failure is likewise retained rather than retried. Retained `RepoInfo` reaches file-reference scopes only through Darkmatter's `repository_scope_catalog` adapter, never by copying Sniff's package paths or rebuilding topology inside Claudine. File resolution remains source-aware because every compose receives the selected source's retained `FileResolutionContext`.
 

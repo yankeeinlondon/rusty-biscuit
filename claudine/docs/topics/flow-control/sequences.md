@@ -302,6 +302,7 @@ Before anything runs, Claudine walks the **entire task graph**:
 - **Every shell command is approved byte-for-byte** — `shell:` tasks and
   `$( … )` expansions alike, across every step, group, and referenced document,
   *including branches that may never run*. Approved bytes are executed bytes.
+  Approval resolves each command under the launch environment.
 
   Resolution is **early-binding only**: `state`, `params`, template values,
   `fm.*`, `ctx.*`, `env.*`. A shell string referencing `outputs`, a
@@ -311,12 +312,28 @@ Before anything runs, Claudine walks the **entire task graph**:
   task instead. `fm.group` still reads the document. A task's `setup:` and
   `teardown:` commands run the bytes approved here, even if a `set` changed
   the value they were built from.
+
+  Each step and group leg later captures its own environment. Before any of
+  its stages runs, a task resolves its approved `shell:`, `setup:`, and
+  `teardown:` commands again under that environment. Identical text runs;
+  changed text is refused (`SequenceShellApprovalChanged`, naming the command
+  and the variables that changed), and nothing in the task runs. Approving
+  `deploy {{ env.TARGET }}` as `deploy staging` never authorizes
+  `deploy prod`. Approval of the command template, which would let changed
+  text run, is **planned**. See
+  [Composition — Approval under a later document's map](../composition.md#approval-under-a-later-documents-map).
 - **Git working state is observed once for the whole walk.** Static preflight
   is one discovery run: every referenced document (and every file it includes)
   that names a Git fact such as `ctx.staged_files` reads the same observation.
   Each step then observes Git state again when it runs, as its own composition
   run, so a step still sees what earlier steps changed.
 - **Provider and model resolve once**, producing a per-step target vector.
+  This plan reads the launch environment. When a step or group leg starts, it
+  captures its own environment, and the model is selected again from it: a
+  later step whose environment sets `MODEL=b` launches with `b`, even if the
+  launch environment named another model. The provider stands as planned,
+  because no environment variable selects it. A model given with `--model`, or
+  confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence regardless of `fail_fast`. Preparation
 never degrades to best-effort.
@@ -335,9 +352,12 @@ already composed for that task.
 ### Phase 2 — Just-in-time composition
 
 Each step composes **at its turn**, not up front. At every step boundary
-Claudine checks the interrupt flag, **re-reads the live source file from disk**,
-re-layers state, composes, validates, executes, appends the output, and folds in
-any mutations.
+Claudine checks the interrupt flag, **captures the step's environment**,
+**re-reads the live source file from disk**, re-layers state, composes,
+validates, executes, appends the output, and folds in any mutations. The step's
+composition, its task, its prompt document, its loop iterations, retries,
+handlers, and `finalize` all read that one environment; a group leg captures
+its own. See [Composition — One Environment per Document](../composition.md#one-environment-per-document).
 
 State layering, lowest precedence to highest:
 
@@ -600,7 +620,11 @@ group:
   typed **preflight** error. Racing write-backs are never legal.
 - **Process isolation** — each task runs as an independent child with
   spawn-level environment and working directory. Claudine never mutates process
-  environment or CWD on behalf of one task while siblings run.
+  environment or CWD on behalf of one task while siblings run. A leg's
+  `shell:` commands, its `setup:`/`teardown:` `shell` actions, and the
+  `::shell` and `$( … )` commands its documents run all start from the
+  environment that leg captured, so `echo $X` prints the value that
+  `{{ env.X }}` reads in the same leg.
 - **Timeouts and guards** apply to each task independently. Ctrl+C fans out to
   all running children; the group is marked interrupted and the sequence exits
   `130`.

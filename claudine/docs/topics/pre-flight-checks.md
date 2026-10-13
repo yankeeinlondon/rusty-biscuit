@@ -68,7 +68,7 @@ The rule that makes the approval set trustworthy: **a command is discovered with
 - the immediate `proxy` `with:` overlay of a handed-off document;
 - caller values (`--set`, `key=value`) and run-produced values (loop values, lifecycle `set`, `outputs`);
 - the reserved sequence inputs (`state`, `previous`, `next`);
-- the same launch snapshot and the same source-relative base directory.
+- the same document environment and the same source-relative base directory (see [Composition — One Environment per Document](composition.md#one-environment-per-document)).
 
 A transcluded partial is discovered with the state composition hands it: its parent's composed values as defaults, overlaid by the directive's own `set.*` values. A partial nested two levels deep inherits through its parent the same way.
 

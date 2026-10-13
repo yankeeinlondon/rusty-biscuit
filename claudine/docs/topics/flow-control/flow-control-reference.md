@@ -42,6 +42,7 @@ Both directives replace only the **provider attempt**. The active document stays
 
 - The document is re-read from disk and fully validated again.
 - The `proxy` `with:` overlay, the proxy history, and the remaining attempt budgets are kept.
+- The document's environment is kept: `env.*`, env-expanded file references, and shell commands read the map the document captured when it started, not a new one.
 - `initialize` does **not** fire again. It fires once per active document, not once per attempt.
 - Launch settings are recomputed from the freshly read document. A `model:` edited between attempts takes effect on the next attempt.
 
@@ -56,6 +57,8 @@ Before continuing a session, `resume` compares a session-compatibility key acros
 A run has exactly one **active document**. `proxy` replaces it. The target enters at its own `initialize` and owns everything after that: the remaining events, the completion step, and the output.
 
 A clean handoff fires no further events for the source document. A `proxy` from `success` or `failure` skips that attempt's `finalize`, and a `proxy` from `finalize` does not re-enter `finalize`.
+
+The target is a new document, so it captures its own environment after it is resolved and before its `initialize` runs; its `env.*`, file references, model selection, and shell commands read that map, while the source keeps reading its own. The target is resolved in the source's file context, so a `{{VAR}}` in the `proxy` path reads the source's map. See [Composition — One Environment per Document](../composition.md#one-environment-per-document).
 
 The target is bootstrapped by the same preparation service that prepares a directly invoked document. `claudine compose target.md` and a `proxy` to `target.md` therefore go through the same `initialize`, schema validation, shell discovery and approval, and diagnostics. See [Composition — Document Handoffs and the Equivalence Contract](../composition.md#document-handoffs-and-the-equivalence-contract) for what the target recalculates for itself.
 

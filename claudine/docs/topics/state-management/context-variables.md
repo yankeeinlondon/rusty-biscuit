@@ -95,7 +95,7 @@ each key is evaluated.
 |---------|---------|
 | `ctx.<key>` | Eager — evaluated once for each composition run and shared by that run |
 | `current.<key>` | Lazy — the same key as `ctx.<key>`, observed once per lifecycle event (in a document body, once per expression) |
-| `env.<key>` | Eager — the frozen invocation snapshot; it does not change during a composition |
+| `env.<key>` | Eager — the map the document captured when it started; it does not change during that document's lifecycle |
 
 **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
 
@@ -103,8 +103,12 @@ A later run therefore sees what an earlier run changed: a `proxy` target, a
 later sequence step, a later loop iteration, and a retried attempt each observe
 the branch and the staged, dirty, and untracked files as they are when that
 run starts, however many runs asked for them before. Only Git working state is
-observed per run; the launch directory, the repository and its packages, host
-facts, and the environment are observed once per invocation. See
+observed per run; the launch directory, the repository and its packages, and
+host facts are observed once per invocation. The environment is captured once
+per document (the launched document, each sequence step and group leg, each
+`proxy` target) and shared by every run of that document; see
+[Composition — One Environment per Document](../composition.md#one-environment-per-document).
+See
 [Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context)
 for the parallel-group, `initialize`, and include rules.
 

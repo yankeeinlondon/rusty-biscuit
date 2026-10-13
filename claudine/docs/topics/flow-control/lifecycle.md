@@ -77,7 +77,7 @@ Every frontmatter property of a lifecycle event interpolates **when that event f
 
 The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
-- **Early-binding** (resolvable before the run): `fm.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
+- **Early-binding** (resolvable before the run): `fm.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …). `env.*` reads the environment the document captured when it started; every event, loop iteration, `retry`, `resume`, and `finalize` of that document reads the same map, and a `proxy` target captures its own (see [Composition — One Environment per Document](../composition.md#one-environment-per-document)).
 - **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `current`.
 
 `err`, `timing`, and `group` are Claudine's lifecycle globals. Which of them an
@@ -119,7 +119,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. Sequence approval resolves those under the launch environment; a task whose own captured environment would change the text is refused before it runs (see [Sequences — Phase 1](sequences.md#phase-1--static-preflight)). A `shell` action's child process starts from the document's environment, so `$X` in the command reads the value `{{ env.X }}` resolved. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document.
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
