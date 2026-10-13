@@ -20,13 +20,13 @@ Adopt the following defaults during implementation and record their provenance, 
 
 | Topic | Implementation rule |
 | --- | --- |
-| Prerequisite gate | Require the reviewed outcomes of `2026-10-12-schematic-runtime-envelope` and the generation-integrity work before Phase 2. Confirm the actual runtime package, `EndpointSpec`, codecs, envelope, error kinds, page metadata, managed client, typed send, origin resolver, and shared deadline. Missing contracts block implementation at Phase 1; do not implement private replacements. Record reconciliation here and in the log rather than silently rewriting the snapshot spec. |
-| Representation | Use named strategy structs inside the four-kind enum; owning define-side types and static runtime projections; one generic `Pager<E>` / `Pages<E>` over a non-endpoint-generic engine. Use method-level capability bounds and the diagnostic attributes recommended by the prototype. No generated per-endpoint pager method bodies. |
+| Prerequisite gate | Require the reviewed outcomes of `2026-10-12-schematic-runtime-envelope`, `2026-10-12-schematic-endpoint-methods`, and the generation-integrity work before Phase 2. Confirm the actual runtime package, `EndpointSpec`, codecs, envelope, error kinds, page metadata, managed client, typed send, origin resolver, and shared deadline. Missing contracts block implementation at Phase 1; do not implement private replacements. Record reconciliation here and in the log rather than silently rewriting the snapshot spec. |
+| Representation | Use named strategy structs inside the four-kind enum; owning define-side types and static runtime projections; one generic `Pager<E>` / `Pages<E>` over a non-endpoint-generic engine. Use method-level capability bounds and the diagnostic attributes recommended by the prototype. Generate thin inherent entry/control forwards on existing endpoint call types; keep traversal and lifecycle logic in the shared runtime. |
 | Resolution | Endpoint exception first; otherwise only an explicit GET `Vec<T>` response can inherit the API default. Other methods and wrappers need entries. Do not infer through aliases or opaque descriptors. Retain resolution origin and caller knobs. |
 | Exceptions and items | Use an ordered list of endpoint-id/`Collection` entries; reject duplicate and unknown ids, with a nearest-id hint. Align diagnostics with the landed generator format. Wrapper entries name a Rust item type path resolved by the existing resolver, including registered types, primitives, and qualified paths. |
 | Managed inputs | Adopt a plain parameter only at the same destination and with an authored matching knob; omit its request field and constructor argument. Required managed inputs need a sendable strategy default. `server_default` is informational. Optional managed inputs are omitted on ordinary sends; required authored defaults are sent. Preserve request `Default` only when remaining fields permit it, including the typed-path and required non-pager rules. |
 | Legacy metadata | Keep `PaginationStyle`, `PaginationResponse`, `with_pagination`, and the two legacy fields; document them as superseded without deprecation attributes. Their already-materialized query parameters can be adopted, but their pagination metadata cannot drive pager emission. Endpoint and EndpointParams literals gain no fields. |
-| Entry points | **Superseded** by `2026-10-12-schematic-runtime-envelope` review 1, Item 1: the primary entry is a method on the endpoint's generated call type from `2026-10-12-schematic-endpoint-methods` (see the spec's inline review note); refresh this row before the plan runs. Was: generic `client.pager(request)`, configuration knobs, then `fetch_page()`, `pages()`, or `collect_all()` for non-session endpoints. `fetch_page()` returns `Page<Item>` and sends once. Session endpoints expose only `with_session`; iteration, collection, and an authored `renew()` are available inside the scope. |
+| Entry points | Extend the delivered generated endpoint call types: `gh.list_releases(owner, repo).page_size(n).pages()` is primary, with authored controls only. A generic request-object pager may remain secondary. `fetch_page()` returns `Page<Item>` and sends once; `collect_all()` retains its complete-list contract. Session endpoints expose `with_session`; iteration, collection, and authored `renew()` remain inside its scope. Endpoint controls precede `.full()`, whose generic result loses the local call type. |
 | Continuation history | Detect any repeated exclusive continuation in forward traversal, including the starting continuation and nonconsecutive cycles. Store exact tuple keys/resolved URLs; use identity progress for inclusive boundaries. Histories are separate by direction and partition. Failure is terminal. |
 | Collection errors | Add `InvalidContinuation`, `InvalidArgument`, and `TransportError` to the specified incomplete reasons. Default page limit: 100, readable/settable and positive, counting attempts within the helper. A final permitted page that proves completion succeeds. Preserve underlying cause/envelope and items from valid pages even if their continuation fails. |
 | Alternates | Model and validate labeled alternates; emit no alternate-selection methods or constants influenced by alternates. |
@@ -48,7 +48,7 @@ Each phase records changes, decisions, validation, deviations, and remaining ris
 ### Wave 1 — Sequential preflight
 
 - [ ] **1.1 Contract refresh**
-  - Read the preceding runtime review outcomes and the current implementation. Produce a contract map covering every refresh item in the spec, including `RedirectFailed`, invalid-argument kinds, response decomposition, cleanup deadline precedence, and the final RestApi literal shape.
+  - Read the preceding runtime and endpoint-method review outcomes, including endpoint-methods review 3 and this spec’s refreshed notes, and the current implementation. Produce a contract map covering every refresh item in the spec, including `RedirectFailed`, invalid-argument kinds, response decomposition, cleanup deadline precedence, and the final RestApi literal shape.
   - Confirm generation integrity supplied partial generation, the isolated compile check, query-parameter separation, and diagnostics. Record absent prerequisites and stop dependent work at this gate.
   - Review actual authorization for regeneration, dependent migrations, runtime/dev-dependency changes, definition authoring, and docs. Record the two optional authorization-dependent steps separately.
   - Inspect existing user changes before selecting files; create the implementation log following the worktree area's example. Copy the spec's entire 20-item Human review agenda into the log with an evidence/status slot per item.
@@ -124,7 +124,7 @@ For applicable configuration readers, one test per format starts with a real-too
   - Implement optional/required size semantics, pre-send validation with request metadata, and authored adjustable size from the next request.
 
 - [ ] **3.2 Pager emission**
-  - Own generator codegen/assembly/request-struct files: replace the empty marker with static constants, item association, and only authored marker implementations. Emit nothing for non-lists/unpaginated lists, and no `using_*` or per-endpoint method bodies.
+  - Own generator codegen/assembly/request-struct files and the existing `codegen/endpoint_methods` emitter: replace the empty marker with static constants, item association, and only authored marker implementations. Extend existing local call types with thin inherent forwards for authored pager controls and entry points; update reserved-name collision handling for added methods. Emit no pagination surface for non-lists/unpaginated lists and no `using_*` methods; runtime logic stays hand-written.
   - Remove adopted inputs from request fields and constructors using the same resolution/adoption contract as validation; retain ordinary parameters in definitions and preserve required non-pager/typed-path Default rules.
   - Resolve wrapper item types through the existing Rust type resolver. Add deterministic snapshots, alternate/legacy-metadata independence tests, and isolated generated compile fixtures using the runtime contract.
   - Update dependency/manifest assembly so emitted clients import the actual runtime package. The generator task integrates its own exports/imports; runtime module registration belongs to 3.1.
@@ -150,8 +150,8 @@ For applicable configuration readers, one test per format starts with a real-too
 ### Wave 7 — Sequential runtime integration
 
 - [ ] **4.2 Transport integration**
-  - Implement the selected decoder and route every page through typed send with page-only RequestMeta, credential resolution, redaction, envelope preservation, and shared monotonic deadline. No retries or detached work.
-  - Implement fetch_page's single send and original-wrapper ordinary-send behavior with required authored defaults. Expose next/prev/items/total only where supported.
+  - Implement the selected decoder and route every page through the full-response typed send path (ordinary call await returns only data) with page-only RequestMeta, credential resolution, redaction, envelope preservation, and shared monotonic deadline. No retries or detached work.
+  - Implement fetch_page's single send and original-wrapper ordinary-send behavior with required authored defaults. Add a narrow runtime integration seam for client/request/options access: current Call fields and the generated wrapper field are private; preserve per-call settings and the existing build/send validation parity. Expose next/prev/items/total only where supported.
   - Build follow-up method/path/carry rules, preserving repeated query values, case-insensitive header destinations and exact body segments. Managed inputs win; validate conflicts rather than silently overwriting them. Reject non-replayable bodies when reuse is required.
   - Parse all Link field values using the shared standards-aware parser; handle quoted commas, multi-token rels, identical versus ambiguous resolved next links, and invalid links. Resolve against the final response URL; apply carry before final runtime origin/security checks, including redirected followed links. Without a carry rule follow next links verbatim using GET.
   - Implement collect_all with retained cause/envelope/items and exact attempted-page limit semantics. Ordinary malformed/interrupted/refused envelope failures map to HttpError; RedirectFailed maps to TransportError with its prior 3xx. Map boundary stalls, missing/invalid continuation, invalid arguments, deadline, origin refusal, and other transport failures explicitly.
@@ -276,3 +276,15 @@ For applicable configuration readers, one test per format starts with a real-too
   - Leave the feature in its active directory and report **implementation complete, ready for review** only when required work and evidence are complete. Otherwise report the precise blocking prerequisite or validation gap, with the next action needed. Do not commit or move the feature.
 
 **Checkpoint:** the implementation is reviewable with deterministic artifacts, demonstrated public behavior, documented limitations, and a complete decision/evidence log. The author owns review closure and lifecycle movement.
+
+## Refresh log
+
+### 2026-10-13 — Endpoint-methods review 3
+
+Source: `2026-10-12-schematic-endpoint-methods` review 3 and its implementation and repair logs.
+
+- Added the completed endpoint-method work to the prerequisite check; Phase 1 reads its verified runtime and call contracts.
+- Replaced generic-first entry planning and the prohibition on generated pager method bodies with thin inherent forwards on existing endpoint call types, as the author already required. The shared runtime still owns traversal and session logic.
+- Assigned generator integration to the existing endpoint-method emitter, including reserved-name checks, instead of assuming a separate endpoint surface.
+- Made the transport task retain full response envelopes and add a narrow integration seam for private call state, preserving effective credentials and early argument validation.
+- Preserved provider scope, capability rules, decided result types, sessions, pipeline ordering, and all existing authorization conditions.
