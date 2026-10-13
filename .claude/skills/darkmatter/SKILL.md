@@ -135,6 +135,9 @@ Important contracts:
   `ctx.env()`), `~/schemas`. Never walk ancestors or read the process
   environment for them. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
+- The runtime baseline is compiled in with its imports (Content Policy's
+  `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
+  `md schema validate`, and DMLS; see [schema.md](schema.md#runtime-baseline).
 
 Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
 suggestions, triggers, and DMLS schema behavior.

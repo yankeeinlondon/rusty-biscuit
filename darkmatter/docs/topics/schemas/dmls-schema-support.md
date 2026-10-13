@@ -69,6 +69,7 @@ flowchart TD
 A few details worth knowing:
 
 - the base baseline always applies, so a document with no `$schema` of its own still gets schema-driven completion and hover for keys like `title` or `style`
+- the base baseline is the [built-in baseline](./definition.md#the-built-in-baseline) compiled into the server, including the Content Policy schema it imports to type `content_policy`. Those compiled-in documents are never read from disk and never become watched dependencies, so the server needs no schema files to type a document. An extension, trigger, or document schema that declares `content_policy` replaces the built-in typing, as for any other baseline property
 - extension baselines whose activation globs match the document contribute their shapes even when the document declares no `$schema` — this is how a Claudine prompt gets `provider`/`model` completions "for free"
 - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
 - the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
@@ -215,6 +216,33 @@ Document highlights currently cover headings and wiki links; schema keys are not
 
 One schema-specific code action ships today: **add a missing required key**, offered directly on a `dm.schema.missing_required` diagnostic (and therefore only in strict mode). Other code actions — create the missing file, migrate a deprecated `style:` key, close an unclosed `::block`, wrap a malformed interpolation in a literal — are schema-adjacent rather than schema-driven. Whole-document **formatting** is byte-equivalent to the `md clean` cleanup sequence; it is a document-level operation, not a schema one.
 
+### Content policies
+
+Because the built-in baseline types `content_policy`, every document gets
+help with its [content policy](../../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
+without a `$schema`:
+
+- **completion** inside a compact entry (`- Ever…`), after `rule:` and
+  `action:` in a `{rule, action}` entry, and for that entry's keys;
+- **hover** on a compact or long-form rule shows the description of the rule
+  form it matches, such as *Interval from a property* for
+  `ValidFor(3mo, @last_updated)`;
+- **diagnostics** on the item, field, or value at fault: an unknown action is
+  ranged on the action's value, a missing `rule` on the entry's mapping, and a
+  single string where a list belongs on the whole value.
+
+```yaml
+---
+content_policy:
+  - ValidFor(3mo)
+  - rule: ValidUntil(2027-01-01)
+    action: delete        # flagged: not refresh, archive, or remove
+---
+```
+
+Checks are passive like every other schema check: DMLS never reads the file a
+`FileChanged` rule watches, so a rule naming a missing file is not flagged.
+
 ### Imported files stay live
 
 Every file a schema imports a named type from is a dependency of the
@@ -235,6 +263,17 @@ reads no other file and adds no dependency.
 - When a named type and its use site both declare `suggest(...)`, the "at
   most one `suggest`" error is ranged on the whole `$schema`, because the
   inherited candidate's span belongs to another file.
+- Rule completion for `content_policy` suggests only `Evergreen`. Content
+  Policy's schema lists seven example rules on its `Evergreen` alternative, and
+  a property may carry only one `suggest(...)` list, whose candidates are
+  linted against the alternative that carries it (see
+  [Completing inside a union value](./definition.md#completing-inside-a-union-value)).
+  The other six fail that alternative's pattern and are dropped. Validation and
+  hover cover every rule form.
+- A frontmatter value holding a `{{ … }}` template is not diagnosed, because
+  its value is known only after interpolation. `md compose` checks it then;
+  DMLS reports nothing for it, including an invalid `content_policy` entry such
+  as `FileChanged({{HOME}}/x, @fp)`.
 
 ## Not Implemented (yet)
 

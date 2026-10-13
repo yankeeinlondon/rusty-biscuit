@@ -7,7 +7,7 @@ This topic covers the practical usage of schemas for standalone validation, sche
 ## What You Get
 
 - A `$schema` frontmatter property that can hold an inline schema, point at a YAML/JSON file, or list a root-level union.
-- A **baseline schema** that every document inherits.
+- A **baseline schema** that every document inherits. Darkmatter ships a built-in one, compiled into the library, which `md compose`, `md schema validate`, and DMLS apply by default.
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
 - A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
@@ -1638,7 +1638,8 @@ the leaf alternatives of either form.
 #### Example: a content policy list
 
 A content-policy style schema whose policies may be short strings or
-`{ rule, action }` mappings:
+`{ rule, action }` mappings. The [built-in baseline](#the-built-in-baseline)
+types `content_policy` this way, importing Content Policy's shipped schema:
 
 ```yaml
 # content-policy.yaml
@@ -1797,7 +1798,7 @@ The resolution rules:
      `https://json-schema.org/draft/2020-12/schema`.
    - `.json` files are always treated as JSON Schema.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
-4. **No `$schema` and no baseline** — validation succeeds vacuously and `pretty` mode emits a `no schema; vacuously valid` note (suppressed by `--quiet`).
+4. **No `$schema`** — the baseline alone applies; `md schema validate` and `md compose` use the [built-in baseline](#the-built-in-baseline) unless told otherwise. With no baseline either, validation succeeds vacuously and `pretty` mode prints a note saying so (suppressed by `--quiet`).
 
 Path references in `$schema` resolve like implicit file references: a bare path is
 tried **from the document's directory first, then the repository root**, while an explicit
@@ -1894,26 +1895,137 @@ let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
-`md schema validate` accepts the baseline per invocation:
+### The Built-in Baseline
 
-```bash
-md schema validate post.md --schema ./schemas/baseline.yaml
-md schema validate post.md     # falls back to $BASELINE_SCHEMA env var
+Darkmatter's own frontmatter properties (`title`, `last_updated`, `style`,
+`ctx`, and the rest) are typed by a built-in baseline authored in
+[`docs/schemas/darkmatter.yaml`](../../schemas/darkmatter.yaml) and described
+in [`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md).
+It also types `content_policy` by importing Content Policy's editor schema:
+
+```yaml
+content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"
 ```
 
-**Resolution order for the `md schema validate` baseline:**
+The property is optional and has no default, so a document without it stays
+valid and nothing inserts it; a present value must be a non-empty list whose
+items each match a `policy` entry (see
+[Example: a content policy list](#example-a-content-policy-list)).
 
-1. `--schema <path>` flag.
-2. `BASELINE_SCHEMA` environment variable.
-3. No baseline.
+The baseline and every schema it imports are compiled into the library, so an
+installed `md` or `dmls` prepares it outside a checkout, with no schema files
+on disk:
 
-`md compose` has a different CLI default: it injects the Darkmatter base
-frontmatter schema as its baseline unless told otherwise. Use
-`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose
-behavior with no default baseline, or `--baseline-schema <path>` to replace the
-default with a custom SimplifiedSchema YAML baseline. See
-[`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md) for the
-base schema contract.
+- the imports resolve from an internal table keyed by repository-relative
+  virtual paths (`darkmatter/docs/schemas/darkmatter.yaml`,
+  `content-policy/schemas/content-policy.yaml`). A reference is resolved
+  lexically with `/` against the importing path; there is no disk or network
+  fallback, so a reference to a path the table does not hold is an error;
+- an embedded document is never a file dependency, so DMLS never watches it
+  and `EffectiveSchema::dependencies()` does not list it;
+- the baseline is prepared and lowered to JSON Schema once per process and
+  shared by every caller.
+
+Resolving the authored `darkmatter.yaml` from a checkout with the ordinary
+disk resolver gives the same typed schema and the same JSON Schema.
+
+### Selecting the Baseline
+
+Each entry point chooses its baseline separately:
+
+| Entry point | Default | Replace with | Opt out with |
+|---|---|---|---|
+| `md schema validate` | built-in baseline | `--schema <path>`, `BASELINE_SCHEMA` | `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
+| `md compose` | built-in baseline | `--baseline-schema <path>` | `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
+| DMLS | built-in baseline, then [extension baselines](./dmls-schema-support.md#extensibility-through-configuration) | — | — |
+| `DarkmatterSchemas` | none | `with_baseline(...)`, `with_baseline_from_file(...)`, `with_darkmatter_baseline_json_schema()` | — |
+
+```rust
+let api = DarkmatterSchemas::new(context)
+    .with_baseline_from_file("./schemas/baseline.yaml")?;
+```
+
+`DARKMATTER_NO_BASELINE_SCHEMA` disables the baseline only for the exact
+values `1`, `true`, `TRUE`, `yes`, and `YES`. Any other value, such as `0`,
+`True`, or ` yes`, leaves it on.
+
+**Resolution order for `md schema validate`.** The first rule that applies
+wins:
+
+```mermaid
+flowchart TD
+    A["md schema validate"] --> B{"--no-baseline-schema?"}
+    B -- yes --> N["no baseline"]
+    B -- no --> C{"--schema PATH?"}
+    C -- yes --> P["baseline from PATH"]
+    C -- no --> D{"DARKMATTER_NO_BASELINE_SCHEMA<br/>is 1, true, TRUE, yes, or YES?"}
+    D -- yes --> N
+    D -- no --> E{"BASELINE_SCHEMA set?"}
+    E -- yes --> Q["baseline from BASELINE_SCHEMA"]
+    E -- no --> F["built-in baseline"]
+```
+
+1. `--no-baseline-schema` validates with no baseline. It cannot be combined
+   with `--schema`; passing both is a usage error that exits `2` before any
+   file is read.
+
+   ```bash
+   md schema validate post.md --no-baseline-schema
+   ```
+
+2. `--schema <path>` replaces the built-in baseline, even when
+   `DARKMATTER_NO_BASELINE_SCHEMA` is set.
+
+   ```bash
+   DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md --schema ./schemas/baseline.yaml
+   # validates against ./schemas/baseline.yaml
+   ```
+
+3. A disabling `DARKMATTER_NO_BASELINE_SCHEMA` validates with no baseline and
+   ignores `BASELINE_SCHEMA`.
+
+   ```bash
+   DARKMATTER_NO_BASELINE_SCHEMA=1 BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md
+   # no baseline
+   ```
+
+4. `BASELINE_SCHEMA` replaces the built-in baseline.
+
+   ```bash
+   BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md
+   ```
+
+5. Otherwise the built-in baseline applies.
+
+   ```bash
+   md schema validate post.md
+   ```
+
+Both environment variables are read from the environment the command was
+started with. A custom path, from `--schema` or `BASELINE_SCHEMA`, takes the
+same reference forms as a file argument and resolves from the directory the
+command was started in, not from the document. A custom baseline that cannot
+be found or loaded exits `2` and never falls back to the built-in baseline or
+to none.
+
+Opting out removes only the baseline. A document's own `$schema` and matching
+[trigger schemas](#repository-trigger-schemas) still apply, and `--no-trigger-schemas`
+turns off triggers independently of the baseline.
+
+**Compatibility.** Because every built-in property is checked by default, a
+document with no `$schema` can now fail `md schema validate`, exactly as it
+fails `md compose`. Given:
+
+```yaml
+---
+last_updated: not-a-date
+---
+```
+
+`md schema validate post.md` exits `1`, because `last_updated` is a `date`.
+`md schema validate post.md --no-baseline-schema` or
+`DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md` exits `0`, as it
+did before the built-in baseline was the default.
 
 ### JSON Schema Baseline Restrictions
 
@@ -1993,13 +2105,15 @@ The same conservative rules apply at every nested level — coercion never fires
 ## CLI: `md schema validate`
 
 ```
-md schema validate <FILE_OR_PROP=VALUE>... [--schema <path>] [--format pretty|json] [--quiet]
+md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --no-baseline-schema] [--no-trigger-schemas] [--format pretty|json] [--quiet]
 ```
 
 | Flag                       | Effect                                                                                                 |
 |----------------------------|--------------------------------------------------------------------------------------------------------|
 | `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
-| `--schema <path>`          | Baseline schema for this invocation. Falls back to `$BASELINE_SCHEMA`, then to no baseline.            |
+| `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
+| `--no-baseline-schema`     | Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`.                      |
+| `--no-trigger-schemas`     | Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
 | `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
 | `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
@@ -2085,6 +2199,8 @@ user:
 
 When multiple kinds of failure occur in the same invocation, the more specific failure wins: parse error (`3`) outranks schema-load failure (`2`), which outranks validation failure (`1`).
 
+Passing both `--schema` and `--no-baseline-schema` is rejected by argument parsing itself, which exits `2` with a "cannot be used with" message on stderr and nothing on stdout.
+
 ### Pretty Output
 
 Given `draft.md`:
@@ -2146,6 +2262,8 @@ description string when one is resolved, or `null` when the property declares no
 description (or the description was suppressed because it was whitespace-only or
 byte-for-byte equal to the problem message).
 
+The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it; the pretty output still says such a document "has a schema definition", because its effective schema is the baseline.
+
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
 
 ### Problem Locations
@@ -2201,7 +2319,7 @@ The same locations appear in `md compose`'s [schema-failure block](#error-render
 
 ### Behavior Without `$schema`
 
-- With a baseline configured, the document is validated against the baseline alone.
+- With a baseline, which is the built-in one unless [selected otherwise](#selecting-the-baseline), the document is validated against the baseline alone, and `pretty` mode says it has a schema definition.
 - Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
 
 ## CLI: `md schema detect`
@@ -2421,7 +2539,7 @@ Detection is passive: it derives the supplied context to each document and never
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
-- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml`) as a `SimplifiedSchema`.
+- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema`.
 - `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
 - `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
 
@@ -2494,6 +2612,8 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 `ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
+A hit needs the whole resolution context to match, and the built-in baseline declares a `file` property (`style.page.stylesheet`), so its merged validator depends on that context. With the built-in baseline, each document whose schema or context differs therefore compiles the merged baseline once; this is most of the cost of validating many documents, and `--no-baseline-schema` avoids it when only document schemas matter.
+
 ## Shell-Completion Integration
 
 The `completion` module is a read-only consumer of an `EffectiveSchema`. It exposes:
@@ -2543,7 +2663,7 @@ The rules:
 - Each element is judged on its own, so neighboring elements can narrow to different alternatives.
 - A key's `required` is `true` only when every alternative offering it requires it; already-authored keys are not removed, so the caller filters them and the typed prefix.
 - The same union used as a property value gives the same answer as an element, apart from `is_array`.
-- `suggest(...)` candidates are linted against their own arm, so a candidate that only another arm accepts is dropped.
+- `suggest(...)` candidates are linted against their own arm, so a candidate that only another arm accepts is dropped. Because a property may carry only one `suggest(...)` list (see [Cardinality](#cardinality)), a union can offer only the candidates the carrying arm accepts. The built-in `content_policy` typing shows this: Content Policy's seven example rules sit on the `Evergreen` arm, so completion offers only `Evergreen`.
 
 All of it is passive: no file is read or written, and no expression is evaluated.
 
@@ -2599,7 +2719,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
 - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper, so compose and the downstream consumer agree.
-- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter; `md compose` does not check the expanded value again, so a `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) passes compose on its own. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
 - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and the run-local options hash, so cached results are not reused across different baselines.
@@ -2650,13 +2770,15 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 ### Compose and Validate Defaults
 
 `md compose` and `md schema validate` share the same `DarkmatterSchemas::validate`
-implementation once their effective schemas are resolved, but their CLI defaults
-intentionally differ. `md compose` injects the Darkmatter base schema by default;
-`md schema validate` keeps the explicit `--schema` / `BASELINE_SCHEMA` contract.
-
-As a result, when a document has no `$schema`, `md compose` may reject an invalid
-Darkmatter-owned frontmatter value that `md schema validate` accepts vacuously
-unless the same baseline is supplied explicitly.
+implementation once their effective schemas are resolved, and both apply the
+built-in baseline by default, so a document with no `$schema` fails both for
+the same invalid Darkmatter-owned value. Each opts out with
+`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA`. They differ in how
+a custom baseline is named (`md compose --baseline-schema <path>`;
+`md schema validate --schema <path>` or `BASELINE_SCHEMA`) and in what they
+check: compose validates after interpolation, so a `{{ … }}` value is checked
+once it resolves, while `md schema validate` checks the frontmatter as
+written. See [Selecting the Baseline](#selecting-the-baseline).
 
 ## Limitations (v1)
 

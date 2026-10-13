@@ -1641,8 +1641,9 @@ impl ComposeOptions {
     /// Attaches the Darkmatter baseline frontmatter schema as the baseline.
     ///
     /// This is a convenience wrapper around
-    /// [`with_baseline_schema`](Self::with_baseline_schema) that loads the
-    /// authored schema from `darkmatter/docs/schemas/darkmatter.yaml`. When both
+    /// [`with_baseline_schema`](Self::with_baseline_schema) that uses the
+    /// compiled-in [`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema),
+    /// whose imports resolve without reading the disk. When both
     /// the baseline and the document `$schema` declare the same property, the
     /// document side wins.
     ///

@@ -7,6 +7,7 @@ and DMLS schema behavior.
 
 - [Document kinds](#document-kinds)
 - [Composition and validation](#composition-and-validation)
+- [Runtime baseline](#runtime-baseline)
 - [Imports and dictionaries](#imports-and-dictionaries)
 - [Named union references](#named-union-references)
 - [Special types](#special-types)
@@ -130,6 +131,48 @@ source snapshot, shared by every problem and root-union arm):
   = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
 - `md schema validate` prints `(at line L, column C)`; the compose block
   prints ` at L:C`; DMLS ranges start at the same nodes.
+
+## Runtime baseline
+
+`darkmatter/docs/schemas/darkmatter.yaml` is the runtime baseline. It declares
+`content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
+(optional, no default). `schemas/embedded.rs` holds the compiled-in table:
+the baseline (`include_str!`) and `content_policy::EDITOR_SCHEMA`, keyed by
+the virtual repo-relative paths `darkmatter/docs/schemas/darkmatter.yaml` and
+`content-policy/schemas/content-policy.yaml`. Embedded imports resolve
+lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
+root), never touch the disk or network, add no dependency edge (DMLS never
+watches them), and identify as `SchemaSourceId::Embedded`. One
+`BASELINE: OnceLock` prepares and lowers it once per process. Resolving the
+authored file from disk gives the same typed schema and JSON. Installed
+binaries therefore need no schema files.
+
+`md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
+first match wins:
+
+1. `--no-baseline-schema` → none (clap conflict with `--schema`, exit 2);
+2. `--schema <path>` → custom, even with the env opt-out;
+3. `DARKMATTER_NO_BASELINE_SCHEMA` exactly `1|true|TRUE|yes|YES`
+   (`commands::compose::disables_baseline_schema`, read from the captured
+   request snapshot) → none, ignoring `BASELINE_SCHEMA`;
+4. `BASELINE_SCHEMA` → custom;
+5. built-in (`with_darkmatter_baseline_json_schema`).
+
+Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
+a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
+and triggers; `--no-trigger-schemas` is independent. JSON `schema` stays null
+for a document without `$schema`. Compatibility: `last_updated: not-a-date`
+with no `$schema` now fails validate as it fails compose. Compose keeps
+`--baseline-schema`/`--no-baseline-schema`/the env (live
+`env_disables_baseline_schema`); DMLS layers built-in → extensions →
+triggers → document. Each document with a distinct schema/context compiles the
+merged baseline (validator cache keys on the full resolution context), so
+tests that judge only document schemas pass `--no-baseline-schema` to stay in
+the L1 budget.
+
+User docs: `darkmatter/docs/topics/schemas/definition.md` (The Built-in
+Baseline, Selecting the Baseline); Content Policy's typing limits are in the
+`content-policy` skill.
 
 ## Imports and dictionaries
 
@@ -346,7 +389,11 @@ needs `@this`.
 
 `suggest(...)` attaches advisory completion candidates without changing
 validation. `lint_suggestions()` reports malformed or misplaced suggestions;
-`suggestions_for_path()` supplies structured completion items.
+`suggestions_for_path()` supplies structured completion items. A property has
+at most one `suggest(...)` (across union atoms too), and it is linted against
+the arm carrying it, so `content_policy` completion offers only `Evergreen`.
+DMLS validates with `PendingPolicy::Defer`, so it reports nothing for a
+`{{ … }}` value.
 
 Literal discriminants use one presentation-neutral union-arm selector shared
 by library validation and DMLS. Expression-typed values enable expression

@@ -121,7 +121,7 @@ let options = ComposeOptions::new()
     .disable(ComposeOperation::Cleanup)
     .disable(ComposeOperation::Normalization);
 
-// With a baseline schema (library-only; no CLI flag)
+// With a custom baseline schema (CLI: `md compose --baseline-schema <path>`)
 let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
