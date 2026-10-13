@@ -1043,6 +1043,15 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 
 The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
 
+`Missing` means a top-level property is absent. A field missing *inside* a
+value is that value's problem, routed by the property's own row: with
+`config: '{ name: string(required) }(required)'` and `config: {}`, `config` is
+present but invalid, never a `name` property to collect. Every report keeps
+the problem's JSON Pointer: that `SchemaValidation` message reads
+`/config: "name" is a required property`, and a dropped optional's reason
+leads with the pointer when the problem lies inside the value
+(`/content_policy/1: "Duration(3mo)" is not valid under any of the schemas …`).
+
 The `Missing` row above is the **launch** view, and it splits by mode and by
 constraint. `eager` means "validate at launch when present"; `required` means
 "the value must be present by the time the composition completes".
