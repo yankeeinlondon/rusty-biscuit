@@ -25,12 +25,11 @@
 use std::path::PathBuf;
 
 use schematic_schema::elevenlabs::{
-    CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
-    ElevenLabsApi, ListModelsRequest, ListVoicesRequest, ListVoicesResponse, ModelInfo, VoiceResponseModel,
+    CreateSoundEffectBody, CreateSpeechBody, ListVoicesResponse, ModelInfo, VoiceResponseModel,
     VoiceSettings,
 };
-use schematic_schema::prelude::{CallOptions, Credential, ElevenLabs, TransportError};
-use schematic_schema::schematic_runtime::{ApiError, EndpointSpec, ErrorKind, NoDeclaredError};
+use schematic_schema::prelude::{Credential, ElevenLabs, TransportError};
+use schematic_schema::schematic_runtime::{ApiError, CallError, ErrorKind, NoDeclaredError};
 
 use crate::audio_cache::{CacheKey, write_atomic};
 use crate::errors::TtsError;
@@ -292,25 +291,18 @@ impl ElevenLabsProvider {
         std::env::var("ELEVEN_LABS_API_KEY").is_ok() || std::env::var("ELEVENLABS_API_KEY").is_ok()
     }
 
-    /// Send `request` and return its decoded success value.
-    ///
-    /// ## Errors
-    ///
-    /// Any non-2xx reply, undecodable body, or transport failure, mapped by
-    /// [`Self::map_api_error`] and [`Self::map_transport_error`].
-    async fn send<R>(&self, request: R) -> Result<R::Success, TtsError>
-    where
-        R: EndpointSpec<Api = ElevenLabsApi, Failure = NoDeclaredError>,
-    {
-        let response = self
-            .client
-            .send(request, &CallOptions::default())
-            .await
-            .map_err(Self::map_transport_error)?;
-        let status = response.meta.status.as_u16();
-        response
-            .into_result()
-            .map_err(|error| Self::map_api_error(status, &error))
+    /// Map a failed call to a `TtsError` via [`Self::map_api_error`] or
+    /// [`Self::map_transport_error`].
+    fn map_call_error(error: CallError<NoDeclaredError>) -> TtsError {
+        match error {
+            CallError::Transport(error) => Self::map_transport_error(error),
+            CallError::Api { error, meta } => Self::map_api_error(meta.status.as_u16(), &error),
+            // `CallError` is non-exhaustive; its redacted `Display` is safe to surface.
+            other => TtsError::HttpError {
+                provider: "elevenlabs".into(),
+                message: other.to_string(),
+            },
+        }
     }
 
     /// Map a failed reply to a `TtsError`: 402 Payment Required becomes
@@ -399,9 +391,11 @@ impl ElevenLabsProvider {
             ..Default::default()
         };
 
-        let request = CreateSpeechRequest::new(voice_id.to_string(), body);
-
-        let audio_bytes = self.send(request).await?;
+        let audio_bytes = self
+            .client
+            .create_speech(voice_id, body)
+            .await
+            .map_err(Self::map_call_error)?;
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
@@ -518,8 +512,6 @@ impl ElevenLabsProvider {
             ..Default::default()
         };
 
-        let request = CreateSpeechRequest::new(voice_id.clone(), body);
-
         tracing::debug!(
             voice_id = %voice_id,
             text_len = text.len(),
@@ -527,7 +519,11 @@ impl ElevenLabsProvider {
             "Sending ElevenLabs TTS request"
         );
 
-        let audio_bytes = self.send(request).await?;
+        let audio_bytes = self
+            .client
+            .create_speech(voice_id, body)
+            .await
+            .map_err(Self::map_call_error)?;
 
         tracing::debug!(
             audio_size = audio_bytes.len(),
@@ -577,11 +573,11 @@ impl ElevenLabsProvider {
                 "Fetching ElevenLabs voices page"
             );
 
-            let request = ListVoicesRequest {
-                page_size: Some(VOICES_PAGE_SIZE),
-                page_token: page_token.take(),
-            };
-            let page = self.send(request).await?;
+            let mut call = self.client.list_voices().page_size(VOICES_PAGE_SIZE);
+            if let Some(token) = page_token.take() {
+                call = call.page_token(token);
+            }
+            let page = call.await.map_err(Self::map_call_error)?;
 
             tracing::debug!(
                 page = page_num,
@@ -629,7 +625,10 @@ impl ElevenLabsProvider {
     /// Returns `TtsError::PaidPlanRequired` on 402 Payment Required, and
     /// `TtsError::HttpError` for any other failed request or reply.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, TtsError> {
-        self.send(ListModelsRequest {}).await
+        self.client
+            .list_models()
+            .await
+            .map_err(Self::map_call_error)
     }
 
     /// Create a sound effect from a text description.
@@ -665,15 +664,17 @@ impl ElevenLabsProvider {
             ..Default::default()
         };
 
-        let request = CreateSoundEffectRequest { body };
-
         tracing::debug!(
             prompt = %prompt,
             duration = ?duration_seconds,
             "Creating ElevenLabs sound effect"
         );
 
-        let audio_bytes = self.send(request).await?;
+        let audio_bytes = self
+            .client
+            .create_sound_effect(body)
+            .await
+            .map_err(Self::map_call_error)?;
 
         Ok(audio_bytes.to_vec())
     }
