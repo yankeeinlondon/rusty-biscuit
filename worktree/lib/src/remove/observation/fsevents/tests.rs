@@ -320,7 +320,7 @@ fn sniff_sees_nothing_of_the_session() {
 /// every volume).
 #[test]
 fn the_barrier_holds_for_a_checkout_on_another_volume() {
-    let elsewhere = tempfile::Builder::new().prefix(".wt-fsevents-volume-").tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let elsewhere = tempfile::Builder::new().prefix(".wt-fsevents-volume-").tempdir_in(crate::test_support::package_dir()).unwrap();
     let markers = MarkerDirectory::create().unwrap();
     let device = |path: &Path| fs::metadata(path).unwrap().dev();
     if device(elsewhere.path()) == device(&markers.0) {

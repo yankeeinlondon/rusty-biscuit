@@ -6,7 +6,7 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -107,6 +107,14 @@ fn has_branch(origin: &Path, branch: &str) -> bool {
     origin.join(&refname).is_file()
         || std::fs::read_to_string(origin.join("packed-refs"))
             .is_ok_and(|packed| packed.lines().any(|line| line.split_once(' ').is_some_and(|(_, name)| name == refname)))
+}
+
+/// This package's directory, read at run time so an archived test run on
+/// another host resolves its own copy rather than the producer's path.
+pub(crate) fn package_dir() -> PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
 }
 
 #[cfg(test)]

@@ -316,12 +316,12 @@ fn file_system(path: &Path) -> String {
 /// package's own directory is on ReFS.
 #[test]
 fn on_refs_a_directory_removed_with_posix_semantics_is_not_reported() {
-    let system = file_system(Path::new(env!("CARGO_MANIFEST_DIR")));
+    let system = file_system(&crate::test_support::package_dir());
     if system != "ReFS" {
         eprintln!("the package is on {system}, not ReFS; the ReFS case was not exercised");
         return;
     }
-    let root = tempfile::Builder::new().prefix(".wt-refs-").tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = tempfile::Builder::new().prefix(".wt-refs-").tempdir_in(crate::test_support::package_dir()).unwrap();
     let checkout = root.path().join("parent").join("checkout");
     for name in ["plain", "posix-empty", "posix-full"] {
         fs::create_dir_all(checkout.join(name)).unwrap();
