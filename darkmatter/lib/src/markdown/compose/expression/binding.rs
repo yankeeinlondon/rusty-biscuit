@@ -2,8 +2,8 @@
 //!
 //! A variable root is exactly one of:
 //!
-//! - a **reserved namespace** (`doc`, `ctx`, `env`, `current`, `current_env`;
-//!   the set is [`reserved_root_descriptors`]);
+//! - a **reserved namespace** (`fm`, `ctx`, `env`, `current`; the set is
+//!   [`reserved_root_descriptors`]);
 //! - a **global** a host registered for the current scope, available (its
 //!   value may be `null`) or unavailable (reading it is a typed
 //!   [`BindingError::Unavailable`]);
@@ -35,7 +35,7 @@ use crate::markdown::span::SourceSpan;
 /// stays a `Global` holding `null` and never falls through to the document.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolvedBinding {
-    /// A document property, read bare or through `doc.`'s owner.
+    /// A document property, read bare or through `fm.`.
     Document {
         /// The property value, or `None` when absent.
         value: Option<Value>,

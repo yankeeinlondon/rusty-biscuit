@@ -119,7 +119,7 @@ const EXCEPTIONS: &[Exception] = &[
     ),
     exception(
         "darkmatter/schemas",
-        "partials/doc.yaml",
+        "partials/fm.yaml",
         Class::EnvelopeRejected,
         "`description` header key",
     ),
@@ -264,7 +264,7 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     // `any` for provider-specific shapes and the optional sequence states.
     ("darkmatter/docs/schemas/claudine.yaml", &["unknown"]),
     ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
-    ("darkmatter/schemas/partials/doc.yaml", &["unknown"]),
+    ("darkmatter/schemas/partials/fm.yaml", &["unknown"]),
 ];
 
 struct Artifact {

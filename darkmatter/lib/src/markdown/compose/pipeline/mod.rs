@@ -104,7 +104,7 @@ impl Markdown {
         // Every nested and transcluded child clones these options, so one
         // handle drains the ICMP denials raised anywhere under this root.
         let icmp = options.icmp.clone();
-        // Same handle rule for the lazy roots: one sink drains every fail-closed
+        // Same handle rule for the lazy root: one sink drains every fail-closed
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
@@ -128,7 +128,7 @@ impl Markdown {
     /// pass 2 resolves only the keys that were deferred because they
     /// referenced shell-pending values. Every authored value is scanned once
     /// and its result is data (see [`value_origin`](super::value_origin)).
-    /// Read-side functions and `doc.*` are available in both passes.
+    /// Read-side functions and `fm.*` are available in both passes.
     ///
     /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks

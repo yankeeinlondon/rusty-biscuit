@@ -3007,7 +3007,7 @@ impl ComposeOptions {
         enc.bool(icmp.is_discovery());
         enc.field("icmp_injected_transport");
         enc.bool(icmp.has_injected_transport());
-        // The lazy roots are evaluated per expression and never cached, so only
+        // The lazy root is evaluated per expression and never cached, so only
         // whether a refresh capability exists can change a composed result.
         enc.field("current_provider");
         enc.bool(current.has_provider());

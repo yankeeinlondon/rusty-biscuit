@@ -519,15 +519,20 @@ fn involved_keys(key: Option<&str>, expression: &str) -> Vec<YamlKeyPath> {
 }
 
 /// Pushes the root segment of every frontmatter `Expr::Variable` onto `names`,
-/// skipping `ctx.*`/`env.*`/`doc` (which resolve from the runtime context, not
-/// the frontmatter block the excerpt slices).
+/// skipping `ctx.*`/`env.*` (which resolve from the runtime context, not the
+/// frontmatter block the excerpt slices) and bare `fm` (a whole-object
+/// snapshot that names no one key). `fm.<key>` and a literal `fm['<key>']`
+/// name the same key as bare `<key>`.
 fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
+    use crate::markdown::compose::expression::fm_namespace::{
+        FRONTMATTER_ROOT, literal_index_key, strip_fm_prefix,
+    };
     match expr {
         Expr::Variable(path) => {
-            if path.starts_with("ctx.") || path.starts_with("env.") || path == "doc" {
+            if path.starts_with("ctx.") || path.starts_with("env.") || path == FRONTMATTER_ROOT {
                 return;
             }
-            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let effective = strip_fm_prefix(path);
             let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
                 names.push(root.to_string());
@@ -556,6 +561,10 @@ fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
             collect_frontmatter_roots(right, names);
         }
         Expr::Index { base, index } => {
+            if let Some(key) = literal_index_key(base, index) {
+                names.push(key.to_string());
+                return;
+            }
             collect_frontmatter_roots(base, names);
             collect_frontmatter_roots(index, names);
         }

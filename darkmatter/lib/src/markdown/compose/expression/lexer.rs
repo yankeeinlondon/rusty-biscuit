@@ -2209,7 +2209,7 @@ And {{ another }}."#;
 
         #[test]
         fn kebab_segment_inside_a_dotted_path_joins() {
-            assert_eq!(tokens("doc.spec-name"), vec![var("doc.spec-name"), Eof]);
+            assert_eq!(tokens("fm.spec-name"), vec![var("fm.spec-name"), Eof]);
             assert_eq!(tokens("a-b.c-d.e"), vec![var("a-b.c-d.e"), Eof]);
         }
 
@@ -2283,7 +2283,7 @@ And {{ another }}."#;
         #[test]
         fn trailing_dash_does_not_join() {
             assert_eq!(tokens("spec-"), vec![var("spec"), Minus, Eof]);
-            assert_eq!(tokens("doc.spec-"), vec![var("doc.spec"), Minus, Eof]);
+            assert_eq!(tokens("fm.spec-"), vec![var("fm.spec"), Minus, Eof]);
             assert_eq!(tokens("spec- "), vec![var("spec"), Minus, Eof]);
         }
 
@@ -2295,10 +2295,10 @@ And {{ another }}."#;
 
         #[test]
         fn joined_span_covers_the_whole_dashed_name() {
-            let input = "  doc.spec-name - café-x ";
+            let input = "  fm.spec-name - café-x ";
             let spanned = lex_spanned(input, ParseMode::Interpolation).unwrap();
-            assert_eq!(spanned[0].value, var("doc.spec-name"));
-            assert_eq!(&input[spanned[0].span.clone()], "doc.spec-name");
+            assert_eq!(spanned[0].value, var("fm.spec-name"));
+            assert_eq!(&input[spanned[0].span.clone()], "fm.spec-name");
             assert_eq!(spanned[1].value, Minus);
             assert_eq!(spanned[2].value, var("café-x"));
             assert_eq!(&input[spanned[2].span.clone()], "café-x");
@@ -2335,7 +2335,7 @@ And {{ another }}."#;
         #[test]
         fn kebab_partials_join() {
             assert_eq!(partial("{{ spec-na"), "spec-na");
-            assert_eq!(partial("{{ doc.spec-na"), "doc.spec-na");
+            assert_eq!(partial("{{ fm.spec-na"), "fm.spec-na");
             assert_eq!(partial("{{ phase-2"), "phase-2");
             assert_eq!(partial("{{ café-na"), "café-na");
         }
@@ -2373,7 +2373,7 @@ And {{ another }}."#;
 
         #[test]
         fn agrees_with_the_lexer_on_complete_names() {
-            for input in ["spec-name", "doc.spec-name", "a-b-c", "iteration-1", "café-name"] {
+            for input in ["spec-name", "fm.spec-name", "a-b-c", "iteration-1", "café-name"] {
                 let first = lex_spanned(input, ParseMode::Interpolation).unwrap()[0].clone();
                 assert_eq!(first.span, 0..input.len(), "lexer for {input:?}");
                 assert_eq!(identifier_prefix_start(input), 0, "prefix for {input:?}");

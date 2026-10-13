@@ -404,7 +404,7 @@ fn former_breaking_forms_now_lex_as_one_variable() {
         ("iteration-1", ParseMode::Interpolation, vec!["iteration-1"]),
         // The collision gate A found in `prompts/_reviews/review-spec-inline.md`.
         ("depends-on", ParseMode::Condition, vec!["depends-on"]),
-        ("doc.spec-name", ParseMode::Interpolation, vec!["doc.spec-name"]),
+        ("fm.spec-name", ParseMode::Interpolation, vec!["fm.spec-name"]),
         ("a-_b", ParseMode::Interpolation, vec!["a-_b"]),
         ("false-1", ParseMode::Interpolation, vec!["false-1"]),
         ("true-value", ParseMode::Condition, vec!["true-value"]),
@@ -438,7 +438,7 @@ fn subtraction_and_literal_dashes_never_join() {
         // Dashes inside string literals are never operators.
         "'review-' + iteration",
         "dirname(spec) + '/review-plan-' + iteration + '.md'",
-        "doc['spec-name']",
+        "fm['spec-name']",
     ] {
         assert_eq!(dashed_variables(text, ParseMode::Interpolation), Ok(vec![]), "`{text}`");
     }
@@ -450,7 +450,7 @@ fn subtraction_and_literal_dashes_never_join() {
 fn gate_b_rejects_the_corpus_failures_found_in_phase_one() {
     for (surface, text) in [
         (Surface::WhenDirective, "!ctx.is_monorepo\""),
-        (Surface::WhenDirective, "file_exists({{doc.doc}})"),
+        (Surface::WhenDirective, "file_exists({{fm.doc}})"),
         (Surface::FrontmatterInterpolation, "…"),
     ] {
         let expression = CorpusExpression { path: PathBuf::from("fixture.md"), surface, text: text.to_string() };

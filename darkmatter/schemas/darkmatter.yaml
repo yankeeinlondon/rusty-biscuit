@@ -1,7 +1,7 @@
 kind: schema
 description: schema's for all global variables defined in Darkmatter
 $schema:
-    doc: "doc@./partials/doc.yaml -> The `doc` schema which forms the Frontmatter's base schema in Darkmatter"
+    fm: "fm@./partials/fm.yaml -> The `fm` root: the document's frontmatter, typed by Darkmatter's base schema"
     # eagerly loaded context
     ctx: context@./partials/context-variables.yaml -> Context about the environment the document is operating in.
     # lazily loaded context

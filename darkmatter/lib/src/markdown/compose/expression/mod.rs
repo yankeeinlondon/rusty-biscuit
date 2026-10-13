@@ -69,7 +69,7 @@ pub mod ast;
 pub mod binding;
 pub mod catalog;
 pub mod ctx;
-pub(crate) mod doc_namespace;
+pub(crate) mod fm_namespace;
 pub mod error;
 pub mod file_suggestions;
 pub mod functions;
@@ -94,6 +94,9 @@ pub use catalog::{
     ReturnType, ReturnValueType, RootEvaluation, RootMembers,
 };
 pub use ctx::CtxLookup;
+pub use fm_namespace::{
+    FRONTMATTER_ROOT, FmPath, fm_namespace_path, resolve_fm_namespace_in_object,
+};
 pub use error::{
     ArityBound, CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
     FileReferenceDiagnostic, ProviderFailureKind,
@@ -311,12 +314,12 @@ pub trait EvaluationLookup {
 
     /// Opens a new expression-evaluation scope.
     ///
-    /// The lazy reserved roots (`current`, `current_env`) memoize **per
-    /// expression evaluation, per key** (spec Q2/D5): repeated reads of one key
-    /// inside a single `{{ … }}` span, `when=` condition, or `$()` branch agree,
-    /// while the next expression observes the fact afresh. Every surface that
-    /// evaluates one parsed expression calls this first; the default is a no-op
-    /// for lookups that hold no lazy roots.
+    /// The lazy reserved root `current` memoizes **per expression evaluation,
+    /// per key** (spec Q2/D5): repeated reads of one key inside a single
+    /// `{{ … }}` span, `when=` condition, or `$()` branch agree, while the next
+    /// expression observes the fact afresh. Every surface that evaluates one
+    /// parsed expression calls this first; the default is a no-op for lookups
+    /// that hold no lazy root.
     fn begin_expression_scope(&self) {}
 }
 
@@ -442,7 +445,7 @@ pub fn scalar_string(value: &Value) -> String {
 /// ```
 pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, ExpressionError> {
     // One call is one expression evaluation, which is the memo scope the lazy
-    // `current` / `current_env` roots refresh at (Q2). The recursion below is
+    // `current` root refreshes at (Q2). The recursion below is
     // inside that scope, so it never reopens it.
     lookup.begin_expression_scope();
     evaluate_expr(expr, lookup, AbsenceScope::default(), &mut ())

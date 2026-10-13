@@ -595,7 +595,7 @@ pub enum ShellExpansionError {
 
     /// Discovery cannot evaluate `dependency` the way the compose pass will:
     /// shell probes answer `false`, `as_markdown` composes nothing, and a lazy
-    /// `current`/`current_env` read observes nothing there. A command or nested
+    /// `current` read observes nothing there. A command or nested
     /// content that depends on one could be approved in one shape and executed
     /// in another.
     #[error(

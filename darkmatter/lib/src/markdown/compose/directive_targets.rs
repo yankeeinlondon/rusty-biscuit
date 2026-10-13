@@ -235,7 +235,9 @@ fn expression_path(expression: &Expr) -> Option<ExpressionPath> {
         Expr::Paren(inner) => return expression_path(inner),
         _ => return None,
     };
-    if let Some(document_path) = path.strip_prefix("doc.") {
+    if let Some(crate::markdown::compose::expression::FmPath::Member(document_path)) =
+        crate::markdown::compose::expression::fm_namespace_path(path)
+    {
         if document_path.is_empty() || document_path.contains('.') {
             return None;
         }

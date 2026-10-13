@@ -39,10 +39,11 @@ fn assert_nullable(actual: TargetNullability, expected_root: &str) {
 
 /// A bare reserved namespace is never a document target, even when the schema
 /// declares (or the frontmatter holds) a property of the same name; that
-/// property stays reachable as `doc.<name>`.
+/// property stays reachable as `fm.<name>`. `doc` and `current_env` are not
+/// reserved, so each bare name is the schema property.
 #[test]
 fn a_reserved_namespace_root_is_never_a_document_target() {
-    let roots = ["doc", "ctx", "env", "current", "current_env"];
+    let roots = ["fm", "ctx", "env", "current"];
     let properties: String = roots.iter().map(|root| format!("  {root}: file\n")).collect();
     let (_, effective, unset) = document_with_schema(&properties, "");
 
@@ -54,7 +55,7 @@ fn a_reserved_namespace_root_is_never_a_document_target() {
         );
         assert_nullable(
             classify_target_nullability(
-                &parse(&format!("doc.{root}")).unwrap(),
+                &parse(&format!("fm.{root}")).unwrap(),
                 Some(&effective),
                 &unset,
             ),
@@ -65,6 +66,14 @@ fn a_reserved_namespace_root_is_never_a_document_target() {
         classify_target_nullability(&parse("null").unwrap(), Some(&effective), &unset),
         TargetNullability::Unknown,
     );
+
+    for ordinary in ["doc", "current_env"] {
+        let (_, effective, unset) = document_with_schema(&format!("  {ordinary}: file\n"), "");
+        assert_nullable(
+            classify_target_nullability(&parse(ordinary).unwrap(), Some(&effective), &unset),
+            ordinary,
+        );
+    }
 }
 
 #[test]
@@ -79,7 +88,7 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         "optional",
     );
     assert_nullable(
-        classify_target_nullability(&parse("doc.defaulted").unwrap(), Some(&effective), &missing),
+        classify_target_nullability(&parse("fm.defaulted").unwrap(), Some(&effective), &missing),
         "defaulted",
     );
     assert_eq!(
@@ -152,7 +161,7 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         TargetNullability::Unknown,
     );
 
-    for expression in ["nested.value", "doc.nested.value", "optional || 'fallback'"] {
+    for expression in ["nested.value", "fm.nested.value", "optional || 'fallback'"] {
         assert_eq!(
             classify_target_nullability(&parse(expression).unwrap(), Some(&effective), &missing),
             TargetNullability::Unknown,

@@ -1023,8 +1023,8 @@ fn ternary_value_branch_absent_property_resolves_to_empty() {
 }
 
 #[test]
-fn ternary_doc_namespace_branch_resolves_property_over_executable() {
-    // `doc.echo` resolves the frontmatter property even though `echo` is a
+fn ternary_fm_namespace_branch_resolves_property_over_executable() {
+    // `fm.echo` resolves the frontmatter property even though `echo` is a
     // real executable on PATH.
     let temp_dir = TempDir::new().unwrap();
     let mut approved = std::collections::HashSet::new();
@@ -1033,7 +1033,7 @@ fn ternary_doc_namespace_branch_resolves_property_over_executable() {
     let mut fm = fm_from_json(json!({
         "flag": false,
         "echo": "property-value",
-        "out": "$(flag ? cat README : doc.echo)"
+        "out": "$(flag ? cat README : fm.echo)"
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)

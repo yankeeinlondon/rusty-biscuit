@@ -10,7 +10,7 @@
 //! Each [`SubtreeCompose::compose`] call associates one
 //! [`EvaluationSession`]: the caller's runtime globals ([`RuntimeBinding`]:
 //! eager, lazy, or unavailable) over Darkmatter's own seed state
-//! (`ctx`/`env`/`doc`/`current`/`current_env` + read-side functions via
+//! (`ctx`/`env`/`fm`/`current` + read-side functions via
 //! [`ResolutionContext`]). A root resolves as a reserved namespace, then a
 //! registered global, then a document property; an absent document property is
 //! `null`. A caller that declares its globals in a [`BindingView`] gets the
@@ -523,7 +523,7 @@ mod tests {
             cause.as_ref(),
             ExpressionError::Binding(binding) if matches!(binding.as_ref(), BindingError::Unavailable(_))
         ));
-        let document = SubtreeCompose::new(&json!("{{ doc.group }}"), &state)
+        let document = SubtreeCompose::new(&json!("{{ fm.group }}"), &state)
             .with_global("group", InjectedGlobal::unavailable(UnavailabilityReason::new("host.outside-group")))
             .compose()
             .unwrap();
@@ -535,7 +535,7 @@ mod tests {
         use crate::markdown::compose::expression::BindingError;
 
         let state = state_with(vec![]);
-        for reserved in ["doc", "ctx", "env", "current", "current_env"] {
+        for reserved in ["fm", "ctx", "env", "current"] {
             let error = SubtreeCompose::new(&json!("{{ x }}"), &state)
                 .with_global(reserved, InjectedGlobal::lazy(|| panic!("never evaluated")))
                 .compose()

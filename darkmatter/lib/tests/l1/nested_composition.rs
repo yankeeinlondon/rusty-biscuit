@@ -424,7 +424,7 @@ fn a_probe_dependent_as_markdown_argument_fails_before_execution() {
     assert_shape_fails_before_execution(
         "probe-arg.md",
         "",
-        "{{ as_markdown(can_execute(\"git\") ? \"::shell echo a\" : doc.ran) }}\n",
+        "{{ as_markdown(can_execute(\"git\") ? \"::shell echo a\" : fm.ran) }}\n",
         "can_execute()",
     );
 }

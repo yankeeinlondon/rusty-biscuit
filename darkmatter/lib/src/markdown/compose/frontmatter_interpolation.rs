@@ -1,7 +1,7 @@
 //! Frontmatter interpolation engine.
 //!
 //! Resolves `{{ variable }}` expressions inside frontmatter values. Lookups
-//! read non-templated (seed) frontmatter values, the reserved `doc` / `doc.*`
+//! read non-templated (seed) frontmatter values, the reserved `fm` / `fm.*`
 //! namespace (the incrementally-resolved frontmatter object), `ctx.*`, and
 //! `env.*`. When a [`ResolutionContext`] is attached, the read-side functions
 //! (`file_exists`, `frontmatter`, `absolute`, `relative`, …) resolve their path
@@ -33,7 +33,7 @@
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{
     EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, ResolvedBinding,
-    doc_namespace, parse,
+    fm_namespace, parse,
 };
 use super::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
@@ -61,7 +61,7 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 
 /// Lookup state for frontmatter interpolation.
 ///
-/// Resolves the reserved `doc` namespace (the incrementally-resolved seed map),
+/// Resolves the reserved `fm` namespace (the incrementally-resolved seed map),
 /// the non-templated (seed) top-level frontmatter values, and `ctx.*` / `env.*`
 /// from the runtime context. An optional [`ResolutionContext`] enables the
 /// read-side expression functions (`file_exists`, `frontmatter`, …) during
@@ -71,7 +71,7 @@ pub(crate) struct FrontmatterSeedState {
     context: ComposeContext,
     resolution_context: Option<ResolutionContext>,
     name_coercion_keys: Vec<String>,
-    /// The lazy `current` / `current_env` roots and their per-expression memo.
+    /// The lazy `current` root and its per-expression memo.
     current: super::context::CurrentScope,
 }
 
@@ -86,9 +86,8 @@ impl FrontmatterSeedState {
         }
     }
 
-    /// Sets the request's refresh authority for the lazy `current` /
-    /// `current_env` roots. The default holds no capability, so every
-    /// `current.<key>` read fails closed.
+    /// Sets the request's refresh authority for the lazy `current` root. The
+    /// default holds no capability, so every `current.<key>` read fails closed.
     #[must_use]
     pub(crate) fn with_current_authority(
         mut self,
@@ -123,19 +122,19 @@ impl FrontmatterSeedState {
 
 impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
-        // Reserved lazy roots, intercepted before every other surface so no
-        // frontmatter key can shadow `current` / `current_env`.
+        // The reserved lazy root, intercepted before every other surface so no
+        // frontmatter key can shadow `current`.
         if let Some(resolved) = self.current.resolve(path, &self.context) {
             return resolved.ok().flatten();
         }
 
-        // Reserved `doc` namespace, intercepted before key/ctx/env lookup.
-        if doc_namespace::is_doc_namespace(path) {
-            return doc_namespace::resolve_doc_namespace_in_map(path, &self.data);
+        // Reserved `fm` namespace, intercepted before key/ctx/env lookup.
+        if fm_namespace::is_fm_namespace(path) {
+            return fm_namespace::resolve_fm_namespace_in_map(path, &self.data);
         }
 
         // The `ctx` and `env` namespaces, their exact roots included, so a
-        // frontmatter key of either name is reachable only as `doc.<name>`.
+        // frontmatter key of either name is reachable only as `fm.<name>`.
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.context.get_effective(ctx_key);
         }
@@ -1451,8 +1450,11 @@ fn static_truthiness(expr: &Expr, seed_map: &HashMap<String, Value>) -> Option<b
         Expr::BoolLiteral(value) => Some(*value),
         Expr::Paren(inner) => static_truthiness(inner, seed_map),
         Expr::Variable(path) => {
-            let root = path.strip_prefix("doc.").unwrap_or(path);
-            if root == "doc" || root.starts_with("ctx.") || root.starts_with("env.") {
+            let root = fm_namespace::strip_fm_prefix(path);
+            if root == fm_namespace::FRONTMATTER_ROOT
+                || root.starts_with("ctx.")
+                || root.starts_with("env.")
+            {
                 return None;
             }
             let (root, rest) = root.split_once('.').unwrap_or((root, ""));
@@ -1515,21 +1517,23 @@ fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
 /// onto `refs`, skipping `ctx.*` and `env.*` since those resolve from the
 /// runtime context, not seed frontmatter.
 ///
-/// The reserved `doc` namespace mirrors bare-name dependencies (Decision C):
-/// `doc.<root>` contributes the same dependency root as bare `<root>`, so
-/// `{{ doc.a }}` waits for templated key `a` and `doc.doc` waits for a literal
-/// key named `doc`. Bare `doc` is a snapshot of the currently-resolved values
-/// and contributes no dependency, avoiding all-key dependencies and self-cycles.
+/// The reserved `fm` namespace mirrors bare-name dependencies (Decision C):
+/// `fm.<root>` contributes the same dependency root as bare `<root>`, so
+/// `{{ fm.a }}` waits for templated key `a` and `fm.fm` waits for a literal
+/// key named `fm`. A literal index on bare `fm` names one whole key:
+/// `fm['release.channel']` waits for the key `release.channel`, not `release`.
+/// Bare `fm` is a snapshot of the currently-resolved values and contributes no
+/// dependency, avoiding all-key dependencies and self-cycles.
 fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
     match expr {
         Expr::Variable(path) => {
             if path.starts_with("ctx.") || path.starts_with("env.") {
                 return;
             }
-            if path == "doc" {
+            if path == fm_namespace::FRONTMATTER_ROOT {
                 return;
             }
-            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let effective = fm_namespace::strip_fm_prefix(path);
             let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
                 refs.push(root.to_string());
@@ -1558,6 +1562,10 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
             collect_variable_roots(right, refs);
         }
         Expr::Index { base, index } => {
+            if let Some(key) = fm_namespace::literal_index_key(base, index) {
+                refs.push(key.to_string());
+                return;
+            }
             collect_variable_roots(base, refs);
             collect_variable_roots(index, refs);
         }
@@ -1583,7 +1591,7 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
 /// interpolation expressions that match an excluded (deferred) key.
 ///
 /// Handles both bare references (`{{ failure }}`, `{{ failure.message }}`) and
-/// `doc.<key>` references (`{{ doc.failure.message }}`), mirroring the root
+/// `fm.<key>` references (`{{ fm.failure.message }}`), mirroring the root
 /// extraction in [`collect_variable_roots`]. Returns the matching deferred
 /// keys in order of first discovery, deduplicated.
 fn collect_deferred_key_references(
@@ -1747,26 +1755,26 @@ mod tests {
         }
 
         #[test]
-        fn doc_namespace_resolves_against_seed_only() {
+        fn fm_namespace_resolves_against_seed_only() {
             let mut data = HashMap::new();
             data.insert("build".to_string(), json!("seed-build"));
-            data.insert("doc".to_string(), json!({ "child": "literal-doc" }));
+            data.insert("fm".to_string(), json!({ "child": "literal-fm" }));
             let state = FrontmatterSeedState::new(data, test_context());
 
-            // doc.<path> resolves a seed property.
-            assert_eq!(state.get("doc.build"), Some(json!("seed-build")));
+            // fm.<path> resolves a seed property.
+            assert_eq!(state.get("fm.build"), Some(json!("seed-build")));
 
-            // bare doc returns the whole seed object.
-            let obj = state.get("doc").expect("bare doc resolves");
+            // bare fm returns the whole seed object.
+            let obj = state.get("fm").expect("bare fm resolves");
             assert!(obj.is_object());
             assert_eq!(obj.get("build"), Some(&json!("seed-build")));
 
-            // a literal property named `doc` is reached as doc.doc.
-            assert_eq!(state.get("doc.doc.child"), Some(json!("literal-doc")));
+            // a literal property named `fm` is reached as fm.fm.
+            assert_eq!(state.get("fm.fm.child"), Some(json!("literal-fm")));
 
-            // missing doc.* values do not fall back to ctx.*.
+            // missing fm.* values do not fall back to ctx.*.
             assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
-            assert_eq!(state.get("doc.today"), None);
+            assert_eq!(state.get("fm.today"), None);
         }
 
         #[test]
@@ -2511,13 +2519,13 @@ mod tests {
         }
 
         #[test]
-        fn doc_root_dependency_orders_like_bare_name() {
-            // `{{ doc.a }}` must wait for the templated key `a` exactly as a bare
+        fn fm_root_dependency_orders_like_bare_name() {
+            // `{{ fm.a }}` must wait for the templated key `a` exactly as a bare
             // `{{ a }}` reference would (Decision C).
             let mut fm = fm_from_json(json!({
                 "base": "/root",
                 "a": "{{ base }}/spec.md",
-                "b": "{{ doc.a }}",
+                "b": "{{ fm.a }}",
             }));
             interpolate_frontmatter(&mut fm, &test_context(), ExpressionFailurePolicy::Strict, false, None, &HashSet::new(), &[]).unwrap();
             assert_eq!(fm.as_map().get("a"), Some(&json!("/root/spec.md")));
@@ -2759,9 +2767,9 @@ mod tests {
         }
 
         #[test]
-        fn composed_key_referencing_deferred_doc_namespace_rejected() {
+        fn composed_key_referencing_deferred_fm_namespace_rejected() {
             let mut fm = fm_from_json(json!({
-                "summary": "{{ doc.failure.message }}",
+                "summary": "{{ fm.failure.message }}",
                 "failure": {
                     "message": "{{err.msg}}"
                 }

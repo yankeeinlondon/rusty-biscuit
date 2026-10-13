@@ -581,7 +581,7 @@ fn regression_basename_in_interpolation() {
     let content = r#"---
 path: foo/bar/baz/test.md
 ---
-Basename: {{ basename(doc.path) }}"#;
+Basename: {{ basename(fm.path) }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap();
     assert!(composed.content().contains("Basename: test.md"));
@@ -648,7 +648,7 @@ fn regression_page_block_with_is_indexed_file() {
     let content = r#"---
 path: foo/review-1.md
 ---
-::block when="is_indexed_file(doc.path)"
+::block when="is_indexed_file(fm.path)"
 Indexed file detected
 ::end-block"#;
     let md: Markdown = content.into();

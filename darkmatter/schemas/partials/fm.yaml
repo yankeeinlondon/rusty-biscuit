@@ -1,7 +1,7 @@
 kind: schema
-description: the _base schema_ for Darkmatter (aka, the "doc" global variable)
+description: the _base schema_ for Darkmatter (aka, the `fm` root, the document's frontmatter)
 types:
-    doc:
+    fm:
         "$schema": "schema -> Declares an inline SimplifiedSchema mapping, referenced schema file, or root union for this document. Raw JSON Schema is supported through referenced files only. Document schemas override baseline properties on conflict."
         title: "string -> Human-readable document title. Used by markdown_title(), reports, diagnostics, and downstream tools that need a display name."
         description: "string -> Human-readable document summary. Used by reports and diagnostics when identifying a document."

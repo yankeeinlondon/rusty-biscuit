@@ -1,11 +1,12 @@
-//! Deferred capability planning for the lazy roots and expression functions.
+//! Deferred capability planning for the lazy `current` root and expression
+//! functions.
 //!
 //! Two planning products stay distinct (decision D4):
 //!
 //! - [`ContextRequirements`](super::ContextRequirements) — the **eager** `ctx.*`
 //!   groups a source needs captured before composition starts.
-//! - [`DeferredCapabilities`] — the **lazy** `current.<key>` keys,
-//!   `current_env.<KEY>` names, and expression functions a source *can* reach.
+//! - [`DeferredCapabilities`] — the **lazy** `current.<key>` keys and
+//!   expression functions a source *can* reach.
 //!
 //! A `current.*` reference never adds an eager requirement, and an eager
 //! requirement never answers a `current.*` read. Planning a deferred capability
@@ -28,7 +29,6 @@ use super::groups::scan_literal_spans;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeferredCapabilities {
     current: BTreeSet<String>,
-    current_env: BTreeSet<String>,
     functions: BTreeSet<String>,
 }
 
@@ -44,9 +44,6 @@ impl DeferredCapabilities {
             if super::ContextGroup::for_key(key).is_some() {
                 planned.current.insert(key.to_string());
             }
-        });
-        planned.scan_root(content, &literal_spans, "current_env.", |planned, key| {
-            planned.current_env.insert(key.to_string());
         });
         planned.scan_functions(content, &literal_spans);
         planned
@@ -64,11 +61,6 @@ impl DeferredCapabilities {
         self.current.iter().map(String::as_str)
     }
 
-    /// The environment names a `current_env.<KEY>` reference could reread.
-    pub fn current_env_keys(&self) -> impl Iterator<Item = &str> {
-        self.current_env.iter().map(String::as_str)
-    }
-
     /// The cataloged expression functions this source could call.
     pub fn functions(&self) -> impl Iterator<Item = &str> {
         self.functions.iter().map(String::as_str)
@@ -76,13 +68,12 @@ impl DeferredCapabilities {
 
     /// Whether this source reaches no lazy read and no function call.
     pub fn is_empty(&self) -> bool {
-        self.current.is_empty() && self.current_env.is_empty() && self.functions.is_empty()
+        self.current.is_empty() && self.functions.is_empty()
     }
 
     /// Every capability planned by this set or by `other`.
     pub fn union(mut self, other: &Self) -> Self {
         self.current.extend(other.current.iter().cloned());
-        self.current_env.extend(other.current_env.iter().cloned());
         self.functions.extend(other.functions.iter().cloned());
         self
     }
@@ -201,12 +192,11 @@ mod tests {
     }
 
     #[test]
-    fn environment_names_and_function_calls_are_planned_separately() {
+    fn an_ordinary_current_env_property_plans_nothing_and_function_calls_are_planned() {
         let planned = DeferredCapabilities::for_content(
             "{{ current_env.HOME }} {{ recent_commits(3) }} {{ length(ipv4()) }}",
         );
 
-        assert_eq!(planned.current_env_keys().collect::<Vec<_>>(), ["HOME"]);
         assert_eq!(
             planned.functions().collect::<Vec<_>>(),
             ["ipv4", "length", "recent_commits"],
@@ -237,7 +227,7 @@ mod tests {
         let planned = DeferredCapabilities::for_document(&document);
 
         assert_eq!(keys(&planned), ["branch"]);
-        assert_eq!(planned.current_env_keys().collect::<Vec<_>>(), ["HOSTNAME"]);
+        assert!(planned.functions().next().is_none());
     }
 
     #[test]
@@ -247,6 +237,5 @@ mod tests {
         let merged = left.union(&right);
 
         assert_eq!(keys(&merged), ["branch", "os"]);
-        assert_eq!(merged.current_env_keys().collect::<Vec<_>>(), ["PATH"]);
     }
 }

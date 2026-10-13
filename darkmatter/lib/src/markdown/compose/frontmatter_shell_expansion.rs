@@ -28,7 +28,7 @@
 
 use super::expression::absence::MissingRoot;
 use super::expression::{
-    ExpressionError, doc_namespace, evaluate_observed, is_truthy, parse, parse_condition,
+    ExpressionError, fm_namespace, evaluate_observed, is_truthy, parse, parse_condition,
     scalar_string,
 };
 use super::frontmatter_interpolation::FrontmatterSeedState;
@@ -310,7 +310,7 @@ pub(crate) enum Branch {
     /// Literal empty string branch — produces no shell invocation.
     Empty,
     /// A §2-ladder value branch: a quoted/numeric/boolean literal, a `name(...)`
-    /// expression function, a `doc.*` reference, or a lone bare name that is not
+    /// expression function, an `fm.*` reference, or a lone bare name that is not
     /// on `PATH` (a frontmatter property, or `null` when absent). It resolves to
     /// a value via the expression engine at execute time and contributes **no**
     /// shell command to the allowlist-reachable set, so it is excluded from
@@ -574,7 +574,7 @@ pub(crate) fn parse_shell_value(
 
     // §2 validity rule for a non-ternary directive: the body must be a real
     // shell command in executed position. A body that resolves to a value
-    // (a quoted/numeric/boolean literal, a `name(...)` function, a `doc.*`
+    // (a quoted/numeric/boolean literal, a `name(...)` function, an `fm.*`
     // reference, or a bare frontmatter property) is expression content, not a
     // shell pipeline — reject it with a `{{ }}` suggestion.
     if !matches!(classify_executed_body(validation_inner), BodyClass::Command) {
@@ -742,7 +742,7 @@ fn parse_branch_from_original(
     }
 
     // Classify the branch per the §2 ladder. Value branches (literals,
-    // `name(...)` functions, `doc.*`, or bare properties) resolve through the
+    // `name(...)` functions, `fm.*`, or bare properties) resolve through the
     // expression engine and carry no shell executable, so the
     // executable-interpolation guard applies only to command branches.
     match classify_executed_body(original_trim) {
@@ -798,7 +798,7 @@ enum BodyClass {
     /// An empty-string literal (`''` / `""`) — produces `""`.
     Empty,
     /// Resolves to a value through the expression engine (literal, `name(...)`
-    /// function, `doc.*`, or a bare frontmatter property / `null`). Not a shell
+    /// function, `fm.*`, or a bare frontmatter property / `null`). Not a shell
     /// command.
     Value,
     /// A shell command pipeline (path-bearing executable, a bare name found on
@@ -839,8 +839,8 @@ fn classify_executed_body(body: &str) -> BodyClass {
         if t.contains('/') {
             return BodyClass::Command;
         }
-        // `doc.*` is always an explicit frontmatter property reference.
-        if doc_namespace::is_doc_namespace(t) {
+        // `fm.*` is always an explicit frontmatter property reference.
+        if fm_namespace::is_fm_namespace(t) {
             return BodyClass::Value;
         }
         if which::which(t).is_ok() {
@@ -1281,7 +1281,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // Snapshot frontmatter values for ternary condition lookups. Built lazily
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
     // resolution context so a ternary condition and its selected branch can use
-    // the read-side functions (`file_exists`, `frontmatter`, …) and `doc.*`.
+    // the read-side functions (`file_exists`, `frontmatter`, …) and `fm.*`.
     // Authorized remote reads use the same run-local runtime as body
     // interpolation, so equivalent calls share policy and single-flight state.
     let resolution_context = options.frontmatter_resolution_context();
@@ -1733,7 +1733,7 @@ enum PreparedBranch {
 ///
 /// `Branch::Empty` short-circuits to `""` and contributes no command. A
 /// `Branch::Value` is evaluated through the expression engine (literals,
-/// `name(...)` functions, `doc.*`, or a bare frontmatter property / `null`)
+/// `name(...)` functions, `fm.*`, or a bare frontmatter property / `null`)
 /// and likewise contributes no command, so it is excluded from approval
 /// discovery. `Branch::Pipeline` is interpolated against the seed state,
 /// tokenized into a pipeline, and dispatched through [`prepare_branch_pipeline`]
@@ -1805,7 +1805,7 @@ fn prepare_optional_branch(
     }
 }
 
-/// Evaluates a §2 value branch (a literal, `name(...)` function, `doc.*`, or a
+/// Evaluates a §2 value branch (a literal, `name(...)` function, `fm.*`, or a
 /// bare frontmatter property) against the seed state and returns its scalar
 /// string form.
 ///

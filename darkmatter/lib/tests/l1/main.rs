@@ -35,6 +35,7 @@ mod union_fixtures;
 mod content_policy_fixtures;
 
 mod absent_property_contract;
+mod fm_namespace_contract;
 mod schemas_effective_presence;
 mod schemas_core_type_values;
 mod schemas_runtime_parity;

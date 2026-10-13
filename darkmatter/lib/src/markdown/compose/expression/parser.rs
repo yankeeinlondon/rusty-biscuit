@@ -2114,7 +2114,7 @@ mod tests {
 
         #[test]
         fn kebab_name_lowers_to_one_variable_spanning_the_whole_name() {
-            for src in ["spec-name", "doc.spec-name", "iteration-1", "false-1", "true-value"] {
+            for src in ["spec-name", "fm.spec-name", "iteration-1", "false-1", "true-value"] {
                 let spanned = parse_spanned(src).unwrap();
                 assert!(
                     matches!(&spanned.kind, SpannedExprKind::Variable(name) if name == src),
@@ -2209,10 +2209,10 @@ mod tests {
         fn keys_the_guard_rejects_still_need_quotes() {
             // A dotted key, a non-ASCII first character, and a leading digit
             // are all outside the unquoted-key guard.
-            for src in ["{ doc.spec-name: 1 }", "{ été-name: 1 }", "{ 2-name: 1 }", "{ foo--bar: 1 }"] {
+            for src in ["{ fm.spec-name: 1 }", "{ été-name: 1 }", "{ 2-name: 1 }", "{ foo--bar: 1 }"] {
                 assert!(parse(src).is_err(), "{src:?} should require a quoted key");
             }
-            for key in ["doc.spec-name", "été-name", "2-name", "foo--bar"] {
+            for key in ["fm.spec-name", "été-name", "2-name", "foo--bar"] {
                 let src = format!(r#"{{ "{key}": 1 }}"#);
                 assert_eq!(
                     parse(&src).unwrap(),

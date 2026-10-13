@@ -1,4 +1,4 @@
-//! The lazy `current` / `current_env` roots through the real compose pipeline
+//! The lazy `current` root through the real compose pipeline
 //! (AC27, AC31, AC32, and the Darkmatter-owned half of AC28/AC36).
 //!
 //! Every test drives a controlled in-process refresh capability, so nothing
@@ -198,7 +198,6 @@ fn the_removed_nesting_fails_instead_of_aliasing_ctx() {
     for document in [
         "{{ current.ctx.branch }}\n",
         "{{ current.env.HOME }}\n",
-        "{{ current_env.ctx.branch }}\n",
     ] {
         let error = compose_error(document, options(provider.clone()));
         assert!(
@@ -298,7 +297,7 @@ fn a_frontmatter_key_cannot_shadow_a_reserved_root() {
 fn preflight_plans_the_lazy_reads_without_observing_them() {
     let provider = ScriptedRefresh::new([("branch", serde_json::json!("main"))]);
     let document: Markdown =
-        "---\nb: '{{ current.branch }}'\n---\n{{ current_env.PATH }} {{ recent_commits(2) }}\n"
+        "---\nb: '{{ current.branch }}'\n---\n{{ recent_commits(2) }}\n"
             .into();
 
     let report = document
@@ -306,30 +305,23 @@ fn preflight_plans_the_lazy_reads_without_observing_them() {
         .expect("preflight must succeed");
 
     assert_eq!(report.deferred_context.current_keys().collect::<Vec<_>>(), ["branch"]);
-    assert_eq!(report.deferred_context.current_env_keys().collect::<Vec<_>>(), ["PATH"]);
     assert!(report.deferred_context.functions().any(|name| name == "recent_commits"));
     assert!(provider.calls().is_empty(), "preflight must observe nothing: {:?}", provider.calls());
 }
 
-/// `current_env` rereads the live process environment at reference time, under
-/// the same memo scope as `current`, while `env` keeps the frozen snapshot.
+/// `current_env` is an ordinary frontmatter property: a declared value wins
+/// over the request's captured `env`, and `current_env.*` never reads `env`.
 #[test]
-#[serial_test::serial(current_env_pipeline)]
-fn current_env_rereads_the_live_environment_while_env_stays_frozen() {
-    let key = "DARKMATTER_LAZY_ROOT_PIPELINE_TEST";
-    unsafe { std::env::set_var(key, "live") };
-
+fn current_env_is_an_ordinary_frontmatter_property() {
     let mut context = ComposeContext::fixed_for_testing();
-    context.env_mut().insert(key.to_string(), "frozen".to_string());
-    let options = ComposeOptions::new_with_context(context);
+    context.env_mut().insert("HOME".to_string(), "captured-home".to_string());
 
     let (composed, _) = compose(
-        &format!("frozen={{{{ env.{key} }}}} live={{{{ current_env.{key} }}}} missing=[{{{{ current_env.NO_SUCH_LAZY_ROOT_VAR }}}}]\n"),
-        options,
+        "---\ncurrent_env:\n  HOME: userland\n---\n[{{ current_env.HOME }}] [{{ env.HOME }}]\n",
+        ComposeOptions::new_with_context(context),
     );
 
-    unsafe { std::env::remove_var(key) };
-    assert_eq!(composed.content().trim(), "frozen=frozen live=live missing=[]");
+    assert_eq!(composed.content().trim(), "[userland] [captured-home]");
 }
 
 // ── The ambient provider's repository observation ───────────────────────────
