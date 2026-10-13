@@ -174,7 +174,7 @@ impl CredentialPlacement {
         }
     }
 
-    /// The names this placement makes secret in stored metadata.
+    /// The name this placement makes secret in stored metadata.
     pub(crate) fn secret_name(&self) -> &str {
         match self {
             Self::ApiKeyQuery { name } | Self::ApiKeyCookie { name } => name,

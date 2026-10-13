@@ -19,7 +19,7 @@ use crate::error::InvalidArgument;
 /// own marker, so a request built for one API cannot be sent through another
 /// API's client even when both declare an endpoint of the same name.
 pub trait Api: 'static {
-    /// Name of the API, used in diagnostics and to key hooks.
+    /// Name of the API, used in diagnostics.
     const NAME: &'static str;
 }
 

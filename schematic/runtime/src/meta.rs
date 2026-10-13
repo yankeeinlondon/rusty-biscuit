@@ -40,7 +40,8 @@ impl fmt::Display for AuthMethod {
     }
 }
 
-/// The request as the application assembled it, after redaction.
+/// The request after redaction, including any credential the runtime
+/// attached.
 ///
 /// It describes the last request sent in a logical send: after a redirect,
 /// the hop that received the final response.
@@ -59,7 +60,8 @@ pub struct RequestMeta {
     pub headers: HeaderMap,
     /// Source of the credential that was sent.
     pub auth: AuthMethod,
-    /// Page number when the send is part of a paginated operation.
+    /// Page number when the send is part of a paginated operation. Reserved
+    /// for pagers, which are planned; the runtime always leaves it `None`.
     pub page: Option<u32>,
 }
 
