@@ -143,3 +143,35 @@ test against the command each replaces), and build fixtures in bulk (one
 `git fast-import`, one `update-ref --stdin`, batched self-checks). Measured
 on `build-win-native`, alone: `fork_origin_cutoff_matrix` 7.2 s → 1.0 s, and
 a four-case pipeline test at 6.8 s became four tests of about 1 s each.
+
+### 6. Fast alone, 2–3× slower in the full run
+
+A test that takes 1.5 s alone and 3.5–5 s in its package's full run is not
+waiting on anything: it is one of many tests that each keep a core busy at
+the same moment. Nextest runs a binary's tests together, so a binary of
+process-heavy tests (`wt remove`, `wt list` with its worker) saturates the
+host while it runs. Measure CPU, not only wall time: a Job Object around
+one test (CPU about equal to wall means it is CPU-bound, not waiting) and a
+sampler of host CPU during the full run. On `build-win-native` Defender
+alone was a quarter of the CPU (the `os` skill's `windows.md`).
+
+Threads inside the product were not the cause there (`wt` averaged five,
+and a test's CPU never exceeded its wall time alone), so capping them would
+not have helped. What helped is less work per test across the whole
+window: fewer processes per `wt` run (in-process reads with parity tests),
+fewer per stand-in request, fixtures copied from a template instead of
+built, and a matrix row per test. Measured on `build-win-native`, full
+`worktree-cli` run, 2026-10-13: slowest test 3.97 s → 3.46 s (5.33 s in an earlier run on a busier host), total test
+time 607 s → 548 s.
+
+### 7. A system service that serves one process at a time
+
+A test that is about 1 s alone and 6–9 s in its full run, alongside others
+at the same duration, may be queuing on a host daemon rather than on CPU.
+Run the test binary 1, 3, and 6 times at once: wall time that grows in step
+with the count while user CPU stays low is serialization. On macOS, CoreAudio
+setup behaves this way (the `os` skill's `macos.md`), and sniff's library
+suite had thirteen tests paying it although only five assert on audio or on
+the full default path. Narrow the request of every test that does not assert what the service
+returns; a live network lookup the test never reads is the same case. Measured
+on a development Mac, full sniff run: slowest of those tests 8.7 s → 2.8 s.
