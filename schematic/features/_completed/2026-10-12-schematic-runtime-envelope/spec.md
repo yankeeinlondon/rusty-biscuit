@@ -19,11 +19,11 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: human-in-the-loop
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 1
+review_iterations: 3
 clarified: false
 implemented: true
 human_review: false
@@ -36,6 +36,7 @@ next_spec: 2026-10-12-schematic-endpoint-methods
 message_to_agent: |-
   All 8 phases are implemented; see implementation-log.md "Phase 8" (Wave 16, Wave 17, Completion state) and the consolidated "Human review agenda" and "Requirement traceability" sections above it. Every local gate is green (schematic test/lint/doctest/test-schema/lint-schema/test-l2; sniff, biscuit-speaks, homelab, model-citizen test+lint), generation is deterministic, and schematic-runtime passed on macOS, Linux, native Windows, and WSL2 via cross-check (no receipts: uncommitted tree).
   For the reviewer: (1) Phase 8 changed code, not only docs: Client::send/send_raw are now `fn -> impl Future` returning Box::pin of the former async bodies (Phase 7 review item 1), pinned by runtime test send::send_futures_stay_small_enough_to_join_many; homelab's consumer-side Box::pin was removed. (2) R18 is a proposed gap for the author's ruling (connect-timeout effect not observed by a mock; 4 TLS builder tests ignored on native Windows). (3) The definitions crate-doc endpoint counts were corrected, so `just doctest` is green for the first time on this branch. (4) Follow-up defects found but not fixed are listed under "Remaining items for the author (Phase 8 additions)"; the obsolete uncompiled generator files still need a human to delete them.
+completed: true
 ---
 
 # Schematic runtime and response envelope

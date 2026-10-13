@@ -3947,3 +3947,36 @@ above. CI is the final proof for the dependents on Windows and WSL2.
 **Implementation complete, ready for review.** R18 remains a proposed gap
 for the author's ruling. Nothing was committed or pushed, `just complete` was
 not run, and the feature directory was not moved.
+
+## Review 1 repair
+
+### Scope exception: ElevenLabs `ListVoices` query parameters (review 1, item 5)
+
+- **Departure.** The spec freezes endpoint literals ("Do not edit the
+  endpoint literals"). Phase 7 nevertheless added the optional query
+  parameters `page_size` (integer) and `page_token` (string) to the
+  ElevenLabs `ListVoices` endpoint in
+  `definitions/src/elevenlabs/endpoints/voices.rs` (commit `deadcabd9`; see
+  "One definition change was needed for migration" under Phase 7).
+- **Ruling.** The author accepted it in review 1, item 5 as a narrow
+  exception to the endpoint-literal freeze, so biscuit-speaks lists voices
+  through generated typed sends instead of a hand-built request outside the
+  runtime.
+- **Wire traffic is unchanged.** The two names are exactly the ones
+  biscuit-speaks' hand-written pager already sent. Only the OpenAPI and
+  Postman exports for ElevenLabs gained the two parameters.
+- **Bounds.** The exception covers exactly these two parameters on this one
+  endpoint. The freeze otherwise stands, and the ruling authorizes no other
+  endpoint change.
+- **Other definition edits on this branch, checked.** No other endpoint
+  literal was edited by this feature. `47a7f40ff` adds only the API-level
+  `cross_origin`, `request_id_header`, and `secret_names` fields (and import
+  lines) to the 18 `RestApi` literals; `deadcabd9` also adds a serde bound to
+  Bitbucket's `PaginatedResponse<T>` type, not an endpoint literal;
+  `3b2379fc9` and the uncommitted `unfolded_circle/core_rest/mod.rs` change
+  are documentation only. The GitHub and Bitbucket endpoint merges in
+  `9e65a90b5` belong to `2026-10-11-schematic-generation-integrity`.
+- **Downstream.** `2026-10-14-schematic-definition-api` takes its definition
+  baseline after this change, so both parameters are part of that baseline.
+  A later pagination strategy may adopt `page_token` as a pager-managed
+  parameter.

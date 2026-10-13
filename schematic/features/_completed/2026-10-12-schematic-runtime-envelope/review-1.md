@@ -1,7 +1,21 @@
 ---
 $schema: feature-review.yaml
 ready: false
-findings: []
+findings:
+  - title: "high: carry out ruling on item 1: one-name API struct with chained client settings, optional .build()?, .api_key(), and .basic_auth()"
+    priority: high
+  - title: "high: carry out ruling on item 2: record the decoder contract as the codec handoff and the hook-capable codec test obligation"
+    priority: high
+  - title: "high: carry out ruling on item 3: document shared-transport ownership of connection settings and refusal at .build()? or first call"
+    priority: high
+  - title: "high: carry out ruling on item 4: record check_link::<R> and the checked absolute-URL path as the pagination handoff"
+    priority: high
+  - title: "high: carry out ruling on item 5: record the ElevenLabs ListVoices page_size/page_token scope exception in the implementation log"
+    priority: high
+  - title: "high: carry out ruling on item 6: document the two partial-generation compatibility questions and update later planning"
+    priority: high
+  - title: "high: carry out ruling on item 7: record the connect-timeout gap beside its tests and repair native-Windows TLS coverage"
+    priority: high
 observations: []
 human_in_the_loop:
     - |-
@@ -92,9 +106,12 @@ blocked: false
 reviewed_by: codex/gpt-6.1-sol
 created: "2026-10-12T16:05:21-07:00"
 spec: "2026-10-12-schematic-runtime-envelope/spec.md"
-implemented: false
+log: "schematic/features/2026-10-12-schematic-runtime-envelope/log.md"
+implemented: true
+implemented_by: claude/opus
 description: "A **feature** review of `2026-10-12-schematic-runtime-envelope/spec.md`"
 feature: "2026-10-12-schematic-runtime-envelope/review-1.md"
+next: "2026-10-12-schematic-runtime-envelope/review-2.md"
 next_spec: "schematic/features/2026-10-12-schematic-endpoint-methods/spec.md"
 next_plan: "schematic/features/2026-10-12-schematic-endpoint-methods/plan.md"
 ---
