@@ -1,7 +1,7 @@
 ---
 total_phases: 12
 created: 2026-10-11
-phase: 10
+phase: 12
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1: []
@@ -183,6 +183,123 @@ skills_files_updated_during_phase_10:
   - .claude/skills/worktree/lifecycle.md
   - .claude/skills/worktree/observation.md
   - .claude/skills/worktree/remove.md
+source_files_during_phase_11:
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/powershell_wrapper_exec.rs
+  - worktree/cli/tests/level2_powershell_remove.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_branch_failure_after_the_checkout_was_removed.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_name_matching_a_pending_removal_and_a_live_worktree.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__refusals_say_nothing_was_removed_and_keep_their_exit_codes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__untrusted_text_is_shown_literally.snap
+docs_updated_during_phase_11:
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11:
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/SKILL.md
+source_files_during_phase_12: []
+docs_updated_during_phase_12:
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12:
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/os/linux.md
+source_code:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/record.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/lock.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/usage/tests.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove_usage_refusal.rs
+  - worktree/cli/tests/snapshots/remove_usage_refusal__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__every_evidence_location_and_holder_shape.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__untrusted_text_is_shown_literally.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__long_lists_are_counted.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__coverage_notes.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__an_unverified_checkout_refuses.snap
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/rename/tests.rs
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/quarantine/naming.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/quarantine/association/tests.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - .config/nextest.toml
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/test_support.rs
+  - worktree/lib/src/remove/observation/inventory.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/resolve.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/error.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/powershell_wrapper_exec.rs
+  - worktree/cli/tests/level2_powershell_remove.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_branch_failure_after_the_checkout_was_removed.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_name_matching_a_pending_removal_and_a_live_worktree.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__refusals_say_nothing_was_removed_and_keep_their_exit_codes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__untrusted_text_is_shown_literally.snap
+documentation:
+  - worktree/fixes/2026-10-05-graceful-file-contention/spikes/README.md
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+completed_phase: 12
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -258,30 +375,30 @@ recorded in dependency docs.
 
 ### Done means
 
-- [ ] `just test`, `just test-l2`, and `just lint` pass in the worktree area;
+- [x] `just test`, `just test-l2`, and `just lint` pass in the worktree area;
       cross-OS evidence for macOS, Linux, native Windows, and WSL2 is recorded
       per the `os` skill, and `just ci-local --plan` shows no unexpected scope.
-- [ ] Every acceptance item (1-12) in the spec maps to a named test (see the
+- [x] Every acceptance item (1-12) in the spec maps to a named test (see the
       traceability table written in Phase 12).
-- [ ] Controlled writers reproduce retained-cwd writes into the quarantine and
+- [x] Controlled writers reproduce retained-cwd writes into the quarantine and
       absolute-path recreation at the original; both stop with preserved
       remnants, honest partial-deletion reports, and no branch operations.
-- [ ] Crash injection at each phase boundary leaves a recoverable record; retry
+- [x] Crash injection at each phase boundary leaves a recoverable record; retry
       by the original name works after unregistering and rejects changed
       identities and new content; completed records never authorize a second
       removal.
-- [ ] Existing protections (branch safety tiers, expected-tip, consent
+- [x] Existing protections (branch safety tiers, expected-tip, consent
       fingerprints, protected includes, handoff records, locked worktrees,
       missing-directory record-only removal, remote endpoints) are retained and
       still tested; exits 3 and 4 still mean "nothing was removed".
-- [ ] Structural checks hold: no per-process repeated checkout walks, no
+- [x] Structural checks hold: no per-process repeated checkout walks, no
       whole-tree rescan per deleted entry, no unconditional hashing of ignored
       file bodies, no scanning threads left running after a query returns.
-- [ ] `worktree/docs/cli/remove.md` describes current behavior with the
+- [x] `worktree/docs/cli/remove.md` describes current behavior with the
       **planned** markers removed only by this change; dependencies docs,
       README, worktree/OS skills, and the implementation log are updated;
       departures from the spec are recorded in the log.
-- [ ] Agent terminal state is "implementation complete, ready for review"; the
+- [x] Agent terminal state is "implementation complete, ready for review"; the
       fix directory is not moved to `_completed` and `just complete` is not run.
 
 ### Waves
@@ -809,7 +926,7 @@ acceptance items 6, 7 (recovery half), 10, and 11 pass at library level.
 
 ### Wave 11
 
-- [ ] **Wire the operation** - `cli/src/commands/remove/`: `execute`'s
+- [x] **Wire the operation** - `cli/src/commands/remove/`: `execute`'s
       healthy-checkout path calls the lifecycle instead of
       `remove_worktree`; the missing-directory path keeps record-only
       removal with no Sniff query; the decisive usage query sits after
@@ -819,7 +936,7 @@ acceptance items 6, 7 (recovery half), 10, and 11 pass at library level.
       on the parent shell's cwd); consent/identity bindings are rechecked
       after discovery and observation setup; `files_unchanged` semantics
       carry into the new flow.
-- [ ] **Partial and recovery reports** - Compact human reports per the
+- [x] **Partial and recovery reports** - Compact human reports per the
       spec's example: both locations, deleted-before-stopping counts with
       the saved report path, remaining content, observed activity with
       receipt times, Git registration state, branch state, "kept" vs
@@ -830,7 +947,7 @@ acceptance items 6, 7 (recovery half), 10, and 11 pass at library level.
       carries only wrapper protocol lines; no `cd:` or `remove-handoff:`
       after a mutation failure; successful removal adds no discovery
       chatter; preflight refusal stays concise.
-- [ ] **Tests** - CLI integration tests (`cli/tests/remove.rs` and a new
+- [x] **Tests** - CLI integration tests (`cli/tests/remove.rs` and a new
       recovery-focused integration test): representative wiring and recovery
       through the real binary; refusal exit 3 with evidence; exit 4 paths;
       post-move stop exit 1 with both locations; wrapper two-invocation
@@ -845,18 +962,18 @@ test-l2`, `just lint` pass locally.
 
 ### Wave 12 (parallel)
 
-- [ ] **Docs** - Rewrite `worktree/docs/cli/remove.md`'s planned section into
+- [x] **Docs** - Rewrite `worktree/docs/cli/remove.md`'s planned section into
       current behavior (exit-code meanings, eligible topologies and
       filesystem limits, retry from the base checkout, the recovery record
       location and report); touch `worktree/README.md` where public behavior
       changes; update `docs/dependencies.md` files for any crate R4-R6 added.
-- [ ] **Skills** - Update the worktree skill's `remove.md` (and `testing.md`
+- [x] **Skills** - Update the worktree skill's `remove.md` (and `testing.md`
       if fixtures change) and the `os` skill with any newly learned
       platform facts, in the same change as the code that established them.
-- [ ] **Implementation log and traceability** - Record rulings, spike
+- [x] **Implementation log and traceability** - Record rulings, spike
       findings, departures from the spec, and the acceptance-item (1-12) to
       test mapping table.
-- [ ] **Cross-OS validation** - macOS locally; Linux, native Windows, and
+- [x] **Cross-OS validation** - macOS locally; Linux, native Windows, and
       WSL2 evidence per the `os` skill (real child-process/rename/handle/
       watch tests are ordinary L1 tests when they need no terminal);
       representative shell-wrapper tests stay at their existing tiers;

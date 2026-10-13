@@ -182,6 +182,123 @@ skills_files_updated_during_phase_10:
   - .claude/skills/worktree/lifecycle.md
   - .claude/skills/worktree/observation.md
   - .claude/skills/worktree/remove.md
+source_files_during_phase_11:
+  - worktree/lib/src/error.rs
+  - worktree/lib/src/remove/mod.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/powershell_wrapper_exec.rs
+  - worktree/cli/tests/level2_powershell_remove.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_branch_failure_after_the_checkout_was_removed.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_name_matching_a_pending_removal_and_a_live_worktree.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__refusals_say_nothing_was_removed_and_keep_their_exit_codes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__untrusted_text_is_shown_literally.snap
+docs_updated_during_phase_11:
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11:
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/remove.md
+  - .claude/skills/worktree/cli-contracts.md
+  - .claude/skills/worktree/testing.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/SKILL.md
+source_files_during_phase_12: []
+docs_updated_during_phase_12:
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+  - docs/dependencies.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12:
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/os/linux.md
+source_code:
+  - worktree/lib/Cargo.toml
+  - Cargo.lock
+  - worktree/lib/src/remove/mod.rs
+  - worktree/lib/src/remove/handoff.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/recovery/mod.rs
+  - worktree/lib/src/remove/recovery/record.rs
+  - worktree/lib/src/remove/recovery/journal.rs
+  - worktree/lib/src/remove/recovery/lock.rs
+  - worktree/lib/src/remove/recovery/storage.rs
+  - worktree/lib/src/remove/recovery/store.rs
+  - worktree/lib/src/remove/recovery/store/tests.rs
+  - worktree/lib/src/remove/usage.rs
+  - worktree/lib/src/remove/usage/tests.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/usage.rs
+  - worktree/cli/tests/remove_usage_refusal.rs
+  - worktree/cli/tests/snapshots/remove_usage_refusal__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__every_evidence_location_and_holder_shape.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__untrusted_text_is_shown_literally.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__long_lists_are_counted.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__coverage_notes.snap
+  - worktree/cli/tests/snapshots/remove_usage_refusal__an_unverified_checkout_refuses.snap
+  - worktree/lib/src/remove/quarantine/mod.rs
+  - worktree/lib/src/remove/quarantine/rename.rs
+  - worktree/lib/src/remove/quarantine/rename/tests.rs
+  - worktree/lib/src/remove/admin_entry.rs
+  - worktree/lib/src/remove/quarantine/naming.rs
+  - worktree/lib/src/remove/quarantine/association.rs
+  - worktree/lib/src/remove/quarantine/association/tests.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - .config/nextest.toml
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/missing.rs
+  - worktree/lib/src/remove/test_support.rs
+  - worktree/lib/src/remove/observation/inventory.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/resolve.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/error.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/exit.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/report.rs
+  - worktree/cli/tests/remove.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/powershell_wrapper_exec.rs
+  - worktree/cli/tests/level2_powershell_remove.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_branch_failure_after_the_checkout_was_removed.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_name_matching_a_pending_removal_and_a_live_worktree.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__long_lists_are_counted_and_uncertain_entries_named.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__refusals_say_nothing_was_removed_and_keep_their_exit_codes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__the_specs_example.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__untrusted_text_is_shown_literally.snap
+documentation:
+  - worktree/fixes/2026-10-05-graceful-file-contention/spikes/README.md
+  - docs/dependencies.md
+  - worktree/docs/cli/remove.md
+  - worktree/README.md
+completed_phase: 12
+implemented: true
 packages:
   - worktree
   - worktree-cli
@@ -2034,3 +2151,267 @@ these tests creep past 5 s on CI.
 Not run: `just test-l2` (no terminal code changed).
 
 Phase 10 is complete; ready for review.
+
+## Phase 11
+
+Started and finished 2026-10-12. `wt remove` now removes every checkout that
+exists through `remove::lifecycle`, finds a stopped removal again by the name
+the user typed, and prints compact stop, recovery, and ambiguity reports on
+stderr. The old `git worktree remove` path is gone.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `worktree/cli/src/commands/remove/mod.rs` | `run` resolves with `resolve_target` (pending → `inspect` → release, retry, or refuse), fingerprints every existing checkout, prints a "Continuing an earlier removal" lead for a retry; `execute` calls `remove_checkout` or `resume` (`execute_record_only` keeps the missing-directory path); `branch_actions`, `report_finished`, `branch_messages`, `with_note`; `Facts` gains `requested_name`, `retry`, `branch_only` (`Facts::branch_only` for `CheckoutRemoved`); the handoff's second run sets `Facts::reported` after `verify` and runs the same `execute` |
+| `worktree/cli/src/commands/remove/recovery.rs` (new) | `refusal_error` (exit class → `RefusedToLoseWork`/`BlockedByEnvironment`/`RemovalFailed`), `refusal_markup`, `stopped_markup` (both locations, deleted/possibly deleted/remaining counts, observed activity with receipt times, registration, per-branch kept/already deleted/not deleted, retry command, base checkout, saved report path, warnings), `inspection_markup`, `ambiguous_markup` |
+| `worktree/cli/src/commands/remove/report.rs` | `ReportInput::checkout_removed` and its files line |
+| `worktree/cli/src/commands/remove/usage.rs` | `visible` is public to the module tree; the `#[allow(dead_code)]` on the module is gone |
+| `worktree/lib/src/error.rs` | `WorktreeError::RemovalFailed(markup)` (exit 1); `DirectoryInUse`, `FolderNotFullyRemoved`, `LockProbeRenameBack`, `NotARealDirectory` and their message helpers removed |
+| `worktree/lib/src/remove/mod.rs` | `remove_worktree`, `check_no_processes`, `is_registered`, `finish_unregistered`, `check_not_in_use` and their tests removed (R8: nothing calls them) |
+| `worktree/cli/src/main.rs`, `exit.rs` | `RemovalFailed` printed as markup; exit mapping without the removed variants |
+
+### Decisions and departures
+
+1. **Exit 1 with markup is a new error variant**, `WorktreeError::RemovalFailed`,
+   rather than printing and calling `process::exit`. `main.rs` prints it like
+   the other markup variants. A pre-move operational failure
+   (`ExitClass::Failure` from a `Refusal`) uses it too, with the
+   "Nothing was removed." lead.
+2. **The usage check moved after the questions**, so a process standing in
+   the worktree is now refused after the report with exit 3 (it was exit 4,
+   before the report). The plan and spec require this order; the old test
+   `a_process_standing_in_the_worktree_blocks_removal_before_the_report` was
+   rewritten as `..._refuses_after_the_questions_with_exit_3`. On Windows the
+   same case is now exit 3 too: Sniff reports the held directory as an open
+   handle (`PING.EXE`), so the rename never runs. The Windows L1 and L2
+   PowerShell tests were updated to the usage refusal.
+3. **A retry is never handed off.** A caller standing inside a pending
+   removal's quarantine gets exit 4 and the instruction to run from the base
+   checkout. The spec says "run recovery from the base checkout"; a handoff
+   record has no field for a pending operation, and adding one is not needed
+   for the stated behavior.
+4. **A retry never repairs.** An unlinked quarantine refuses before `prepare`
+   (whose `Unlinked` branch would run `git worktree repair`). `inspect`
+   already resolves that state as `PartialCheckout`; this guards the race.
+5. **`CheckoutRemoved` retries** build a synthetic `WorktreeEntry` at the
+   original path with the record's branch; a branch that no longer exists is
+   treated as detached (nothing to delete), so the retry can still close the
+   record.
+6. **Remote states other than `Present`** are still the CLI's: after a
+   verified removal, `Unavailable` exits 1 with the old
+   `git push origin --delete` guidance, `Absent`/`NoRemote` print "Nothing to
+   delete on origin.", and the lifecycle receives a remote action only for
+   `Present`.
+7. **A branch failure after the checkout was removed** is reported by
+   `stopped_markup` with "Removed worktree X …, but a branch step did not
+   finish", each branch as kept, already deleted, or not deleted (Git's first
+   error line), and "Retry: wt remove X". The old `git push origin --delete`
+   hint for a failed lease is replaced by the retry, which closes the pending
+   record.
+8. **Interruption is not wired** (`Environment::interrupted` is `|| false`):
+   `worktree-cli` has no signal-handling dependency, and adding one is a
+   dependency decision outside this phase's tasks. Ctrl-C still kills the
+   process, which the crash recovery handles (Phase 10).
+9. **Docs:** the topic page's former "Planned" section is now in the present
+   tense without the banner, and the sections it contradicted ("Background
+   programs writing into the worktree", the handoff's usage paragraph, the
+   exit-code table) describe current behavior. The README bullet on folders
+   other programs use is rewritten. Phase 12's full rewrite of that page is
+   still to do.
+
+### Requirement-to-test mapping
+
+| Requirement (plan Phase 11 / spec acceptance) | Test |
+| --- | --- |
+| Usage refuses through the real binary after the questions, exit 3, PID and evidence, no force flag bypasses, nothing kept in the store, stdout empty (item 1) | `remove::a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3` (Unix); Windows: `powershell_wrapper_exec::a_directory_held_by_another_program_refuses_with_exit_3_and_nothing_removed`, `level2_powershell_remove::level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_nothing_removed` |
+| Ordinary removal goes through the lifecycle with no discovery chatter, no quarantine left, record completed (item 2) | `remove::example_clean_and_merged_removes_worktree_and_branch` and every existing success test in `remove.rs` |
+| Write into the moved checkout: exit 1, both locations, remaining, registration at the moved path, branch kept, saved report parsed, no protocol line; retry by original name lists the new file and refuses without consent (exit 3); with `--force-worktree` finishes, deletes the branch, closes the record (items 3, 6, 8, 11) | `remove_recovery::a_write_into_the_moved_checkout_stops_then_a_retry_needs_fresh_consent` |
+| Recreation at the original path: exit 1, original marked recreated and untouched; retry refuses (exit 3) with nothing deleted; after the user moves it, retry finishes (items 3, 7, 8, 10) | `remove_recovery::recreation_at_the_original_path_stops_and_is_never_cleaned_up` |
+| A new worktree at the original path is ambiguous with the pending removal; both listed and untouched (item 10) | `remove_recovery::a_new_worktree_at_the_original_path_is_ambiguous_with_the_pending_removal` |
+| Branch failure after removal: kept vs already deleted, retry, report path, record pending, stdout empty (items 6, 8) | `remove::a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result`, `remove::a_branch_that_moves_after_its_worktree_is_removed_is_kept` |
+| Wrapper first run hands off despite the parent shell in the worktree; the second run removes (item 9) | `remove::the_parent_shell_inside_does_not_block_the_handoff_and_the_second_run_removes` |
+| A different process inside at the second run refuses there, exit 3, no `cd:`/`remove-handoff:` (item 9) | `remove::a_process_still_inside_after_the_handoff_refuses_the_second_run` |
+| Exit 4 paths unchanged (no wrapper, expired/missing token, shell still inside) | existing `remove::standing_inside_without_the_wrapper_exits_4_and_removes_nothing`, `an_expired_token_refuses_with_exit_4`, `a_missing_or_malformed_token_refuses_with_exit_4`, `a_caller_still_inside_the_target_is_refused_with_exit_4` |
+| Stdout protocol unchanged | existing `wrapper_protocol.rs`, `shell_wrapper_exec.rs`, `powershell_wrapper_exec.rs` |
+| Missing directory keeps record-only removal, no Sniff (item 10) | existing missing-directory tests in `remove.rs` (they pass through `execute_record_only`) |
+| Report rendering: the spec's example, branch failure after removal, untrusted text escaped (markup, control characters, multi-line errors), listing limits and uncertain entries, refusals' exit codes 3/4/1, ambiguity (item 8) | `remove_recovery_report::*` (6 snapshot tests, integration binary per the double-target trap) |
+
+The writers in `remove_recovery.rs` are `git` shims that fire once a
+`.wt-remove-*` sibling exists. A writer at `git worktree remove` or
+`diff-index` was tried first and let the removal succeed: the last check of
+both paths is at the start of `unregister_quarantine`, before those calls, so
+such a write is the documented concurrent-write limit, not a stop.
+
+### Verification
+
+Local (macOS), in `worktree/`:
+
+- `just test`: 1358 passed, 15 skipped, 0 failed.
+- `just test-l2`: 41 passed (the slow ones are the existing Kitty graph
+  tests).
+- `just lint`: clean. Windows cross-target clippy
+  (`-p worktree -p worktree-cli --lib --tests`, and `worktree-cli --tests
+  --features terminal-tests`): clean.
+
+Cross-OS (`./scripts/cross-check.sh worktree-cli --os <os> --build-jobs 2`):
+
+| OS | Result |
+| --- | --- |
+| Linux (`build-linux`) | 609 passed (first attempts: linker OOM-killed, then the archive-mode `CARGO_BIN_EXE_wt` path; both fixed) |
+| WSL2 (`build-win`) | 609 passed |
+| native Windows (`build-win-native`) | 574 passed; L2 PowerShell (`--features terminal-tests level2_powershell`) 3 passed |
+
+### Findings that need attention
+
+- **Windows Search holds fresh files.** In one Windows run, two `example_*`
+  tests were refused (exit 3) because `SearchProtocolHost.exe` had an open
+  handle on a file the test had just written under `%TEMP%`, which the index
+  scope excludes. 14 immediate reruns passed. This is the spec's
+  conservative rule working as written, but it makes Windows CI flaky and
+  will sometimes pause a user's removal. Recorded in the `os` skill and raised
+  for human review in the spec.
+- **Windows cost per removal.** The same six `example_*` tests take 2.3–3.5 s
+  on `build-win-native` before this phase and 3.0–5.3 s after it, about
+  1.5–2 s more per removal. Under the full package run, many `remove.rs` tests
+  take 5–8 s there, although untouched `list_prs` tests reach 12 s in the
+  same run, so the host was loaded. The L1 budget is 5 s; CI runs Windows on
+  every push to `main`. The lifecycle's redundant Git calls noted in Phase 10
+  (`inspect_missing` then `remove_missing_record`) are the first candidate.
+
+Not run: WSL2 and Linux L2 (no terminal-facing change beyond the stderr
+report).
+
+Phase 11 is complete; ready for review.
+
+## Phase 12
+
+Started and finished 2026-10-12. Docs, skills, the dependency catalog, the
+acceptance traceability table, and cross-OS validation. No source code
+changed in this phase.
+
+### What was done
+
+| File | Change |
+| --- | --- |
+| `worktree/docs/cli/remove.md` | Restructured for a reader new to the repo: it now opens with what `wt remove` does and the usage examples (the former "Current behavior" heading is gone), then the report, consent, usage pause, and handoff, then three new top-level sections: **Deleting the checkout** (move-then-delete flow, its limits, Git association, then "Watching for changes" and "Checked deletion" subsections), **What `wt remove` refuses to move** (eligible topologies and filesystem limits, including WSL `/mnt/<drive>` exit 4), and **Recovery records and retry** (the `<git-common-dir>/wt-removal/<operation-id>/` files, retrying from outside the moved checkout or the base checkout, the never-handed-off rule, resolution by name, and the retry decision diagram). The two duplicate flow diagrams were merged into one; "as it does today" (spec wording) was dropped. No "planned" marker remains, and none was needed: everything the page describes is built |
+| `worktree/README.md` | Removed the sub-bullet describing the old `git worktree remove` partial-failure fallback (`rm -rf` / `Remove-Item` hint), which no longer exists; added retry and refused-topology sub-bullets; exit-code table: 1 includes a stop after the move, 3 includes another process using the worktree (it was listed under 4), 4 lists change watching and the Windows open-file move block |
+| `docs/dependencies.md` | Catalog entries for `fsevent-sys` 4.1 and `inotify` 0.11 under Platform-Specific (the usage note already existed; the catalog had no entries); the `windows-sys` entry now names the `ReadDirectoryChangesW` observer |
+| `.claude/skills/worktree/lifecycle.md` | Points to the docs sections that must change with an exit class or refusal, and to the README exit table |
+| `.claude/skills/os/linux.md` | `--build-jobs` must follow the package name in `cross-check`; before it the script exits 2 (`unknown flag --build-jobs`) |
+
+### Rulings, spikes, and departures (index)
+
+The rulings R1-R12 and spike results S1-S3 are recorded under "Phase 1"
+(old numbering) and in `spikes/README.md`; every later phase records its
+departures under its own "Decisions and departures" heading. The departures
+that change what the spec says the user sees:
+
+- The usage check runs after the questions (Phase 11), so a process standing
+  in the worktree is exit 3 after the report, not exit 4 before it. On Windows
+  a held directory is now usually exit 3 too: Sniff sees the handle before the
+  move is attempted.
+- A retry is never handed off (Phase 11); a shell inside the moved checkout
+  gets exit 4 and the instruction to run from the base checkout.
+- A pre-move operational failure exits 1 through `WorktreeError::RemovalFailed`
+  with "Nothing was removed." (Phase 11).
+- Interruption (Ctrl-C) is not wired to a stop at the next entry boundary;
+  the library supports it (`Environment::interrupted`), the CLI passes
+  `|| false`, and a killed process is handled by crash recovery (Phase 11).
+- The last check of both paths and the index happens at the start of
+  unregistering, so a write after it is the documented concurrent-write
+  limit, not a stop (Phase 11, stated in the docs).
+
+### Acceptance traceability (spec items 1-12)
+
+Library tests are under `worktree/lib/src/remove/`; CLI tests are integration
+binaries in `worktree/cli/tests/`. `native_*` tests use the real observer,
+rename, and processes, and run as ordinary L1 on every OS.
+
+| Item | Tests |
+| --- | --- |
+| 1. Known usage refuses before rename/deletion, names PIDs/evidence, keeps branches, no force flag overrides | `usage::tests::every_evidence_kind_from_another_process_refuses`, `usage::tests::a_real_query_names_a_process_working_in_the_checkout`, `usage::tests::only_this_operations_registered_handles_are_excluded`, `usage::tests::this_processes_other_evidence_still_refuses`, `lifecycle::tests::observed_usage_refuses_before_anything_moves`; CLI `remove::a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3`, `powershell_wrapper_exec::a_directory_held_by_another_program_refuses_with_exit_3_and_nothing_removed`, `level2_powershell_remove::level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_nothing_removed`, `remove_usage_refusal::*` |
+| 2. No match / partial / unsupported discovery proceed with observation; no chatter; coverage kept; root-validation errors refuse | `usage::tests::no_match_clears_whatever_the_coverage`, `usage::tests::a_match_in_a_partial_report_refuses_with_its_coverage`, `usage::tests::every_query_error_refuses_as_unverified_without_a_retry`, `usage::tests::a_real_query_of_a_vanished_checkout_refuses`, `lifecycle::tests::partial_discovery_…`, `lifecycle::tests::unavailable_discovery_…`, `lifecycle::tests::unsupported_discovery_still_removes_and_is_kept_in_the_report`, `lifecycle::tests::an_unverified_checkout_refuses`, `lifecycle::tests::native_a_removal_runs_end_to_end_and_closes_its_record` (one decisive query); CLI `remove::example_clean_and_merged_removes_worktree_and_branch`, `remove_usage_refusal::coverage_notes`, `remove_usage_refusal::an_unverified_checkout_refuses` |
+| 3. Controlled writers: retained-cwd write into the quarantine and recreation at the original; remnants kept, honest report, no branch operations | `deletion::tests::native_a_writer_in_the_moved_checkout_stops_deletion_and_its_file_is_kept`, `deletion::tests::native_recreation_at_the_original_path_stops_deletion`, `lifecycle::tests::a_write_into_the_quarantine_during_deletion_stops_with_an_honest_report`, `lifecycle::tests::recreation_at_the_original_path_stops_and_is_left_alone`; CLI `remove_recovery::a_write_into_the_moved_checkout_stops_then_a_retry_needs_fresh_consent`, `remove_recovery::recreation_at_the_original_path_stops_and_is_never_cleaned_up` |
+| 4. Modification, replacement, deletion-time recreation, delayed events, overflow, watch invalidation | `deletion::tests::a_file_changed_without_any_event_is_kept_and_stops_deletion`, `inventory::tests::a_permission_change_is_a_modification`, `deletion::tests::a_directory_replaced_by_a_link_is_never_descended`, `deletion::tests::an_entry_deleted_by_someone_else_is_recorded_absent_and_stops`, `deletion::tests::a_reported_write_stops_at_the_next_drain`, `deletion::tests::lost_coverage_and_admin_changes_stop_deletion`, `deletion::tests::native_a_full_queue_stops_with_lost_coverage`, `unregister::tests::a_recreated_original_found_only_by_the_final_check_stops`, `observation::tests::delayed_events_arrive_only_once_delivered`, inotify `a_kernel_overflow_is_coverage_loss` / `a_mount_or_unmount_under_a_watched_path_is_loss_and_elsewhere_ignored`, FSEvents `an_unmount_or_a_moved_parent_or_admin_directory_is_loss`, ReadDirectoryChangesW `a_system_buffer_overflow_is_coverage_loss` / `completions_map_to_events_overflow_or_an_ended_watch`, `lifecycle::tests::lost_coverage_after_the_move_stops_and_a_failed_diagnostic_is_recorded`, `lifecycle::tests::unexplained_activity_during_the_move_stops_after_it` |
+| 5. Rename collision/failure, Windows handle contention, submodules, locked worktrees, links/reparse points, changed admin associations, cross-device | `association::tests::a_collision_at_the_quarantine_is_never_replaced`, `rename::tests::an_existing_destination_is_never_replaced`, `rename::tests::rename_failures_map_to_their_exit_classes` (EXDEV / `ERROR_NOT_SAME_DEVICE` → cross-device), `rename::tests::an_open_file_in_the_tree_is_a_sharing_failure` (Windows), `association::tests::an_open_file_in_the_checkout_blocks_the_move_as_in_use`, `association::tests::a_checkout_with_a_submodule_refuses_before_anything_moves`, `association::tests::a_locked_worktree_refuses_at_planning_and_at_the_move`, `lifecycle::tests::a_locked_worktree_refuses`, `rename::tests::a_link_is_moved_as_itself`, `inventory::tests::a_link_at_the_root_is_refused`, `association::tests::unsupported_shapes_refuse_before_anything_moves`, `association::tests::state_that_changed_since_planning_refuses_the_move`, `association::tests::a_failed_record_rewrite_is_rolled_back`, `association::tests::an_unverified_record_rewrite_is_rolled_back_and_restored` |
+| 6. Crash injection at each phase leaves recoverable records; retry by original name after unregistering; changed identities/new content rejected | `lifecycle::tests::a_crash_after_the_move_is_resumed_by_the_original_name`, `lifecycle::tests::a_crash_after_the_content_is_removed_resumes_with_the_record_and_uncertain_entries`, `lifecycle::tests::a_crash_after_unregistering_runs_only_the_branch_actions_on_retry`, `lifecycle::tests::native_a_killed_removal_is_found_and_resumed_by_its_original_name`, `lifecycle::tests::a_replaced_quarantine_is_never_resumed`, `lifecycle::tests::new_content_in_the_quarantine_needs_fresh_consent`; CLI `remove_recovery::a_write_into_the_moved_checkout_stops_then_a_retry_needs_fresh_consent` |
+| 7. Consent fingerprint, expected tip, remote endpoint retained; recreated original never traversed; rollback never overwrites | `lifecycle::tests::files_that_need_consent_refuse_without_it`, `lifecycle::tests::files_changed_after_approval_refuse`, `lifecycle::tests::a_tip_moved_after_approval_refuses`, `association::tests::a_recreated_original_is_never_overwritten`, `association::tests::a_replaced_quarantine_is_not_moved_back`, `deletion::tests::recreation_at_the_original_stops_and_is_never_touched`; CLI `remove::a_changed_remote_destination_between_the_runs_refuses_with_nothing_removed`, `remove::a_branch_that_moves_after_its_worktree_is_removed_is_kept`, and the existing handoff fingerprint tests in `remove.rs` |
+| 8. Human reports and structured outcomes agree on both paths, partial deletion, coverage, registration, branch state | `deletion::tests::the_report_names_deleted_entries_and_states_the_concurrent_write_limit`, `outcome::tests::a_stopped_report_round_trips_through_json`, `remove_recovery_report::*` (6 snapshots), CLI `remove_recovery::*` (parse the saved `report.json` and compare with stderr), `remove::a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result` |
+| 9. Wrapper first run reaches handoff despite its shell; second run discovers; another process refuses; stdout protocol unchanged | `remove::the_parent_shell_inside_does_not_block_the_handoff_and_the_second_run_removes`, `remove::a_process_still_inside_after_the_handoff_refuses_the_second_run`, `wrapper_protocol.rs`, `shell_wrapper_exec.rs`, `powershell_wrapper_exec.rs`, L2 `level2_powershell_remove` |
+| 10. Missing directories keep record-only removal; pending records cannot be bypassed by the quarantine name; reused branch/name ambiguous; partial checkouts never cleaned unchecked | existing missing-directory tests in `missing.rs` and `remove.rs`, `lifecycle::tests::a_crash_after_the_move_is_resumed_by_the_original_name` (quarantine basename reaches the same record), `lifecycle::tests::a_new_worktree_at_the_original_path_is_ambiguous_and_never_cleaned_up`, `lifecycle::tests::a_reused_branch_is_ambiguous_with_the_pending_removal`, `lifecycle::tests::a_partial_checkout_without_its_git_link_is_kept`; CLI `remove_recovery::a_new_worktree_at_the_original_path_is_ambiguous_with_the_pending_removal` |
+| 11. Record/journal write failures, crash between unlink and result, stale locks, malformed records, interruption after rename; branch-step failures need fresh approval; completed records never authorize again | `deletion::tests::a_journal_that_cannot_record_an_intent_stops_before_its_batch`, `lifecycle::tests::an_unwritable_record_stops_before_deleting`, `lifecycle::tests::a_crash_after_the_content_is_removed_resumes_with_the_record_and_uncertain_entries`, `lifecycle::tests::only_a_held_lock_blocks_a_retry`, `lifecycle::tests::an_unreadable_record_blocks_a_new_removal`, `deletion::tests::an_interrupt_stops_at_the_next_entry_boundary`, `lifecycle::tests::an_interrupted_removal_is_resumed`, `lifecycle::tests::a_failed_branch_deletion_keeps_the_record_and_a_retry_needs_fresh_approval`, `lifecycle::tests::a_completed_record_never_authorizes_a_second_removal`, the recovery-store robustness matrices in `recovery/store/tests.rs` |
+| 12. Native paths round-trip; links not followed; nested mounts/unsupported entries refuse; concurrent rename destination never replaced; exit 1 after move, 3 before, 4 for Windows sharing failure; ordinary I/O not labeled usage | `rename::tests::a_name_that_is_not_utf8_moves_losslessly`, `outcome::tests::a_non_utf8_path_survives_the_report_losslessly`, `rename::tests::identity_names_a_link_itself_not_its_target`, `inventory::tests::a_fifo_or_socket_is_ineligible_and_never_opened`, `association::tests::unsupported_shapes_refuse_before_anything_moves`, `rename::tests::an_existing_destination_is_never_replaced`, `rename::tests::rename_failures_map_to_their_exit_classes`, `rename::tests::unix_error_codes_classify`, `rename::tests::windows_error_codes_classify_by_stage`, `rename::tests::a_parent_this_user_cannot_write_is_a_permission_failure`, `rename::tests::an_error_without_an_os_code_is_other`, `remove_recovery_report::refusals_say_nothing_was_removed_and_keep_their_exit_codes` |
+
+### Structural checks (re-verified)
+
+- **No per-process repeated checkout walks:** one decisive Sniff query per
+  attempt (`native_a_removal_runs_end_to_end_and_closes_its_record` asserts
+  exactly one query and one discovery entry); the diagnostic query after a
+  stop runs only on a stop.
+- **No whole-tree rescan per deleted entry:** each entry is rechecked by its
+  own metadata; events are drained per depth level and every 2,048 entries
+  (`drains_follow_depth_levels_and_the_bound_not_entries`).
+- **No unconditional hashing of ignored bodies:** only consent-sensitive paths
+  are hashed (`a_file_below_a_sensitive_directory_is_hashed` asserts ignored
+  output stays `Content::Unhashed`).
+- **No scanning threads after a query returns:** Sniff's contract, covered by
+  its own query tests; `wt` calls the query synchronously and holds nothing
+  from it.
+
+### Requirement-to-test mapping (this phase)
+
+No behavior changed in this phase, so no test was added. The docs edits were
+checked against the code they describe: exit classes (`exit.rs`,
+`recovery.rs::refusal_error`), the record location and file names
+(`recovery/storage.rs`), and the retry-never-handed-off rule
+(`commands/remove/mod.rs`). No test reads the edited files
+(`include_str!`/`repo_root()` search: none in worktree; test-toolkit reads
+only other `os` skill pages).
+
+### Verification
+
+Local (macOS), in `worktree/`:
+
+- `just test`: 1358 passed, 15 skipped, 0 failed.
+- `just test-l2`: 41 passed.
+- `just lint`: clean.
+
+Cross-OS (`./scripts/cross-check.sh --os <os> <package>`, archive mode):
+
+| OS | `worktree` | `worktree-cli` | L2 |
+| --- | --- | --- | --- |
+| Linux (`build-linux`) | 747 passed, 1 skipped | 609 passed, 55 skipped | `--features terminal-tests level2_` with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`: 41 passed |
+| WSL2 (`build-win`) | 747 passed, 1 skipped | 609 passed, 55 skipped | not run (CI omits it as an accepted gap) |
+| native Windows (`build-win-native`) | 720 passed, 1 skipped | first run 573 passed, **1 failed** (below); rerun 574 passed | `level2_powershell`: 3 passed |
+
+`just ci-local --plan` against R11: the worktree, worktree-cli, and sniff cells
+are the expected L1/L2/lint/check set (sniff because the filesystem-watchers
+feature is on this branch). The only narrowed cells are `test-toolkit` (it
+reads `os` skill pages) and two darkmatter cells from a darkmatter spec on
+this branch, unrelated to this fix. No `source-inputs`, no prompts, no
+terminal focus. About 25 executing cells: the 30-45 min band for a pull
+request.
+
+### Findings that need attention
+
+- **Windows Search again.** The first Windows `worktree-cli` run failed
+  `remove::example_unique_commits_without_a_terminal_keep_the_branch_with_a_warning`
+  with exit 3: `SearchProtocolHost.exe` (PID 6808) held an open handle on
+  `b.txt` in a fresh fixture under `%TEMP%`. That is the third observed hit,
+  and the human-review item from Phase 11 is still open. Not papered over;
+  the immediate rerun passed.
+- **Windows timing.** On `build-win-native`, 45 of 93 `remove` tests and 34
+  tests elsewhere in `worktree-cli` (for example `list_prs` at 11 s) take
+  more than 5 s in a package run. The worst `remove` tests take 16-18 s and
+  run several removals or the network stand-ins; every `worktree` library
+  test of the new lifecycle is under 5 s (slowest 4.6 s). The overrun is
+  package-wide on that host, and this fix adds about 1.5-2 s per removal
+  (Phase 11). The redundant Git calls in `unregister_quarantine`
+  (`inspect_missing` followed by `remove_missing_record`, about four spawns)
+  account for roughly 0.2 s of that, so they are not the main cost; the
+  per-removal Sniff query and the marker-confirmed watch checks are the next
+  candidates to measure. Not changed here: this phase changes no behavior,
+  and the remedy needs a measurement first.
+
+Phase 12 is complete. Implementation complete, ready for review.

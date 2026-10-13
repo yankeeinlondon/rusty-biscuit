@@ -20,79 +20,72 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 status: planned
-implemented: false
+implemented: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
 depends-on:
   - 2026-10-05-filesystem-watchers
-human_review: false
+human_review: true
+human_review_items:
+  - |-
+    **Windows system processes can briefly "use" a worktree and pause `wt remove`.**
+
+    `wt remove` now checks, right before it moves anything, whether any other
+    process has a file in the worktree open, and it refuses (exit 3) if so.
+    The spec made this deliberately strict: any open handle refuses, there is
+    no automatic retry, and no flag overrides it. On the native Windows build
+    host, the Windows Search helper `SearchProtocolHost.exe` opened a file a
+    test had just created under the temp folder, which made the test fail
+    (exit 3). This has now happened three times: twice in Phase 11 and once
+    more in Phase 12's final Windows run (1 of 574 tests; the immediate rerun
+    passed). A user can hit the same thing: they rerun and it works.
+
+    Why decide before merging: every phase is now implemented, and CI runs
+    Windows on every push to `main`. As written, Windows CI will fail now and
+    then for this reason alone, and nothing in a test can fix it without
+    changing the rule.
+
+    Options:
+    - **A. Keep the strict rule.** No change. Pros: simplest, and never deletes
+      under a reader. Cons: occasional Windows CI failures, and users
+      occasionally see "Removal paused" naming a system process they did not
+      start.
+    - **B. Ask once more for known Windows indexing and scanning processes.**
+      If every process found is on a short, fixed list (Windows Search's
+      `SearchProtocolHost.exe`, `SearchFilterHost.exe`, `SearchIndexer.exe`),
+      wait about half a second and check again; refuse only if one is still
+      there. Pros: removes the flake and the user annoyance and keeps the rule
+      strict for everything else. Cons: a small exception to "no automatic
+      retry", and the list must be maintained.
+    - **C. Ignore those processes entirely.** Pros: no delay at all. Cons: a
+      process that really holds a file is let through; the strict rule exists
+      so `wt` never deletes under an active reader.
+
+    Recommendation: **B.** It keeps the safety rule for every real program,
+    costs at most one short wait in the rare case, and is the smallest change
+    that makes Windows CI reliable.
 message_to_agent: |-
-  Phases 1-10 are closed. Every author decision is made (see "## Decisions");
-  do not set human_review for them.
+  All 12 phases are implemented; read implementation-log.md "## Phase 12"
+  first. It holds the acceptance (items 1-12) to test table, the structural
+  checks, and the cross-OS evidence (macOS, Linux, WSL2, native Windows all
+  pass; one Windows run hit the Windows Search refusal described in
+  human_review_items, and the rerun passed).
 
-  Read implementation-log.md "## Phase 10" and .claude/skills/worktree/
-  lifecycle.md first. Phase 10 built the whole removal at library level in
-  worktree/lib/src/remove/lifecycle.rs (+ lifecycle/resume.rs, resolve.rs);
-  `wt remove` does not call it yet. Phase 11 wires it; do not add a second
-  flow, store, or retry path in the CLI.
-
-  Entry points: remove_checkout(&RemovalRequest, &Environment) -> Removal;
-  resolve_target(base, name) -> Target {Live, Pending, Ambiguous};
-  inspect(base, &id) -> Inspection {resolution, original, quarantine,
-  registration, journal, retained}; resume(&ResumeRequest, &Environment);
-  release_unstarted(base, &id). Removal::exit_class() gives
-  Success/Failure/Refused/Blocked = exit 0/1/3/4; map that, not the outcome.
-  Environment { usage: &SniffUsage, interrupted: &|| false (or a Ctrl-C
-  flag), observe: &native_observation }.
-
-  Wiring facts the CLI must respect:
-  - Approval { inventory, fingerprint, tip, discard_files }. The record
-    requires a 64-hex fingerprint ALWAYS, but run() only computes
-    facts.reported when inside || needs_consent. Compute it for every
-    healthy-checkout removal (consent_state(base, path, branch) returns
-    (Inventory, fingerprint) exactly as Facts::local + fingerprint do).
-    Approval.tip = facts.head. files_unchanged is subsumed: the lifecycle
-    rechecks tip, dirty list, and fingerprint after discovery.
-  - BranchActions { local: Some(LocalBranchDeletion { name, expected_tip:
-    facts.head }) for BranchStep::Delete, remote:
-    Some(RemoteBranchDeletion { remote: "origin", destination, endpoint,
-    expected_sha }) only for RemoteState::Present }. Other remote states
-    (Unavailable, etc.) are still the CLI's to refuse or report as today;
-    the lifecycle deletes only what it is given, after verified removal.
-  - Removal::Finished always has a saved report_path; a Refused has no
-    record (a pre-move refusal after begin discards it). Refusal::Usage(
-    UsageRefusal::InUse) renders with commands/remove/usage.rs's
-    usage_refusal (then drop its #[allow(dead_code)]).
-  - Per R8 delete the early check_no_processes in run, and remove_worktree,
-    check_not_in_use, finish_unregistered (and their tests) once nothing
-    calls them; the missing-directory path keeps remove_missing_record and
-    never queries Sniff.
-  - Retry: resolve_target replaces find_worktree for remove. Pending ->
-    inspect -> NotStarted/MovedUnassociated: release_unstarted, then the
-    normal live flow; Quarantined: report + ask from
-    consent_state(base, record.quarantine, branch) and resume with that
-    Approval; ContentRemoved: inspect_missing on the quarantine's entry,
-    ask, resume with RecordApproval; CheckoutRemoved: reassess branches,
-    ask, resume with fresh BranchActions; anything else: render the
-    Inspection (Refusal::Recovery, exit 3). Ambiguous -> list candidates,
-    exit 3. Run recovery from the base checkout.
-  - The handoff second run: after handoff::verify, call remove_checkout
-    there (the decisive usage query must happen in the second run).
-
-  Test facts:
-  - lifecycle/tests.rs has Usage (fake UsageSource) and Observers
-    (injected observer starter) helpers; run_with/resume_with take a
-    Boundary hook for crash injection.
-  - Windows: one lifecycle run is ~22 git calls; retry tests take 4.0-4.7 s
-    on build-win-native under load. Keep CLI tests to one lifecycle run
-    each, and do not loop fixtures inside a test.
-  - macOS: TestRepo paths are /var/... while Git lists /private/var/...;
-    compare with same_location.
-  - Pre-existing, not fixed: remove::missing::tests::
-    a_split_index_whose_shared_file_changes_after_inspection_refuses takes
-    ~7 s alone on native Windows.
+  For a review or fix agent:
+  - User docs: worktree/docs/cli/remove.md was restructured in Phase 12
+    ("Deleting the checkout", "What `wt remove` refuses to move", "Recovery
+    records and retry"); keep the README exit-code table in step with it.
+  - Windows timing is open: on build-win-native, 45 of 93 worktree-cli
+    `remove` tests and 34 other worktree-cli tests exceed 5 s in a package
+    run (host-wide). The fix adds about 1.5-2 s per removal; the redundant
+    Git calls in unregister_quarantine explain only about 0.2 s. Measure the
+    per-removal Sniff query and the marker-confirmed watch checks before
+    changing code.
+  - Not wired: Environment::interrupted is `|| false` (no signal crate in
+    worktree-cli).
+  - cross-check: flags such as --build-jobs go after the package name.
 ---
 
 # Graceful removal under filesystem contention
