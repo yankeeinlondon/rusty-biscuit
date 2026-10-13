@@ -28,8 +28,8 @@ use crate::hooks::{HookStage, SupportsHooks};
 ///
 /// `Output` may own the [`LiveBody`] and read it after `decode` returns, as a
 /// stream does. Such an output is `Send` but need not be `Clone` or `Sync`,
-/// and the envelope's `elapsed` then measures the time to the response head,
-/// not to the end of the body.
+/// and the envelope's `elapsed`, which stops when decoding returns, then
+/// measures about the time to the response head, not to the end of the body.
 pub trait Decode: 'static {
     /// The decoded value.
     type Output: Send + 'static;

@@ -1,10 +1,10 @@
 //! The two response hooks a client can register, and the marker that limits
 //! typed mutators to codecs that run them.
 //!
-//! - [`ClientBuilder::pre_response_json`](crate::ClientBuilder::pre_response_json)
+//! - [`Client::pre_response_json`](crate::Client::pre_response_json)
 //!   registers one client-global hook that reshapes a successful JSON body
 //!   before it is decoded.
-//! - [`ClientBuilder::mutate_response`](crate::ClientBuilder::mutate_response)
+//! - [`Client::mutate_response`](crate::Client::mutate_response)
 //!   registers a mutator for one endpoint, typed by its success type, that
 //!   runs on the decoded value.
 //!

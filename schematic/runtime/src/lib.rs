@@ -12,8 +12,11 @@
 //!   redaction that keeps credentials out of it ([`redact`]);
 //! - the [`Decode`] boundary through which codecs read a live response body,
 //!   and the built-in codecs [`Json`], [`Text`], [`Binary`], and [`Empty`];
-//! - the managed [`Client`], built through [`ClientBuilder`] from an
-//!   [`ApiDefinition`], optionally sharing a [`SharedTransport`];
+//! - the managed [`Client`], created infallibly from an [`ApiDefinition`]
+//!   and configured by chained settings that are validated on its first send
+//!   or by [`Client::build`], optionally sharing a [`SharedTransport`];
+//! - [`api_client!`], which gives a generated API's client struct the
+//!   client's settings and sends as inherent methods;
 //! - programmatic [`Credential`]s and the API's [`AuthConfig`], per-call
 //!   [`CallOptions`], and the shared [`Deadline`];
 //! - the [`OriginPolicy`] that governs redirects and followed links;
@@ -41,6 +44,7 @@
 //! The runtime does not depend on `schematic-define`; generated code
 //! translates definition data into runtime configuration.
 
+mod api_client;
 pub mod client;
 pub mod codec;
 pub mod credentials;
@@ -57,7 +61,7 @@ pub mod redact;
 pub mod response;
 pub mod transport;
 
-pub use client::{ApiDefinition, Client, ClientBuilder, DEFAULT_TIMEOUT, MAX_REDIRECTS};
+pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
 pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
 pub use deadline::Deadline;
@@ -75,6 +79,10 @@ pub use transport::{SharedTransport, SharedTransportBuilder};
 pub use http::Method;
 /// The URL type of [`Client::check_link`].
 pub use url::Url;
+/// The JSON value type of [`Client::pre_response_json`], named by
+/// [`api_client!`] expansions.
+#[doc(hidden)]
+pub use serde_json;
 pub use response::{
     ApiError, ErrorKind, FailureCategory, NoDeclaredError, Outcome, RedirectRefusal, Response,
 };
@@ -85,4 +93,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 1;
+pub const ABI: u32 = 2;

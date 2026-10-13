@@ -1,7 +1,8 @@
 //! Metadata recorded for every send, redacted when it is captured.
 //!
-//! The only constructors are [`RequestMeta::capture`] and
-//! [`ResponseMeta::capture`], and both apply a [`SecretNames`] set, so a
+//! The only public constructors are [`RequestMeta::capture`] and
+//! [`ResponseMeta::capture`]; they, and the runtime's own record of a request
+//! its invalid client never assembled, apply a [`SecretNames`] set, so a
 //! stored metadata field never holds a secret value.
 
 use std::fmt;
@@ -87,6 +88,23 @@ impl RequestMeta {
     }
 }
 
+impl RequestMeta {
+    /// Records a request that was never assembled because its client's
+    /// settings are invalid: the endpoint, its declared method, and the
+    /// configured base URL, redacted with `secrets`.
+    pub(crate) fn unassembled(secrets: &SecretNames, endpoint_id: &'static str, method: Method, base_url: &str) -> Self {
+        Self {
+            endpoint_id,
+            method,
+            url: secrets.redact_url_reference(base_url),
+            query: Vec::new(),
+            headers: HeaderMap::new(),
+            auth: AuthMethod::Anonymous,
+            page: None,
+        }
+    }
+}
+
 impl fmt::Display for RequestMeta {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.method, self.url)
@@ -107,8 +125,11 @@ pub struct ResponseMeta {
     /// The provider's request id, when the API names a request-id header and
     /// the response carries it; redacted when that header name is secret.
     pub request_id: Option<String>,
-    /// Time from the start of the logical send to this record, including
-    /// every redirect hop.
+    /// Time from the start of the logical send until its outcome was
+    /// produced, including every redirect hop, the body read, decoding, and
+    /// response hooks. For a codec output that keeps reading the body after
+    /// decoding returns, it stops when decoding returned. A response hook,
+    /// which runs before the outcome exists, sees the time to the head.
     pub elapsed: Duration,
 }
 

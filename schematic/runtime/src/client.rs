@@ -1,8 +1,8 @@
 //! The managed client, the typed send, and the raw send.
 //!
-//! A [`Client`] is built for one API marker `A` and sends only requests whose
+//! A [`Client`] is created for one API tag `A` and sends only requests whose
 //! [`EndpointSpec::Api`] is `A`. Generated code supplies the API's
-//! [`ApiDefinition`]; callers adjust it through [`ClientBuilder`] but cannot
+//! [`ApiDefinition`]; callers adjust it through its chained settings but cannot
 //! inject an HTTP client, so every send goes through the runtime's credential
 //! resolution, origin policy, expiration, and redaction.
 //!
@@ -18,7 +18,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -45,7 +45,7 @@ use crate::redact::{RedactedUrl, SecretNames};
 use crate::response::{ApiError, ErrorKind, FailureCategory, Outcome, RedirectRefusal, Response};
 use crate::transport::{self, ConnectionSettings, SharedTransport};
 
-/// The per-request timeout used when the builder sets none.
+/// The per-request timeout used when the client sets none.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The most redirects one send follows; the next redirect response is
@@ -79,7 +79,7 @@ impl ApiDefinition {
 
     /// Sets the API's cross-origin policy (default
     /// [`OriginPolicy::SameOrigin`]). Callers can only tighten it, through
-    /// [`ClientBuilder::cross_origin`].
+    /// [`Client::cross_origin`].
     #[must_use]
     pub fn cross_origin(mut self, policy: OriginPolicy) -> Self {
         self.cross_origin = policy;
@@ -113,18 +113,29 @@ impl ApiDefinition {
     }
 }
 
-/// A client for the API marked by `A`.
+/// A client for the API tagged by `A`.
 ///
-/// Cloning is cheap and shares the connection pool and configuration.
+/// [`new`](Self::new) never fails. Settings are chained by value and are
+/// validated together, once: by [`build`](Self::build), or else by the first
+/// send or [`check_link`](Self::check_link), which report an invalid setting
+/// as [`TransportErrorKind::InvalidClient`] before any network work. Nothing
+/// invalid falls back to a default.
+///
+/// Cloning is cheap. Clones share the validated configuration and its
+/// connection pool, whichever clone validates first. A setting applied after
+/// validation discards the cached result for that value only, which
+/// validates again on its next use; clones made earlier keep theirs.
 pub struct Client<A: Api> {
-    inner: Arc<Inner>,
+    settings: Arc<Settings>,
+    built: Arc<OnceLock<Result<Inner, BuildError>>>,
     api: PhantomData<fn() -> A>,
 }
 
 impl<A: Api> Clone for Client<A> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            settings: Arc::clone(&self.settings),
+            built: Arc::clone(&self.built),
             api: PhantomData,
         }
     }
@@ -132,14 +143,48 @@ impl<A: Api> Clone for Client<A> {
 
 impl<A: Api> fmt::Debug for Client<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let settings = &*self.settings;
+        let secrets = secret_names(&settings.definition, &settings.definition.auth);
         f.debug_struct("Client")
             .field("api", &A::NAME)
-            .field("base_url", &self.inner.secrets.redact_url(&self.inner.base_url))
-            .field("timeout", &self.inner.timeout)
+            .field("base_url", &secrets.redact_url_reference(&settings.definition.base_url))
+            .field("timeout", &settings.timeout)
+            .field("credential", &settings.credential)
             .finish_non_exhaustive()
     }
 }
 
+/// A client's settings as the caller chained them, before validation.
+///
+/// Options that configure connections (proxy, root certificates, invalid
+/// certificate acceptance, connect timeout) apply to the client's own pool;
+/// a client attached to a [`SharedTransport`] takes them from the transport
+/// and refuses its own.
+#[derive(Clone)]
+struct Settings {
+    definition: ApiDefinition,
+    timeout: Duration,
+    connection: ConnectionSettings,
+    transport: Option<SharedTransport>,
+    user_agent: Option<String>,
+    default_headers: Vec<(String, String)>,
+    credential: Option<ClientCredential>,
+    env_order: Option<Vec<String>>,
+    cross_origin: Option<OriginPolicy>,
+    hooks: Hooks,
+}
+
+/// The client-level credential, as set.
+#[derive(Debug, Clone)]
+enum ClientCredential {
+    /// A credential of an explicit kind, from [`Client::credentials`].
+    Given(Credential),
+    /// A key from [`Client::api_key`], whose kind follows the API's first
+    /// single-secret placement once the client is validated.
+    Key(Credential),
+}
+
+/// A validated client: what every send reads.
 struct Inner {
     http: reqwest::Client,
     base_url: Url,
@@ -153,145 +198,137 @@ struct Inner {
     hooks: Hooks,
 }
 
-/// Builds a [`Client`].
-///
-/// Options that configure connections (proxy, root certificates, invalid
-/// certificate acceptance, connect timeout) apply to the client's own pool;
-/// a client attached to a [`SharedTransport`] takes them from the transport
-/// and refuses its own.
-pub struct ClientBuilder<A: Api> {
-    definition: ApiDefinition,
-    timeout: Duration,
-    connection: ConnectionSettings,
-    transport: Option<SharedTransport>,
-    user_agent: Option<String>,
-    default_headers: Vec<(String, String)>,
-    credential: Option<Credential>,
-    env_order: Option<Vec<String>>,
-    cross_origin: Option<OriginPolicy>,
-    hooks: Hooks,
-    api: PhantomData<fn() -> A>,
-}
-
-impl<A: Api> fmt::Debug for ClientBuilder<A> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClientBuilder")
-            .field("api", &A::NAME)
-            .field("timeout", &self.timeout)
-            .field("credential", &self.credential)
-            .finish_non_exhaustive()
-    }
-}
-
 impl<A: Api> Client<A> {
-    /// A builder seeded from `definition`.
-    pub fn builder(definition: ApiDefinition) -> ClientBuilder<A> {
-        ClientBuilder {
-            definition,
-            timeout: DEFAULT_TIMEOUT,
-            connection: ConnectionSettings::default(),
-            transport: None,
-            user_agent: None,
-            default_headers: Vec::new(),
-            credential: None,
-            env_order: None,
-            cross_origin: None,
-            hooks: Hooks::default(),
+    /// An unvalidated client for `definition`, with every default.
+    pub fn new(definition: ApiDefinition) -> Self {
+        Self {
+            settings: Arc::new(Settings {
+                definition,
+                timeout: DEFAULT_TIMEOUT,
+                connection: ConnectionSettings::default(),
+                transport: None,
+                user_agent: None,
+                default_headers: Vec::new(),
+                credential: None,
+                env_order: None,
+                cross_origin: None,
+                hooks: Hooks::default(),
+            }),
+            built: Arc::default(),
             api: PhantomData,
         }
     }
-}
 
-impl<A: Api> ClientBuilder<A> {
+    /// Applies `change` and discards any cached validation.
+    fn update(mut self, change: impl FnOnce(&mut Settings)) -> Self {
+        change(Arc::make_mut(&mut self.settings));
+        self.built = Arc::default();
+        self
+    }
+
     /// Sends requests to `url` instead of the definition's base URL, for
     /// example a local mock.
     #[must_use]
-    pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.definition.base_url = url.into();
-        self
+    pub fn base_url(self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.update(|settings| settings.definition.base_url = url)
     }
 
     /// The per-request timeout (default 30 s). Under a shared
     /// [`Deadline`] a send is bounded by the earlier of the
     /// two.
     #[must_use]
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
+    pub fn timeout(self, timeout: Duration) -> Self {
+        self.update(|settings| settings.timeout = timeout)
     }
 
     /// Bounds how long establishing a connection may take.
     #[must_use]
-    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.connection.connect_timeout = Some(timeout);
-        self
+    pub fn connect_timeout(self, timeout: Duration) -> Self {
+        self.update(|settings| settings.connection.connect_timeout = Some(timeout))
     }
 
     /// Sends every request through the proxy at `url`.
     #[must_use]
-    pub fn proxy(mut self, url: impl Into<String>) -> Self {
-        self.connection.proxy = Some(url.into());
-        self
+    pub fn proxy(self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.update(|settings| settings.connection.proxy = Some(url))
     }
 
     /// Trusts `certificate` (PEM or DER) as a root, in addition to the
     /// platform's roots.
     #[must_use]
-    pub fn add_root_certificate(mut self, certificate: impl Into<Vec<u8>>) -> Self {
-        self.connection.roots.push(certificate.into());
-        self
+    pub fn add_root_certificate(self, certificate: impl Into<Vec<u8>>) -> Self {
+        let certificate = certificate.into();
+        self.update(|settings| settings.connection.roots.push(certificate))
     }
 
     /// Accepts any server certificate, including self-signed and expired
     /// ones. Only for devices that cannot present a valid certificate.
     #[must_use]
-    pub fn danger_accept_invalid_certificates(mut self) -> Self {
-        self.connection.accept_invalid_certificates = true;
-        self
+    pub fn danger_accept_invalid_certificates(self) -> Self {
+        self.update(|settings| settings.connection.accept_invalid_certificates = true)
     }
 
     /// Sends `value` as the `User-Agent` of every request.
     #[must_use]
-    pub fn user_agent(mut self, value: impl Into<String>) -> Self {
-        self.user_agent = Some(value.into());
-        self
+    pub fn user_agent(self, value: impl Into<String>) -> Self {
+        let value = value.into();
+        self.update(|settings| settings.user_agent = Some(value))
     }
 
     /// Sends a header with every request, unless the request sets the same
     /// header itself. A header that would carry a credential is refused when
-    /// the client is built.
+    /// the client is validated.
     #[must_use]
-    pub fn default_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.default_headers.push((name.into(), value.into()));
-        self
+    pub fn default_header(self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        let header = (name.into(), value.into());
+        self.update(|settings| settings.default_headers.push(header))
     }
 
     /// Takes connections from `transport` instead of a private pool.
+    ///
+    /// The transport owns every connection option, so a client attached to
+    /// one that also sets any of them fails validation with
+    /// [`BuildError::TransportOptionConflict`], even when the values match.
     #[must_use]
-    pub fn transport(mut self, transport: &SharedTransport) -> Self {
-        self.transport = Some(transport.clone());
-        self
+    pub fn transport(self, transport: &SharedTransport) -> Self {
+        let transport = transport.clone();
+        self.update(|settings| settings.transport = Some(transport))
     }
 
     /// Sends `credential` when a call supplies none, before the environment
-    /// fallback is read.
+    /// fallback is read. It replaces any credential set before, including
+    /// one from [`api_key`](Self::api_key).
     #[must_use]
-    pub fn credentials(mut self, credential: Credential) -> Self {
-        self.credential = Some(credential);
-        self
+    pub fn credentials(self, credential: Credential) -> Self {
+        self.update(|settings| settings.credential = Some(ClientCredential::Given(credential)))
+    }
+
+    /// Sends `key` when a call supplies none, wherever the API takes a
+    /// single secret: in the first placement of the definition's accepted
+    /// list that is a bearer token or an API key in a header, query
+    /// parameter, or cookie. It replaces any credential set before.
+    ///
+    /// An API that accepts only Basic credentials, or none, fails validation
+    /// with [`BuildError::IncompatibleCredential`].
+    #[must_use]
+    pub fn api_key(self, key: impl Into<String>) -> Self {
+        let key = Credential::api_key(key);
+        self.update(|settings| settings.credential = Some(ClientCredential::Key(key)))
     }
 
     /// Reads the environment fallback's variables in this order instead of
     /// the definition's. For Basic authentication these are the password
     /// variables.
     #[must_use]
-    pub fn env_order<I, S>(mut self, vars: I) -> Self
+    pub fn env_order<I, S>(self, vars: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.env_order = Some(vars.into_iter().map(Into::into).collect());
-        self
+        let vars = vars.into_iter().map(Into::into).collect();
+        self.update(|settings| settings.env_order = Some(vars))
     }
 
     /// Tightens the API's cross-origin policy for this client.
@@ -299,11 +336,10 @@ impl<A: Api> ClientBuilder<A> {
     /// [`OriginPolicy::Deny`] and [`OriginPolicy::SameOrigin`] are accepted,
     /// and so is an [`OriginPolicy::AllowOrigins`] list that is a subset of
     /// the API's own list. Over a `Deny` API only `Deny` is accepted. Any
-    /// other choice fails [`build`](Self::build).
+    /// other choice fails validation.
     #[must_use]
-    pub fn cross_origin(mut self, policy: OriginPolicy) -> Self {
-        self.cross_origin = Some(policy);
-        self
+    pub fn cross_origin(self, policy: OriginPolicy) -> Self {
+        self.update(|settings| settings.cross_origin = Some(policy))
     }
 
     /// Runs `hook` on every successful JSON body before it is decoded, so it
@@ -313,12 +349,11 @@ impl<A: Api> ClientBuilder<A> {
     /// hooks, and only once the body has parsed as JSON; registering again
     /// replaces it. See [`crate::hooks`] for the full order.
     #[must_use]
-    pub fn pre_response_json<F>(mut self, hook: F) -> Self
+    pub fn pre_response_json<F>(self, hook: F) -> Self
     where
         F: Fn(&ResponseMeta, serde_json::Value) -> Result<serde_json::Value, HookError> + Send + Sync + 'static,
     {
-        self.hooks.set_pre_response_json(hook);
-        self
+        self.update(|settings| settings.hooks.set_pre_response_json(hook))
     }
 
     /// Runs `hook` on the decoded success value of endpoint `R`, after the
@@ -327,17 +362,20 @@ impl<A: Api> ClientBuilder<A> {
     /// `R` must be an endpoint of this client's API whose codec supports
     /// hooks; a text, binary, or empty endpoint does not compile.
     #[must_use]
-    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+    pub fn mutate_response<R, F>(self, hook: F) -> Self
     where
         R: EndpointSpec<Api = A>,
         R::Decoder: SupportsHooks,
         F: Fn(&ResponseMeta, &mut R::Success) -> Result<(), HookError> + Send + Sync + 'static,
     {
-        self.hooks.set_mutator::<R, F>(hook);
-        self
+        self.update(|settings| settings.hooks.set_mutator::<R, F>(hook))
     }
 
-    /// Builds the client.
+    /// Validates the settings now and returns the same client, so a bad
+    /// setting is reported here rather than by the first send.
+    ///
+    /// The result is cached: the client and its clones send through the
+    /// connection pool built here.
     ///
     /// ## Errors
     ///
@@ -346,66 +384,103 @@ impl<A: Api> ClientBuilder<A> {
     /// credential is of a kind the API does not accept, an allowed origin is
     /// not a bare HTTP(S) origin, the requested cross-origin policy loosens
     /// the API's, a connection option is set on a client attached to a shared
-    /// transport, or the HTTP client cannot be initialized.
-    pub fn build(self) -> Result<Client<A>, BuildError> {
-        let base_url = parse_base_url(&self.definition.base_url)?;
-        let origins = OriginRules::new(&base_url, &self.definition.cross_origin, self.cross_origin.as_ref())?;
-        let mut auth = self.definition.auth;
-        if let Some(vars) = self.env_order {
-            auth.replace_env_order(vars);
-        }
-        if let Some(credential) = &self.credential
-            && auth.placement_for(credential.kind()).is_none()
-        {
-            return Err(BuildError::IncompatibleCredential {
-                supplied: credential.kind().name(),
-            });
-        }
-        let secrets = SecretNames::builtin()
-            .with_names(auth.placements().map(CredentialPlacement::secret_name))
-            .with_names(&self.definition.secret_names);
+    /// transport, a proxy or root certificate is invalid, or the HTTP client
+    /// cannot be initialized.
+    pub fn build(self) -> Result<Self, BuildError> {
+        self.validated()?;
+        Ok(self)
+    }
 
-        let mut default_headers = HeaderMap::new();
-        for (name, value) in &self.default_headers {
-            if secrets.is_secret_header(name) {
-                return Err(BuildError::AuthBearingDefaultHeader { name: name.clone() });
-            }
-            let (name, value) = header_pair(name, value).ok_or_else(|| BuildError::InvalidHeader { name: name.clone() })?;
-            default_headers.append(name, value);
-        }
-        if let Some(agent) = &self.user_agent {
-            let value = HeaderValue::from_str(agent).map_err(|_| BuildError::InvalidHeader {
-                name: USER_AGENT.to_string(),
-            })?;
-            default_headers.insert(USER_AGENT, value);
-        }
+    /// The validated client, validating on first use.
+    fn validated(&self) -> Result<&Inner, BuildError> {
+        self.built.get_or_init(|| validate(&self.settings)).as_ref().map_err(Clone::clone)
+    }
 
-        let http = match self.transport {
-            Some(shared) => {
-                if let Some(option) = self.connection.first_set_option() {
-                    return Err(BuildError::TransportOptionConflict { option });
-                }
-                shared.http
-            }
-            None => self.connection.build()?,
-        };
-
-        Ok(Client {
-            inner: Arc::new(Inner {
-                http,
-                base_url,
-                timeout: self.timeout,
-                default_headers,
-                auth,
-                credential: self.credential,
-                secrets,
-                request_id_header: self.definition.request_id_header,
-                origins,
-                hooks: self.hooks,
-            }),
-            api: PhantomData,
+    /// The validated client for a send of `R`, or the transport error that
+    /// reports why the settings are invalid.
+    fn validated_for<R: EndpointSpec>(&self, start: Instant) -> Result<&Inner, TransportError> {
+        self.validated().map_err(|error| {
+            let settings = &*self.settings;
+            let secrets = secret_names(&settings.definition, &settings.definition.auth);
+            let meta = RequestMeta::unassembled(&secrets, R::ENDPOINT_ID, R::METHOD, &settings.definition.base_url);
+            TransportError::new(meta, TransportErrorKind::InvalidClient(error), start.elapsed())
         })
     }
+}
+
+/// The names whose values are never stored for an API with `definition` and
+/// the effective `auth`.
+fn secret_names(definition: &ApiDefinition, auth: &AuthConfig) -> SecretNames {
+    SecretNames::builtin()
+        .with_names(auth.placements().map(CredentialPlacement::secret_name))
+        .with_names(&definition.secret_names)
+}
+
+/// Validates `settings` into the state every send reads.
+fn validate(settings: &Settings) -> Result<Inner, BuildError> {
+    let definition = &settings.definition;
+    let base_url = parse_base_url(&definition.base_url)?;
+    let origins = OriginRules::new(&base_url, &definition.cross_origin, settings.cross_origin.as_ref())?;
+    let mut auth = definition.auth.clone();
+    if let Some(vars) = &settings.env_order {
+        auth.replace_env_order(vars.clone());
+    }
+    let credential = match settings.credential.clone() {
+        None => None,
+        Some(ClientCredential::Given(credential)) => {
+            if auth.placement_for(credential.kind()).is_none() {
+                return Err(BuildError::IncompatibleCredential {
+                    supplied: credential.kind().name(),
+                });
+            }
+            Some(credential)
+        }
+        Some(ClientCredential::Key(key)) => {
+            let placement = auth.key_placement().ok_or(BuildError::IncompatibleCredential {
+                supplied: key.kind().name(),
+            })?;
+            Some(key.for_placement(placement))
+        }
+    };
+    let secrets = secret_names(definition, &auth);
+
+    let mut default_headers = HeaderMap::new();
+    for (name, value) in &settings.default_headers {
+        if secrets.is_secret_header(name) {
+            return Err(BuildError::AuthBearingDefaultHeader { name: name.clone() });
+        }
+        let (name, value) = header_pair(name, value).ok_or_else(|| BuildError::InvalidHeader { name: name.clone() })?;
+        default_headers.append(name, value);
+    }
+    if let Some(agent) = &settings.user_agent {
+        let value = HeaderValue::from_str(agent).map_err(|_| BuildError::InvalidHeader {
+            name: USER_AGENT.to_string(),
+        })?;
+        default_headers.insert(USER_AGENT, value);
+    }
+
+    let http = match &settings.transport {
+        Some(shared) => {
+            if let Some(option) = settings.connection.first_set_option() {
+                return Err(BuildError::TransportOptionConflict { option });
+            }
+            shared.http.clone()
+        }
+        None => settings.connection.build()?,
+    };
+
+    Ok(Inner {
+        http,
+        base_url,
+        timeout: settings.timeout,
+        default_headers,
+        auth,
+        credential,
+        secrets,
+        request_id_header: definition.request_id_header.clone(),
+        origins,
+        hooks: settings.hooks.clone(),
+    })
 }
 
 fn parse_base_url(text: &str) -> Result<Url, BuildError> {
@@ -442,6 +517,9 @@ struct Assembled {
 }
 
 /// How [`Client::execute`] ended once a response head arrived.
+///
+/// The `elapsed` of its metadata stops at that head; the caller sets the
+/// whole-send time once it has produced the outcome.
 enum Exchange {
     /// A reply that is not a followable redirect, with its body unread.
     Final { meta: ResponseMeta, body: LiveBody },
@@ -502,9 +580,11 @@ impl<A: Api> Client<A> {
     where
         R: EndpointSpec<Api = A>,
     {
-        let (meta, outcome) = match self.execute(request, options).await? {
+        let start = Instant::now();
+        let inner = self.validated_for::<R>(start)?;
+        let (mut meta, outcome) = match inner.execute(request, options, start).await? {
             Exchange::Final { meta, body } => {
-                let outcome = classify_reply::<R>(body, self.inner.hooks.stage::<R>(&meta)).await;
+                let outcome = classify_reply::<R>(body, inner.hooks.stage::<R>(&meta)).await;
                 (meta, outcome)
             }
             Exchange::Stopped { meta, body, stop } => {
@@ -516,6 +596,7 @@ impl<A: Api> Client<A> {
                 (meta, Outcome::Failure(ApiError { kind, body }))
             }
         };
+        meta.elapsed = start.elapsed();
         Ok(completed(options.deadline.as_ref(), meta, outcome))
     }
 
@@ -551,7 +632,9 @@ impl<A: Api> Client<A> {
     where
         R: EndpointSpec<Api = A>,
     {
-        let (meta, body, completion) = match self.execute(request, options).await? {
+        let start = Instant::now();
+        let inner = self.validated_for::<R>(start)?;
+        let (mut meta, body, completion) = match inner.execute(request, options, start).await? {
             Exchange::Final { meta, body } => match body.collect().await {
                 Ok(bytes) => (meta, bytes, RawCompletion::Complete),
                 Err(failure) => (meta, failure.retained, RawCompletion::BodyInterrupted),
@@ -565,24 +648,55 @@ impl<A: Api> Client<A> {
                 (meta, body, completion)
             }
         };
+        meta.elapsed = start.elapsed();
         if let Some(deadline) = &options.deadline {
             deadline.record_completed();
         }
         Ok(RawResponse { meta, body, completion })
     }
 
+    /// Checks a URL the caller is about to request, such as a next-page
+    /// link, against the cross-origin policy for the endpoint `R`, without any
+    /// network work.
+    ///
+    /// A same-origin URL passes under every policy, including
+    /// [`OriginPolicy::Deny`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`TransportError`] of kind
+    /// [`TransportErrorKind::CrossOriginRejected`] when the policy refuses
+    /// `url`'s origin, or when `url` is not a plain HTTP(S) URL, and of kind
+    /// [`TransportErrorKind::InvalidClient`] when the client's settings are
+    /// invalid.
+    pub fn check_link<R>(&self, url: &Url) -> Result<(), TransportError>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        let inner = self.validated_for::<R>(Instant::now())?;
+        match inner.origins.link(url) {
+            Decision::Follow { .. } => Ok(()),
+            Decision::Refuse => {
+                let meta = inner.meta_for::<R>(&R::METHOD, url, &HeaderMap::new(), AuthMethod::Anonymous);
+                let target = inner.secrets.redact_url(url);
+                Err(TransportError::new(meta, TransportErrorKind::CrossOriginRejected { target }, Duration::ZERO))
+            }
+        }
+    }
+}
+
+impl Inner {
     /// The execution core shared by every send: assembles `request`, checks
     /// its origin, resolves the credential once, and follows redirects under
     /// one expiration until a reply that ends the send.
     ///
     /// It does not count the send against its deadline; the caller does,
     /// once the outcome is classified.
-    async fn execute<R>(&self, request: R, options: &CallOptions) -> Result<Exchange, TransportError>
+    async fn execute<R>(&self, request: R, options: &CallOptions, start: Instant) -> Result<Exchange, TransportError>
     where
-        R: EndpointSpec<Api = A>,
+        R: EndpointSpec,
     {
-        let start = Instant::now();
-        let inner = &*self.inner;
+        let inner = self;
         let pre_send = |kind: TransportErrorKind, meta: RequestMeta| TransportError::new(meta, kind, start.elapsed());
 
         let parts = request
@@ -641,8 +755,7 @@ impl<A: Api> Client<A> {
             let (sent, auth) = hop;
             let meta = self.meta_for::<R>(&sent.method, &sent.url, &sent.headers, auth);
             let failed_hop = |category: FailureCategory, last_redirect: Option<(ResponseMeta, Bytes)>| match last_redirect {
-                Some((mut redirect_meta, body)) => {
-                    redirect_meta.elapsed = start.elapsed();
+                Some((redirect_meta, body)) => {
                     let target = inner.secrets.redact_url(&current.url);
                     Ok(Exchange::Stopped {
                         meta: redirect_meta,
@@ -719,35 +832,9 @@ impl<A: Api> Client<A> {
         }
     }
 
-    /// Checks a URL the caller is about to request, such as a next-page
-    /// link, against the cross-origin policy for the endpoint `R`, without any
-    /// network work.
-    ///
-    /// A same-origin URL passes under every policy, including
-    /// [`OriginPolicy::Deny`].
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`TransportError`] of kind
-    /// [`TransportErrorKind::CrossOriginRejected`] when the policy refuses
-    /// `url`'s origin, or when `url` is not a plain HTTP(S) URL.
-    pub fn check_link<R>(&self, url: &Url) -> Result<(), TransportError>
-    where
-        R: EndpointSpec<Api = A>,
-    {
-        match self.inner.origins.link(url) {
-            Decision::Follow { .. } => Ok(()),
-            Decision::Refuse => {
-                let meta = self.meta_for::<R>(&R::METHOD, url, &HeaderMap::new(), AuthMethod::Anonymous);
-                let target = self.inner.secrets.redact_url(url);
-                Err(TransportError::new(meta, TransportErrorKind::CrossOriginRejected { target }, Duration::ZERO))
-            }
-        }
-    }
-
     /// Starts one hop's request.
     async fn dispatch(&self, sent: &Assembled) -> reqwest::Result<reqwest::Response> {
-        let mut request = self.inner.http.request(sent.method.clone(), sent.url.clone()).headers(sent.headers.clone());
+        let mut request = self.http.request(sent.method.clone(), sent.url.clone()).headers(sent.headers.clone());
         if let Some(body) = &sent.body {
             request = request.body(body.bytes.clone());
         }
@@ -770,7 +857,7 @@ impl<A: Api> Client<A> {
     ) -> Result<(Assembled, AuthMethod), InvalidArgument> {
         let mut sent = hop.clone();
         if !credentials {
-            strip_secrets(&self.inner.secrets, &mut sent);
+            strip_secrets(&self.secrets, &mut sent);
             return Ok((sent, AuthMethod::Anonymous));
         }
         if let Some((placement, value)) = &resolved.sent {
@@ -803,7 +890,7 @@ impl<A: Api> Client<A> {
             return Err(RedirectRefusal::HopLimit);
         }
         target.set_fragment(None);
-        let Decision::Follow { credentials } = self.inner.origins.redirect(&target) else {
+        let Decision::Follow { credentials } = self.origins.redirect(&target) else {
             return Err(RedirectRefusal::CrossOrigin);
         };
 
@@ -828,7 +915,7 @@ impl<A: Api> Client<A> {
     /// Joins the endpoint's path (or takes it whole when it is an absolute
     /// URL) and query onto the base URL, and assembles its headers and body.
     fn assemble(&self, parts: RequestParts) -> Result<Assembled, TransportErrorKind> {
-        let inner = &*self.inner;
+        let inner = self;
         let RequestParts {
             method,
             path,
@@ -876,13 +963,13 @@ impl<A: Api> Client<A> {
     }
 
     fn meta_for<R: EndpointSpec>(&self, method: &Method, url: &Url, headers: &HeaderMap, auth: AuthMethod) -> RequestMeta {
-        RequestMeta::capture(&self.inner.secrets, R::ENDPOINT_ID, method.clone(), url, headers, auth)
+        RequestMeta::capture(&self.secrets, R::ENDPOINT_ID, method.clone(), url, headers, auth)
     }
 
     /// Metadata for a request whose parts could not be assembled: the base
     /// URL and the endpoint's declared method.
     fn base_meta<R: EndpointSpec>(&self) -> RequestMeta {
-        self.meta_for::<R>(&R::METHOD, &self.inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)
+        self.meta_for::<R>(&R::METHOD, &self.base_url, &HeaderMap::new(), AuthMethod::Anonymous)
     }
 }
 

@@ -13,11 +13,12 @@ use http::Method;
 use crate::codec::Decode;
 use crate::error::InvalidArgument;
 
-/// Marker for one generated API.
+/// The tag of one generated API.
 ///
-/// A generated client accepts only requests whose [`EndpointSpec::Api`] is its
-/// own marker, so a request built for one API cannot be sent through another
-/// API's client even when both declare an endpoint of the same name.
+/// A generated API struct wraps a [`Client`](crate::Client) of its tag and
+/// accepts only requests whose [`EndpointSpec::Api`] is that tag, so a
+/// request built for one API cannot be sent through another API's client even
+/// when both declare an endpoint of the same name.
 pub trait Api: 'static {
     /// Name of the API, used in diagnostics.
     const NAME: &'static str;

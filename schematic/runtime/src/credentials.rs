@@ -57,6 +57,18 @@ impl Credential {
         })
     }
 
+    /// The same secret as a credential for `placement`'s kind; a Basic
+    /// credential is returned unchanged.
+    pub(crate) fn for_placement(self, placement: &CredentialPlacement) -> Self {
+        match (self.0, placement.kind()) {
+            (Secret::AccessToken(secret) | Secret::ApiKey(secret), CredentialKind::AccessToken) => {
+                Self::access_token(secret)
+            }
+            (Secret::AccessToken(secret) | Secret::ApiKey(secret), _) => Self::api_key(secret),
+            (basic, _) => Self(basic),
+        }
+    }
+
     /// The method this credential is for.
     pub fn kind(&self) -> CredentialKind {
         match self.0 {
@@ -255,6 +267,14 @@ impl AuthConfig {
     /// The placement for a caller-supplied credential of `kind`, if any.
     pub(crate) fn placement_for(&self, kind: CredentialKind) -> Option<&CredentialPlacement> {
         self.accepted.iter().find(|placement| placement.kind() == kind)
+    }
+
+    /// The placement a client's `api_key` uses: the first accepted placement
+    /// that carries a single secret (a bearer token or an API key in a
+    /// header, query parameter, or cookie), in the definition's order. `None`
+    /// for an API that accepts only Basic credentials or none.
+    pub(crate) fn key_placement(&self) -> Option<&CredentialPlacement> {
+        self.accepted.iter().find(|placement| !matches!(placement, CredentialPlacement::Basic))
     }
 
     /// Replaces the order of the fallback's (password, key, or token)

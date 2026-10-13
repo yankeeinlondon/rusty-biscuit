@@ -72,6 +72,10 @@ pub enum TransportErrorKind {
         /// Time since the deadline was created.
         deadline_elapsed: Duration,
     },
+    /// The client's settings are invalid, so no request could start. A
+    /// client validates its settings on its first send, or earlier through
+    /// its `build`.
+    InvalidClient(BuildError),
     /// Any other failure before a head; the library's text is not kept.
     Other,
 }
@@ -92,6 +96,7 @@ impl fmt::Display for TransportErrorKind {
                 f,
                 "deadline exceeded after {completed_requests} completed request(s) in {deadline_elapsed:?}"
             ),
+            Self::InvalidClient(error) => write!(f, "invalid client: {error}"),
             Self::Other => f.write_str("request failed"),
         }
     }

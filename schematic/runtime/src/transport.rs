@@ -107,6 +107,22 @@ impl ConnectionSettings {
 
     /// Builds an HTTP client that never follows redirects.
     pub(crate) fn build(&self) -> Result<reqwest::Client, BuildError> {
+        self.client_builder()?.build().map_err(|_| {
+            // The TLS backend parses root certificates only here, so a build
+            // that succeeds without them blames a certificate.
+            let without_roots = Self {
+                roots: Vec::new(),
+                ..self.clone()
+            };
+            if !self.roots.is_empty() && without_roots.build().is_ok() {
+                BuildError::InvalidCertificate
+            } else {
+                BuildError::Transport
+            }
+        })
+    }
+
+    fn client_builder(&self) -> Result<reqwest::ClientBuilder, BuildError> {
         let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         if let Some(proxy) = &self.proxy {
             let proxy = reqwest::Proxy::all(proxy.as_str()).map_err(|_| BuildError::InvalidProxy)?;
@@ -127,19 +143,7 @@ impl ConnectionSettings {
         if let Some(timeout) = self.connect_timeout {
             builder = builder.connect_timeout(timeout);
         }
-        builder.build().map_err(|_| {
-            // The TLS backend parses root certificates only here, so a build
-            // that succeeds without them blames a certificate.
-            let without_roots = Self {
-                roots: Vec::new(),
-                ..self.clone()
-            };
-            if !self.roots.is_empty() && without_roots.build().is_ok() {
-                BuildError::InvalidCertificate
-            } else {
-                BuildError::Transport
-            }
-        })
+        Ok(builder)
     }
 }
 
@@ -177,4 +181,26 @@ fn chain_has_tls_error(mut source: Option<&(dyn std::error::Error + 'static)>) -
         source = current.source();
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Ownership of this setting is proved by
+    // `a_client_attached_to_a_shared_transport_refuses_every_connection_option`;
+    // this proves delivery. No test observes its effect: a connect that hangs
+    // cannot be produced portably or deterministically on loopback, and
+    // enforcing the bound is the HTTP library's responsibility.
+    #[test]
+    fn the_connect_timeout_reaches_the_http_client_builder() {
+        let settings = ConnectionSettings {
+            connect_timeout: Some(Duration::from_millis(1234)),
+            ..ConnectionSettings::default()
+        };
+
+        let described = format!("{:?}", settings.client_builder().expect("builder"));
+
+        assert!(described.contains("connect_timeout: 1.234s"), "{described}");
+    }
 }
