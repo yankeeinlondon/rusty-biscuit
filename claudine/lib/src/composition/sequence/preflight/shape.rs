@@ -64,6 +64,10 @@ pub struct PreflightTask {
     /// The `setup:`/`teardown:` shell commands sequence approval fixed, which
     /// execution runs instead of re-evaluating the authored text.
     pub approved_stack_commands: Vec<ApprovedCommand>,
+    /// Every interpolating `shell:`, `setup:`, and `teardown:` command
+    /// sequence approval fixed, with what it was resolved from, so the task
+    /// can refuse one its own captured environment would change.
+    pub preflight_approvals: Vec<super::PreflightApproval>,
 }
 
 /// Where a `setup:`/`teardown:` shell command was authored: its stage and its
@@ -93,7 +97,9 @@ impl CommandSiteId {
 }
 
 /// A command whose exact bytes sequence approval fixed. Execution runs
-/// [`Self::command`]; the authored text is never evaluated again.
+/// [`Self::command`]; the authored text is never evaluated again to produce
+/// what runs. (A [`PreflightApproval`](super::PreflightApproval) re-resolves
+/// it only to refuse a task whose environment would change it.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovedCommand {
     site: CommandSiteId,

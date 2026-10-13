@@ -136,7 +136,8 @@ fn compose_prompt_markdown(
     // from the launch evidence that produced it.
     let invocation = &shared_ctx.invocation;
     let options = ComposeOptions::new_with_context(shared_ctx.runtime.clone())
-        .with_context_authority(invocation.compose_context_authority());
+        .with_context_authority(invocation.compose_context_authority())
+        .with_shell_child_environment(invocation.env_baseline().shell_child_environment());
     let mut options = match source_path(source) {
         Some(path) => crate::composition::bind_agent_workspace(options, path, shell_cwd),
         None => options,

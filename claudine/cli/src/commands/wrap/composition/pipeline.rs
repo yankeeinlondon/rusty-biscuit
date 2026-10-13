@@ -896,6 +896,7 @@ fn construct_argv_and_system_prompt(
                 target.model.as_deref(),
                 effective_non_interactive,
                 has_model_env,
+                &super::target::request_environment(request),
                 &mut |key, value| {
                     env_plan.env.insert(key.into(), value.into());
                 },
@@ -1181,6 +1182,7 @@ fn construct_argv_and_system_prompt(
                 has_model_env: env_plan
                     .env
                     .contains_key(&std::ffi::OsString::from("MODEL")),
+                environment: super::target::request_environment(request),
                 mcp: mcp_rebuild.clone(),
                 opencode_config_base: opencode_config_base.clone(),
                 kilo_config_base: kilo_config_base.clone(),

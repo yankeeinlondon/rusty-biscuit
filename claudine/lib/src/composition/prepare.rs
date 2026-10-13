@@ -343,27 +343,42 @@ fn canonical_compose_options(
         (None, Some(invocation)) => invocation.current_provider(),
         (None, None) => std::sync::Arc::new(UnsuppliedRefresh) as _,
     };
+    // A shell child of this document starts from the document's environment,
+    // not from whatever this process holds now: two documents of one
+    // invocation can have captured different maps.
+    let child_environment = match (
+        options.document_epoch.as_ref(),
+        options.invocation_context.as_ref(),
+    ) {
+        (Some(epoch), _) => Some(epoch.env_baseline()),
+        (None, Some(invocation)) => Some(invocation.env_baseline()),
+        (None, None) => None,
+    };
     let mut compose_opts = bind_agent_workspace(
         ComposeOptions::new_with_context(ctx.clone())
             .with_context_authority(authority)
             .with_current_provider(current_provider),
         source_path,
         options.shell_working_directory.as_deref(),
-    )
-    .with_perf(options.perf_enabled)
-    // Defer the seven lifecycle event subtrees so their authored `{{ }}`
-    // spans survive raw in `effective_frontmatter` for event-time
-    // interpolation (C1). Non-lifecycle keys compose as today, so
-    // variable *values* (`phase`, `pass_icon`, …) are composed before
-    // launch and may still be mutated by lifecycle/loop side effects
-    // during the run.
-    .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-    // The composed body is delivered verbatim to the agent and reported as the
-    // user prompt. Darkmatter's default strips incidental single newlines, which
-    // would collapse an author's line-structured prompt into one paragraph —
-    // altering the delivered text and defeating line-count-based report
-    // truncation. Preserve the source line breaks for prompt delivery.
-    .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
+    );
+    if let Some(baseline) = child_environment {
+        compose_opts = compose_opts.with_shell_child_environment(baseline.shell_child_environment());
+    }
+    compose_opts = compose_opts
+        .with_perf(options.perf_enabled)
+        // Defer the seven lifecycle event subtrees so their authored `{{ }}`
+        // spans survive raw in `effective_frontmatter` for event-time
+        // interpolation (C1). Non-lifecycle keys compose as today, so
+        // variable *values* (`phase`, `pass_icon`, …) are composed before
+        // launch and may still be mutated by lifecycle/loop side effects
+        // during the run.
+        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+        // The composed body is delivered verbatim to the agent and reported as the
+        // user prompt. Darkmatter's default strips incidental single newlines, which
+        // would collapse an author's line-structured prompt into one paragraph —
+        // altering the delivered text and defeating line-count-based report
+        // truncation. Preserve the source line breaks for prompt delivery.
+        .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
     let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
     overrides.extend(&options.layered_overrides());
     overrides.initialize_outputs();

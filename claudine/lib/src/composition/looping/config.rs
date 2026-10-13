@@ -6,20 +6,24 @@ use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use serde_json::Value;
 
 use super::super::error::CompositionError;
+use crate::invocation_context::DocumentEnvironment;
 use super::super::json_util::json_type_name;
 use super::super::types::{LoopAction, LoopCondition, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 
 use super::dsl::{parse_actions, parse_positive_usize, parse_string};
 
-/// Read the fail-fast setting from env vars with deprecation support.
+/// Read the fail-fast setting from a document's environment, with
+/// deprecation support.
 ///
 /// Checks `CLAUDINE_FAIL_FAST` first, then falls back to the legacy
-/// `FAIL_FAST` name with a one-time deprecation warning.
-pub fn resolve_fail_fast_from_env() -> Option<bool> {
-    if let Ok(value) = std::env::var("CLAUDINE_FAIL_FAST") {
+/// `FAIL_FAST` name with a one-time deprecation warning. Like every loop
+/// setting, it reads the map the document captured at entry, so
+/// re-preparation and later iterations see the same value.
+pub fn resolve_fail_fast_from_env(environment: &DocumentEnvironment) -> Option<bool> {
+    if let Some(value) = environment.get("CLAUDINE_FAIL_FAST") {
         return value.parse().ok();
     }
-    if let Ok(value) = std::env::var("FAIL_FAST") {
+    if let Some(value) = environment.get("FAIL_FAST") {
         static WARN_ONCE: std::sync::Once = std::sync::Once::new();
         WARN_ONCE.call_once(|| {
             tracing::warn!("The FAIL_FAST env var is deprecated. Use CLAUDINE_FAIL_FAST instead.");
@@ -29,24 +33,26 @@ pub fn resolve_fail_fast_from_env() -> Option<bool> {
     None
 }
 
-/// Read the max-iterations setting from env.
-///
-/// Checks `CLAUDINE_MAX_ITERATIONS`.
-pub fn resolve_max_iterations_from_env() -> Option<usize> {
-    std::env::var("CLAUDINE_MAX_ITERATIONS")
-        .ok()
+/// Read the max-iterations setting (`CLAUDINE_MAX_ITERATIONS`) from a
+/// document's environment.
+pub fn resolve_max_iterations_from_env(environment: &DocumentEnvironment) -> Option<usize> {
+    environment
+        .get("CLAUDINE_MAX_ITERATIONS")
         .and_then(|v| v.parse().ok())
 }
 
-/// Read the rate-limit pause reset-margin override from env.
+/// Read the rate-limit pause reset-margin override from a document's
+/// environment.
 ///
 /// Checks `CLAUDINE_PAUSE_RESET_MARGIN`, parsed with the shared timeout
 /// grammar (e.g. `5s`, `2m`, `0.5s`). Invalid values are ignored so the
 /// engine falls back to its built-in margin. Primarily a test knob to keep
 /// pause-policy coverage fast; also lets operators tune skew tolerance.
-pub fn resolve_pause_reset_margin_from_env() -> Option<std::time::Duration> {
-    let raw = std::env::var("CLAUDINE_PAUSE_RESET_MARGIN").ok()?;
-    crate::harness::parse_timeout(&raw, std::path::Path::new("<CLAUDINE_PAUSE_RESET_MARGIN>")).ok()
+pub fn resolve_pause_reset_margin_from_env(
+    environment: &DocumentEnvironment,
+) -> Option<std::time::Duration> {
+    let raw = environment.get("CLAUDINE_PAUSE_RESET_MARGIN")?;
+    crate::harness::parse_timeout(raw, std::path::Path::new("<CLAUDINE_PAUSE_RESET_MARGIN>")).ok()
 }
 
 /// Detect and parse a loop configuration from resolved composition frontmatter.

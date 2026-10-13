@@ -126,7 +126,8 @@ pub(super) fn run_step_task(
         prepared_context: Some(&task_context),
         file_resolution_context: task_source_context.file_resolution_context(),
         effect_engine: &engine,
-        shell_runner: &SystemShellRunner,
+        // The step's document: its `shell` actions start from its environment.
+        shell_runner: run.prep_context.invocation.shell_runner(),
         emitter: &emitter,
         term: &term,
         source_path: &task.origin_path,
@@ -171,6 +172,10 @@ pub(super) fn run_step_task(
         stream: sink.as_ref(),
         live: live.as_ref(),
         run_evidence: Some(step_run),
+        // The step's document: its view already carries the environment the
+        // step captured, which the task's approved commands are checked
+        // against and its prompt document composes under.
+        document: Some(&run.prep_context.invocation),
     }
     .run();
 
@@ -225,6 +230,8 @@ fn prepare_task_context(
     // package facts come from the invocation owner, while the task document's
     // own `SourceContext` (returned alongside) still drives file resolution.
     // The epoch joins the task's run, which its prompt document joins too.
+    // `invocation` is the task's document view, so its environment is the one
+    // the task captured, never the launch document's.
     let document_epoch = invocation.begin_document_epoch_in(run);
     let mut task_context = document_epoch.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
@@ -269,6 +276,9 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         diagnostic: _,
         // Bytes approval already resolved; they hold no expression to read.
         approved_stack_commands: _,
+        // Re-resolved from the context preflight approved them under, never
+        // from this one.
+        preflight_approvals: _,
     } = task;
     push_json_scan(
         &(name, label, params, timeout, operation, flow, setup, teardown),
@@ -316,13 +326,22 @@ fn group_requirements(
     group: &PreflightGroup,
     graph: &claudine::composition::sequence::preflight::PreflightGraph,
 ) -> darkmatter::markdown::compose::ContextRequirements {
+    task_requirements(&group.tasks, graph)
+}
+
+/// What `tasks` mention, nested groups included: each task's own fields and
+/// its prompt document's root page, as [`group_requirements`] reads them.
+fn task_requirements(
+    tasks: &[PreflightTask],
+    graph: &claudine::composition::sequence::preflight::PreflightGraph,
+) -> darkmatter::markdown::compose::ContextRequirements {
     let mut scan = String::new();
     // A task's scan already covers nested groups' fields.
-    for task in &group.tasks {
+    for task in tasks {
         push_task_scan(task, &mut scan);
     }
     let mut documents = darkmatter::markdown::compose::ContextRequirements::default();
-    let mut pending: Vec<&PreflightTask> = group.tasks.iter().collect();
+    let mut pending: Vec<&PreflightTask> = tasks.iter().collect();
     while let Some(task) = pending.pop() {
         match &task.action {
             PreflightAction::Prompt { path, .. } => {
@@ -433,17 +452,75 @@ impl<'a> WrapperPromptRunner<'a> {
     fn take_provider(&self) -> Option<claudine::provider::Provider> {
         self.record().provider
     }
+
+    /// The step's target and environment overrides for `document`: its model
+    /// re-selected under that document's map (see
+    /// [`super::resolve::StepSelection::for_document`]), and `MODEL` naming it.
+    fn document_target(
+        &self,
+        document: &InvocationContext,
+    ) -> (Option<ResolvedExecutionTarget>, BTreeMap<String, String>) {
+        let target = self.target.cloned().map(|planned| {
+            self.run
+                .selection
+                .for_document(planned, document.document_environment())
+        });
+        let mut env_overrides = self.env_overrides.clone();
+        if let Some(target) = &target {
+            match &target.model {
+                Some(model) => {
+                    env_overrides.insert("MODEL".to_string(), model.clone());
+                }
+                None => {
+                    env_overrides.remove("MODEL");
+                }
+            }
+        }
+        (target, env_overrides)
+    }
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
     fn open_member_run(&self, task: &PreflightTask) -> Option<TaskRun> {
         let run = RunEvidence::default();
-        let (_, context, epoch) =
-            prepare_task_context(&self.run.prep_context.invocation, task, self.env_overrides, &run);
+        // A serial leg is a document of its own: it captures its environment
+        // once, here, before any of its stages run.
+        let document = self.run.prep_context.invocation.capture_document();
+        let (_, env_overrides) = self.document_target(&document);
+        let (_, context, epoch) = prepare_task_context(&document, task, &env_overrides, &run);
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
         );
-        Some(TaskRun { context, run })
+        Some(TaskRun {
+            context,
+            run,
+            document: Some(document),
+        })
+    }
+
+    fn open_leg_run(&self, task: &PreflightTask, group: Option<&TaskRun>) -> Option<TaskRun> {
+        // A parallel leg captures its own environment but joins the group's
+        // run, so siblings share one observation of the working tree and
+        // nothing mutable of one another's.
+        let run = group.map_or_else(RunEvidence::default, |group| group.run.clone());
+        let document = self.run.prep_context.invocation.capture_document();
+        let epoch = document.begin_document_epoch_in(&run);
+        let mut context = epoch.capture_launch_context(&task_requirements(
+            std::slice::from_ref(task),
+            self.run.graph,
+        ));
+        let (_, env_overrides) = self.document_target(&document);
+        for (key, value) in &env_overrides {
+            context.env_mut().insert(key.clone(), value.clone());
+        }
+        epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        );
+        Some(TaskRun {
+            context,
+            run,
+            document: Some(document),
+        })
     }
 
     fn open_group_run(&self, group: &PreflightGroup) -> Option<TaskRun> {
@@ -459,28 +536,35 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
         );
-        Some(TaskRun { context, run })
+        // The group is not a document: its shared run is captured under the
+        // step's view, and each leg enters its own.
+        Some(TaskRun {
+            context,
+            run,
+            document: None,
+        })
     }
 
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
         *self.record() = PromptRunRecord::default();
 
+        // The document the task runs in: a group leg's own view, or the
+        // step's. Everything below — composition, the prompt document's
+        // lifecycle, and the launch — reads that document's environment.
+        let document = request
+            .document
+            .clone()
+            .unwrap_or_else(|| self.run.prep_context.invocation.clone());
         // Just-in-time, like the step itself: the referenced document is read
         // now, so a document an earlier step rewrote is composed as it stands.
         let source = composition::resolve_composition_source_in_context(
             &request.path.display().to_string(),
             self.run.compose.file_resolution_context,
         )?;
-        let prompt_source_context = self
-            .run
-            .prep_context
-            .invocation
+        let prompt_source_context = document
             .derive_source(&source.resolved_path)
             .expect("resolved prompt document always has a parent directory");
-        let params_source_context = self
-            .run
-            .prep_context
-            .invocation
+        let params_source_context = document
             .derive_source(&request.params_origin_path)
             .expect("a preflight task always has an authoring source");
         let mut caller_input_records =
@@ -504,11 +588,13 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             .for_referenced_document(request.inline_compose, &prompt_source_context);
         prompt_compose_context.caller_input_records = &caller_input_records;
         prompt_compose_context.run_evidence = request.run_evidence.as_ref();
+        prompt_compose_context.invocation = &document;
+        let (document_target, document_env_overrides) = self.document_target(&document);
         let composed = super::jit::compose_step(
             &source,
             &prompt_compose_context,
             &request.set_overrides,
-            self.env_overrides,
+            &document_env_overrides,
             self.run.approved.clone(),
             // A referenced prompt document *is* its body; composing it to
             // nothing is the error the empty-body guard exists to name.
@@ -518,7 +604,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let shared = self.run.shared;
         let resolved =
             shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
-        let mut env_overrides = self.env_overrides.clone();
+        let mut env_overrides = document_env_overrides;
         let mut task_owned_env = super::jit::step_owned_env(self.run.effective_fail_fast);
         if let Some(operation) = &request.operation {
             env_overrides.insert("OPERATION".to_string(), operation.clone());
@@ -548,7 +634,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             },
             file_ref: request.reference.clone(),
             prepared: composed.prepared,
-            resolved_target: self.target.cloned(),
+            resolved_target: document_target,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
             sequence: true,
@@ -577,11 +663,11 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             env_overrides,
             shared_approval_cache: Some(Arc::clone(&self.run.compose.approval_cache)),
             installed_snapshot: Some(self.run.prep_context.installed_snapshot.clone()),
-            invocation_context: Some(self.run.prep_context.invocation.clone()),
+            prep_env_context: Some(document.environment_context()),
+            invocation_context: Some(document.clone()),
             source_context: Some(prompt_source_context),
             prep_launch_workspace: Some(self.run.prep_context.launch_workspace.clone()),
             prep_launch_context: Some(self.run.prep_context.launch_context.clone()),
-            prep_env_context: Some(self.run.prep_context.env_context.clone()),
             prep_launch_detection_error: self.run.prep_context.launch_detection_error.clone(),
             header_emitted: false,
             provider_tail: shared.provider_tail.clone(),
@@ -761,6 +847,7 @@ mod tests {
                     task_property: String::new(),
                 },
                 approved_stack_commands: Vec::new(),
+                preflight_approvals: Vec::new(),
             }
         }
     }

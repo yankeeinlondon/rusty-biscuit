@@ -32,12 +32,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
 use super::super::lifecycle::bindings::{
-    LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings, unavailable_root,
+    LifecycleScope, approval_diagnostics, unavailable_root,
 };
-use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveState};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
@@ -50,8 +49,10 @@ use super::task::TaskStage;
 use super::{reserved, source as source_resolution};
 use crate::invocation_context::{InvocationContext, SourceContext};
 
+mod reapproval;
 mod shape;
 
+pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, CommandSiteId, GroupExecution, PreflightAction, PreflightGroup,
     PreflightStep, PreflightTask, TaskDiagnosticProvenance,
@@ -250,6 +251,9 @@ struct Loader<'a> {
     file_resolution_context: biscuit_file::FileResolutionContext,
     invocation: Option<&'a InvocationContext>,
     source_contexts: HashMap<PathBuf, SourceContext>,
+    /// The frontmatter the current step's early-binding state was built
+    /// from, kept on each approval so a task can re-resolve it.
+    step_frontmatter: Arc<HashMap<String, Value>>,
 }
 
 impl<'a> Loader<'a> {
@@ -268,6 +272,7 @@ impl<'a> Loader<'a> {
             file_resolution_context,
             invocation: None,
             source_contexts: HashMap::new(),
+            step_frontmatter: Arc::default(),
         }
     }
 
@@ -288,6 +293,7 @@ impl<'a> Loader<'a> {
             file_resolution_context: source_context.file_resolution_context().clone(),
             invocation: Some(invocation),
             source_contexts: HashMap::from([(source_path, source_context)]),
+            step_frontmatter: Arc::default(),
         }
     }
 
@@ -300,7 +306,8 @@ impl<'a> Loader<'a> {
         for (index, step) in plan.steps.iter().enumerate() {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
             let property = format!("tasks[{index}]");
-            let state = self.step_state(plan, index)?;
+            self.step_frontmatter = Arc::new(self.step_frontmatter(plan, index));
+            let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
 
             let task = match &step.executable {
                 Some(executable) => Some(self.load_step_task(
@@ -325,17 +332,13 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    /// Build the early-binding lookup for one step: the invoking document's
+    /// The early-binding frontmatter for one step: the invoking document's
     /// frontmatter under this step's reserved overlay.
     ///
     /// This is exactly the state a shell command sees at its turn, minus the
     /// runtime mutation layer — which is precisely why a command referencing
     /// that layer is rejected rather than approved against a stale value.
-    fn step_state(
-        &self,
-        plan: &SequencePlan,
-        index: usize,
-    ) -> Result<EffectiveState, CompositionError> {
+    fn step_frontmatter(&self, plan: &SequencePlan, index: usize) -> HashMap<String, Value> {
         let overlay = super::build_step_overlay(plan, index);
         let mut frontmatter: HashMap<String, Value> = self
             .source
@@ -349,13 +352,7 @@ impl<'a> Loader<'a> {
         if let Value::Object(overrides) = overlay.as_set_overrides(None) {
             frontmatter.extend(overrides);
         }
-
-        EffectiveStateBuilder::new()
-            .with_frontmatter(frontmatter)
-            .with_context(self.context.clone())
-            .with_allow_ctx_override(true)
-            .build()
-            .map_err(|e| CompositionError::PreFlightStateBuildFailed { source: e })
+        frontmatter
     }
 
     /// Expand a step's declared executable into a task node.
@@ -406,6 +403,7 @@ impl<'a> Loader<'a> {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
 
+        let mut preflight_approvals = Vec::new();
         let action = match field {
             ExecutableField::Prompt => {
                 let reference = expect_reference(value, "prompt", label)?;
@@ -416,7 +414,9 @@ impl<'a> Loader<'a> {
                 }
             }
             ExecutableField::Shell => {
-                let commands = self.resolve_shell_commands(value, origin, label, state)?;
+                let (commands, approvals) =
+                    self.resolve_shell_commands(value, origin, label, state)?;
+                preflight_approvals = approvals;
                 PreflightAction::Shell { commands }
             }
             ExecutableField::SideEffect => PreflightAction::SideEffect {
@@ -481,6 +481,7 @@ impl<'a> Loader<'a> {
                 task_property: property.to_string(),
             },
             approved_stack_commands: Vec::new(),
+            preflight_approvals,
         };
 
         self.collect_lifecycle_shell(&mut task, origin, label, state)?;
@@ -793,14 +794,15 @@ impl<'a> Loader<'a> {
         Ok(path)
     }
 
-    /// Resolve a task's `shell:` value into its executable byte strings.
+    /// Resolve a task's `shell:` value into its executable byte strings, with
+    /// an approval record for each one that interpolates.
     fn resolve_shell_commands(
         &mut self,
         value: &Value,
         origin: &Path,
         label: &str,
         state: &EffectiveState,
-    ) -> Result<Vec<String>, CompositionError> {
+    ) -> Result<(Vec<String>, Vec<PreflightApproval>), CompositionError> {
         let raw: Vec<String> = match value {
             Value::String(s) => vec![s.clone()],
             Value::Array(items) => items
@@ -830,16 +832,19 @@ impl<'a> Loader<'a> {
         };
 
         let mut resolved = Vec::with_capacity(raw.len());
+        let mut approvals = Vec::new();
         for command in raw {
-            let bytes = self.resolve_shell_bytes(&command, origin, label, state)?;
+            let (bytes, approval) =
+                self.resolve_shell_bytes(&command, origin, label, state, TaskStage::Primary)?;
             self.graph.shell_commands.push(DiscoveredCommand {
                 command: bytes.clone(),
                 source_file: origin.to_path_buf(),
                 origin: label.to_string(),
             });
             resolved.push(bytes);
+            approvals.extend(approval);
         }
-        Ok(resolved)
+        Ok((resolved, approvals))
     }
 
     /// Collect shell actions out of a task's `setup:`/`teardown:` stacks,
@@ -863,7 +868,9 @@ impl<'a> Loader<'a> {
             let Some(stack) = stack else { continue };
             for command in shape::collect_stack_shell_commands(&stack) {
                 let stage_label = format!("{label} `{}`", stage.key());
-                let bytes = self.resolve_shell_bytes(&command, origin, &stage_label, state)?;
+                let (bytes, approval) =
+                    self.resolve_shell_bytes(&command, origin, &stage_label, state, stage)?;
+                task.preflight_approvals.extend(approval);
                 self.graph.shell_commands.push(DiscoveredCommand {
                     command: bytes.clone(),
                     source_file: origin.to_path_buf(),
@@ -888,15 +895,20 @@ impl<'a> Loader<'a> {
     /// bytes with no second resolution to catch the divergence. Per-task and
     /// JIT audits — where the selected target's environment is available —
     /// continue to permit those roots.
+    ///
+    /// A command that interpolates also returns its [`PreflightApproval`], so
+    /// a task can refuse the command when its own captured environment would
+    /// change the text.
     fn resolve_shell_bytes(
         &mut self,
         raw: &str,
         origin: &Path,
         label: &str,
         state: &EffectiveState,
-    ) -> Result<String, CompositionError> {
+        stage: TaskStage,
+    ) -> Result<(String, Option<PreflightApproval>), CompositionError> {
         if !raw.contains("{{") {
-            return Ok(raw.to_string());
+            return Ok((raw.to_string(), None));
         }
         // The sequence approval scope declares every value that does not
         // exist yet unavailable — `outputs` (the accumulator later tasks push
@@ -950,30 +962,27 @@ impl<'a> Loader<'a> {
             invocation.extend_launch_context(&mut self.context, &requirements);
         }
         let runtime_context = self.context.clone();
-        let resolution_ctx = super::super::document_expression_resolution_context(
+        let bytes = reapproval::compose_shell_text(
+            raw,
             origin,
-            Some(&runtime_context),
+            label,
+            state,
+            &runtime_context,
             &file_resolution_context,
-            None,
         )?;
-
-        let (view, globals) = runtime_bindings(scope, LifecycleValues::default());
-        let composed = SubtreeCompose::new(&Value::String(raw.to_string()), state)
-            .with_resolution_context(resolution_ctx)
-            .with_globals(globals)
-            .with_binding_view(view)
-            .compose()
-            .map_err(|e| CompositionError::SequenceShellResolution {
-                command: raw.to_string(),
-                task: label.to_string(),
-                message: e.to_string(),
-                source: Some(Box::new(e)),
-            })?;
-
-        Ok(match composed {
-            Value::String(s) => s,
-            other => other.to_string(),
-        })
+        let approval = reapproval::ApprovalRecord {
+            stage,
+            authored: raw,
+            approved: &bytes,
+            origin,
+            label,
+            frontmatter: &self.step_frontmatter,
+            state,
+            runtime_context: &runtime_context,
+            file_resolution_context: &file_resolution_context,
+        }
+        .into_approval();
+        Ok((bytes, Some(approval)))
     }
 
     /// Resolve a reference authored inside `origin` to an absolute path.

@@ -45,6 +45,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::invocation_context::EnvBaseline;
+
 use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
@@ -302,7 +304,16 @@ pub trait ShellRunner: Sync {
         &self,
         request: &ShellValueRequest<'_>,
     ) -> Result<Vec<(String, Value)>, ShellRunError> {
-        execute_set_shell_values(request)
+        execute_set_shell_values(request, None)
+    }
+
+    /// This runner, starting its children from `environment` instead of this
+    /// process's: the shell route of a document entered under its own map.
+    ///
+    /// `None` keeps `self`, which is right for a runner that starts no process
+    /// of its own (a recorder, [`DisabledShellRunner`]).
+    fn for_child_environment(&self, _environment: &EnvBaseline) -> Option<Box<dyn ShellRunner>> {
+        None
     }
 }
 
@@ -329,7 +340,8 @@ pub struct ShellValueRequest<'a> {
 /// Each value's commands are exactly the bytes preflight approved, so they are
 /// its pre-approved set; a lifecycle `shell` action runs its approved bytes on
 /// the same terms. Commands run in the request's launch directory, as a
-/// lifecycle `shell` action does.
+/// lifecycle `shell` action does, and from `child_environment` when one is
+/// given (otherwise they inherit this process's).
 ///
 /// ## Errors
 ///
@@ -337,16 +349,20 @@ pub struct ShellValueRequest<'a> {
 /// [`ShellRunError::Context`] when the request's context fails validation.
 pub fn execute_set_shell_values(
     request: &ShellValueRequest<'_>,
+    child_environment: Option<&EnvBaseline>,
 ) -> Result<Vec<(String, Value)>, ShellRunError> {
     let approved = request
         .values
         .iter()
         .flat_map(|value| value.commands())
         .collect();
-    let options = ComposeOptions::new_with_context(request.context.clone())
+    let mut options = ComposeOptions::new_with_context(request.context.clone())
         .with_source_file(request.source_path)
         .with_pre_approved_commands(approved)
         .with_shell_working_directory(request.file_resolution_context.request_cwd());
+    if let Some(environment) = child_environment {
+        options = options.with_shell_child_environment(environment.shell_child_environment());
+    }
     let compose_request =
         crate::composition::compose_request(options, request.file_resolution_context.clone())
             .map_err(|source| ShellRunError::Context { source })?;
@@ -377,21 +393,82 @@ impl ShellRunner for DisabledShellRunner {
     }
 }
 
-/// Production [`ShellRunner`] that runs commands through the system shell.
+/// Production [`ShellRunner`] that runs commands through the system shell,
+/// inheriting this process's environment.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemShellRunner;
 
 impl ShellRunner for SystemShellRunner {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
-        let mut cmd = system_shell_command(command).map_err(|error| ShellRunError::Spawn {
-            command: command.to_string(),
-            source: std::io::Error::other(error),
-        })?;
-        let status = cmd.status().map_err(|source| ShellRunError::Spawn {
-            command: command.to_string(),
-            source,
-        })?;
-        Ok(status.code().unwrap_or(-1))
+        run_system_shell(command, None)
+    }
+
+    fn for_child_environment(&self, environment: &EnvBaseline) -> Option<Box<dyn ShellRunner>> {
+        Some(Box::new(DocumentShellRunner::new(environment.clone())))
+    }
+}
+
+/// [`SystemShellRunner`] for one document: every child, including a `set`
+/// value's `$( … )`, starts from exactly that document's environment
+/// ([`crate::invocation_context::InvocationContext::env_baseline`]) rather than
+/// from this process's.
+#[derive(Debug, Clone)]
+pub struct DocumentShellRunner {
+    environment: EnvBaseline,
+}
+
+impl DocumentShellRunner {
+    /// A runner whose children start from exactly `environment`.
+    pub fn new(environment: EnvBaseline) -> Self {
+        Self { environment }
+    }
+
+    /// The environment every child starts from.
+    pub fn environment(&self) -> &EnvBaseline {
+        &self.environment
+    }
+}
+
+impl ShellRunner for DocumentShellRunner {
+    fn run(&self, command: &str) -> Result<i32, ShellRunError> {
+        run_system_shell(command, Some(&self.environment))
+    }
+
+    fn run_values(
+        &self,
+        request: &ShellValueRequest<'_>,
+    ) -> Result<Vec<(String, Value)>, ShellRunError> {
+        execute_set_shell_values(request, Some(&self.environment))
+    }
+
+    fn for_child_environment(&self, environment: &EnvBaseline) -> Option<Box<dyn ShellRunner>> {
+        Some(Box::new(Self::new(environment.clone())))
+    }
+}
+
+fn run_system_shell(command: &str, environment: Option<&EnvBaseline>) -> Result<i32, ShellRunError> {
+    let mut cmd = system_shell_command(command, environment).map_err(|error| ShellRunError::Spawn {
+        command: command.to_string(),
+        source: std::io::Error::other(error),
+    })?;
+    let status = cmd.status().map_err(|source| ShellRunError::Spawn {
+        command: command.to_string(),
+        source,
+    })?;
+    Ok(status.code().unwrap_or(-1))
+}
+
+/// `program` as a child starting from `environment`, or inheriting this
+/// process's when there is none.
+fn shell_program(
+    program: &str,
+    environment: Option<&EnvBaseline>,
+) -> Result<std::process::Command, crate::child_environment::ChildEnvironmentError> {
+    match environment {
+        Some(environment) => {
+            crate::child_environment::command_with_environment(program, &environment.to_child_map())
+        }
+        None => crate::child_environment::command(program),
     }
 }
 
@@ -399,10 +476,11 @@ impl ShellRunner for SystemShellRunner {
 #[cfg(windows)]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<std::process::Command, crate::child_environment::ChildEnvironmentError> {
     use std::os::windows::process::CommandExt;
 
-    let mut cmd = crate::child_environment::command("cmd")?;
+    let mut cmd = shell_program("cmd", environment)?;
     // `cmd.exe` owns the command-tail grammar. Passing it through the Windows
     // argv encoder changes nested quotes before the shell can parse them.
     cmd.arg("/D").arg("/C").raw_arg(command);
@@ -413,8 +491,9 @@ fn system_shell_command(
 #[cfg(not(windows))]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<std::process::Command, crate::child_environment::ChildEnvironmentError> {
-    let mut cmd = crate::child_environment::command("sh")?;
+    let mut cmd = shell_program("sh", environment)?;
     cmd.arg("-c").arg(command);
     Ok(cmd)
 }

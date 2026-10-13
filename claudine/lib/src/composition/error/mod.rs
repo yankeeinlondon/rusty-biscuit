@@ -1908,6 +1908,32 @@ pub enum CompositionError {
         source: Option<Box<MarkdownError>>,
     },
 
+    /// A task's preflight-approved shell command resolves to different text
+    /// under the environment its own document captured.
+    ///
+    /// Sequence preflight approves exact text resolved under the launch
+    /// environment, before any later task captures its own. A task whose
+    /// captured environment changes that text is refused before it runs: an
+    /// approval authorizes only the text it approved.
+    #[error(
+        "shell command `{command}` in {task} was approved at sequence preflight as `{approved}`, \
+         but this task's environment resolves it to `{resolved}` ({changed}); a preflight \
+         approval covers only the exact text it approved, so the command was refused before it ran"
+    )]
+    SequenceShellApprovalChanged {
+        /// The authored command.
+        command: String,
+        /// A label locating the task.
+        task: String,
+        /// The text sequence preflight approved.
+        approved: String,
+        /// The text the task's environment resolves the command to.
+        resolved: String,
+        /// The environment variables the command names whose values changed,
+        /// or a note that the change is not attributable to a named variable.
+        changed: String,
+    },
+
     // -- Atomic task execution (phase 7) ---------------------------------------
     /// A task's `timeout:` value is not a duration the repository's parser
     /// accepts.

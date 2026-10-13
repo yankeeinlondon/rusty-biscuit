@@ -23,7 +23,7 @@ use claudine::composition::{
     LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
-    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy,
+    build_loop_seed_with_lifecycle, commit_proxy,
     resolve_loop_config,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
@@ -196,7 +196,10 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let invocation = InvocationContext::capture(crate::request::snapshot())?;
+    // The caller's document reads the launch map; each `proxy` target below
+    // replaces this with the view it captures for itself.
+    let mut invocation = InvocationContext::capture(crate::request::snapshot())?
+        .with_environment_source(crate::request::document_environment_source());
     let provisional_context = invocation.launch_file_resolution_context().clone();
     let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
@@ -441,6 +444,12 @@ pub(crate) fn run_composition_inner(
                     handoff.overlay(),
                 );
                 source = target_source;
+                // The source's map selected the target: the commit above
+                // resolved it in the source's file context. The target is a
+                // document of its own, so it captures its own map here, before
+                // its bootstrap and `initialize`, and every stage of its
+                // lifecycle reads that map.
+                invocation = invocation.capture_document();
                 source_context = invocation.derive_source(&source.resolved_path)?;
                 file_resolution_context = source_context.file_resolution_context().clone();
                 current_file = handoff.authored_target().to_string();
@@ -932,18 +941,22 @@ pub(crate) fn resolve_composition_source(
     }
 }
 
-/// Build the loop execution options from CLI flags and environment.
-fn build_loop_options(shared: &SharedComposeArgs) -> LoopExecutionOptions {
+/// Build the loop execution options from CLI flags and the document's
+/// captured environment.
+fn build_loop_options(
+    shared: &SharedComposeArgs,
+    environment: &claudine::invocation_context::DocumentEnvironment,
+) -> LoopExecutionOptions {
     LoopExecutionOptions {
         max_iterations: shared
             .max_iterations
-            .or(claudine::composition::resolve_max_iterations_from_env()),
-        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+            .or(claudine::composition::resolve_max_iterations_from_env(environment)),
+        fail_fast: claudine::composition::resolve_fail_fast_from_env(environment),
         on_rate_limit: shared.on_rate_limit.map(Into::into),
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
-        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(environment),
     }
 }
 
@@ -1040,7 +1053,8 @@ fn build_and_run_loop(
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)
         .build();
-    let shell_runner = SystemShellRunner;
+    // This document's `shell` actions start from its own environment.
+    let shell_runner = prep_context.invocation.shell_runner().clone();
     let emitter = DefaultLifecycleEmitter;
     // One cell for the whole `--loop` run: a `set` written in iteration 1 and
     // every committed `outputs` entry stay visible to later iterations. Inside a
@@ -1466,7 +1480,7 @@ fn execute_loop_or_single(
     document_epoch: claudine::invocation_context::DocumentEpoch,
     step_scope: Option<&StepScope>,
 ) -> Result<ActiveDocumentOutcome> {
-    let loop_options = build_loop_options(shared);
+    let loop_options = build_loop_options(shared, document_epoch.environment());
 
     // Captured once for frontmatter-excerpt enrichment of any error rendered
     // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or

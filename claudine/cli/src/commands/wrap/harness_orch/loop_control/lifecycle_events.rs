@@ -298,7 +298,12 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         prepared_context,
         file_resolution_context: &materialized.file_resolution_context,
         effect_engine,
-        shell_runner: &SystemShellRunner,
+        // The materialized document's `shell` actions start from its own
+        // environment.
+        shell_runner: materialized
+            .document_epoch
+            .as_ref()
+            .map_or(&SystemShellRunner as &dyn claudine::composition::ShellRunner, |epoch| epoch.shell_runner()),
         emitter,
         term,
         source_path,

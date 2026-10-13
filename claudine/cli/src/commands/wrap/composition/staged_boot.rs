@@ -305,7 +305,8 @@ pub(crate) fn route_staged_initialize(
 ///
 /// `options` are the options the bootstrap read was assembled from — caller
 /// layers, file-resolution context, epoch, and snapshot — so nothing is
-/// recaptured. The retained snapshot is only extended for context groups the
+/// recaptured: the document environment the epoch's invocation view entered
+/// before the bootstrap is the one the reread reads. The retained snapshot is only extended for context groups the
 /// rewritten document newly names. Approvals accumulate: `approved` (from the
 /// bootstrap) plus every command the body audit approves.
 ///
