@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use schematic_schema::gitlab::*;
-use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
+use schematic_schema::schematic_runtime::CallOptions;
 
 use super::{
     count_api_request,
@@ -56,7 +56,7 @@ const REPLIES: Replies = Replies::new(
 /// println!("Stars: {:?}", metadata.stars);
 /// ```
 pub struct GitLabRemote {
-    client: GitLabClient,
+    client: GitLab,
     base_url: String,
 }
 
@@ -67,7 +67,7 @@ impl GitLabRemote {
     ///
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
     pub fn new() -> Result<Self, SniffError> {
-        Self::build(GitLab::builder(), "https://gitlab.com")
+        Self::build(GitLab::new(), "https://gitlab.com")
     }
 
     /// Create a GitLab provider for a self-hosted instance.
@@ -88,10 +88,10 @@ impl GitLabRemote {
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
         let clean_url = base_url.trim_end_matches('/');
         let api_url = format!("{}/api/v4", clean_url);
-        Self::build(GitLab::builder().base_url(api_url), clean_url)
+        Self::build(GitLab::new().base_url(api_url), clean_url)
     }
 
-    fn build(builder: ClientBuilder<GitLab>, base_url: &str) -> Result<Self, SniffError> {
+    fn build(builder: GitLab, base_url: &str) -> Result<Self, SniffError> {
         let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self {
             client,

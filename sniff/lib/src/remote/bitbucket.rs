@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::bitbucket::*;
-use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
+use schematic_schema::schematic_runtime::CallOptions;
 
 use super::{
     count_api_request,
@@ -48,7 +48,7 @@ const REPLIES: Replies = Replies::new(
 /// println!("Stars: {:?}", metadata.stars);
 /// ```
 pub struct BitbucketRemote {
-    client: BitbucketClient,
+    client: Bitbucket,
 }
 
 impl BitbucketRemote {
@@ -62,7 +62,7 @@ impl BitbucketRemote {
     ///
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
     pub fn new() -> Result<Self, SniffError> {
-        Self::build(Bitbucket::builder())
+        Self::build(Bitbucket::new())
     }
 
     /// Create with a custom base URL (for Bitbucket Server/Data Center).
@@ -76,10 +76,10 @@ impl BitbucketRemote {
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized,
     /// including when `base_url` is not an HTTP(S) URL with a host.
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
-        Self::build(Bitbucket::builder().base_url(base_url))
+        Self::build(Bitbucket::new().base_url(base_url))
     }
 
-    fn build(builder: ClientBuilder<Bitbucket>) -> Result<Self, SniffError> {
+    fn build(builder: Bitbucket) -> Result<Self, SniffError> {
         let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self { client })
     }
@@ -163,7 +163,7 @@ const MAX_LISTING_PAGES: i64 = 10;
 /// truncated any directory past one page — the same defect as an ignored GitHub
 /// `truncated` flag, just spelled differently (R11.5).
 async fn collect_directory_entries(
-    client: &BitbucketClient,
+    client: &Bitbucket,
     workspace: &str,
     repo_slug: &str,
     commit: &str,

@@ -9,7 +9,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::gitea::*;
-use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
+use schematic_schema::schematic_runtime::CallOptions;
 
 use super::{
     count_api_request,
@@ -62,7 +62,7 @@ const CODEBERG_API_URL: &str = "https://codeberg.org/api/v1";
 /// let metadata = codeberg.get_repo_metadata("forgejo", "forgejo").await?;
 /// ```
 pub struct GiteaRemote {
-    client: GiteaClient,
+    client: Gitea,
     base_url: String,
 }
 
@@ -92,7 +92,7 @@ impl GiteaRemote {
     /// ```
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
         let normalized_url = normalize_base_url(base_url);
-        Self::build(Gitea::builder().base_url(&normalized_url), normalized_url)
+        Self::build(Gitea::new().base_url(&normalized_url), normalized_url)
     }
 
     /// Create for [Codeberg](https://codeberg.org), a popular public Gitea instance.
@@ -117,13 +117,13 @@ impl GiteaRemote {
     /// Codeberg's credential order against `api_url`, so a test can point it
     /// at a local server.
     fn codeberg_at(api_url: &str) -> Result<Self, SniffError> {
-        let builder = Gitea::builder()
+        let builder = Gitea::new()
             .base_url(api_url)
             .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]);
         Self::build(builder, api_url.to_string())
     }
 
-    fn build(builder: ClientBuilder<Gitea>, base_url: String) -> Result<Self, SniffError> {
+    fn build(builder: Gitea, base_url: String) -> Result<Self, SniffError> {
         let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self { client, base_url })
     }

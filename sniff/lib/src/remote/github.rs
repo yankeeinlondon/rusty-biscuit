@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::github::*;
-use schematic_schema::schematic_runtime::{AuthMethod, CallOptions, ClientBuilder};
+use schematic_schema::schematic_runtime::{AuthMethod, CallOptions};
 
 use super::{
     count_api_request,
@@ -39,7 +39,7 @@ const REPLIES: Replies = Replies::new("GitHub", Unauthorized::Rejected);
 /// println!("Stars: {:?}", metadata.stars);
 /// ```
 pub struct GitHubRemote {
-    client: GitHubClient,
+    client: GitHub,
 }
 
 impl GitHubRemote {
@@ -49,7 +49,7 @@ impl GitHubRemote {
     ///
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
     pub fn new() -> Result<Self, SniffError> {
-        Self::build(GitHub::builder())
+        Self::build(GitHub::new())
     }
 
     /// Create with a custom base URL (for GitHub Enterprise).
@@ -63,10 +63,10 @@ impl GitHubRemote {
     /// Returns `SniffError::RemoteInit` if the client cannot be initialized,
     /// including when `base_url` is not an HTTP(S) URL with a host.
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
-        Self::build(GitHub::builder().base_url(base_url))
+        Self::build(GitHub::new().base_url(base_url))
     }
 
-    fn build(builder: ClientBuilder<GitHub>) -> Result<Self, SniffError> {
+    fn build(builder: GitHub) -> Result<Self, SniffError> {
         let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self { client })
     }
