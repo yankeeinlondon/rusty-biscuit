@@ -4,6 +4,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod builder;
+mod call;
 mod client_settings;
 mod compile_fail;
 mod credential_resolution;

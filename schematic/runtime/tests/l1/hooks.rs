@@ -66,7 +66,7 @@ async fn a_json_success_runs_parse_then_global_hook_then_decode_then_mutator() {
         .build()
         .expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/wrapped"), &CallOptions::new()).await.expect("head");
+    let response = client.send(Call::<Json<Item>>::get("/wrapped")).full().await.expect("head");
 
     assert_eq!(response.data(), Some(&Item { id: 11 }), "the mutator ran on the value decoded from the hook's output");
     assert_eq!(entries(&log), ["global call 200", "mutator call saw id 1"]);
@@ -77,7 +77,7 @@ async fn each_hook_runs_alone_when_it_is_the_only_one_registered() {
     let server = serve(&[("/wrapped", 200, r#"{"data":{"id":1}}"#, "application/json"), ("/plain", 200, r#"{"id":4}"#, "application/json")]).await;
     let log: Log = Arc::default();
     let global_only = base(&server).pre_response_json(unwrapping(&log)).build().expect("client");
-    let response = global_only.send(Call::<Json<Item>>::get("/wrapped"), &CallOptions::new()).await.expect("head");
+    let response = global_only.send(Call::<Json<Item>>::get("/wrapped")).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 1 }));
     assert_eq!(entries(&log), ["global call 200"]);
 
@@ -88,11 +88,11 @@ async fn each_hook_runs_alone_when_it_is_the_only_one_registered() {
         })
         .build()
         .expect("client");
-    let response = mutator_only.send(Call::<Json<Item>>::get("/plain"), &CallOptions::new()).await.expect("head");
+    let response = mutator_only.send(Call::<Json<Item>>::get("/plain")).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 8 }));
 
     let none = base(&server).build().expect("client");
-    let response = none.send(Call::<Json<Item>>::get("/plain"), &CallOptions::new()).await.expect("head");
+    let response = none.send(Call::<Json<Item>>::get("/plain")).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 4 }), "control: no hook, no change");
 }
 
@@ -118,21 +118,21 @@ async fn non_2xx_replies_non_json_endpoints_and_raw_sends_run_neither_hook() {
         .expect("client");
     let options = CallOptions::new();
 
-    let declared = client.send(Call::<Json<Item>, ProviderError>::get("/error"), &options).await.expect("head");
+    let declared = client.send(Call::<Json<Item>, ProviderError>::get("/error")).full().await.expect("head");
     let error = declared.error().expect("failure");
     assert_eq!(
         error.declared(),
         Some(&ProviderError { message: "top".into() }),
         "the declared error decodes from the original body, not a hook's output"
     );
-    let undeclared = client.send(Call::<Json<Item>>::get("/undeclared"), &options).await.expect("head");
+    let undeclared = client.send(Call::<Json<Item>>::get("/undeclared")).full().await.expect("head");
     assert_eq!(undeclared.error().map(|error| &error.kind), Some(&ErrorKind::Undeclared));
 
-    let text = client.send(Call::<Text>::get("/text"), &options).await.expect("head");
+    let text = client.send(Call::<Text>::get("/text")).full().await.expect("head");
     assert_eq!(text.data().map(String::as_str), Some(r#"{"data":{"id":1}}"#), "a text body is never reshaped");
-    let binary = client.send(Call::<Binary>::get("/text"), &options).await.expect("head");
+    let binary = client.send(Call::<Binary>::get("/text")).full().await.expect("head");
     assert_eq!(binary.data(), Some(&Bytes::from_static(br#"{"data":{"id":1}}"#)));
-    let empty = client.send(Call::<Empty>::get("/text"), &options).await.expect("head");
+    let empty = client.send(Call::<Empty>::get("/text")).full().await.expect("head");
     assert_eq!(empty.data(), Some(&()));
 
     let raw = client.send_raw(Call::<Json<Item>, ProviderError>::get("/json"), &options).await.expect("head");
@@ -142,7 +142,7 @@ async fn non_2xx_replies_non_json_endpoints_and_raw_sends_run_neither_hook() {
     assert_eq!(*mutator_runs.lock().expect("count"), 0);
 
     // Control: the same client runs both hooks on a 2xx JSON reply.
-    let typed = client.send(Call::<Json<Item>, ProviderError>::get("/json"), &options).await.expect("head");
+    let typed = client.send(Call::<Json<Item>, ProviderError>::get("/json")).full().await.expect("head");
     assert_eq!(typed.data(), Some(&Item { id: 1 }));
     assert_eq!(entries(&log), ["global call 200"]);
     assert_eq!(*mutator_runs.lock().expect("count"), 1);
@@ -154,7 +154,7 @@ async fn a_body_that_is_not_json_is_malformed_and_the_global_hook_never_sees_it(
     let log: Log = Arc::default();
     let client = base(&server).pre_response_json(unwrapping(&log)).build().expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/html"), &CallOptions::new()).await.expect("head");
+    let response = client.send(Call::<Json<Item>>::get("/html")).full().await.expect("head");
 
     let error = response.error().expect("failure");
     assert_eq!(error.kind, ErrorKind::MalformedSuccess);
@@ -170,7 +170,7 @@ async fn a_hook_output_that_does_not_decode_is_malformed_with_the_original_bytes
         .build()
         .expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+    let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
 
     let error = response.error().expect("failure");
     assert_eq!(error.kind, ErrorKind::MalformedSuccess);
@@ -195,7 +195,7 @@ async fn a_refusing_hook_is_a_hook_failure_with_the_original_bytes_and_no_hook_t
         .expect("client");
 
     for (label, client) in [("global", refusing_global), ("mutator", refusing_mutator)] {
-        let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+        let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
         let error = response.error().expect("failure");
         assert_eq!(error.kind, ErrorKind::Hook, "{label}");
         assert_eq!(error.body, Bytes::from_static(BODY.as_bytes()), "{label}");
@@ -239,9 +239,9 @@ async fn a_mutator_runs_only_for_its_own_endpoint_and_a_second_registration_repl
         .build()
         .expect("client");
 
-    let mutated = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+    let mutated = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
     assert_eq!(mutated.data(), Some(&Item { id: 200 }));
-    let other = client.send(Other, &CallOptions::new()).await.expect("head");
+    let other = client.send(Other).full().await.expect("head");
     assert_eq!(other.data(), Some(&Item { id: 1 }));
 }
 
@@ -298,9 +298,9 @@ async fn apis_sharing_an_endpoint_id_never_run_each_others_mutators() {
     let beta = tagging::<Beta>(&server, &transport);
     let beta_without_hooks = Client::<Beta>::new(ApiDefinition::new(server.uri())).transport(&transport).build().expect("client");
 
-    let from_alpha = alpha.send(List::<Alpha>(std::marker::PhantomData), &CallOptions::new()).await.expect("head");
-    let from_beta = beta.send(List::<Beta>(std::marker::PhantomData), &CallOptions::new()).await.expect("head");
-    let unhooked = beta_without_hooks.send(List::<Beta>(std::marker::PhantomData), &CallOptions::new()).await.expect("head");
+    let from_alpha = alpha.send(List::<Alpha>(std::marker::PhantomData)).full().await.expect("head");
+    let from_beta = beta.send(List::<Beta>(std::marker::PhantomData)).full().await.expect("head");
+    let unhooked = beta_without_hooks.send(List::<Beta>(std::marker::PhantomData)).full().await.expect("head");
 
     assert_eq!(from_alpha.data().map(|listing| listing.seen_by.clone()), Some(vec!["Alpha".to_owned()]));
     assert_eq!(from_beta.data().map(|listing| listing.seen_by.clone()), Some(vec!["Beta".to_owned()]));

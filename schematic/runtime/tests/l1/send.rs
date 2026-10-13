@@ -2,6 +2,8 @@
 //! classification, codecs, request assembly, and redaction of what is
 //! stored (R3–R6, R8–R10, R12, R13, R28).
 
+use std::future::IntoFuture;
+
 use bytes::Bytes;
 use http::Method;
 use schematic_runtime::redact::REDACTED;
@@ -49,7 +51,7 @@ async fn a_success_reaches_the_caller_with_its_metadata() {
     let mut parts = RequestParts::new(Method::GET, "/item");
     parts.query = vec![("page".into(), "2".into())];
     parts.headers = vec![("x-trace".into(), "t1".into())];
-    let response = client.send(Call::<Json<Item>>::new(parts), &CallOptions::new()).await.expect("head arrived");
+    let response = client.send(Call::<Json<Item>>::new(parts)).full().await.expect("head arrived");
 
     assert_eq!(response.data(), Some(&Item { id: 7 }));
     assert!(response.error().is_none());
@@ -77,7 +79,7 @@ async fn the_request_id_is_none_without_the_header_or_the_definition_field() {
     let named = builder(ApiDefinition::new("https://unused.invalid").request_id_header("x-request-id"), &server.uri())
         .build()
         .expect("client");
-    let response = named.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+    let response = named.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
     assert_eq!(response.meta.request_id, None, "the response does not carry the header");
 
     let server = MockServer::start().await;
@@ -86,7 +88,7 @@ async fn the_request_id_is_none_without_the_header_or_the_definition_field() {
         .mount(&server)
         .await;
     let unnamed = plain_client(&server.uri());
-    let response = unnamed.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+    let response = unnamed.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
     assert_eq!(response.meta.request_id, None, "the API names no request-id header");
 }
 
@@ -97,7 +99,7 @@ async fn a_declared_error_is_decoded_on_arrival_and_keeps_its_body() {
     let client = plain_client(&server.uri());
 
     let response = client
-        .send(Call::<Json<Item>, ProviderError>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).full()
         .await
         .expect("head arrived");
 
@@ -121,7 +123,7 @@ async fn an_undecodable_declared_error_is_malformed_with_its_body() {
     let server = serve(400, b"<html>bad</html>", "text/html").await;
     let client = plain_client(&server.uri());
     let response = client
-        .send(Call::<Json<Item>, ProviderError>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).full()
         .await
         .expect("head arrived");
     let error = response.error().expect("failure");
@@ -136,7 +138,7 @@ async fn statuses_outside_the_declared_range_and_endpoints_without_a_declared_er
         let server = serve(status, body, "application/json").await;
         let client = plain_client(&server.uri());
         let response = client
-            .send(Call::<Json<Item>, NoDeclaredError>::get("/item"), &CallOptions::new())
+            .send(Call::<Json<Item>, NoDeclaredError>::get("/item")).full()
             .await
             .expect("a head arrived, so an envelope");
         let error = response.error().expect("failure");
@@ -148,7 +150,7 @@ async fn statuses_outside_the_declared_range_and_endpoints_without_a_declared_er
     // A 3xx is not in the declared range even when the endpoint declares an error.
     let server = serve(304, b"", "application/json").await;
     let response = plain_client(&server.uri())
-        .send(Call::<Json<Item>, ProviderError>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).full()
         .await
         .expect("head");
     assert_eq!(response.error().expect("failure").kind, ErrorKind::Undeclared);
@@ -159,7 +161,7 @@ async fn html_on_a_json_endpoint_is_a_malformed_success_with_its_evidence() {
     let html: &[u8] = b"<!doctype html><title>Sign in</title>";
     let server = serve(200, html, "text/html").await;
     let response = plain_client(&server.uri())
-        .send(Call::<Json<Item>, ProviderError>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).full()
         .await
         .expect("head arrived");
 
@@ -188,15 +190,14 @@ async fn codecs_judge_the_body_not_the_content_type() {
             .await;
     }
     let client = plain_client(&server.uri());
-    let options = CallOptions::new();
 
-    let json = client.send(Call::<Json<Item>>::get("/json"), &options).await.expect("head");
+    let json = client.send(Call::<Json<Item>>::get("/json")).full().await.expect("head");
     assert_eq!(json.data(), Some(&Item { id: 3 }), "valid JSON under a misleading content type decodes");
-    let text = client.send(Call::<Text>::get("/text"), &options).await.expect("head");
+    let text = client.send(Call::<Text>::get("/text")).full().await.expect("head");
     assert_eq!(text.data().map(String::as_str), Some("café \u{fffd}"), "invalid UTF-8 is replaced");
-    let binary = client.send(Call::<Binary>::get("/binary"), &options).await.expect("head");
+    let binary = client.send(Call::<Binary>::get("/binary")).full().await.expect("head");
     assert_eq!(binary.data(), Some(&Bytes::from_static(b"\x00\x01{")));
-    let empty = client.send(Call::<Empty>::get("/empty"), &options).await.expect("head");
+    let empty = client.send(Call::<Empty>::get("/empty")).full().await.expect("head");
     assert_eq!(empty.data(), Some(&()), "an unexpected body is drained and ignored");
 }
 
@@ -206,7 +207,7 @@ async fn a_refused_connection_is_a_transport_error_with_request_metadata() {
     let mut parts = RequestParts::new(Method::GET, "/item");
     parts.query = vec![("api_key".into(), SENTINEL.into()), ("page".into(), "2".into())];
     let error = plain_client(&base)
-        .send(Call::<Json<Item>>::new(parts), &CallOptions::new())
+        .send(Call::<Json<Item>>::new(parts)).full()
         .await
         .expect_err("no head can arrive");
 
@@ -225,7 +226,7 @@ async fn an_invalid_argument_is_refused_before_any_request() {
     let client = plain_client(&server.uri());
 
     let error = client
-        .send(Call::<Json<Item>>::invalid("page_size above the maximum"), &CallOptions::new())
+        .send(Call::<Json<Item>>::invalid("page_size above the maximum")).full()
         .await
         .expect_err("refused before sending");
     match &error.kind {
@@ -238,7 +239,7 @@ async fn an_invalid_argument_is_refused_before_any_request() {
 
     let mut parts = RequestParts::new(Method::POST, "/item");
     parts.headers = vec![("bad header".into(), "v".into())];
-    let error = client.send(Call::<Json<Item>>::new(parts), &CallOptions::new()).await.expect_err("refused");
+    let error = client.send(Call::<Json<Item>>::new(parts)).full().await.expect_err("refused");
     assert!(matches!(error.kind, TransportErrorKind::InvalidArgument(_)), "{:?}", error.kind);
     assert_eq!(error.request.method, Method::POST);
 
@@ -251,7 +252,7 @@ async fn query_order_duplicates_and_a_template_query_reach_the_server() {
     let mut parts = RequestParts::new(Method::GET, "/item?fixed=1#fragment");
     parts.query = vec![("tag".into(), "a".into()), ("tag".into(), "b".into()), ("q".into(), "x y&z+~é".into())];
     let response = plain_client(&server.uri())
-        .send(Call::<Json<Item>>::new(parts), &CallOptions::new())
+        .send(Call::<Json<Item>>::new(parts)).full()
         .await
         .expect("head");
 
@@ -293,7 +294,7 @@ async fn every_body_form_is_sent_with_its_content_type() {
     for body in bodies {
         let mut parts = RequestParts::new(Method::POST, "/upload");
         parts.body = body;
-        let response = client.send(Call::<Empty>::new(parts), &CallOptions::new()).await.expect("head");
+        let response = client.send(Call::<Empty>::new(parts)).full().await.expect("head");
         assert_eq!(response.data(), Some(&()));
     }
 
@@ -347,13 +348,12 @@ async fn no_stored_field_or_display_text_holds_a_secret_in_any_outcome() {
             .await;
     }
     let client = builder(secret_definition(), &server.uri()).build().expect("client");
-    let options = CallOptions::new().credential(Credential::api_key(SENTINEL));
 
     for route in ["/ok", "/declared", "/malformed"] {
         let mut parts = secret_parts();
         parts.path = route.into();
         let response = client
-            .send(Call::<Json<Item>, ProviderError>::new(parts), &options)
+            .send(Call::<Json<Item>, ProviderError>::new(parts)).credential(Credential::api_key(SENTINEL)).full()
             .await
             .expect("head");
         let stored = format!("{:?}", response.meta);
@@ -384,7 +384,7 @@ async fn no_stored_field_or_display_text_holds_a_secret_in_any_outcome() {
     let error = builder(secret_definition(), &closed_port_url().await)
         .build()
         .expect("client")
-        .send(Call::<Json<Item>, ProviderError>::new(secret_parts()), &options)
+        .send(Call::<Json<Item>, ProviderError>::new(secret_parts())).credential(Credential::api_key(SENTINEL)).full()
         .await
         .expect_err("transport failure");
     for text in [format!("{:?}", error.request), error.to_string(), format!("{error:?}")] {
@@ -402,10 +402,7 @@ async fn a_provider_echo_stays_in_the_raw_body_and_out_of_metadata_and_display()
         .await;
     let client = builder(secret_definition(), &server.uri()).build().expect("client");
     let response = client
-        .send(
-            Call::<Json<Item>, ProviderError>::get("/item"),
-            &CallOptions::new().credential(Credential::api_key(SENTINEL)),
-        )
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).credential(Credential::api_key(SENTINEL)).full()
         .await
         .expect("head");
 
@@ -425,11 +422,14 @@ fn send_futures_stay_small_enough_to_join_many() {
     let client = plain_client("http://127.0.0.1:9");
     let options = CallOptions::new();
 
-    let send = client.send(Call::<Json<Item>, ProviderError>::get("/item"), &options);
+    let send = client.send(Call::<Json<Item>, ProviderError>::get("/item")).into_future();
     let send_size = std::mem::size_of_val(&send);
+    let full = client.send(Call::<Json<Item>, ProviderError>::get("/item")).full().into_future();
+    let full_size = std::mem::size_of_val(&full);
     let raw = client.send_raw(Call::<Json<Item>>::get("/item"), &options);
     let raw_size = std::mem::size_of_val(&raw);
 
     assert!(send_size <= BOUND, "send future is {send_size} bytes");
+    assert!(full_size <= BOUND, "full send future is {full_size} bytes");
     assert!(raw_size <= BOUND, "send_raw future is {raw_size} bytes");
 }

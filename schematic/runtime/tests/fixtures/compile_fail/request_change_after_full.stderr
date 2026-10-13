@@ -1,0 +1,11 @@
+error[E0599]: no method named `map_request` found for struct `FullCall<'a, A, R>` in the current scope
+ --> tests/fixtures/compile_fail/request_change_after_full.rs
+  |
+  |     let _ = full.clone().map_request(|request| request);
+  |                          ^^^^^^^^^^^ method not found in `FullCall<'_, Example, ListItems>`
+
+error[E0599]: no method named `full` found for struct `FullCall<'a, A, R>` in the current scope
+ --> tests/fixtures/compile_fail/request_change_after_full.rs
+  |
+  |     let _ = full.full();
+  |                  ^^^^ method not found in `FullCall<'_, Example, ListItems>`

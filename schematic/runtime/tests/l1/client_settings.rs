@@ -80,7 +80,7 @@ async fn new_never_fails_and_the_first_call_reports_each_invalid_setting_without
     let link = Url::parse(&server.uri()).expect("server URL");
 
     for (client, expected) in invalid_settings(&server.uri(), &transport) {
-        let sent = client.send(GetItem::get("/item"), &CallOptions::new()).await.expect_err("refused");
+        let sent = client.send(GetItem::get("/item")).full().await.expect_err("refused");
         assert_invalid_client(&sent, &expected);
         let raw = client.send_raw(GetItem::get("/item"), &CallOptions::new()).await.expect_err("refused");
         assert_invalid_client(&raw, &expected);
@@ -100,7 +100,7 @@ async fn build_reports_the_same_errors_and_returns_the_same_client_type() {
     }
 
     let built: Client<TestApi> = builder(bare(), &server.uri()).build().expect("valid settings build");
-    let response = built.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
+    let response = built.send(GetItem::get("/item")).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 1 }));
 }
 
@@ -117,7 +117,7 @@ async fn a_client_and_its_clones_share_one_validation_and_connection_pool() {
     let built_clone = built.clone();
 
     for client in [&clone, &unbuilt, &clone, &built, &built_clone] {
-        let response = client.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
+        let response = client.send(GetItem::get("/item")).full().await.expect("head");
         assert_eq!(response.data(), Some(&Item { id: 1 }));
     }
 
@@ -132,9 +132,9 @@ async fn a_setting_applied_after_build_takes_effect_and_leaves_earlier_clones_al
     let later = built.clone().default_header("x-after", "1");
     let broken = built.clone().base_url("not a url");
 
-    built.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
-    later.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
-    let error = broken.send(GetItem::get("/item"), &CallOptions::new()).await.expect_err("refused");
+    built.send(GetItem::get("/item")).full().await.expect("head");
+    later.send(GetItem::get("/item")).full().await.expect("head");
+    let error = broken.send(GetItem::get("/item")).full().await.expect_err("refused");
     assert!(matches!(error.kind, TransportErrorKind::InvalidClient(BuildError::InvalidBaseUrl { .. })), "{error:?}");
 
     let requests = received(&server).await;
@@ -181,7 +181,7 @@ async fn api_key_goes_to_the_first_placement_that_takes_a_single_secret() {
     for (label, definition, sent, expected) in cases {
         let server = item_server().await;
         let client = builder(definition, &server.uri()).api_key("k-1");
-        let response = client.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
+        let response = client.send(GetItem::get("/item")).full().await.expect("head");
         assert_eq!(response.meta.request.auth, AuthMethod::ClientLevel, "{label}");
         let requests = received(&server).await;
         assert_eq!(sent(&requests[0]).as_deref(), Some(expected), "{label}");
@@ -198,7 +198,7 @@ async fn api_key_on_an_api_without_a_single_secret_placement_is_refused() {
         let expected = BuildError::IncompatibleCredential { supplied: "API key" };
         let client = builder(definition, &server.uri()).api_key(SENTINEL);
         assert_eq!(client.clone().build().expect_err(label), expected, "{label}");
-        let error = client.send(GetItem::get("/item"), &CallOptions::new()).await.expect_err(label);
+        let error = client.send(GetItem::get("/item")).full().await.expect_err(label);
         assert_invalid_client(&error, &expected);
     }
     assert!(received(&server).await.is_empty(), "a refused key sends nothing");
@@ -209,7 +209,7 @@ async fn the_last_client_credential_set_wins() {
     let server = item_server().await;
     let definition = accepting([CredentialPlacement::Bearer { header: None }, CredentialPlacement::Basic]);
     let client = builder(definition, &server.uri()).api_key("first").credentials(Credential::basic("u", "p"));
-    client.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
+    client.send(GetItem::get("/item")).full().await.expect("head");
 
     let requests = received(&server).await;
     assert_eq!(
@@ -256,7 +256,7 @@ async fn the_api_client_macro_gives_the_struct_every_setting_and_send_without_a_
         .build()
         .expect("valid settings build");
 
-    let response = client.send(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
+    let response = client.send(GetItem::get("/item")).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 2 }), "the registered mutator ran");
     let raw = client.send_raw(GetItem::get("/item"), &CallOptions::new()).await.expect("head");
     assert_eq!(&raw.body[..], br#"{"id":1}"#);
@@ -275,7 +275,7 @@ async fn the_api_client_macro_gives_the_struct_every_setting_and_send_without_a_
     }
 
     let invalid = generated::Example::new("not a url");
-    let error = invalid.send(GetItem::get("/item"), &CallOptions::new()).await.expect_err("refused");
+    let error = invalid.send(GetItem::get("/item")).full().await.expect_err("refused");
     assert!(matches!(error.kind, TransportErrorKind::InvalidClient(_)), "{error:?}");
     assert!(invalid.build().is_err());
 }

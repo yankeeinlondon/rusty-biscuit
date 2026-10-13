@@ -73,6 +73,22 @@ impl<D, E> Call<D, E> {
     }
 }
 
+// By hand: a derive would require the same of `D` and `E`.
+impl<D, E> std::fmt::Debug for Call<D, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Call").field("parts", &self.parts).finish()
+    }
+}
+
+impl<D, E> Clone for Call<D, E> {
+    fn clone(&self) -> Self {
+        Self {
+            parts: self.parts.clone(),
+            codec: PhantomData,
+        }
+    }
+}
+
 impl<D, E> EndpointSpec for Call<D, E>
 where
     D: Decode,

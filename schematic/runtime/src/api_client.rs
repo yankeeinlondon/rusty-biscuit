@@ -160,17 +160,11 @@ macro_rules! api_client {
             }
 
             /// See [`Client::send`](schematic_runtime::Client::send).
-            pub fn send<R>(
-                &self,
-                request: R,
-                options: &$crate::CallOptions,
-            ) -> impl ::core::future::Future<
-                Output = Result<$crate::Response<R::Success, R::Failure>, $crate::TransportError>,
-            >
+            pub fn send<R>(&self, request: R) -> $crate::Call<'_, $tag, R>
             where
                 R: $crate::EndpointSpec<Api = $tag>,
             {
-                self.0.send(request, options)
+                self.0.send(request)
             }
 
             /// See [`Client::send_raw`](schematic_runtime::Client::send_raw).

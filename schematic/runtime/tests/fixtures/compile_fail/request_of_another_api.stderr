@@ -1,7 +1,7 @@
 error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
  --> tests/fixtures/compile_fail/request_of_another_api.rs
   |
-  |     let _ = client.send(GiteaListRepos, &CallOptions::new()).await;
+  |     let _ = client.send(GiteaListRepos).await;
   |                    ---- ^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
   |                    |
   |                    required by a bound introduced by this call
@@ -14,51 +14,32 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send`
  --> src/client.rs
   |
-  |     pub fn send<R>(
+  |     pub fn send<R>(&self, request: R) -> Call<'_, A, R>
   |            ---- required by a bound in this associated function
-...
+  |     where
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send`
 
-error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
- --> tests/fixtures/compile_fail/request_of_another_api.rs
-  |
-  |     let _ = client.send(GiteaListRepos, &CallOptions::new()).await;
-  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
-  |
-note: expected this to be `Github`
- --> tests/fixtures/compile_fail/request_of_another_api.rs
-  |
-  |     type Api = Gitea;
-  |                ^^^^^
-note: required by a bound in `Client::<A>::send`
- --> src/client.rs
-  |
-  |     pub fn send<R>(
-  |            ---- required by a bound in this associated function
-...
-  |         R: EndpointSpec<Api = A>,
-  |                         ^^^^^^^ required by this bound in `Client::<A>::send`
-
-error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
- --> tests/fixtures/compile_fail/request_of_another_api.rs
-  |
-  |     let _ = client.send(GiteaListRepos, &CallOptions::new()).await;
-  |                                                              ^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
-  |
-note: expected this to be `Github`
- --> tests/fixtures/compile_fail/request_of_another_api.rs
-  |
-  |     type Api = Gitea;
-  |                ^^^^^
-note: required by a bound in `Client::<A>::send`
- --> src/client.rs
-  |
-  |     pub fn send<R>(
-  |            ---- required by a bound in this associated function
-...
-  |         R: EndpointSpec<Api = A>,
-  |                         ^^^^^^^ required by this bound in `Client::<A>::send`
+error[E0277]: `Call<'_, Github, GiteaListRepos>` is not a future
+  --> tests/fixtures/compile_fail/request_of_another_api.rs
+   |
+   |     let _ = client.send(GiteaListRepos).await;
+   |                                         ^^^^^ `Call<'_, Github, GiteaListRepos>` is not a future
+   |
+   = help: the trait `IntoFuture` is not implemented for `Call<'_, Github, GiteaListRepos>`
+   = note: Call<'_, Github, GiteaListRepos> must be a future or must implement `IntoFuture` to be awaited
+help: the trait `IntoFuture` is conditionally implemented for `Call<'_, A, R>`
+  --> src/call.rs
+   |
+   | impl<'a, A: Api, R: EndpointSpec<Api = A>> IntoFuture for Call<'a, A, R> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                                  |
+   |                                  unsatisfied requirement introduced here: `<GiteaListRepos as EndpointSpec>::Api == Github`
+help: remove the `.await`
+   |
+35 -     let _ = client.send(GiteaListRepos).await;
+35 +     let _ = client.send(GiteaListRepos);
+   |
 
 error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == Github`
  --> tests/fixtures/compile_fail/request_of_another_api.rs

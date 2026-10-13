@@ -39,7 +39,7 @@ impl EndpointSpec for GiteaListRepos {
 }
 
 async fn misuse(client: GitHub, link: Url) {
-    let _ = client.send(GiteaListRepos, &CallOptions::new()).await;
+    let _ = client.send(GiteaListRepos).await;
     let _ = client.send_raw(GiteaListRepos, &CallOptions::new()).await;
     let _ = client.check_link::<GiteaListRepos>(&link);
 }

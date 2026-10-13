@@ -7,7 +7,7 @@ use base64::Engine;
 use bytes::Bytes;
 use http::Method;
 use schematic_runtime::{
-    ApiDefinition, AuthConfig, AuthMethod, BuildError, CallOptions, Client, Credential, CredentialPlacement, EnvFallback,
+    ApiDefinition, AuthConfig, AuthMethod, BuildError, Client, Credential, CredentialPlacement, EnvFallback, FullCall,
     ErrorKind, Json, NoDeclaredError, RequestParts, Response, TransportError, TransportErrorKind,
 };
 use test_toolkit::EnvGuard;
@@ -39,12 +39,10 @@ async fn received(server: &MockServer) -> Vec<wiremock::Request> {
     server.received_requests().await.expect("recording is on")
 }
 
-async fn send(
-    client: &Client<TestApi>,
-    parts: RequestParts,
-    options: &CallOptions,
-) -> Result<Response<Item, NoDeclaredError>, TransportError> {
-    client.send(Call::<Json<Item>>::new(parts), options).await
+/// A send of `parts` whose await returns the envelope; per-call settings
+/// chain on the result.
+fn send(client: &Client<TestApi>, parts: RequestParts) -> FullCall<'_, TestApi, Call<Json<Item>>> {
+    client.send(Call::<Json<Item>>::new(parts)).full()
 }
 
 fn get() -> RequestParts {
@@ -87,17 +85,22 @@ async fn per_call_beats_client_beats_environment_beats_anonymous_with_one_creden
     let without_client = builder(bearer_api(&[var]), &server.uri()).build().expect("client");
 
     let mut reported = Vec::new();
-    for (client, options) in [
-        (&with_client, CallOptions::new().credential(Credential::access_token(&per_call))),
-        (&with_client, CallOptions::new()),
-        (&without_client, CallOptions::new()),
+    for (client, per_call) in [
+        (&with_client, Some(Credential::access_token(&per_call))),
+        (&with_client, None),
+        (&without_client, None),
     ] {
-        let response = send(client, get(), &options).await.expect("head");
+        let call = send(client, get());
+        let call = match per_call {
+            Some(credential) => call.credential(credential),
+            None => call,
+        };
+        let response = call.await.expect("head");
         assert_sentinel_not_stored(&response);
         reported.push(response.meta.request.auth.clone());
     }
     drop(env);
-    let response = send(&without_client, get(), &CallOptions::new()).await.expect("head");
+    let response = send(&without_client, get()).await.expect("head");
     assert_sentinel_not_stored(&response);
     reported.push(response.meta.request.auth.clone());
 
@@ -135,7 +138,7 @@ async fn nothing_resolving_sends_once_anonymously_and_a_401_is_an_envelope_failu
     let client = builder(bearer_api(&[var]), &server.uri()).build().expect("client");
 
     let response = client
-        .send(Call::<Json<Item>, ProviderError>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>, ProviderError>::get("/item")).full()
         .await
         .expect("a 401 head is an envelope, not a transport error");
 
@@ -166,14 +169,14 @@ async fn the_first_non_empty_variable_wins_and_a_client_order_replaces_the_defin
     let server = ok_server().await;
 
     let scanned = builder(bearer_api(&[empty, second, third]), &server.uri()).build().expect("client");
-    let response = send(&scanned, get(), &CallOptions::new()).await.expect("head");
+    let response = send(&scanned, get()).await.expect("head");
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar(second.into()), "the empty variable is skipped");
 
     let reordered = builder(bearer_api(&[empty, second, third]), &server.uri())
         .env_order([third, second])
         .build()
         .expect("client");
-    let response = send(&reordered, get(), &CallOptions::new()).await.expect("head");
+    let response = send(&reordered, get()).await.expect("head");
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar(third.into()));
 
     let requests = received(&server).await;
@@ -188,11 +191,11 @@ async fn each_send_reads_the_environment_again() {
     let client = builder(bearer_api(&[var]), &server.uri()).build().expect("client");
 
     let first = EnvGuard::set_safe(var, "first-token");
-    let response = send(&client, get(), &CallOptions::new()).await.expect("head");
+    let response = send(&client, get()).await.expect("head");
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar(var.into()));
     drop(first);
     let _second = EnvGuard::set_safe(var, "second-token");
-    send(&client, get(), &CallOptions::new()).await.expect("head");
+    send(&client, get()).await.expect("head");
 
     let requests = received(&server).await;
     assert_eq!(authorization_values(&requests[0]), ["Bearer first-token"]);
@@ -222,8 +225,7 @@ async fn an_environment_change_after_the_request_left_does_not_change_the_report
         .await;
         (head, replacement)
     };
-    let options = CallOptions::new();
-    let (response, (head, _replacement)) = tokio::join!(send(&client, get(), &options), server);
+    let (response, (head, _replacement)) = tokio::join!(send(&client, get()), server);
 
     let response = response.expect("head");
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar(first.into()));
@@ -255,7 +257,7 @@ async fn each_placement_puts_the_credential_where_the_api_expects_it() {
             .expect("client");
         let mut parts = get();
         parts.query = vec![("page".into(), "2".into())];
-        let response = send(&client, parts, &CallOptions::new().credential(credential)).await.expect("head");
+        let response = send(&client, parts).credential(credential).await.expect("head");
         assert_eq!(response.meta.request.auth, AuthMethod::PerCall);
         assert_sentinel_not_stored(&response);
     }
@@ -281,7 +283,7 @@ async fn a_cookie_credential_joins_existing_cookies_with_its_value_percent_encod
     let mut parts = get();
     parts.headers = vec![("Cookie".into(), "a=1".into())];
 
-    let response = send(&client, parts, &CallOptions::new().credential(Credential::api_key("k ey;\"1\""))).await.expect("head");
+    let response = send(&client, parts).credential(Credential::api_key("k ey;\"1\"")).await.expect("head");
 
     assert_eq!(response.meta.request.auth, AuthMethod::PerCall);
     let requests = received(&server).await;
@@ -305,17 +307,17 @@ async fn basic_environment_credentials_need_both_variables_and_report_the_passwo
 
     let user = EnvGuard::set_safe(user_var, "alice");
     let password = EnvGuard::set_safe(password_var, SENTINEL);
-    let both = send(&client, get(), &CallOptions::new()).await.expect("head");
+    let both = send(&client, get()).await.expect("head");
     assert_eq!(both.meta.request.auth, AuthMethod::EnvVar(password_var.into()));
     assert_sentinel_not_stored(&both);
 
     drop(user);
-    let no_user = send(&client, get(), &CallOptions::new()).await.expect("head");
+    let no_user = send(&client, get()).await.expect("head");
     assert_eq!(no_user.meta.request.auth, AuthMethod::Anonymous);
 
     drop(password);
     let _user = EnvGuard::set_safe(user_var, "alice");
-    let no_password = send(&client, get(), &CallOptions::new()).await.expect("head");
+    let no_password = send(&client, get()).await.expect("head");
     assert_eq!(no_password.meta.request.auth, AuthMethod::Anonymous);
 
     let requests = received(&server).await;
@@ -337,11 +339,11 @@ async fn an_explicit_policy_and_its_environment_fallback_use_their_own_placement
     let server = ok_server().await;
     let client = builder(api, &server.uri()).build().expect("client");
 
-    let per_call = send(&client, get(), &CallOptions::new().credential(Credential::access_token("call-token")))
+    let per_call = send(&client, get()).credential(Credential::access_token("call-token"))
         .await
         .expect("head");
     assert_eq!(per_call.meta.request.auth, AuthMethod::PerCall);
-    let from_env = send(&client, get(), &CallOptions::new()).await.expect("head");
+    let from_env = send(&client, get()).await.expect("head");
     assert_eq!(from_env.meta.request.auth, AuthMethod::EnvVar(var.into()));
 
     let requests = received(&server).await;
@@ -351,7 +353,7 @@ async fn an_explicit_policy_and_its_environment_fallback_use_their_own_placement
     assert_eq!(requests[1].url.query(), Some("key=env-key"));
 
     // The fallback's placement is not an accepted placement for a caller's key.
-    let refused = send(&client, get(), &CallOptions::new().credential(Credential::api_key("call-key")))
+    let refused = send(&client, get()).credential(Credential::api_key("call-key"))
         .await
         .expect_err("refused before sending");
     assert_invalid_argument(&refused);
@@ -385,7 +387,7 @@ async fn a_per_call_credential_no_placement_accepts_is_refused_before_any_reques
         (&bearer_only, Credential::basic("alice", SENTINEL)),
         (&no_auth, Credential::access_token(SENTINEL)),
     ] {
-        let error = send(client, get(), &CallOptions::new().credential(credential)).await.expect_err("refused");
+        let error = send(client, get()).credential(credential).await.expect_err("refused");
         assert_invalid_argument(&error);
         assert!(!format!("{error:?}").contains(SENTINEL));
         assert!(!error.to_string().contains(SENTINEL));
@@ -422,13 +424,13 @@ async fn a_request_already_carrying_the_credentials_slot_is_refused_and_sent_unc
         let client = builder(ApiDefinition::new(UNUSED).auth(AuthConfig::none().accept(placement.clone())), &server.uri())
             .build()
             .expect("client");
-        let error = send(&client, parts.clone(), &CallOptions::new().credential(credential))
+        let error = send(&client, parts.clone()).credential(credential)
             .await
             .expect_err("collision");
         assert_invalid_argument(&error);
         assert_eq!(received(&server).await.len(), sent_before, "{placement:?}");
 
-        send(&client, parts, &CallOptions::new()).await.expect("no credential resolved, so no collision");
+        send(&client, parts).await.expect("no credential resolved, so no collision");
     }
 
     let requests = received(&server).await;
@@ -446,7 +448,7 @@ async fn ordinary_duplicate_query_values_stay_beside_a_query_credential() {
     let mut parts = get();
     parts.query = vec![("tag".into(), "a".into()), ("tag".into(), "b".into())];
 
-    send(&client, parts, &CallOptions::new().credential(Credential::api_key("k1"))).await.expect("head");
+    send(&client, parts).credential(Credential::api_key("k1")).await.expect("head");
 
     assert_eq!(received(&server).await[0].url.query(), Some("tag=a&tag=b&key=k1"));
 }
@@ -482,7 +484,7 @@ async fn anonymous_mode_bypasses_every_source_and_strips_every_placement_from_th
         ("X-Trace".into(), "t1".into()),
     ];
 
-    let response = send(&client, parts, &CallOptions::anonymous()).await.expect("head");
+    let response = send(&client, parts).anonymous().await.expect("head");
 
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
     let requests = received(&server).await;

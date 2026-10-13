@@ -14,7 +14,7 @@ use rcgen::{
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use schematic_runtime::{
-    ApiDefinition, BuildError, CallOptions, Client, DEFAULT_TIMEOUT, Json, RequestParts, SharedTransport,
+    ApiDefinition, BuildError, Client, DEFAULT_TIMEOUT, Json, RequestParts, SharedTransport,
     TransportErrorKind,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -128,7 +128,7 @@ async fn a_valid_base_url_redirects_every_call_to_the_mock() {
     let server = item_server().await;
     let client = builder(definition(), &format!("{}/", server.uri())).build().expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head arrived");
+    let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head arrived");
 
     assert_eq!(response.meta.status, 200);
     assert_eq!(response.data(), Some(&Item { id: 1 }));
@@ -156,7 +156,7 @@ async fn a_server_that_never_answers_times_out_after_the_configured_timeout() {
     let client = builder(definition(), &url).timeout(timeout).build().expect("client");
 
     let started = std::time::Instant::now();
-    let error = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect_err("no head arrives");
+    let error = client.send(Call::<Json<Item>>::get("/item")).full().await.expect_err("no head arrives");
     let waited = started.elapsed();
     let _ = release.send(());
 
@@ -175,10 +175,10 @@ async fn the_user_agent_and_default_headers_reach_the_server_and_a_request_heade
         .build()
         .expect("client");
 
-    client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head arrived");
+    client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head arrived");
     let mut parts = RequestParts::new(Method::GET, "/item");
     parts.headers = vec![("X-Default".into(), "from-request".into())];
-    client.send(Call::<Json<Item>>::new(parts), &CallOptions::new()).await.expect("head arrived");
+    client.send(Call::<Json<Item>>::new(parts)).full().await.expect("head arrived");
 
     let requests = server.received_requests().await.expect("recording");
     assert_eq!(requests.len(), 2);
@@ -268,7 +268,7 @@ async fn clients_on_one_shared_transport_reuse_a_single_connection() {
     let second = builder(definition(), &url).transport(&transport).build().expect("client");
 
     for client in [&first, &second, &first] {
-        let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+        let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
         assert_eq!(response.data(), Some(&Item { id: 1 }), "the body is fully drained");
     }
 
@@ -282,7 +282,7 @@ async fn standalone_clients_each_open_their_own_connection() {
     let second = plain_client(&url);
 
     for client in [&first, &second, &first] {
-        let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head");
+        let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head");
         assert_eq!(response.data(), Some(&Item { id: 1 }));
     }
 
@@ -294,7 +294,7 @@ async fn a_standalone_client_sends_through_its_proxy_in_absolute_form() {
     let (proxy_url, head, _proxy) = recording_server().await;
     let client = builder(definition(), "http://target.invalid").proxy(proxy_url).build().expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head arrived");
+    let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head arrived");
 
     assert_eq!(response.data(), Some(&Item { id: 1 }));
     let head = head.await.expect("the proxy received the request");
@@ -307,7 +307,7 @@ async fn a_client_on_a_shared_transport_sends_through_the_transport_proxy() {
     let transport = SharedTransport::builder().proxy(proxy_url).build().expect("transport");
     let client = builder(definition(), "http://target.invalid").transport(&transport).build().expect("client");
 
-    let response = client.send(Call::<Json<Item>>::get("/item"), &CallOptions::new()).await.expect("head arrived");
+    let response = client.send(Call::<Json<Item>>::get("/item")).full().await.expect("head arrived");
 
     assert_eq!(response.data(), Some(&Item { id: 1 }));
     let head = head.await.expect("the proxy received the request");
@@ -410,7 +410,7 @@ async fn tls_server(leaf: CertificateDer<'static>, key: Vec<u8>) -> (String, Ser
 
 async fn send_item(client: &Client<TestApi>) -> Result<u16, TransportErrorKind> {
     client
-        .send(Call::<Json<Item>>::get("/item"), &CallOptions::new())
+        .send(Call::<Json<Item>>::get("/item")).full()
         .await
         .map(|response| response.meta.status.as_u16())
         .map_err(|error| error.kind)

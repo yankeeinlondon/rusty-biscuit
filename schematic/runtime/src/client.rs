@@ -30,6 +30,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use tokio::time::Instant;
 use url::Url;
 
+use crate::call::Call;
 use crate::codec::{BodyReadError, Decode, DecodeFailureKind, LiveBody, StreamBounds};
 use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
@@ -538,45 +539,37 @@ enum Stop {
 }
 
 impl<A: Api> Client<A> {
-    /// Sends `request` and decodes its reply with the endpoint's codec,
-    /// following redirects the cross-origin policy allows.
+    /// Binds `request` to this client as a [`Call`], which sends when it is
+    /// awaited. Per-call settings chain on the call before the await.
     ///
-    /// A 2xx reply to an endpoint whose codec supports hooks runs the
-    /// client's response hooks (see [`crate::hooks`]).
+    /// The send decodes the reply with the endpoint's codec and follows
+    /// redirects the cross-origin policy allows. A 2xx reply to an endpoint
+    /// whose codec supports hooks runs the client's response hooks (see
+    /// [`crate::hooks`]).
     ///
     /// ## Returns
     ///
-    /// `Ok` with an envelope whenever a response head arrived, whatever its
-    /// status and whether its body could be read or decoded. After a redirect
-    /// the envelope describes the last response received: the final reply, a
-    /// redirect that was not followed ([`ErrorKind::RedirectRefused`]), or the
-    /// last redirect when the next hop received no head
-    /// ([`ErrorKind::RedirectFailed`]).
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`TransportError`] only when no response head arrived: an
-    /// argument, URL, or cross-origin target was refused before sending, the
-    /// shared deadline had already expired, or the connection, TLS
-    /// handshake, or wait for the first head failed.
-    ///
-    /// ## Notes
-    ///
-    /// The returned future is one heap pointer: the request's state machine
-    /// is boxed, so joining many sends in one future needs no large stack.
-    pub fn send<R>(
-        &self,
-        request: R,
-        options: &CallOptions,
-    ) -> impl Future<Output = Result<Response<R::Success, R::Failure>, TransportError>>
+    /// Awaiting the call returns the data, or a [`CallError`](crate::CallError).
+    /// Awaiting [`Call::full`] returns `Ok` with an envelope whenever a
+    /// response head arrived, whatever its status and whether its body could
+    /// be read or decoded. After a redirect the envelope describes the last
+    /// response received: the final reply, a redirect that was not followed
+    /// ([`ErrorKind::RedirectRefused`]), or the last redirect when the next
+    /// hop received no head ([`ErrorKind::RedirectFailed`]). It returns
+    /// [`TransportError`] only when no response head arrived: an argument,
+    /// URL, or cross-origin target was refused before sending, the shared
+    /// deadline had already expired, or the connection, TLS handshake, or
+    /// wait for the first head failed.
+    pub fn send<R>(&self, request: R) -> Call<'_, A, R>
     where
         R: EndpointSpec<Api = A>,
     {
-        Box::pin(self.send_unboxed(request, options))
+        Call::new(self, request)
     }
 
-    /// The body of [`send`](Self::send), before boxing.
-    async fn send_unboxed<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
+    /// The send behind an awaited [`Call`] and [`FullCall`](crate::FullCall),
+    /// before boxing.
+    pub(crate) async fn send_unboxed<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
     where
         R: EndpointSpec<Api = A>,
     {
@@ -619,7 +612,7 @@ impl<A: Api> Client<A> {
     ///
     /// ## Notes
     ///
-    /// The returned future is boxed, as [`send`](Self::send)'s is.
+    /// The returned future is boxed, as an awaited [`Call`]'s is.
     pub fn send_raw<R>(&self, request: R, options: &CallOptions) -> impl Future<Output = Result<RawResponse, TransportError>>
     where
         R: EndpointSpec<Api = A>,

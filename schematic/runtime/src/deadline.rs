@@ -1,7 +1,8 @@
 //! The shared deadline for an operation spanning several sends.
 //!
-//! A [`Deadline`] is created once and passed to every send of the operation
-//! through [`CallOptions`](crate::CallOptions). Its clones share one
+//! A [`Deadline`] is created once and passed to every send of the operation,
+//! through [`Call::deadline`](crate::Call::deadline) or, for a raw send,
+//! [`CallOptions`](crate::CallOptions). Its clones share one
 //! expiration on the monotonic clock and one count of completed logical
 //! sends. Each send under a deadline is bounded by the smaller of the time
 //! remaining and the client's per-request timeout; once it has expired, no

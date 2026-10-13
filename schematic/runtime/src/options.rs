@@ -1,4 +1,5 @@
-//! Per-call options for a send.
+//! Per-call options for a raw send, and the state behind a
+//! [`Call`](crate::Call)'s per-call settings.
 
 use crate::credentials::Credential;
 use crate::deadline::Deadline;

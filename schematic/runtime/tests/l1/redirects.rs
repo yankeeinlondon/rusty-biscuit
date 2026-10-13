@@ -12,7 +12,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use http::Method;
 use schematic_runtime::{
-    ApiDefinition, AuthConfig, AuthMethod, BuildError, CallOptions, Client, Credential, CredentialPlacement, Deadline, Empty,
+    ApiDefinition, AuthConfig, AuthMethod, BuildError, Client, Credential, CredentialPlacement, Deadline, Empty,
     ErrorKind, FailureCategory, Json, MAX_REDIRECTS, NoDeclaredError, OriginPolicy, RedirectRefusal, RequestBody,
     RequestParts, Response, SharedTransport, TransportErrorKind,
 };
@@ -95,7 +95,7 @@ fn client(a: &MockServer, form: Form, policy: Option<OriginPolicy>) -> Client<Te
 }
 
 async fn get(client: &Client<TestApi>, at: &str) -> Response<Item, NoDeclaredError> {
-    client.send(Call::<Json<Item>>::get(at), &CallOptions::new()).await.expect("a head arrived")
+    client.send(Call::<Json<Item>>::get(at)).full().await.expect("a head arrived")
 }
 
 fn refusal<T, E>(response: &Response<T, E>) -> Option<RedirectRefusal> {
@@ -264,8 +264,8 @@ async fn a_foreign_hop_drops_every_secret_the_application_set_and_a_same_origin_
         Call::<Json<Item>>::new(parts)
     };
 
-    let foreign = client.send(request("/out"), &CallOptions::new()).await.expect("head");
-    let same = client.send(request("/same"), &CallOptions::new()).await.expect("head");
+    let foreign = client.send(request("/out")).full().await.expect("head");
+    let same = client.send(request("/same")).full().await.expect("head");
 
     assert_eq!(foreign.data(), Some(&Item { id: 2 }));
     let landed = &requests(b).await[0];
@@ -331,20 +331,20 @@ async fn an_absolute_request_url_is_checked_before_it_is_sent() {
     let foreign = format!("{}/landing?token={SENTINEL}", b.uri());
 
     let strict = client(a, Form::Header, Some(OriginPolicy::same_origin()));
-    let error = strict.send(Call::<Json<Item>>::get(&foreign), &CallOptions::new()).await.expect_err("refused before sending");
+    let error = strict.send(Call::<Json<Item>>::get(&foreign)).full().await.expect_err("refused before sending");
     assert!(matches!(error.kind, TransportErrorKind::CrossOriginRejected { .. }), "{:?}", error.kind);
     assert!(!error.to_string().contains(SENTINEL), "{error}");
     assert!(requests(b).await.is_empty());
 
     let loose = client(a, Form::Header, Some(OriginPolicy::allow_without_credentials()));
-    let response = loose.send(Call::<Json<Item>>::get(&foreign), &CallOptions::new()).await.expect("sent");
+    let response = loose.send(Call::<Json<Item>>::get(&foreign)).full().await.expect("sent");
     assert_eq!(response.data(), Some(&Item { id: 2 }));
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
     assert!(!carries(&requests(b).await[0], SECRET));
 
     let deny = client(a, Form::Header, Some(OriginPolicy::deny()));
     let own = format!("{}/final", a.uri());
-    let response = deny.send(Call::<Json<Item>>::get(&own), &CallOptions::new()).await.expect("sent");
+    let response = deny.send(Call::<Json<Item>>::get(&own)).full().await.expect("sent");
     assert_eq!(response.data(), Some(&Item { id: 1 }), "a same-origin absolute URL passes under deny");
     assert!(carries(&requests_to(a, "/final").await[0], SECRET));
 }
@@ -381,7 +381,7 @@ async fn each_redirect_status_rewrites_or_replays_the_request() {
             parts.body = RequestBody::Json(r#"{"a":1}"#.into());
         }
 
-        let response = client.send(Call::<Empty>::new(parts), &CallOptions::new()).await.expect("head");
+        let response = client.send(Call::<Empty>::new(parts)).full().await.expect("head");
 
         let label = format!("{} {}", case.status, case.method);
         assert_eq!(response.meta.status, 204, "{label}");
@@ -498,7 +498,7 @@ async fn an_explicit_host_and_a_redirects_cookie_never_reach_the_next_hop() {
         Call::<Json<Item>>::new(parts)
     };
 
-    client.send(with_host("/cross"), &CallOptions::new()).await.expect("head");
+    client.send(with_host("/cross")).full().await.expect("head");
     get(&client, "/set").await;
 
     assert_eq!(requests_to(a, "/cross").await[0].headers["host"], "a.example.test", "the first hop sends the caller's Host");
@@ -518,8 +518,8 @@ async fn a_followed_redirect_whose_target_refuses_the_connection_keeps_the_redir
     let refuse = builder(ApiDefinition::new("https://unused.invalid"), &a.uri()).build().expect("client");
     let deadline = Deadline::after(Duration::from_secs(30));
 
-    let failed = follow.send(Call::<Json<Item>>::get("/start"), &CallOptions::new().deadline(&deadline)).await.expect("a head arrived");
-    let refused = refuse.send(Call::<Json<Item>>::get("/start"), &CallOptions::new()).await.expect("a head arrived");
+    let failed = follow.send(Call::<Json<Item>>::get("/start")).deadline(&deadline).full().await.expect("a head arrived");
+    let refused = refuse.send(Call::<Json<Item>>::get("/start")).full().await.expect("a head arrived");
 
     let error = failed.error().expect("failure");
     let ErrorKind::RedirectFailed { target, category } = &error.kind else {
@@ -575,7 +575,7 @@ async fn a_shared_deadline_expiring_between_hops_is_a_failed_redirect_counted_on
     let (_a, _b, client, _) = delayed_pair(Duration::from_millis(100), Duration::from_secs(5)).await;
     let deadline = Deadline::after(Duration::from_millis(400));
 
-    let response = client.send(Call::<Json<Item>>::get("/start"), &CallOptions::new().deadline(&deadline)).await.expect("head");
+    let response = client.send(Call::<Json<Item>>::get("/start")).deadline(&deadline).full().await.expect("head");
 
     let error = response.error().expect("failure");
     assert!(
@@ -592,7 +592,7 @@ async fn a_followed_send_reports_the_final_hop_and_the_whole_elapsed_time() {
     let (a, b, client, _) = delayed_pair(Duration::from_millis(100), Duration::from_millis(100)).await;
     let deadline = Deadline::after(Duration::from_secs(30));
 
-    let response = client.send(Call::<Json<Item>>::get("/start"), &CallOptions::new().deadline(&deadline)).await.expect("head");
+    let response = client.send(Call::<Json<Item>>::get("/start")).deadline(&deadline).full().await.expect("head");
 
     assert_eq!(response.data(), Some(&Item { id: 2 }));
     assert_eq!(response.meta.request.url.as_str(), format!("{}/landing", b.uri()));

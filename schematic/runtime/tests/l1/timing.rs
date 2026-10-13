@@ -13,7 +13,7 @@ use bytes::Bytes;
 use http::Method;
 use schematic_runtime::redact::REDACTED;
 use schematic_runtime::{
-    ApiDefinition, BodyReadError, CallOptions, Client, Deadline, Decode, DecodeFailure, ErrorKind, Json, LiveBody,
+    ApiDefinition, BodyReadError, Client, Deadline, Decode, DecodeFailure, ErrorKind, Json, LiveBody,
     NoDeclaredError, Outcome, RequestParts, Response, TransportErrorKind,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -143,7 +143,7 @@ async fn a_body_cut_off_after_the_head_is_interrupted_inside_the_envelope_with_i
         .await;
 
         let response = client(&url, Duration::from_secs(10))
-            .send(item(), &CallOptions::new())
+            .send(item()).full()
             .await
             .expect("a head arrived, so an envelope");
 
@@ -166,7 +166,7 @@ async fn a_stalled_head_is_a_timeout_whose_text_redacts_the_query() {
 
     let started = Instant::now();
     let error = client(&url, Duration::from_millis(200))
-        .send(Call::<Json<Item>>::new(parts), &CallOptions::new())
+        .send(Call::<Json<Item>>::new(parts)).full()
         .await
         .expect_err("no head arrives");
 
@@ -204,7 +204,7 @@ async fn an_exhausted_deadline_sends_nothing() {
     let deadline = Deadline::after(Duration::ZERO);
 
     let error = client
-        .send(item(), &CallOptions::new().deadline(&deadline))
+        .send(item()).deadline(&deadline).full()
         .await
         .expect_err("refused before sending");
     assert!(
@@ -215,7 +215,7 @@ async fn an_exhausted_deadline_sends_nothing() {
 
     // The mock serves in accept order, so a control request answered first
     // proves the refused send never connected.
-    let control = client.send(item(), &CallOptions::new()).await.expect("control request");
+    let control = client.send(item()).full().await.expect("control request");
     assert_eq!(control.data(), Some(&Item { id: 1 }));
     assert_eq!(accepted.load(Ordering::SeqCst), 1);
     assert_eq!(deadline.completed_requests(), 0);
@@ -226,10 +226,9 @@ async fn a_per_request_timeout_under_a_longer_deadline_leaves_the_rest_of_the_bu
     let (hanging, _hanging_server) = serve(hang).await;
     let (fast, _accepted, _fast_server) = counting_server(Duration::ZERO).await;
     let deadline = Deadline::after(Duration::from_secs(2));
-    let options = CallOptions::new().deadline(&deadline);
 
     let error = client(&hanging, Duration::from_millis(200))
-        .send(item(), &options)
+        .send(item()).deadline(&deadline).full()
         .await
         .expect_err("no head arrives");
     assert_eq!(error.kind, TransportErrorKind::Timeout, "the request timeout fired, not the deadline");
@@ -237,7 +236,7 @@ async fn a_per_request_timeout_under_a_longer_deadline_leaves_the_rest_of_the_bu
     assert!(deadline.remaining() > Duration::from_secs(1), "{:?}", deadline.remaining());
     assert_eq!(deadline.completed_requests(), 0);
 
-    let response = client(&fast, Duration::from_millis(200)).send(item(), &options).await.expect("head");
+    let response = client(&fast, Duration::from_millis(200)).send(item()).deadline(&deadline).full().await.expect("head");
     assert_eq!(response.data(), Some(&Item { id: 1 }));
     assert_eq!(deadline.completed_requests(), 1);
 }
@@ -248,7 +247,7 @@ async fn a_deadline_shorter_than_the_timeout_bounds_the_request() {
     let deadline = Deadline::after(Duration::from_millis(300));
 
     let error = client(&url, Duration::from_secs(10))
-        .send(item(), &CallOptions::new().deadline(&deadline))
+        .send(item()).deadline(&deadline).full()
         .await
         .expect_err("no head arrives");
 
@@ -270,12 +269,11 @@ async fn a_deadline_stops_an_operation_of_several_sends_and_sends_nothing_after_
     let (url, accepted, _server) = counting_server(Duration::from_millis(150)).await;
     let client = client(&url, Duration::from_secs(10));
     let deadline = Deadline::after(Duration::from_millis(400));
-    let options = CallOptions::new().deadline(&deadline);
 
     let mut successes = 0_u64;
     let mut refusals = 0;
     for _ in 0..5 {
-        match client.send(item(), &options).await {
+        match client.send(item()).deadline(&deadline).full().await {
             Ok(response) => {
                 assert_eq!(refusals, 0, "no send succeeds after the deadline stopped one");
                 assert_eq!(response.data(), Some(&Item { id: 1 }));
@@ -301,7 +299,7 @@ async fn a_deadline_stops_an_operation_of_several_sends_and_sends_nothing_after_
 
     // Served in accept order: everything counted before the control request
     // was sent under the deadline.
-    client.send(item(), &CallOptions::new()).await.expect("control request");
+    client.send(item()).full().await.expect("control request");
     let under_deadline = accepted.load(Ordering::SeqCst) as u64 - 1;
     assert!(
         (successes..=successes + 1).contains(&under_deadline),
@@ -327,14 +325,13 @@ async fn only_sends_that_received_a_head_count_as_completed() {
     })
     .await;
     let deadline = Deadline::after(Duration::from_secs(10));
-    let options = CallOptions::new().deadline(&deadline);
 
-    let response = client(&failing, Duration::from_secs(5)).send(item(), &options).await.expect("head");
+    let response = client(&failing, Duration::from_secs(5)).send(item()).deadline(&deadline).full().await.expect("head");
     assert_eq!(response.error().expect("failure").kind, ErrorKind::Undeclared);
     assert_eq!(deadline.completed_requests(), 1, "an HTTP failure is a completed send");
 
     let error = client(&closed_port_url().await, Duration::from_secs(5))
-        .send(item(), &options)
+        .send(item()).deadline(&deadline).full()
         .await
         .expect_err("refused");
     assert_eq!(error.kind, TransportErrorKind::Connect);
@@ -342,7 +339,7 @@ async fn only_sends_that_received_a_head_count_as_completed() {
 
     let hanging_client = client(&hanging, Duration::from_secs(5));
     tokio::select! {
-        result = hanging_client.send(item(), &options) => panic!("the send cannot finish: {:?}", result.map(|r| r.meta.status)),
+        result = hanging_client.send(item()).deadline(&deadline).full() => panic!("the send cannot finish: {:?}", result.map(|r| r.meta.status)),
         _ = head_seen.recv() => {}
     }
     assert_eq!(deadline.completed_requests(), 1, "a dropped send is not");
@@ -359,7 +356,7 @@ async fn an_expiration_after_the_head_is_a_body_interruption_with_the_partial_by
 
     let started = Instant::now();
     let response = client(&url, Duration::from_millis(300))
-        .send(item(), &CallOptions::new())
+        .send(item()).full()
         .await
         .expect("the head arrived, so an envelope, not a timeout");
 
@@ -394,10 +391,9 @@ async fn dropping_a_send_closes_its_connection_and_does_not_count_it() {
     let mut server = AbortOnDrop(server);
     let deadline = Deadline::after(Duration::from_secs(10));
     let client = client(&url, Duration::from_secs(10));
-    let options = CallOptions::new().deadline(&deadline);
 
     tokio::select! {
-        result = client.send(item(), &options) => {
+        result = client.send(item()).deadline(&deadline).full() => {
             panic!("the body never completes: {:?}", result.map(|r| r.meta.status));
         }
         _ = written_seen => {}
@@ -423,10 +419,9 @@ fn a_dropped_send_leaves_no_task_alive_and_the_runtime_shuts_down_promptly() {
         let (listener, url) = listener().await;
         let (written_seen, server) = partial_then_wait_for_close(listener);
         let client = client(&url, Duration::from_secs(10));
-        let options = CallOptions::new();
 
         tokio::select! {
-            result = client.send(item(), &options) => {
+            result = client.send(item()).full() => {
                 panic!("the body never completes: {:?}", result.map(|r| r.meta.status));
             }
             _ = written_seen => {}
@@ -472,7 +467,7 @@ async fn a_streaming_decoder_yields_its_first_line_before_the_body_ends() {
     .await;
 
     let response = client(&url, Duration::from_secs(5))
-        .send(Call::<Lines>::get("/stream"), &CallOptions::new())
+        .send(Call::<Lines>::get("/stream")).full()
         .await
         .expect("head");
     assert_eq!(response.meta.status, 200);
@@ -502,7 +497,7 @@ async fn a_stream_outlives_the_send_expiration_while_it_keeps_delivering_then_ti
 
     let started = Instant::now();
     let response = client(&url, timeout)
-        .send(Call::<Lines>::get("/stream"), &CallOptions::new())
+        .send(Call::<Lines>::get("/stream")).full()
         .await
         .expect("head");
     let mut lines = into_lines(response);
@@ -535,7 +530,7 @@ async fn the_shared_deadline_bounds_a_stream_that_never_goes_idle() {
     let deadline = Deadline::after(Duration::from_millis(300));
 
     let response = client(&url, Duration::from_secs(10))
-        .send(Call::<Lines>::get("/stream"), &CallOptions::new().deadline(&deadline))
+        .send(Call::<Lines>::get("/stream")).deadline(&deadline).full()
         .await
         .expect("head");
     assert_eq!(deadline.completed_requests(), 1, "the send completed when the decoder returned");

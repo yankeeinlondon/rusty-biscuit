@@ -108,7 +108,7 @@ async fn answer(mut stream: TcpStream) {
 }
 
 async fn typed<D: Decode, E: ErrorBody>(client: &Client<TestApi>, path: &str) -> Response<D::Output, E> {
-    client.send(Call::<D, E>::get(path), &CallOptions::new()).await.expect("a head arrived")
+    client.send(Call::<D, E>::get(path)).full().await.expect("a head arrived")
 }
 
 async fn raw(client: &Client<TestApi>, path: &str) -> RawResponse {

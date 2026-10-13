@@ -15,10 +15,13 @@
 //! - the managed [`Client`], created infallibly from an [`ApiDefinition`]
 //!   and configured by chained settings that are validated on its first send
 //!   or by [`Client::build`], optionally sharing a [`SharedTransport`];
+//! - the [`Call`] that [`Client::send`] returns, which sends when awaited and
+//!   returns the data or a [`CallError`], and its [`FullCall`] form, which
+//!   returns the whole [`Response`];
 //! - [`api_client!`], which gives a generated API's client struct the
 //!   client's settings and sends as inherent methods;
 //! - programmatic [`Credential`]s and the API's [`AuthConfig`], per-call
-//!   [`CallOptions`], and the shared [`Deadline`];
+//!   [`CallOptions`] for [`Client::send_raw`], and the shared [`Deadline`];
 //! - the [`OriginPolicy`] that governs redirects and followed links;
 //! - [`Client::send_raw`] and its [`RawResponse`], for a reply without
 //!   decoding;
@@ -26,11 +29,12 @@
 //!
 //! ## The governing rule
 //!
-//! A send returns `Ok` (a [`Response`], or a [`RawResponse`] from
-//! [`Client::send_raw`]) if and only if an HTTP response head (status
+//! A send returns `Ok` (a [`Response`] from an awaited [`FullCall`], or a
+//! [`RawResponse`] from [`Client::send_raw`]) if and only if an HTTP response head (status
 //! line and headers) was received; any HTTP status, including an undecodable
 //! or cut-off body, is reported inside the envelope with its raw bytes. A send
-//! returns `Err(TransportError)` only when no head arrived.
+//! returns `Err(TransportError)` only when no head arrived. An awaited
+//! [`Call`] folds the two failure cases into one [`CallError`].
 //!
 //! ## What is safe to log
 //!
@@ -45,6 +49,7 @@
 //! translates definition data into runtime configuration.
 
 mod api_client;
+pub mod call;
 pub mod client;
 pub mod codec;
 pub mod credentials;
@@ -61,6 +66,7 @@ pub mod redact;
 pub mod response;
 pub mod transport;
 
+pub use call::{Call, CallError, CallFuture, FullCall};
 pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
 pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
 pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
@@ -93,4 +99,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 2;
+pub const ABI: u32 = 3;

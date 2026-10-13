@@ -373,7 +373,7 @@ async fn typed_and_raw_sends_report_the_same_evidence_for_every_ending() {
         // the failed target is fixed here.
         (&any, "/dead", None),
     ] {
-        let typed = client.send(Call::<Json<Item>>::get(at), &CallOptions::new()).await.expect("typed head");
+        let typed = client.send(Call::<Json<Item>>::get(at)).full().await.expect("typed head");
         let raw = client.send_raw(Call::<Json<Item>>::get(at), &CallOptions::new()).await.expect("raw head");
 
         match expected {
@@ -401,7 +401,7 @@ async fn typed_and_raw_sends_report_the_same_evidence_for_every_ending() {
             let raw: RawResponse = client.send_raw(Call::<Text>::get("/x"), &CallOptions::new()).await.expect("head");
             (raw.completion, raw.body)
         } else {
-            let typed = client.send(Call::<Json<Item>>::get("/x"), &CallOptions::new()).await.expect("head");
+            let typed = client.send(Call::<Json<Item>>::get("/x")).full().await.expect("head");
             (typed_disposition(&typed), typed_body(&typed).expect("failure body"))
         };
         assert_eq!(completion, RawCompletion::BodyInterrupted, "raw: {send_raw}");
