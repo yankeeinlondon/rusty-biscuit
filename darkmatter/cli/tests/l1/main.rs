@@ -14,6 +14,8 @@ mod common;
 mod union_fixtures;
 #[path = "../../../lib/tests/position_fixtures/mod.rs"]
 mod position_fixtures;
+#[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
+mod content_policy_fixtures;
 
 mod clean;
 mod clean_frontmatter;
@@ -77,11 +79,13 @@ mod schema_union_matrix_cells;
 mod schema_union_pipeline;
 mod schema_validate;
 mod schema_validate_baseline;
+mod schema_validate_baseline_selection;
 mod schema_robustness_matrix;
 mod schema_validate_core_types;
 mod schema_validate_shipped_artifacts;
 mod schema_validate_phase;
 mod spawn_site_guard;
+mod standalone_baseline;
 mod test_layout;
 mod toc;
 mod validate_refs;

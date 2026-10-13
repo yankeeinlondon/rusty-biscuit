@@ -92,17 +92,20 @@ fn schema_validate_json_format_reports_problems() {
 }
 
 #[test]
-fn schema_validate_no_schema_no_baseline_is_vacuous_success() {
+fn schema_validate_no_schema_with_baseline_opt_out_is_vacuous_success() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    let doc = write_file(tmp, "no-schema.md", "---\nname: alice\n---\nBody\n");
+    // `last_updated` would fail the embedded baseline's `date`; the opt-out
+    // leaves no effective schema to check it.
+    let doc = write_file(tmp, "no-schema.md", "---\nname: alice\nlast_updated: not-a-date\n---\nBody\n");
 
     process
         .command()
-        .args(["schema", "validate"])
+        .args(["schema", "validate", "--no-baseline-schema"])
         .arg(&doc)
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("doesn't have a schema definition"));
 }
 
 #[test]

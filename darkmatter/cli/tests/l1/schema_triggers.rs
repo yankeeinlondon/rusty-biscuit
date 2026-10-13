@@ -395,7 +395,6 @@ fn schema_validate_applies_triggers_from_schemas_dir_and_home() {
 }
 
 /// `text` without SGR escape sequences (`ESC [ ... m`).
-#[cfg(unix)]
 fn strip_ansi(text: &str) -> String {
     let mut plain = String::with_capacity(text.len());
     let mut chars = text.chars();

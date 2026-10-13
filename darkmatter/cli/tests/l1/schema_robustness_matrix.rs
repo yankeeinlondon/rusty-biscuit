@@ -193,9 +193,14 @@ fn run(files: &[(String, String)], cells: &[Cell], compared: &BTreeSet<String>) 
         std::fs::write(dir.join(&cell.name), format!("---\n{}---\nBody\n", cell.frontmatter))
             .expect("write document");
     }
+    // These columns judge document schemas, as they did before the built-in
+    // baseline became the default. With it, every distinct document schema
+    // compiles the whole merged baseline (about 12 ms each in a debug build),
+    // which pushes a column past the L1 time budget; baseline selection and
+    // merging have their own tests in `schema_validate_baseline_selection`.
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--format", "json", "--no-baseline-schema"])
         .args(cells.iter().map(|cell| cell.name.as_str()))
         .output()
         .expect("md runs");
@@ -305,8 +310,8 @@ fn root_schema_declaration_column() {
     matrix.cell(col, Control, "control both files", with(arms, "schema: spec.md\nreview: review.md\n"), Expect::Valid);
     matrix.cell(col, Control, "control neither", with(arms, ""), Expect::Invalid("schema"));
 
-    // The document has no inline declaration: no synthetic schema, nothing
-    // is constrained.
+    // The document has no inline declaration: no synthetic schema, and with
+    // no baseline nothing is constrained.
     matrix.cell(col, Absent, "absent", "schema: 5\n", Expect::Valid);
     matrix.cell(col, ExplicitNull, "null", "$schema: null\nschema: spec.md\n", load("$schema must be a mapping, sequence, or string; got null"));
     matrix.cell(col, ExplicitNull, "empty value", "$schema:\nschema: spec.md\n", load("$schema must be a mapping, sequence, or string; got null"));

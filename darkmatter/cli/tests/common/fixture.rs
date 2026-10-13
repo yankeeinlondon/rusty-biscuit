@@ -21,7 +21,7 @@
 //! | home | `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture `home`; `HOMEDRIVE`/`HOMEPATH` removed |
 //! | config/cache | `XDG_CONFIG_HOME` → fixture `config`, `XDG_CACHE_HOME` → fixture `cache` (the fallback `dirs::cache_dir()` uses for compose artifacts when no `--cache-root` flag is passed) |
 //! | temp | `TMPDIR` (Unix) / `TEMP`+`TMP` (Windows) → fixture `tmp` |
-//! | darkmatter namespace | inherited `DARKMATTER_*`, `DM_*`, `MD_*`, `THEME`, `CODE_THEME`, `PREFER_ITALICS`, `TERMINAL_IMAGES`, `HASH_PROPERTY`, `HASH_IGNORE_PROPERTIES`, `BASELINE_SCHEMA`, `AGENT`, `MODEL`, `RUST_LOG` removed by prefix or name |
+//! | darkmatter namespace | inherited `DARKMATTER_*`, `DM_*`, `MD_*`, `THEME`, `CODE_THEME`, `PREFER_ITALICS`, `TERMINAL_IMAGES`, `HASH_PROPERTY`, `HASH_IGNORE_PROPERTIES`, `BASELINE_SCHEMA`, `SCHEMAS_DIR`, `AGENT`, `MODEL`, `RUST_LOG` removed by prefix or name |
 //! | Git plumbing | `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`/`GIT_OBJECT_DIRECTORY` and the `GIT_CONFIG_*` family removed; `GIT_CONFIG_NOSYSTEM=1` set so the host's system gitconfig never applies |
 //! | rendering | `COLUMNS`, `LINES`, `TERM`, `COLORTERM`, `COLORFGBG`, `CLICOLOR_FORCE`, `FORCE_COLOR`, inherited `NO_COLOR` removed; `NO_COLOR=1` set. A test whose subject *is* rendering policy declares its own values with [`MdCommandBuilder::rendering_input`] |
 //! | PATH | fixture `bin` + [`minimal_system_path`] |
@@ -772,6 +772,7 @@ pub fn inherited_scrub_keys() -> Vec<OsString> {
         "HASH_PROPERTY",
         "HASH_IGNORE_PROPERTIES",
         "BASELINE_SCHEMA",
+        "SCHEMAS_DIR",
     ];
     let mut keys: Vec<OsString> = std::env::vars_os()
         .map(|(key, _)| key)
