@@ -45,6 +45,24 @@ deletion engine decides which are the operation's own.
     flushes every 1 ms until the marker's event arrives (about 11 ms idle),
     and `DRAIN_TIMEOUT` (5 s) without it is `CoverageLost::DrainTimedOut`.
     Works with the checkout on another volume than the marker.
+  - **One confirmed marker is not a barrier either** (2026-10-13).
+    fseventsd does not keep the order changes were made in: in a burst of
+    2,000 creations it gave a contiguous run of 1-9 of them event IDs
+    *after* a marker created once all writes had returned, and delivered
+    them in the next drain, with no drop flag (about 1 drain in 15, also
+    with the test alone). A second `FlushSync` does not help. The drain
+    therefore repeats marker rounds until one delivers no watched-path
+    event (`Shared::delivered`), all within `DRAIN_TIMEOUT`; 500 stressed
+    bursts, 200 of them under full-suite load, then passed. It is still
+    not a barrier: with all 11 FSEvents tests stressed at once, a quiet
+    round returned with 240 of 2,000 creations pending. The macOS contract
+    is therefore "delivered so far, settled": late events arrive in a later
+    drain, never dropped without `CoverageLost`, and the per-entry checks
+    before unlink (inode, size, ns mtime, mode, BLAKE3) and unregistration's
+    index/HEAD reread are what protect work. The burst test asserts eventual
+    delivery. A true barrier would need kqueue (an fd per directory and
+    file). To diagnose, record the callback's event IDs and compare a late
+    path's ID with the marker's.
   - **`FSEventStreamStart` returns before events flow**; `start` runs one
     barrier before returning, or a change right after it is missed.
   - **A directory's removal or rename hides pending child events** in the

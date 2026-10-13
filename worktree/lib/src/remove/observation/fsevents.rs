@@ -8,18 +8,26 @@
 //!   watched: a recursive watch on it would deliver every sibling worktree's
 //!   activity, and a busy sibling (a build) is enough to make FSEvents drop
 //!   events. Only these three subtrees reach the stream.
-//! - A drain is a marker followed by `FSEventStreamFlushSync`. A flush alone
-//!   delivers only what fseventsd has already read from the kernel, and a
-//!   change made just before it can still be in transit (measured: 1 of 50
-//!   write-then-flush rounds missed its write). A marker alone is not enough
-//!   either: fseventsd may deliver it before earlier changes (S2). So the
-//!   drain creates a file in a private marker directory the stream also
-//!   watches, flushes until that file's event arrives (fseventsd reads the
-//!   kernel's events in order, so every earlier change has reached it), and
-//!   the flush that delivered the marker delivered those changes too. The
-//!   marker directory is in the per-user temporary directory, outside the
-//!   checkout and Git's admin directory. A marker not confirmed within
-//!   [`DRAIN_TIMEOUT`] is coverage loss.
+//! - A drain is a series of marker rounds. A round creates a file in a
+//!   private marker directory the stream also watches and calls
+//!   `FSEventStreamFlushSync` until that file's event arrives. A flush alone
+//!   delivers only what fseventsd has already processed (measured: 1 of 50
+//!   write-then-flush rounds missed its write), and one confirmed marker is
+//!   not enough either: fseventsd does not keep the order changes were made
+//!   in. Under a burst of 2,000 creations it assigned a few of them event
+//!   IDs after a marker created once all 2,000 had returned, and delivered
+//!   them only in a later round (about 1 drain in 15). So the drain repeats
+//!   rounds until one delivers no watched-path event, which makes a late
+//!   event rare (none in 500 stressed bursts) but not impossible: with 11
+//!   streams busy at once, a quiet round still came back with 240 creations
+//!   pending. A drain here therefore returns what has been delivered so far;
+//!   anything late arrives in a later drain, never lost without a loss being
+//!   reported. Correctness rests on the direct checks: the deletion engine's
+//!   comparison of each entry with its record before unlinking it, and
+//!   unregistration's reread of the index, HEAD, and both paths. The marker
+//!   directory is in the per-user temporary directory, outside the checkout
+//!   and Git's admin directory. Rounds that cannot be confirmed within
+//!   [`DRAIN_TIMEOUT`] in total are coverage loss.
 //! - `MustScanSubDirs` and either dropped flag are coverage loss.
 //! - A moved or deleted parent or admin directory produces no event under the
 //!   watched paths, so each drain compares their identity (device and inode)
@@ -59,8 +67,8 @@ use super::{Backend, CoverageLost, EventKind, EventQueue, ObservationError, Obse
 /// (S2), so the stream batches instead.
 const LATENCY_SECONDS: f64 = 0.1;
 
-/// How long a drain waits for its marker. FSEvents lagged 100-600 ms under
-/// load in S2.
+/// How long a drain's marker rounds may take in total. FSEvents lagged
+/// 100-600 ms under load in S2.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 const LOST_FLAGS: u32 = fs_events::kFSEventStreamEventFlagMustScanSubDirs
@@ -152,6 +160,9 @@ struct Shared {
     admin_released: AtomicBool,
     /// The highest marker the stream has delivered.
     marker_seen: AtomicU64,
+    /// Watched-path events delivered so far, markers excluded. A barrier
+    /// round that leaves it unchanged was quiet.
+    delivered: AtomicU64,
 }
 
 impl Shared {
@@ -194,6 +205,7 @@ impl Shared {
         let Some((root, relative)) = self.locate(path) else {
             return;
         };
+        self.delivered.fetch_add(1, Ordering::SeqCst);
         if flags & (fs_events::kFSEventStreamEventFlagMount | fs_events::kFSEventStreamEventFlagUnmount) != 0 {
             // A volume appearing or leaving under a watched path changes
             // content no item event describes.
@@ -287,6 +299,7 @@ impl FsEvents {
             moved: AtomicBool::new(moved),
             admin_released: AtomicBool::new(false),
             marker_seen: AtomicU64::new(0),
+            delivered: AtomicU64::new(0),
         });
         let stream = create_stream(&shared, &watched)?;
         #[cfg(test)]
@@ -335,30 +348,46 @@ impl FsEvents {
         Ok(adapter)
     }
 
-    /// Delivers every event caused before the call into the queue, or
-    /// records why that cannot be confirmed.
+    /// Runs marker rounds until one delivers no watched-path event, or
+    /// records why that could not be confirmed. See the module docs for why
+    /// one round is not enough.
     fn barrier(&mut self) {
+        let started = Instant::now();
+        loop {
+            let before = self.shared.delivered.load(Ordering::SeqCst);
+            if !self.marker_round(started) {
+                return;
+            }
+            if self.shared.delivered.load(Ordering::SeqCst) == before {
+                return;
+            }
+        }
+    }
+
+    /// Writes the next marker and flushes until the stream delivers it.
+    /// `false` when that could not be confirmed, which is recorded as loss.
+    fn marker_round(&mut self, started: Instant) -> bool {
         self.marker += 1;
         let marker = self.shared.paths.markers.join(self.marker.to_string());
         if let Err(error) = std::fs::File::create(&marker) {
             self.shared.queue.lose(CoverageLost::ReadFailed { message: format!("writing the drain marker failed: {error}") });
-            return;
+            return false;
         }
-        let started = Instant::now();
-        loop {
+        let confirmed = loop {
             // SAFETY: the stream is started and is released only after the
             // run-loop thread is joined, in `drop`.
             unsafe { fs_events::FSEventStreamFlushSync(self.stream.0) };
             if self.shared.marker_seen.load(Ordering::SeqCst) >= self.marker {
-                break;
+                break true;
             }
             if started.elapsed() >= DRAIN_TIMEOUT {
                 self.shared.queue.lose(CoverageLost::DrainTimedOut { waited: DRAIN_TIMEOUT });
-                break;
+                break false;
             }
             std::thread::sleep(Duration::from_millis(1));
-        }
+        };
         let _ = std::fs::remove_file(&marker);
+        confirmed
     }
 
     /// The parent and (until released) the admin directory must still be the

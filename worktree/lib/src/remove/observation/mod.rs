@@ -11,8 +11,12 @@
 //!
 //! Each platform has a native adapter behind the same contract:
 //!
-//! - [`Observation::drain`] is a barrier: every event caused before the call
-//!   is in the returned [`Drain`];
+//! - [`Observation::drain`] is a barrier on Linux and Windows: every event
+//!   caused before the call is in the returned [`Drain`]. FSEvents promises
+//!   no ordering, so on macOS a drain settles until a quiet marker round and
+//!   an event can still arrive in a later drain (see the `fsevents` adapter);
+//!   no event is dropped without a [`CoverageLost`], and the direct checks
+//!   before each deletion, not the drain, decide what is safe to delete;
 //! - a directory's removal or rename may be reported in place of changes
 //!   below it that were not yet delivered (FSEvents coalesces them), so a
 //!   caller that must see those changes drains before removing or renaming

@@ -45,6 +45,7 @@ fn shared(fixture: &Fixture) -> Shared {
         moved: AtomicBool::new(false),
         admin_released: AtomicBool::new(false),
         marker_seen: AtomicU64::new(0),
+        delivered: AtomicU64::new(0),
     }
 }
 
@@ -247,27 +248,33 @@ fn rename_away(from: &Path, to: &Path) {
     crate::remove::quarantine::rename::rename_no_replace(from, to).unwrap();
 }
 
+/// FSEvents promises no ordering, so a drain can return before a few of a
+/// burst's events (see the adapter's module docs). None may be lost: each
+/// creation is delivered by some drain, or a loss is reported.
 #[test]
-fn a_burst_is_delivered_completely_or_reported_as_lost() {
+fn a_burst_is_delivered_eventually_or_reported_as_lost() {
     const FILES: usize = 2_000;
+    const DRAINS: usize = 20;
     let fixture = new_fixture();
     let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions::default()).unwrap();
     let sub = fixture.checkout.join("sub");
     for index in 0..FILES {
         fs::write(sub.join(format!("f{index}")), b"x").unwrap();
     }
-    let drain = observation.drain();
-    let created: std::collections::HashSet<_> = drain
-        .events
-        .iter()
-        .filter(|event| event.kind == EventKind::Created)
-        .map(|event| event.scope.clone())
-        .collect();
-    let all = (0..FILES).all(|index| created.contains(&tree(&format!("sub/f{index}"))));
-    match &drain.lost {
-        None => assert!(all, "no loss reported, so all {FILES} creations must be there: {} were", created.len()),
-        Some(loss) => eprintln!("the burst was reported as lost ({loss}) after {} creations", created.len()),
+    let mut created = std::collections::HashSet::new();
+    for _ in 0..DRAINS {
+        let drain = observation.drain();
+        created.extend(drain.events.iter().filter(|event| event.kind == EventKind::Created).map(|event| event.scope.clone()));
+        if let Some(loss) = &drain.lost {
+            eprintln!("the burst was reported as lost ({loss}) after {} creations", created.len());
+            return;
+        }
+        if (0..FILES).all(|index| created.contains(&tree(&format!("sub/f{index}")))) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    panic!("no loss reported, yet {DRAINS} drains delivered only {} of {FILES} creations", created.len());
 }
 
 #[test]
