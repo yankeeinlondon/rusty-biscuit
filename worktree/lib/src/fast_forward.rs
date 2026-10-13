@@ -21,7 +21,6 @@
 //! branches between the `symbolic-ref` check and the merge.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::git::{git_from, git_from_bytes_allow_no_match};
 use crate::live_remote::is_valid_branch_name;
@@ -132,7 +131,7 @@ fn read_ref(main: &Path, refname: &str) -> Option<String> {
 /// holders (possible with `--force`) are refused: moving the branch under
 /// one would leave the other's files stale. So is a `prunable` holder.
 fn holder_of(main: &Path, default: &str) -> Result<Option<PathBuf>, FfRefusal> {
-    let listing = git_from(main, main, &["worktree", "list", "--porcelain"]).map_err(|_| FfRefusal::Other)?;
+    let listing = crate::git::worktree_list_from(main, main).map_err(|_| FfRefusal::Other)?;
     let mut holders: Vec<WorktreeEntry> = parse_worktree_list(&listing)
         .into_iter()
         .filter(|entry| entry.branch.as_deref() == Some(default))
@@ -197,7 +196,7 @@ fn merge_ff_only(main: &Path, checkout: &Path, default: &str, old: &str, new: &s
     // A raw command: `git_from` sets no locale, and the refusal is only
     // recognizable from `LC_ALL=C` stderr.
     let output = crate::git::calls::output(
-        Command::new("git")
+        crate::git::command()
             .current_dir(main)
             .arg("-C")
             .arg(checkout)
@@ -247,7 +246,7 @@ mod tests {
     /// Pushes a commit to origin's `branch` and fetches it into the local
     /// tracking ref; returns the pushed SHA.
     fn advance_origin(repo: &TestRepo, branch: &str, file: &str) -> String {
-        let sha = repo.push_commit_to_origin(branch, file);
+        let sha = crate::test_support::commit_to_origin(&repo.origin_path(), branch, file);
         repo.git(&["fetch", "-q", "origin"]);
         sha
     }

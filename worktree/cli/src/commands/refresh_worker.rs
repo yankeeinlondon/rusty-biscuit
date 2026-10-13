@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use sniff::remote::blocking::PrUnavailable;
 use worktree::api_preference;
-use worktree::git::{calls, git_from};
+use worktree::git::calls;
 use worktree::live_remote::GitFailure;
 use worktree::pull_requests::{
     FetchedPrs, OpenPrSource, PrRequestError, REFRESH_DEADLINE, RefreshOutcome, SniffOpenPrSource, origin_digest,
@@ -79,6 +79,7 @@ fn worker_command(exe: &Path, main: &Path, args: &LaunchArgs) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    worktree::git::forget_installation_hint(&mut command);
     sniff::process::configure_detached_child(&mut command);
     command
 }
@@ -362,9 +363,13 @@ impl GitRemote for TimedGit<'_> {
 }
 
 fn worker_source(origin: &str) -> Box<dyn OpenPrSource> {
+    #[cfg(debug_assertions)]
+    let deadline = crate::env::test_refresh_deadline().unwrap_or(REFRESH_DEADLINE);
+    #[cfg(not(debug_assertions))]
+    let deadline = REFRESH_DEADLINE;
     Box::new(SniffOpenPrSource {
         remote_url: origin.to_string(),
-        deadline: REFRESH_DEADLINE,
+        deadline,
     })
 }
 
@@ -372,16 +377,7 @@ fn worker_source(origin: &str) -> Box<dyn OpenPrSource> {
 /// (not a linked worktree, not a subdirectory).
 fn main_checkout(repo: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(repo).ok()?;
-    let out = git_from(
-        &canonical,
-        &canonical,
-        &["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
-    )
-    .ok()?;
-    let mut lines = out.lines().map(|line| std::fs::canonicalize(line.trim()).ok());
-    let (Some(Some(top)), Some(Some(git_dir)), Some(Some(common))) = (lines.next(), lines.next(), lines.next()) else {
-        return None;
-    };
+    let [top, git_dir, common] = worktree::git::checkout_layout(&canonical)?;
     (top == canonical && git_dir == common).then_some(canonical)
 }
 
@@ -405,7 +401,7 @@ mod tests {
     const WAIT: Duration = Duration::from_secs(10);
 
     fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git").current_dir(dir).args(args).status().expect("git");
+        let status = worktree::git::command().current_dir(dir).args(args).status().expect("git");
         assert!(status.success(), "git {args:?}");
     }
 
@@ -1082,7 +1078,7 @@ mod tests {
     }
 
     fn git_stdout(dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git").current_dir(dir).args(args).output().expect("git");
+        let output = worktree::git::command().current_dir(dir).args(args).output().expect("git");
         assert!(output.status.success(), "git {args:?}");
         String::from_utf8(output.stdout).expect("utf-8").trim().to_string()
     }
@@ -1134,13 +1130,13 @@ mod tests {
     }
 
     /// The whole worker, both halves on their threads, starts git only to
-    /// locate the checkout, check the remote head, and fetch: each process
-    /// costs about 47 ms on Windows, inside `wt list`'s 3 s wait. A local
-    /// origin has no PR provider and no branch-head API, so the PR half asks
-    /// nothing and the check falls back to `ls-remote`.
+    /// check the remote head and fetch: each process costs about 47 ms on
+    /// Windows, inside `wt list`'s 3 s wait. The checkout is located
+    /// in-process. A local origin has no PR provider and no branch-head API,
+    /// so the PR half asks nothing and the check falls back to `ls-remote`.
     #[test]
     #[serial_test::serial]
-    fn a_fetching_worker_starts_only_the_checkout_lookup_ls_remote_and_fetch() {
+    fn a_fetching_worker_starts_only_ls_remote_and_fetch() {
         let root = tempfile::tempdir().expect("temp dir");
         let origin = root.path().join("origin.git");
         let main = root.path().join("main");
@@ -1163,6 +1159,6 @@ mod tests {
         let started = scope.finish();
 
         assert_eq!(git_stdout(&main, &["rev-parse", "refs/remotes/origin/main"]), pushed, "the worker fetched");
-        assert_eq!(started, 3, "the checkout's rev-parse, ls-remote, and fetch, nothing else");
+        assert_eq!(started, 2, "ls-remote and fetch, nothing else");
     }
 }

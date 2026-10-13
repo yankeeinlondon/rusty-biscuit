@@ -54,14 +54,37 @@ pub fn test_wait_budget() -> Option<Duration> {
 
 #[cfg(debug_assertions)]
 fn test_wait_budget_from(value: Option<&OsStr>) -> Option<Duration> {
+    milliseconds_from(TEST_WAIT_BUDGET_VAR, value)
+}
+
+/// A debug build's override of the refresh worker's PR request deadline
+/// ([`worktree::pull_requests::REFRESH_DEADLINE`]), in milliseconds.
+///
+/// Binary tests whose stand-in holds the worker's request set it past their
+/// own waits, so a held worker ends when the test releases it (or its
+/// teardown reaps it), never because the production deadline ran out first
+/// on a loaded host. Only debug builds read it.
+pub const TEST_REFRESH_DEADLINE_VAR: &str = "WT_TEST_REFRESH_DEADLINE_MS";
+
+/// The PR request deadline a debug build's test asked for through
+/// [`TEST_REFRESH_DEADLINE_VAR`], if any.
+///
+/// ## Panics
+///
+/// As [`test_wait_budget`].
+#[cfg(debug_assertions)]
+pub fn test_refresh_deadline() -> Option<Duration> {
+    milliseconds_from(TEST_REFRESH_DEADLINE_VAR, std::env::var_os(TEST_REFRESH_DEADLINE_VAR).as_deref())
+}
+
+#[cfg(debug_assertions)]
+fn milliseconds_from(name: &str, value: Option<&OsStr>) -> Option<Duration> {
     let value = value?;
     let millis = value
         .to_str()
         .and_then(|text| text.parse::<u64>().ok())
         .filter(|millis| *millis > 0)
-        .unwrap_or_else(|| {
-            panic!("{TEST_WAIT_BUDGET_VAR} must be a positive whole number of milliseconds, not {value:?}")
-        });
+        .unwrap_or_else(|| panic!("{name} must be a positive whole number of milliseconds, not {value:?}"));
     Some(Duration::from_millis(millis))
 }
 
@@ -108,6 +131,18 @@ mod tests {
         for refused in ["", "0", "-5", "1.5", "3s", " 250"] {
             let parsed = std::panic::catch_unwind(|| test_wait_budget_from(Some(OsStr::new(refused))));
             assert!(parsed.is_err(), "{TEST_WAIT_BUDGET_VAR}={refused:?} was accepted");
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn the_test_refresh_deadline_is_read_only_when_set_to_positive_milliseconds() {
+        let read = |value: Option<&str>| milliseconds_from(TEST_REFRESH_DEADLINE_VAR, value.map(OsStr::new));
+        assert_eq!(read(None), None);
+        assert_eq!(read(Some("60000")), Some(Duration::from_secs(60)));
+        for refused in ["", "0", "-5", "10s"] {
+            let parsed = std::panic::catch_unwind(|| read(Some(refused)));
+            assert!(parsed.is_err(), "{TEST_REFRESH_DEADLINE_VAR}={refused:?} was accepted");
         }
     }
 

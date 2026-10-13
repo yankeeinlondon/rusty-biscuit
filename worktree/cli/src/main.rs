@@ -14,6 +14,8 @@ use clap_complete::CompleteEnv;
 
 fn main() {
     let process_start = std::time::Instant::now();
+    // SAFETY: nothing else runs yet; see the function's docs.
+    unsafe { worktree::git::name_installation_for_gix() };
 
     CompleteEnv::with_factory(Cli::command).complete();
 

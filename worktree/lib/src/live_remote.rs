@@ -172,9 +172,11 @@ pub fn fetch_tracking_ref(base: &Path, branch: &str, deadline: Duration) -> Resu
     run_transport(base, &args, deadline).map(drop)
 }
 
-/// Unix seconds of the last change to `refs/remotes/origin/<branch>`, from
-/// its reflog: `None` when the ref, its reflog, or a parsable entry is
-/// missing. It dates a change to the ref, not a fetch or a check.
+/// Unix seconds from the newest entry of `refs/remotes/origin/<branch>`'s
+/// reflog: `None` when the ref, its reflog, or a parsable entry is missing.
+/// `%ct` there is the committer date of the commit that entry points at,
+/// not the time the entry was written, so a fetch of an old commit dates
+/// as old.
 pub fn tracking_ref_changed_at(base: &Path, branch: &str) -> Option<u64> {
     let refname = format!("refs/remotes/origin/{branch}");
     // An existing ref without a reflog prints nothing and exits 0 (S3).
@@ -229,7 +231,7 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
 /// [`GitFailure::Timeout`], a failed exit is [`classify_git_failure`] of its
 /// stderr, and everything else is [`GitFailure::Other`].
 pub fn run_transport(base: &Path, args: &[&str], deadline: Duration) -> Result<String, TransportError> {
-    let mut command = Command::new("git");
+    let mut command = crate::git::command();
     command
         .current_dir(base)
         .arg("-C")
@@ -491,7 +493,7 @@ pub(crate) mod tests {
         assert_eq!(heads.live_head("origin", "no-such-branch").unwrap(), None);
 
         // A push elsewhere is visible live without a fetch.
-        let pushed = repo.push_commit_to_origin("main", "other.txt");
+        let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "other.txt");
         assert_eq!(heads.live_head("origin", "main").unwrap(), Some(pushed));
     }
 
@@ -725,18 +727,15 @@ pub(crate) mod tests {
     #[test]
     fn a_fetch_updates_only_the_one_tracking_ref() {
         let repo = TestRepo::with_origin();
-        repo.git(&["push", "-q", "origin", "main:refs/heads/feature"]);
+        crate::test_support::fast_import(&repo.origin_path(), "reset refs/heads/feature\nfrom refs/heads/main^0\n\n");
         repo.git(&["fetch", "-q", "origin"]);
         std::fs::write(repo.path().join(".git").join("FETCH_HEAD"), "sentinel\n").unwrap();
         // A configured extra refspec and pruning must not widen the fetch.
-        repo.git(&["config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*"]);
-        repo.git(&["config", "fetch.prune", "true"]);
+        crate::test_support::configure(&repo.path(), &[("remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*"), ("fetch.prune", "true")]);
 
-        let main = repo.push_commit_to_origin("main", "upstream.txt");
-        repo.push_commit_to_origin("feature", "feature.txt");
-        let pusher = repo.path().parent().unwrap().join("pusher");
-        repo.git_in(&pusher, &["tag", "v2"]);
-        repo.git_in(&pusher, &["push", "-q", "origin", "v2"]);
+        let main = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
+        crate::test_support::commit_to_origin(&repo.origin_path(), "feature", "feature.txt");
+        crate::test_support::fast_import(&repo.origin_path(), "reset refs/tags/v2\nfrom refs/heads/feature^0\n\n");
         let (before_refs, before_head) = snapshot(&repo);
 
         fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap();
@@ -756,7 +755,7 @@ pub(crate) mod tests {
     fn a_remote_rewind_is_applied() {
         let repo = TestRepo::with_origin();
         let first = repo.sha("main");
-        repo.push_commit_to_origin("main", "upstream.txt");
+        crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
         fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap();
         assert_ne!(repo.sha("origin/main"), first);
 
