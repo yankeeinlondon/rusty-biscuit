@@ -24,14 +24,14 @@ reviewed: false
 review_iterations: 0
 clarified: false
 implemented: false
-human_review: true
+human_review: false
 depends_on:
     - 2026-10-12-schematic-runtime-envelope
 related:
     - 2026-10-20-type-constraints
 next_spec: 2026-10-13-schematic-pagination
 message_to_agent: |-
-  Draft created from 2026-10-12-schematic-runtime-envelope review 1, Item 1 ruling. The author approved the call shape in the Examples section during that review; treat it as Decided. Everything under "Proposed decisions" is a draft default, not ruled. This spec runs after the runtime-envelope repair (which delivers the one-name client struct, chained client settings, optional `.build()?`, and `.api_key()`) and before pagination, whose entry points build on the call types defined here.
+  Draft created from 2026-10-12-schematic-runtime-envelope review 1, Item 1 ruling. The author approved the call shape in the Examples section during that review; treat it as Decided. The decisions D1–D4 were ruled on 2026-10-12 under the author's delegation, and each states its reason; apply them without pausing. This spec runs after the runtime-envelope repair (which delivers the one-name client struct, chained client settings, optional `.build()?`, and `.api_key()`) and before pagination, whose entry points build on the call types defined here.
 ---
 
 # Schematic endpoint methods
@@ -115,7 +115,7 @@ A caller reading the hover text in an editor needs nothing else.
 - clean and incremental `cargo build` time of `schematic-schema`, with OpenAI's 265 endpoints reported separately;
 - the size of the generated crate.
 
-The numbers are recorded in the implementation log and presented to the author. If the author judges the cost too high, the fallback in PD3 applies.
+The numbers are recorded in the implementation log, and the decision rule in D3 is applied to them. No pause for the author is needed.
 
 **R9. In-repo consumers adopt the methods.** Every consumer of generated REST clients (biscuit-speaks, homelab, sniff, model-citizen if still a consumer) moves from request objects plus `send` to endpoint methods, except where generic code needs R6. This is the evidence that the surface is usable, and it removes the old pattern from the codebase.
 
@@ -136,19 +136,51 @@ It uses the GitHub and OpenAI examples above.
 - Value constraints. Those are `2026-10-20-type-constraints`; this spec only gives them a place to run (R5).
 - Changing endpoint definitions.
 
-## Proposed decisions (unruled)
+## Decisions
 
-**PD1. Shape of the combined error (R3).** *Default:* a runtime `CallError<E>` enum with `Transport(TransportError)` and `Api(ApiError<E>)`, implementing `std::error::Error`, with accessors for the shared request metadata.
+The author delegated these rulings on 2026-10-12, so the pipeline can run without pausing for them. Each records the reason it was chosen.
 
-**PD2. Name collisions.** An optional value could share a name with a shared per-call method (`full`, `build`, `anonymous`, `credential`, `deadline`), and a method name could collide with an existing inherent method on the API struct (`new`, `builder`, client settings). *Default:* the generator detects every collision and appends `_param` to the optional value's setter, or `_endpoint` to the endpoint method, with a generator diagnostic listing each rename. No silent renaming without a diagnostic.
+**D1. Combined error (R3): Decided.** The runtime defines `CallError<E>`:
 
-**PD3. Fallback if compile cost is unacceptable (R8).** Optional values are passed as one options struct argument instead of chained setters: `gh.list_releases(owner, repo, ListReleasesOptions { per_page: Some(10), ..Default::default() })`. The method-per-endpoint discoverability is kept either way.
+- **Shape:** a `#[non_exhaustive]` enum with `Transport(TransportError)` and `Api(ApiError<E>)`.
+- **Traits:** it implements `std::error::Error` and `Display`.
+- **Accessor:** `request_meta()` returns the request metadata both variants share.
 
-**PD4. How the per-endpoint call type shares the per-call methods.** *Default:* the generated call type wraps the runtime's generic call type, and the generator emits the handful of shared per-call methods on each call type as one-line forwards. This keeps them inherent, so no trait import is needed. The forwarding is generated, so it costs generator output size, not hand maintenance.
+Why:
+
+- **The name.** `CallError` names exactly what failed, a call. It doesn't shadow `std::error::Error` or crate-level `Error` aliases in consumers.
+- **`#[non_exhaustive]`.** Later specs can add a variant (for example, pagination's own failures) without breaking callers' `match`.
+
+**D2. Name collisions: Decided.** Collisions are detected by the generator and resolved with a diagnostic, never silently.
+
+| Collision | Resolution | Why |
+|---|---|---|
+| An optional value's setter collides with a shared per-call method (`full`, `build`, `anonymous`, `credential`, `deadline`, plus any method later specs add to call types, such as pagination's `pages`) | The setter gets a `_param` suffix (`.full_param(..)`) | The per-call methods have to be stable across every endpoint. Renaming the rarer, endpoint-specific name keeps `.full()` meaning the same thing everywhere. |
+| An endpoint method collides with an inherent method on the API struct (`new`, `builder`, client settings) | The endpoint method gets an `_endpoint` suffix | Same reason: client methods must be stable across APIs |
+| A name is a Rust keyword | The existing request-field name sanitizer is reused, so setters match today's field names | Keeps one rule instead of two |
+
+The generator's diagnostic lists every rename. A test asserts the rename list for the shipped definitions, so a new collision shows up in review.
+
+**D3. Compile cost (R8, formerly PD3): Decided, as a measured rule.** Chained setters are the default. Measure a clean debug `cargo build -p schematic-schema` on the development Mac, before and after:
+
+1. **The increase is 25% or less:** keep chained setters. Done.
+2. **The increase is more than 25%:** add per-API Cargo features to `schematic-schema`, default all on, so that a consumer can compile only the APIs it uses. Switch each in-repo consumer to the features it needs. Then measure the dependent build of the heaviest single-API consumer (biscuit-speaks with ElevenLabs) against its own baseline.
+   - If that increase is 25% or less, keep chained setters.
+   - Otherwise switch to the options-struct fallback: `gh.list_releases(owner, repo, ListReleasesOptions { per_page: Some(10), ..Default::default() })`. Endpoint methods remain either way.
+
+Why this order:
+
+- Today every consumer compiles all 18 APIs (`schematic-schema` has no feature flags), so most of any increase would be paid for APIs a consumer never calls.
+- Per-API features remove that waste without giving up the approved call style. The options struct is the last resort because it reads worse.
+- Record every measurement and which branch was taken in the implementation log.
+
+**D4. Sharing per-call methods (PD4): Decided as drafted.** The generated per-endpoint call type wraps the runtime's generic call type. The generator emits the shared per-call methods on each call type as one-line forwards.
+
+Why: forwards keep them inherent, so no trait import is needed, which is the point of this feature. They're generated, so they cost output size, not hand maintenance. The output size is counted in D3's measurement.
 
 ## Validation
 
-- `schematic-gen`, L1: generated-output assertions for a fixture API covering required arguments, optional setters, collisions (PD2), and rustdoc content.
+- `schematic-gen`, L1: generated-output assertions for a fixture API covering required arguments, optional setters, collisions (D2), and rustdoc content.
 - `schematic-runtime`, L1:
   - `.await` versus `.full()` results;
   - `.build()` refusing an invalid argument with no network work;
@@ -159,6 +191,4 @@ It uses the GitHub and OpenAI examples above.
 
 ## Human review agenda
 
-1. Compile-cost numbers (R8) and whether PD3's fallback is needed.
-2. The combined error's name and shape (PD1).
-3. The collision-renaming rule (PD2).
+None open. D1–D4 were ruled under the author's delegation. A reviewer should still flag any measurement or collision result that the D2 and D3 rules don't cover.

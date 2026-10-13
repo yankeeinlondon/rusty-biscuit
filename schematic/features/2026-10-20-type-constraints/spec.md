@@ -24,15 +24,16 @@ reviewed: false
 review_iterations: 0
 clarified: false
 implemented: false
-human_review: true
+human_review: false
 depends_on:
     - 2026-10-14-schematic-definition-api
+    - 2026-10-12-schematic-endpoint-methods
 related:
     - 2026-10-12-schematic-runtime-envelope
     - 2026-10-13-schematic-pagination
     - 2026-10-18-schematic-fidelity-polish
 message_to_agent: |-
-  Draft split out of 2026-10-12-schematic-runtime-envelope review 1, Item 2. The author agreed that constraints matter primarily on what is sent and that this is separate work. The proposed decisions (PD) below are drafts; none is ruled. The "endpoint method" call surface referenced here is the one ruled in that review's Item 1 and is itself scheduled as a separate feature.
+  Split out of 2026-10-12-schematic-runtime-envelope review 1, Item 2. The author agreed that constraints matter primarily on what is sent and that this is separate work. Decisions D1–D5 were ruled on 2026-10-12 under the author's delegation, and each states its reason; apply them without pausing. Checks run at the `.build()?` / `.await` points defined by 2026-10-12-schematic-endpoint-methods (its R5).
 ---
 
 # Type constraints
@@ -73,7 +74,7 @@ let releases = gh.list_releases("yankeeinlondon", "rusty-biscuit")
 
 | Applies to | Keywords |
 |---|---|
-| strings | `minLength`, `maxLength`, `pattern`, `format` (see PD4) |
+| strings | `minLength`, `maxLength`, `pattern`, `format` (see D4) |
 | numbers and integers | `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` |
 | arrays | `minItems`, `maxItems`, `uniqueItems` |
 | any | `enum` (already supported), `const` |
@@ -104,22 +105,62 @@ let call = gh.list_releases("yankeeinlondon", "rusty-biscuit")
 
 **R6. Constraints are exported.** The OpenAPI exporter emits every constraint a definition carries. Generated Rust documentation states each constrained field's rules, so they are visible in the editor.
 
-**R7. Replies are not rejected for violating constraints by default.** Constraint checking does not run on replies unless the caller opts in (PD3). Structural checking of replies (types, required fields, enum values) is unchanged.
+**R7. Replies are not checked against value constraints.** No reply-side constraint checking is built, opt-in or otherwise (D3). Structural checking of replies (types, required fields, enum values) is unchanged.
 
-## Proposed decisions (unruled)
+## Decisions
 
-**PD1. How generated code enforces constraints.** *Default:* generate a plain `validate()` method on each request type that checks its constrained fields and returns every violation, not only the first. This adds no dependency beyond `regex` (PD5). Alternatives considered:
+The author delegated these rulings on 2026-10-12, so the pipeline can run without pausing for them. Each records the reason it was chosen.
 
-- *Newtypes* (`PerPage(u8)` validated on construction): enforcement is guaranteed by the type, but every setter would take a wrapper (`.per_page(PerPage::new(10)?)`). That breaks the call ergonomics ruled in Item 1.
-- *The `validator` crate*: derive-based and familiar, but it is an extra dependency, and its attribute dialect differs from JSON Schema in small ways that would need mapping.
+**D1. Enforcement mechanism: Decided.** Each request type with constrained values gets a generated `validate()` method. It checks every constrained field and returns all violations, not just the first.
 
-**PD2. Where the check runs relative to credentials and encoding.** *Default:* before credentials are applied and before the request is encoded, on the request's own typed values, so error messages use field names rather than wire names.
+The two alternatives were considered and rejected:
 
-**PD3. Reply-side checking.** *Default:* off. The author agreed during the runtime-envelope review that constraints matter primarily on what is sent. Open question for the author: when a reply-side check is turned on, should it log the violation and still return the data, or reject the reply? See "Human review agenda."
+- **Newtypes**, e.g. `PerPage(u8)`, validated on construction. Every setter would then take a wrapper (`.per_page(PerPage::new(10)?)`), which breaks the call style approved in `2026-10-12-schematic-endpoint-methods`.
+- **The `validator` crate.** It adds a dependency, and its attribute dialect differs from JSON Schema in small ways that would need mapping. Generated checks can follow JSON Schema's definitions exactly.
 
-**PD4. Which `format` values are checked.** *Default:* `date-time`, `date`, `email`, `uri`, `uuid`, `ipv4`, `ipv6`. Any other `format` is carried and exported but not enforced, and the generator emits an informational diagnostic so the gap is visible.
+**D2. Where the check runs: Decided as drafted.** The check runs on the request's typed values, before credentials are applied and before encoding. It is called from the `.build()?` and `.await` points defined by `2026-10-12-schematic-endpoint-methods` (its R5).
 
-**PD5. `pattern` dialect.** JSON Schema patterns use the ECMA-262 regular-expression dialect. The Rust `regex` crate does not support look-around or back-references. *Default:* compile each pattern with `regex` at generation time. A pattern that does not compile is carried and exported but not enforced, with a generator diagnostic naming the API, schema path, and pattern. Adding `regex` to generated crates is recorded in `docs/dependencies.md`.
+Why:
+
+- **Readable errors.** Messages name fields the way the caller wrote them (`per_page`), not their wire spelling.
+- **No secrets in errors.** A violation can never involve a credential, because credentials haven't been added yet.
+
+**D3. Reply-side checking: Decided. None is built.** Replies are not checked against value constraints, and no opt-in mode is added.
+
+Why:
+
+- **Nobody needs it.** The author's stated priority is what is sent, and no consumer has asked for reply checking.
+- **It would mean two extra decisions with no user to inform them:** a logging-versus-rejecting policy, and a configuration surface.
+- **It can be added later without breaking anything.** That would be a new opt-in, not a change to existing behavior.
+
+**D4. Which `format` values are checked: Decided.**
+
+| `format` | Checked with |
+|---|---|
+| `date-time`, `date` | `chrono` (RFC 3339) |
+| `uri` | `url`, already a runtime dependency |
+| `uuid` | A hand-written structural check: 8-4-4-4-12 hex digits. No `uuid` dependency. |
+| `ipv4`, `ipv6` | The standard library |
+| `email` | A structural check only: one `@`, non-empty local part and domain, domain contains a `.` |
+
+Any other `format` is kept in the definition and exported, but not enforced. The generator emits an informational diagnostic so the gap is visible.
+
+Why:
+
+- Full email validation per RFC 5322 is notoriously unreliable and rejects real addresses. A structural check catches typos without false rejections.
+- Avoiding a `uuid` dependency for a fixed-shape string keeps the dependency list short.
+
+**D5. Where the checks and `pattern` support live: Decided.**
+
+- **The checking helpers** (each `format`, length, range, `multipleOf`, uniqueness, and pattern matching) live in `schematic-runtime`, in a `validate` module. Generated `validate()` methods call them.
+- **Patterns** are compiled with the `regex` crate at generation time to prove they compile, and again once at run time through a lazily initialized static.
+- **Unsupported patterns.** A pattern that `regex` cannot compile (look-around, back-references) is kept in the definition and exported, but not enforced. A generator diagnostic names the API, the schema path, and the pattern.
+- **Dependencies.** `regex` and `chrono` are added to `schematic-runtime` and recorded in `schematic/docs/dependencies.md`.
+
+Why the runtime, not the generated crate:
+
+- The generated crate gains no new dependencies.
+- The runtime's ABI marker covers the helpers. That follows the direction set in review 1, Item 6: move shared helpers into the runtime instead of adding new generated shared code.
 
 ## Validation
 
@@ -129,6 +170,4 @@ let call = gh.list_releases("yankeeinlondon", "rusty-biscuit")
 
 ## Human review agenda
 
-1. **Reply-side behavior when opted in (PD3):** log and return the data, or reject the reply?
-2. **Enforcement mechanism (PD1):** generated `validate()` (default), newtypes, or the `validator` crate.
-3. **Scheduling relative to the endpoint-method feature ruled in review 1, Item 1.** Both touch the generated request types. Running this one after it avoids reworking the setters twice.
+None open. D1–D5 were ruled under the author's delegation. A reviewer should still flag any constraint or `format` found in the shipped definitions that these rules do not cover.
