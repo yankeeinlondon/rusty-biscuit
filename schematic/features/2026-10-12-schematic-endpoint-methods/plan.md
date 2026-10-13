@@ -9,7 +9,44 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - schematic/features/2026-10-12-schematic-endpoint-methods/endpoint-inventory.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/api_client.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/tests/l1/call.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/client_settings.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/runtime/tests/l1/whole_send_elapsed.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.rs
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - schematic-runtime
+    - schematic-gen
+    - schematic-schema
 ---
 
 # Schematic endpoint methods implementation plan
@@ -108,14 +145,14 @@ Everything here is in `schematic-runtime`. It must not depend on `schematic-defi
 
 ### Wave 2: Types (parallel)
 
-- [ ] **Task 2.1: CallError.**
+- [x] **Task 2.1: CallError.**
     - Add `CallError<E>` in the runtime `error` module (or a new `call_error` module re-exported from `lib.rs`).
     - Shape per D1 and ruling 1: `#[non_exhaustive]`, `Transport(TransportError)`, `Api { error: ApiError<E>, meta: ResponseMeta }`.
     - Implement `Display` and `std::error::Error` with `source()` returning the inner error.
     - Implement `request_meta()`, and add convenience accessors (`api()`, `transport()`) only if a consumer in Phase 6 needs them.
     - `Display` must be credential-free, following the crate's redaction rule.
     - Prerequisite: Task 1.2's finding on `TransportError` metadata.
-- [ ] **Task 2.2: Call and FullCall.**
+- [x] **Task 2.2: Call and FullCall.**
     - Add `Call<'a, A, R>` and `FullCall<'a, A, R>` in a new `call.rs` module, holding `&'a Client<A>`, the request, and `CallOptions`.
     - Add the shared methods on both: `anonymous()`, `credential(..)`, `deadline(..)`, and `build()`. `Call` also has `full()`.
     - Implement `IntoFuture` for each, boxed per ruling 4.
@@ -125,23 +162,23 @@ Everything here is in `schematic-runtime`. It must not depend on `schematic-defi
 
 ### Wave 3: Wire in (sequential after Wave 2)
 
-- [ ] **Task 2.3: Change `Client::send`.**
+- [x] **Task 2.3: Change `Client::send`.**
     - Per ruling 2, `send(request)` returns `Call`. Keep the boxed state machine as the future's body.
     - Update `api_client!` so the generated API struct's `send` forwards the same way.
     - Update all runtime-internal callers and doc examples.
-- [ ] **Task 2.4: ABI bump.** Raise `ABI` to `3` in `runtime/src/lib.rs` and the matching constant in `gen/src/lib.rs`, because generated code can observe the change. Update both constants' doc comments if they list changes.
-- [ ] **Task 2.5: Migrate runtime tests.** Move `runtime/tests/l1` and doc tests from `send(request, &CallOptions)` to the new shape. Keep a test per prior behavior: credentials precedence, anonymous, deadline, and error evidence.
+- [x] **Task 2.4: ABI bump.** Raise `ABI` to `3` in `runtime/src/lib.rs` and the matching constant in `gen/src/lib.rs`, because generated code can observe the change. Update both constants' doc comments if they list changes.
+- [x] **Task 2.5: Migrate runtime tests.** Move `runtime/tests/l1` and doc tests from `send(request, &CallOptions)` to the new shape. Keep a test per prior behavior: credentials precedence, anonymous, deadline, and error evidence.
 
 ### Wave 4: Runtime tests (parallel, after Wave 3)
 
-- [ ] **Task 2.6: Behavior tests (L1).** Use the mock-server pattern the existing runtime tests use.
+- [x] **Task 2.6: Behavior tests (L1).** Use the mock-server pattern the existing runtime tests use.
     - `.await` returns the data on 2xx. On a declared error, a malformed body, and an interrupted body, it returns `CallError::Api` with `request_meta()` populated.
     - On a connection failure it returns `CallError::Transport`.
     - `.full()` returns the envelope with status, headers, and request id, including for error replies.
     - `.build()` refuses an invalid argument with no request reaching the mock server (assert zero hits).
     - A built call sent twice produces two requests and two results.
     - `anonymous`, `credential`, and `deadline` behave as they did through `CallOptions`: last-set credential mode wins, and an expired deadline yields a transport error.
-- [ ] **Task 2.7: `CallError` tests (L1).** `Display` has no secret values, `source()` chains, `request_meta()` works on both variants, and a downstream `match` with a wildcard arm compiles (non-exhaustive).
+- [x] **Task 2.7: `CallError` tests (L1).** `Display` has no secret values, `source()` chains, `request_meta()` works on both variants, and a downstream `match` with a wildcard arm compiles (non-exhaustive).
 
 ### Checkpoint 2
 
@@ -154,22 +191,22 @@ All of it is in `schematic/gen/src/codegen` and `output/assemble`.
 
 ### Wave 5: Components (parallel)
 
-- [ ] **Task 3.1: Name resolver.**
+- [x] **Task 3.1: Name resolver.**
     - New module under `codegen/api_struct` (or `codegen/endpoint_methods`).
     - Input: an `Endpoint` set for one API. Output: for each endpoint, the method name, the call-type name, per-setter names, and a list of renames with reason.
     - Rules per D2 and rulings 6 and 7: `_param` for a setter colliding with a shared method, `_endpoint` for a method colliding with an API-struct method, the existing request-field sanitizer for keywords, and a hard error for two endpoints that share a snake-case name.
     - The reserved-name const lives here, with the drift test from ruling 6.
-- [ ] **Task 3.2: Diagnostics.**
+- [x] **Task 3.2: Diagnostics.**
     - Emit every rename through the generator's existing diagnostic format (`gen/src/diagnostics.rs`), one line per rename, naming the API, endpoint id, old name, new name, and reason.
     - Make the rename list retrievable programmatically so the Phase 4 test can pin it.
-- [ ] **Task 3.3: Rustdoc builder.**
+- [x] **Task 3.3: Rustdoc builder.**
     - Build the method docs from the endpoint definition (R7): description, `METHOD /path`, a required-arguments list with types, and the optional setters the call type exposes.
     - Follow the repo's rustdoc conventions: no H1, `##` sections, and no quoted format strings or glyph narration.
     - Handle a missing description without emitting an empty line.
 
 ### Wave 6: Emission (after Wave 5)
 
-- [ ] **Task 3.4: Call type and method emission.**
+- [x] **Task 3.4: Call type and method emission.**
     - For each REST endpoint, emit `{Endpoint}Call<'a>`: a newtype over the runtime `Call<'a, Api, {Endpoint}Request>`.
     - Emit one setter per optional request value, delegating to the request's `with_*` method (ruling 8), using names from Task 3.1.
     - Emit one-line inherent forwards for `anonymous`, `credential`, `deadline`, `full`, and `build` (D4), and an `IntoFuture` impl that delegates.
@@ -177,25 +214,25 @@ All of it is in `schematic/gen/src/codegen` and `output/assemble`.
     - Place call types in each endpoint's existing module, so the API struct's `impl` block only gains the methods. Re-export call types from the API module and the prelude following the request types' pattern.
     - Do not emit anything for WebSocket APIs.
     - Keep request types and `{Endpoint}Request::new` public (R6).
-- [ ] **Task 3.5: Shared helpers decision.**
+- [x] **Task 3.5: Shared helpers decision.**
     - Check whether Task 3.4 touches the generated `shared.rs` helpers.
     - If it does, move `encode_cookie_value`, `combine_cookie_headers`, and `FormFile` into the runtime per the spec's note, keep re-exports for generated code, and update the partial-generation byte comparison for `shared.rs` accordingly.
     - If it does not, change nothing and log "not touched".
-- [ ] **Task 3.6: Assembly and docs strings.** Wire the new emission into `output/assemble` (including `lib_rs.rs` and `prelude.rs`) and update `module_docs.rs` text that describes the call shape.
+- [x] **Task 3.6: Assembly and docs strings.** Wire the new emission into `output/assemble` (including `lib_rs.rs` and `prelude.rs`) and update `module_docs.rs` text that describes the call shape.
 
 ### Wave 7: Generator tests (parallel, after Wave 6)
 
-- [ ] **Task 3.7: Output assertions (L1).** Against a fixture API with:
+- [x] **Task 3.7: Output assertions (L1).** Against a fixture API with:
     - required arguments in order and optional setters;
     - a setter named `full`, a method named `new`, and a keyword-named field;
     - rustdoc content (all four R7 items);
     - a doc string with Markdown characters.
     - Assert generated tokens and the rename list. Extend `codegen/api_struct/tests.rs` and `request_structs/tests.rs` in the existing style.
-- [ ] **Task 3.8: Compile test.**
+- [x] **Task 3.8: Compile test.**
     - Extend `gen/tests/l1/fresh_output_compile.rs`, or add a `trybuild` case, so a source file importing only the fixture API struct calls an endpoint method, chains a setter, and awaits.
     - This proves no trait import is needed.
     - Include a negative case: awaiting after `.full()` yields a `Response`, and chaining a setter after `.full()` fails to compile.
-- [ ] **Task 3.9: Partial generation.** Confirm `partial_generation.rs` tests still pass with ABI 3, and add a case showing modules generated against ABI 2 are refused.
+- [x] **Task 3.9: Partial generation.** Confirm `partial_generation.rs` tests still pass with ABI 3, and add a case showing modules generated against ABI 2 are refused.
 
 ### Checkpoint 3
 

@@ -8,7 +8,44 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - schematic/features/2026-10-12-schematic-endpoint-methods/endpoint-inventory.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/api_client.rs
+    - schematic/runtime/src/deadline.rs
+    - schematic/runtime/src/options.rs
+    - schematic/runtime/tests/l1/call.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/support.rs
+    - schematic/runtime/tests/l1/builder.rs
+    - schematic/runtime/tests/l1/client_settings.rs
+    - schematic/runtime/tests/l1/credential_resolution.rs
+    - schematic/runtime/tests/l1/hooks.rs
+    - schematic/runtime/tests/l1/raw.rs
+    - schematic/runtime/tests/l1/redirects.rs
+    - schematic/runtime/tests/l1/send.rs
+    - schematic/runtime/tests/l1/timing.rs
+    - schematic/runtime/tests/l1/whole_send_elapsed.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.rs
+    - schematic/runtime/tests/fixtures/compile_fail/call_error_match_needs_a_wildcard.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.rs
+    - schematic/runtime/tests/fixtures/compile_fail/request_change_after_full.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - schematic-runtime
+    - schematic-gen
+    - schematic-schema
 ---
 
 # Implementation Log for 2026-10-12-schematic-endpoint-methods (8 phases)
@@ -184,3 +221,104 @@ Phase 1 changes no behavior, so it adds no tests. The inventory script and the p
 - Rulings are recorded (1–12 adopted, 13–14 added), the baseline numbers exist, and the expected rename list is written down (empty).
 - No source file changed: only this log, `plan.md`, the spec's frontmatter, and the new `endpoint-inventory.md`.
 - Status: Phase 1 implementation complete, ready for review.
+
+## Phase 2
+
+Phase 2 adds the runtime call types: `Call`, `FullCall`, `CallError`, and `CallFuture` in a new `schematic/runtime/src/call.rs`. `Client::send(request)` now returns a `Call`, `api_client!` forwards it, and the ABI is now 3. Skills loaded: `rust-testing` conventions (L1 placement through `tests/l1/main.rs`, no tier markers in names) and `os` from Phase 1. No `#[cfg]` or path code changed.
+
+### What was built
+
+- **`Call<'a, A, R>`** holds `&'a Client<A>`, the request, and a `CallOptions`. It has these methods:
+    - `anonymous()`, `credential(..)`, and `deadline(..)`: the last credential mode set wins.
+    - `map_request(f)`: replaces the request and keeps the settings. Phase 3's generated setters use it.
+    - `full()` returns a `FullCall`.
+    - `build()` (needs `R: Clone`) encodes a clone of the request with `into_parts()` and discards the result (ruling 5). It returns `Result<Self, InvalidArgument>`.
+
+  `IntoFuture` boxes `send_unboxed` into `CallFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>`. It maps `Outcome::Failure` to `CallError::Api` and keeps the metadata, and maps a `TransportError` to `CallError::Transport`. The `dyn … + Send` coercion compiles for every `R`, so it is the compile-time `Send` assertion Phase 1 asked for.
+- **`FullCall<'a, A, R>`** has the same per-call methods and `build()`, and awaits to `Result<Response<..>, TransportError>`. It has no `map_request` and no `full`, so a setter after `.full()` does not compile (ruling 3).
+- `Clone` and `Debug` are written by hand with method- and impl-level bounds: `Clone` needs only `R: Clone` and `Debug` only `R: Debug`, and `IntoFuture` needs neither. Both types are `#[must_use]`.
+- **`CallError<E>`** is `#[non_exhaustive]` with `Transport(TransportError)` and `Api { error: ApiError<E>, meta: Box<ResponseMeta> }`.
+    - `request_meta()` serves both variants.
+    - It implements `From<TransportError>`, `Display`, and `Error` (for `E: Debug + 'static`), and derives `Clone` and `PartialEq`.
+    - No `api()` or `transport()` accessors were added (Task 2.1 defers them to Phase 6, and only if a consumer needs them).
+- **`Client::send(request) -> Call<'_, A, R>`** (ruling 2). `send_unboxed` is now `pub(crate)` and is the body of both futures. `send_raw` and `check_link` are unchanged, and `send_raw` still takes `&CallOptions`.
+- **`api_client!`** forwards `send(request) -> $crate::Call<'_, $tag, R>`.
+- **ABI**: `schematic_runtime::ABI` and `schematic_gen::RUNTIME_ABI` are both 3. Neither doc comment lists changes, so the comments are unchanged.
+
+### Departures from the plan (recorded here, spec untouched)
+
+1. **`CallError::Api` stores `meta: Box<ResponseMeta>`, not `meta: ResponseMeta`.** `ResponseMeta` holds two `HeaderMap`s and a `RequestMeta`. Unboxed, every `Result<T, CallError<E>>` would be large, and consumers' functions returning it would trip clippy's `result_large_err`. This follows `TransportError`, which already boxes its `request`. Field access (`meta.status`) reads the same through `Box`.
+2. **`Display` does not repeat the inner error; `source()` returns it.** The Rust error-handling guideline is to either show the source's text or return it as `source`, never both. Otherwise `anyhow`'s `{:#}` prints the same text twice. The two forms:
+    - `Transport` prints `"{endpoint_id} call failed before a response arrived"`.
+    - `Api` prints `"{endpoint_id} call failed: {ResponseMeta}"`, for example `call call failed: 401 Unauthorized from GET http://…/item`.
+
+   Both are credential-free, because they are built only from the endpoint id and the redacted `ResponseMeta` `Display`. **Author:** if the preference is a transparent `Display` (the inner text) with `source()` forwarding the inner error's own source, it is a two-line change.
+3. **`Call::map_request` is public** (plan: unspecified). Phase 3's generated setters need some public way to change a call's request from another crate. One documented method is simpler than a `#[doc(hidden)]` back door, and it is also usable from generic (R6) code.
+4. **`schematic/schema/src/lib.rs` was regenerated in this phase**, not Phase 4. `schematic-gen`'s `slow_real_apis_compile_offline` byte-compares fresh output with the committed tree, so `just test` failed once the generator emitted ABI 3. I ran the real generator: `cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman`, which is `just generate` without its desktop notification. The only change is the ABI marker and its assertion message in `lib.rs`; OpenAPI and Postman outputs were byte-identical. The schema library therefore builds against the new runtime. Phase 4 still regenerates for the endpoint methods.
+5. **`schematic-gen`'s tests were migrated in this phase.** They call `send(request, &CallOptions)` inside the generated test programs in `fresh_output_compile.rs`, and `e2e_generation.rs` pinned the literal `ABI: u32 = 2`. Both are part of the area's `just test`. Generator *source* is unchanged apart from `RUNTIME_ABI` and the `//!` example in `gen/src/lib.rs`. The generated docs strings in `module_docs.rs` and `assemble/{lib_rs,prelude}.rs` still show the old shape; that is Task 3.6.
+
+### Known breakage carried into later phases
+
+- **Consumers do not compile until Phase 6.** `cargo check` shows:
+    - `biscuit-speaks` (lib): 4 errors.
+    - `homelab` (lib): 4 errors.
+    - `sniff` with `--all-features`: 78 errors. The default features compile, because the remote clients are feature-gated.
+
+  Every error is a `send(request, &CallOptions)` call or a use of its `Response` result. Removing the options parameter (ruling 2) makes this unavoidable. The plan migrates them to endpoint methods in Phase 6. Until then a workspace-wide build or a push hook that compiles these packages fails.
+- **`schematic-schema`'s own tests** (`github_client`, `huggingface_client`, `artificial_analysis_client`, `non_json_endpoints`) do not compile, for the same reason. Task 4.2 migrates them.
+- **`gen/tests/l1/http_client.rs`** asserts that generated API code contains no `.send(`. Phase 3's endpoint methods will call `self.0.send(..)`, so Phase 3 must narrow that assertion.
+
+### Task 2.5: Migrating the runtime tests
+
+The 169 call sites were rewritten mechanically: `send(X, &CallOptions::new()<chain>)` became `send(X)<chain>.full()`, and `&CallOptions::anonymous()` became `.anonymous()`. This keeps each existing test's envelope assertions unchanged. The scripts are outside the repository (`/tmp/p2-scripts`).
+
+Hand edits:
+
+- `credential_resolution.rs`: the `send` helper now returns a `FullCall`, so each caller chains its own settings. The precedence loop holds an `Option<Credential>` instead of a `CallOptions`.
+- `send_futures_stay_small_enough_to_join_many` now measures `Call::into_future()` and `FullCall::into_future()`. After the mechanical rewrite it would have measured the `FullCall` struct, not a future.
+- `support::Call` gained a hand-written `Clone` and `Debug`, because derives would bound the codec parameters.
+
+The tests for credentials precedence, anonymous mode, deadlines, and error evidence keep their own files and assertions.
+
+The two `request_of_another_api*` compile-fail fixtures use `send(GiteaListRepos).await`. Their regenerated `.stderr` still leads with the intended `E0271` "`Api == Github`" mismatch; the compiler now also reports that the mismatched `Call` is not awaitable.
+
+### Requirement-to-test mapping
+
+The boundary is the runtime crate's public API, called from a separate test crate (`schematic-runtime::l1`) against wiremock or a raw-socket mock. That is fidelity F2, the same as the existing runtime suites, at tier L1. The compile-time contracts use trybuild.
+
+| Behavior | Test (`schematic/runtime/tests/…`) |
+| --- | --- |
+| `.await` returns the data on 2xx | `l1/call.rs::awaiting_a_call_returns_the_data_of_a_2xx_reply` |
+| Declared error and malformed 2xx become `CallError::Api` with status, request id, body, and `request_meta()` | `call::a_declared_error_or_an_undecodable_body_is_an_api_error_with_its_response_kept` |
+| Interrupted body becomes `CallError::Api` (`BodyInterrupted`) with the partial bytes | `call::a_body_cut_off_after_the_head_is_an_api_error_with_the_bytes_that_arrived` |
+| Connection failure becomes `CallError::Transport` (`Connect`) with `request_meta()` | `call::a_connection_failure_is_a_transport_error_with_the_request_kept` |
+| `.full()` returns the envelope (status, headers, request id) for success and error replies, and `TransportError` when no head arrives | `call::full_returns_the_envelope_for_a_success_and_for_an_error_reply` |
+| `.build()` refuses an invalid argument on `Call` and `FullCall` with **zero** requests; the same check runs at `.await`; a valid `build()` sends nothing | `call::build_refuses_an_invalid_argument_before_any_request_is_sent` |
+| A built call (and a built `FullCall`) awaited twice makes two requests with two results, and a clone keeps per-call settings | `call::a_built_call_sent_twice_makes_two_requests_and_two_results` |
+| `anonymous` and `credential` on `Call` and `FullCall`, with the last mode winning, checked against the header actually sent and `meta.request.auth` | `call::per_call_settings_behave_on_call_and_full_alike_and_the_last_credential_mode_wins` |
+| An expired deadline is a transport error and sends nothing; a live deadline counts completed sends through both awaits | `call::an_expired_deadline_is_a_transport_error_on_call_and_full_and_nothing_is_sent` |
+| `map_request` replaces the request and keeps the settings | `call::map_request_replaces_the_request_and_keeps_the_settings` |
+| `Call` and `FullCall` are `Send` before the await | `call::a_call_can_move_to_another_thread_before_it_is_awaited` |
+| `Display` is credential-free for both variants, `source()` downcasts to the inner `ApiError` or `TransportError`, and `request_meta()` is redacted | `call::call_error_display_names_the_call_without_secrets_and_its_source_is_the_inner_error` |
+| A downstream wildcard match compiles; `From<TransportError>` | `call::call_error_is_matched_with_a_wildcard_arm_and_converts_from_a_transport_error` |
+| A downstream match **without** a wildcard fails (`#[non_exhaustive]`) | `fixtures/compile_fail/call_error_match_needs_a_wildcard.rs` (E0004) |
+| After `.full()` the request cannot change and `.full()` cannot repeat; per-call settings still chain | `fixtures/compile_fail/request_change_after_full.rs` (E0599 ×2) |
+| A request of another API is refused through `Client::send` and `api_client!`'s `send` | existing `request_of_another_api*.rs`, migrated |
+| The boxed futures stay one pointer | `l1/send.rs::send_futures_stay_small_enough_to_join_many` (now covers `Call` and `FullCall`) |
+| Generated `lib.rs` records ABI 3 | `schematic-gen::l1 e2e_generation::generated_files_exist_and_have_expected_structure`, and `runtime_abi_tests` (gen and runtime constants agree) |
+| Committed schema tree equals fresh generator output | `schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline` |
+
+The Input Robustness Matrix does not apply: no parser or configuration reader changed.
+
+### Gates run
+
+- `just test` in `schematic/`: 1895 passed and 12 skipped (tier-skipped, as in Phase 1). `test-fresh-output` passed 6 of 6, and `test-compile-fail` passed 1 of 1, covering all 9 fixtures.
+- `just lint` in `schematic/`: exit 0.
+- `cargo build --manifest-path schematic/schema/Cargo.toml`: builds.
+- Not run, and expected to fail until later phases: the schema crate's tests and the consumer packages (see "Known breakage").
+- Cross-OS: not run. The change adds no `#[cfg]`, path, or process code. The new tests use the same loopback mocks and `closed_port_url()` as the existing runtime suites, which already run on every CI OS. A refused loopback connect on Windows takes longer than on macOS, but stays well inside the 5 s budget per test, as in the existing suites.
+
+### Checkpoint 2
+
+- `just test` and `just lint` pass in the `schematic` area. That covers more than the plan's checkpoint asked: the generator tests were migrated rather than left failing.
+- Status: Phase 2 implementation complete, ready for review.
