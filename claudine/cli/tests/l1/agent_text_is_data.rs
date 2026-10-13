@@ -156,7 +156,7 @@ fn sequence_outputs_with_template_syntax_stay_raw() {
     fs::write(fixture.cwd().join("producer.md"), "Produce.\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ doc.entry }}]\nLast: [{{ last(outputs) }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nLast: [{{ last(outputs) }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -185,7 +185,7 @@ fn sequence_parallel_group_nested_output_stays_raw() {
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' '{{ ctx.repo }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ doc.entry }}]\nNested: [{{ last(outputs)[0] }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(outputs)[0] }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -814,7 +814,7 @@ fn task_params_and_group_variables_from_outputs_stay_raw() {
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' 'see {{ title }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader-title\n---\nGroup: [{{ group.prev }}]\nParam: [{{ doc.entry }}]\n",
+        "---\ntitle: reader-title\n---\nGroup: [{{ group.prev }}]\nParam: [{{ fm.entry }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");

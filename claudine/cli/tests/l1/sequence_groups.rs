@@ -270,7 +270,7 @@ fn group_variables_reach_members_and_do_not_leak_to_the_next_step() {
     fake_goose(&fixture);
     fs::write(
         fixture.cwd().join("member.md"),
-        "---\nstart:\n  info: 'label is {{ doc.label }}'\n---\n\nMember body.\n",
+        "---\nstart:\n  info: 'label is {{ fm.label }}'\n---\n\nMember body.\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -328,7 +328,7 @@ fn outputs_chain_through_a_serial_group() {
     fake_goose(&fixture);
     fs::write(
         fixture.cwd().join("member.md"),
-        "---\nstart:\n  info: 'prior is {{ doc.prior }}'\n---\n\nMember body.\n",
+        "---\nstart:\n  info: 'prior is {{ fm.prior }}'\n---\n\nMember body.\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -527,7 +527,7 @@ fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
     fake_goose(&fixture);
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\nstart:\n  info: 'entry is {{ doc.entry }}'\n---\n\nReader body.\n",
+        "---\nstart:\n  info: 'entry is {{ fm.entry }}'\n---\n\nReader body.\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");

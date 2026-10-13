@@ -16,8 +16,8 @@
 //!   in `payload`, proving the whole-value typed-resolution escape hatch reaches
 //!   the side-effect engine.
 //! - **key/value literal default** — a key/value `{ action: message, message:
-//!   "doc.title" }` sends the **literal** string `doc.title`, while the
-//!   `{{ doc.title }}` equivalent resolves the value. This is the breaking
+//!   "fm.title" }` sends the **literal** string `fm.title`, while the
+//!   `{{ fm.title }}` equivalent resolves the value. This is the breaking
 //!   change the spec calls out: key/value string parameters are literal by
 //!   default.
 //!
@@ -169,7 +169,7 @@ fn state_contents(staged: &Staged) -> String {
 /// stack mixing a positional multi-arg `set_frontmatter`, a positional
 /// communication action (`stderr`), and a key/value `shell` action. Proves the
 /// mixed-form stack parses, the gate evaluates, event-time interpolation
-/// resolves (`{{ doc.phase }}`/`{{ doc.title }}`), the positional side-effect
+/// resolves (`{{ fm.phase }}`/`{{ fm.title }}`), the positional side-effect
 /// writes the interpolated frontmatter to `state.md`, and the key/value shell
 /// action runs (`--yolo` auto-approves it at pre-flight).
 #[test]
@@ -187,8 +187,8 @@ success:
   stack:
     - when: "file_exists('state.md')"
       action:
-        - set_frontmatter: ["state.md", "status", "production ready in {{ doc.phase }}"]
-        - stderr: "SUCCESS_COMM {{ doc.title }}"
+        - set_frontmatter: ["state.md", "status", "production ready in {{ fm.phase }}"]
+        - stderr: "SUCCESS_COMM {{ fm.title }}"
         - action: shell
           command: "echo shell-ran >> events.log"
     - action: {append_line: ["events.log", "success"]}
@@ -213,7 +213,7 @@ Body
     );
 
     // The positional multi-arg `set_frontmatter` wrote the interpolated value to
-    // the target document's frontmatter (event-time `{{ doc.phase }}` resolved).
+    // the target document's frontmatter (event-time `{{ fm.phase }}` resolved).
     let state = state_contents(&staged);
     assert!(
         state.contains("status: production ready in phase-6"),
@@ -221,17 +221,17 @@ Body
          state.md; state.md was:\n{state}\npane:\n{pane}"
     );
 
-    // The positional communication action fired with `{{ doc.title }}` resolved.
+    // The positional communication action fired with `{{ fm.title }}` resolved.
     assert!(
         pane.contains("SUCCESS_COMM ACTFORMS_TITLE"),
-        "positional stderr communication must fire with doc.title resolved; \
+        "positional stderr communication must fire with fm.title resolved; \
          pane:\n{pane}"
     );
 }
 
 /// Typed-argument write-through, end-to-end. A whole-value `{{ true }}` argument
 /// writes a YAML boolean (not the string `"true"`), and a whole-value
-/// `{{ doc.payload }}` argument passes the object stored in frontmatter to
+/// `{{ fm.payload }}` argument passes the object stored in frontmatter to
 /// `merge_frontmatter`. Proves the spec's typed escape hatch reaches the
 /// side-effect engine through the positional array form.
 #[test]
@@ -246,7 +246,7 @@ payload:
 success:
   stack:
     - action: {set_frontmatter: ["state.md", "ready", "{{ true }}"]}
-    - action: {merge_frontmatter: ["state.md", "{{ doc.payload }}"]}
+    - action: {merge_frontmatter: ["state.md", "{{ fm.payload }}"]}
 finalize:
   stack:
     - action: {append_line: ["events.log", "finalize"]}
@@ -268,7 +268,7 @@ Body
         !state.contains("ready: \"true\"") && !state.contains("ready: 'true'"),
         "the typed boolean must not be stringified; state.md was:\n{state}\npane:\n{pane}"
     );
-    // `{{ doc.payload }}` passes the object through to `merge_frontmatter`.
+    // `{{ fm.payload }}` passes the object through to `merge_frontmatter`.
     assert!(
         state.contains("owner: ken"),
         "merge_frontmatter must merge the object stored in `payload`; \
@@ -277,8 +277,8 @@ Body
 }
 
 /// Key/value literal default, end-to-end (the spec's breaking change). A
-/// key/value communication action whose parameter is `doc.title` sends the
-/// **literal** string `doc.title`, while the `{{ doc.title }}` equivalent
+/// key/value communication action whose parameter is `fm.title` sends the
+/// **literal** string `fm.title`, while the `{{ fm.title }}` equivalent
 /// resolves the value. The `stderr` channel is used (its semantics are
 /// identical to `message` for this rule) because it writes plain prose to the
 /// pane deterministically, where `message` routes through statusful logging
@@ -294,10 +294,10 @@ success:
   stack:
     - action:
         action: stderr
-        message: "LITERAL=doc.title"
+        message: "LITERAL=fm.title"
     - action:
         action: stderr
-        message: "INTERP={{ doc.title }}"
+        message: "INTERP={{ fm.title }}"
 finalize:
   stack:
     - action: {append_line: ["events.log", "finalize"]}
@@ -307,11 +307,11 @@ Body
     let staged = stage(doc);
     let pane = run_compose_in_tmux(&staged, "finalize", "");
 
-    // The literal-default key/value parameter is sent verbatim: `doc.title` is
+    // The literal-default key/value parameter is sent verbatim: `fm.title` is
     // the literal string, NOT the resolved title.
     assert!(
-        pane.contains("LITERAL=doc.title"),
-        "a key/value string parameter must be literal by default — `doc.title` \
+        pane.contains("LITERAL=fm.title"),
+        "a key/value string parameter must be literal by default — `fm.title` \
          must reach stderr unresolved; pane:\n{pane}"
     );
     assert!(
@@ -319,9 +319,9 @@ Body
         "the literal-default parameter must NOT resolve as an expression; \
          pane:\n{pane}"
     );
-    // The `{{ doc.title }}` equivalent resolves the context value.
+    // The `{{ fm.title }}` equivalent resolves the context value.
     assert!(
         pane.contains("INTERP=LITDEFAULT_TITLE"),
-        "a `{{{{ doc.title }}}}` span must resolve the document title; pane:\n{pane}"
+        "a `{{{{ fm.title }}}}` span must resolve the document title; pane:\n{pane}"
     );
 }

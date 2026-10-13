@@ -1263,6 +1263,50 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
     }
 }
 
+/// The frozen `prompts/clarify.md` (intentionally not kept in step with the
+/// live prompt) declares an ordinary frontmatter property named `doc` and
+/// reads it as bare `{{doc}}`. `doc` is not a reserved root, so the composed
+/// prompt names the supplied specification wherever the body reads it.
+#[test]
+fn compose_frozen_clarify_reads_its_ordinary_doc_property() {
+    let fixture = CliProcessFixture::named("compose-frozen-clarify");
+    let root = fixture.cwd().to_path_buf();
+    common::prompt_staging::stage_frozen_prompts(&root.join("prompts"), &["clarify.md"]);
+    common::write(&root.join("specs/demo-spec.md"), "# Demo\n");
+    fixture.initialize_repository();
+    // `--dry-run` never reaches the provider, but discovery still has to find
+    // one; the stub fails loudly if the dry run ever does launch it.
+    common::write_dry_run_provider_stub(fixture.bin_dir(), "claude");
+    let assert = fixture
+        .command()
+        .env("CLAUDE_CODE_EXIT", "0")
+        .args(["compose", "--claude", "--dry-run", "prompts/clarify.md", "spec=specs/demo-spec.md"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    // The eager `spec` file normalizes to an absolute path, so each line is
+    // matched by its fixed text and the file name it ends with.
+    let line_with = |prefix: &str| {
+        stdout
+            .lines()
+            .map(str::trim_start)
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no line starting {prefix:?}:\n{stdout}"))
+    };
+    assert!(
+        line_with("The functional specification document: ").ends_with("demo-spec.md."),
+        "the body must read the ordinary `doc` property:\n{stdout}"
+    );
+    assert!(
+        line_with("- update the document's frontmatter (").ends_with("demo-spec.md):"),
+        "every `{{{{doc}}}}` span must read the same property:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("{{doc") && !stdout.contains("technical design specification"),
+        "no expression may leak and the `design` block must stay closed:\n{stdout}"
+    );
+}
+
 // ============================================================================
 // Schema-aware shell completion
 // ============================================================================

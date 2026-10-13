@@ -1,18 +1,12 @@
 //! Level 2 real-Claudine coverage for **AC28** of
-//! `darkmatter/features/2026-09-09-more-context`: the lazy `current.*` and
-//! `current_env.*` roots in Claudine lifecycle handlers, under a real
-//! `claudine compose`.
+//! `darkmatter/features/2026-09-09-more-context`: the lazy `current.*` root in
+//! Claudine lifecycle handlers, under a real `claudine compose`.
 //!
-//! Five contracts, each a separate test:
+//! Four contracts, each a separate test:
 //!
-//! - **every event** — a handler that references `current.<key>` and
-//!   `current_env.<KEY>` resolves in all seven lifecycle events. Three runs are
-//!   needed, because `success`, `failure`, and `blocked` are mutually exclusive
-//!   within one iteration.
-//! - **live environment refresh** — the composing process mutates its own
-//!   environment *after* the eager `env` snapshot is taken, and every event
-//!   sees the new value through `current_env` while `env` still reports the
-//!   launch value.
+//! - **every event** — a handler that references `current.<key>` resolves in
+//!   all seven lifecycle events. Three runs are needed, because `success`,
+//!   `failure`, and `blocked` are mutually exclusive within one iteration.
 //! - **per-event freshness (Q2)** — a fact that changes *between* two events is
 //!   observed afresh by each event, while the eager `ctx` mirror of the same key
 //!   stays frozen at its launch value.
@@ -27,23 +21,11 @@
 //!
 //! `claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs`
 //! drives the executor in process with a mock shell and a recording emitter. It
-//! proves the executor rereads the environment; it cannot prove that the
+//! proves the executor resolves the lazy root; it cannot prove that the
 //! binary's `InvocationContext` installs a refresh authority that reaches every
 //! event, that the authority survives the composition-preflight `blocked` path
 //! (which builds its own execution context), or that the loop gate gets one.
 //! Those are `claudine-cli` wiring facts, and only a real run exercises them.
-//!
-//! ## What is not provable at this level
-//!
-//! AC28's strongest reading of the environment clause — a dedicated key mutated
-//! **between** two lifecycle events of one run — has no product surface in a
-//! real `claudine` process. A subprocess cannot mutate its parent's
-//! environment, and the binary exposes no action that writes its own. The `PWD`
-//! sync exercised below is the one in-process environment mutation a real run
-//! makes, so it is the live-refresh evidence available here; the
-//! between-evaluations variant stays with the in-process executor test named
-//! above. `level2_ac28_lazy_roots_refresh_between_lifecycle_events` covers the
-//! per-event half of the clause with a fact that *can* change mid-run.
 //!
 //! ## Focus
 //!
@@ -75,11 +57,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
-
-/// The environment key the fixture exports on the `claudine` command line, so a
-/// handler has a `current_env.<KEY>` to read that no host could supply.
-const ENV_KEY: &str = "CLAUDINE_TEST_AC28_KEY";
-const ENV_VALUE: &str = "ac28-sentinel";
 
 /// The branch the fixture repository starts on.
 const BRANCH_BEFORE: &str = "ac28-before";
@@ -164,15 +141,15 @@ fn stage() -> Fixture {
     fixture
 }
 
-/// One lifecycle stack that records `event` with both lazy roots resolved.
+/// One lifecycle stack that records `event` with the lazy root resolved.
 fn recorder(event: &str) -> String {
     format!(
         "  stack:\n    - action: {{append_line: [\"events.log\", \
-         \"{event} branch={{{{ current.branch }}}} key={{{{ current_env.{ENV_KEY} }}}}\"]}}\n"
+         \"{event} branch={{{{ current.branch }}}}\"]}}\n"
     )
 }
 
-/// A document whose every lifecycle event records both lazy roots.
+/// A document whose every lifecycle event records the lazy root.
 ///
 /// `extra_frontmatter` is how a caller makes the run take a different terminal
 /// path: a malformed harness key routes to `blocked`.
@@ -228,7 +205,7 @@ fn compose_in_tmux(
     // pane has a TTY, so without it a run carrying one would sit on a prompt.
     // Setters follow the document because both are positionals.
     let command = format!(
-        "cd {dir} && NO_COLOR='1' HOME='{home}' PATH='{path}' {ENV_KEY}='{ENV_VALUE}' \
+        "cd {dir} && NO_COLOR='1' HOME='{home}' PATH='{path}' \
          CLAUDINE_RENDEZVOUS_REPORT='false' PLAYA_DRY_RUN='1' PLAYA_SPOOL_DIR='{spool}' \
          {claudine} compose --goose --yolo {document_name}{tail}",
         dir = launch_dir.display(),
@@ -287,8 +264,8 @@ fn event_line<'a>(lines: &'a [String], event: &str) -> &'a str {
         .as_str()
 }
 
-/// AC28, first clause: a handler referencing `current.<key>` and
-/// `current_env.<KEY>` resolves both in **every** lifecycle event.
+/// AC28, first clause: a handler referencing `current.<key>` resolves in
+/// **every** lifecycle event.
 ///
 /// Three runs of the same document, because `success`, `failure`, and `blocked`
 /// are mutually exclusive within one iteration: a clean provider exit reaches
@@ -304,7 +281,7 @@ mod level2_ac28_lazy_roots_resolve_in_every_lifecycle_event {
     const BLOCKED_EVENTS: &[&str] = &["initialize", "blocked", "finalize"];
 
     /// Composes the probe document once and asserts the run recorded exactly
-    /// `events`, each resolving both lazy roots.
+    /// `events`, each resolving the lazy root.
     fn assert_run(provider_exit: i32, extra_frontmatter: &str, events: &[&str]) {
         require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -320,7 +297,7 @@ mod level2_ac28_lazy_roots_resolve_in_every_lifecycle_event {
         );
         let run = fixture.events();
 
-        let expected = format!("branch={BRANCH_BEFORE} key={ENV_VALUE}");
+        let expected = format!("branch={BRANCH_BEFORE}");
         assert_eq!(
             run.len(),
             events.len(),
@@ -330,7 +307,7 @@ mod level2_ac28_lazy_roots_resolve_in_every_lifecycle_event {
             assert_eq!(
                 event_line(&run, event),
                 format!("{event} {expected}"),
-                "the `{event}` handler must resolve both lazy roots; the run \
+                "the `{event}` handler must resolve the lazy root; the run \
                  recorded {run:?}; pane:\n{pane}"
             );
         }
@@ -369,72 +346,6 @@ mod level2_ac28_lazy_roots_resolve_in_every_lifecycle_event {
                 "AC28 covers all seven lifecycle events; no run reaches `{event}`"
             );
         }
-    }
-}
-
-/// AC28, environment clause: the composing process changes its own environment
-/// after the eager `env` snapshot is taken, and the lazy mirror sees it.
-///
-/// The change is real product behavior, not a test poke. Launched from a
-/// subdirectory, the wrapper switches to the child working directory and syncs
-/// `PWD` to match (`switch_process_cwd`, because several providers trust `PWD`
-/// over `getcwd`). `env.PWD` therefore reports the launch directory for the
-/// whole run while `current_env.PWD` reports the directory the process is
-/// actually in — in every event. Reading only one of the two roots could not
-/// tell a live reread from a frozen snapshot that happened to be right.
-#[test]
-fn level2_ac28_current_env_sees_an_in_process_change_the_env_snapshot_missed() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    let fixture = stage();
-    let launch_dir = fixture.repo.join("nested/launch-dir");
-    fs::create_dir_all(&launch_dir).unwrap();
-
-    let mut document = String::from("---\ntitle: AC28 environment refresh\n");
-    for event in ["initialize", "start", "success", "finalize"] {
-        document.push_str(event);
-        document.push_str(":\n  stack:\n    - action: {append_line: [\"events.log\", \"");
-        document.push_str(event);
-        document.push_str(" live={{ current_env.PWD }} frozen={{ env.PWD }}\"]}\n");
-    }
-    document.push_str("---\nBody\n");
-    fs::write(launch_dir.join("doc.md"), &document).unwrap();
-
-    let pane = compose_in_tmux(
-        &fixture,
-        &launch_dir,
-        "doc.md",
-        "",
-        at_least(fixture.events_path(), 4),
-    );
-
-    let lines = fixture.events();
-    let repo_root = fs::canonicalize(&fixture.repo).unwrap();
-    let launch = launch_dir.display().to_string();
-    for event in ["initialize", "start", "success", "finalize"] {
-        let line = event_line(&lines, event);
-        let live = line
-            .split("live=")
-            .nth(1)
-            .and_then(|rest| rest.split(" frozen=").next())
-            .unwrap_or_default();
-        let frozen = line.split(" frozen=").nth(1).unwrap_or_default();
-        assert_eq!(
-            fs::canonicalize(live).ok().as_deref(),
-            Some(repo_root.as_path()),
-            "`current_env.PWD` in `{event}` must be the directory the process \
-             moved to; events.log was {lines:?}; pane:\n{pane}"
-        );
-        assert_eq!(
-            frozen, launch,
-            "`env.PWD` in `{event}` must still be the launch directory the eager \
-             snapshot captured; events.log was {lines:?}; pane:\n{pane}"
-        );
-        assert_ne!(
-            live, frozen,
-            "the fixture only says anything while the two directories differ; \
-             events.log was {lines:?}"
-        );
     }
 }
 

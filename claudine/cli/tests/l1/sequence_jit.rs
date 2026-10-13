@@ -75,7 +75,7 @@ fn a_later_step_composes_against_the_edit_an_earlier_step_made() {
         &format!(
             r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ doc.marker }}}}"\n---\nBody {{{{state}}}}.\n' > "{md}"
+  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ fm.marker }}}}"\n---\nBody {{{{state}}}}.\n' > "{md}"
 fi
 printf 'ok\n'
 exit 0"#,
@@ -84,7 +84,7 @@ exit 0"#,
     );
     fs::write(
         &md,
-        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ doc.marker }}'\n---\nBody {{state}}.\n",
+        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ fm.marker }}'\n---\nBody {{state}}.\n",
     )
     .unwrap();
 
@@ -201,7 +201,7 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: {phase: advanced}}\nstart:\n  info: 'phase={{ doc.phase }}'\n---\nBody for {{state}} in {{ doc.phase }}.\n",
+        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: {phase: advanced}}\nstart:\n  info: 'phase={{ fm.phase }}'\n---\nBody for {{state}} in {{ fm.phase }}.\n",
     )
     .unwrap();
 
