@@ -108,9 +108,10 @@ concluded. Truncated provider trees must continue through provider-specific
 bounds; continuation work uses its own counter.
 
 The provider modules (`github.rs`, `gitlab.rs`, `gitea.rs`, `bitbucket.rs`)
-send through the generated `{Api}Client` with `client.send(req,
-&CallOptions::default())`. `send` is `Ok` for any HTTP status; classify every
-reply through the module's `REPLIES` (`remote/envelope.rs`), never by hand:
+call the generated endpoint methods, e.g.
+`client.list_pull_requests(owner, repo).state(s).await`, which yields
+`Result<T, CallError<E>>`. Classify every result through the module's
+`REPLIES` (`REPLIES.value(..)` in `remote/envelope.rs`), never by hand:
 
 - 401 is per provider; 403 with `x-ratelimit-remaining: 0` or a "rate limit"
   body, and 429, are `RateLimited` with `retry_after` from `Retry-After`
@@ -120,8 +121,8 @@ reply through the module's `REPLIES` (`remote/envelope.rs`), never by hand:
   a raw reqwest error, or a request URL into a message.
 - A missing credential sends anonymously, so there is no anonymous retry,
   except GitHub `list_workflow_runs`: a 401/403 to a request whose
-  `meta.request.auth` is not `Anonymous` is resent once with
-  `CallOptions::anonymous()`.
+  `meta.request.auth` is not `Anonymous` (a `CallError::Api`) is resent once
+  as `call.anonymous()`, from a clone of the same call.
 - Constructors map `BuildError` to `RemoteInit`; `Default` panics on it.
 - Test env-dependent paths with `EnvGuard` + `#[serial]` and clear every
   provider variable (`PROVIDER_CREDENTIAL_VARIABLES` in

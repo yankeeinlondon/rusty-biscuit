@@ -512,7 +512,6 @@ Each provider module follows the same structure:
 // sniff/lib/src/remote/github.rs (pattern representative of all providers)
 
 use schematic_schema::github::*;
-use schematic_schema::schematic_runtime::CallOptions;
 
 const REPLIES: Replies = Replies::new("GitHub", Unauthorized::Rejected);
 
@@ -536,18 +535,23 @@ impl GitHubRemote {
     }
 }
 
-// Every request: send, then classify the reply.
-let info = REPLIES.value(
+// Every request: call the endpoint method, chain any optional values, await,
+// then classify the result.
+let info = REPLIES.value(self.client.get_repository(owner, repo).await)?;
+let prs = REPLIES.value(
     self.client
-        .send(GetRepositoryRequest::new(owner, repo), &CallOptions::default())
+        .list_pull_requests(owner, repo)
+        .state("open".to_string())
         .await,
 )?;
 ```
 
-`send` returns `Ok` with a response envelope for any HTTP status, and
-`Err(TransportError)` only when no response arrived. `Replies` (in
-`remote/envelope.rs`) turns either into a `SniffError` the same way for all
-four providers; see [Error classification](#error-classification).
+Awaiting an endpoint call returns `Ok` with the decoded data for a 2xx reply,
+and otherwise a `CallError`: `Transport` when no response arrived, or `Api`
+with the reply's metadata (status, headers) and the error body for an error
+status or a body that could not be read. `Replies` (in `remote/envelope.rs`)
+turns either into a `SniffError` the same way for all four providers; see
+[Error classification](#error-classification).
 
 ### Provider-Specific Mapping Notes
 
@@ -845,14 +849,20 @@ provider body is quoted as received.
 Because a missing credential sends the request anonymously, the provider
 methods make one request each and never retry. The single exception is
 GitHub `list_workflow_runs`: when a request that carried a credential gets a
-401 or 403, it is sent once more with `CallOptions::anonymous()`, which sends
+401 or 403, the same call is sent once more with `.anonymous()`, which sends
 no credential from any source. A 401 or 403 to an anonymous request is
 final.
 
 ```rust
-let first = self.client.send(request.clone(), &CallOptions::default()).await?;
-let retry = matches!(first.meta.status.as_u16(), 401 | 403)
-    && first.meta.request.auth != AuthMethod::Anonymous;
+let call = self.client.list_workflow_runs(owner, repo).per_page(limit as i64);
+let first = call.clone().await;
+let retry = matches!(
+    &first,
+    Err(CallError::Api { meta, .. })
+        if matches!(meta.status.as_u16(), 401 | 403)
+            && meta.request.auth != AuthMethod::Anonymous
+);
+let reply = if retry { call.anonymous().await } else { first };
 ```
 
 Some failures read as absence rather than errors:

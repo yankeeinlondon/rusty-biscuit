@@ -934,6 +934,29 @@ mod github_tests {
         }
     }
 
+    #[tokio::test]
+    async fn error_5xx_keeps_its_status_and_body() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("bad gateway"))
+            .mount(&server)
+            .await;
+
+        let result = provider.get_repo_metadata("test-owner", "test-repo").await;
+
+        match result {
+            Err(SniffError::RemoteApi {
+                status, message, ..
+            }) => {
+                assert_eq!(status, 502);
+                assert_eq!(message, "bad gateway");
+            }
+            other => panic!("Expected RemoteApi error, got: {other:?}"),
+        }
+    }
+
     /// A 2xx body that does not decode and a 2xx body that is cut off are both
     /// status 0, and their messages tell them apart.
     #[tokio::test]

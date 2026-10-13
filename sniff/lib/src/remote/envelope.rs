@@ -1,19 +1,20 @@
 //! Turns replies from the generated provider clients into [`SniffError`]s.
 //!
-//! Every send returns either a response envelope, for any HTTP status, or a
-//! [`TransportError`] when no response head arrived. [`Replies`] classifies
+//! Every awaited endpoint call returns its data or a [`CallError`]: a
+//! [`TransportError`] when no response head arrived, or an [`ApiError`] with
+//! the [`ResponseMeta`] of the reply that carried it. [`Replies`] classifies
 //! both the same way for every provider; only the meaning of a 401 differs.
 //!
 //! ## What is safe to report
 //!
-//! Errors are composed from the envelope's status, the `Retry-After` and
+//! Errors are composed from the reply's status, the `Retry-After` and
 //! `x-ratelimit-remaining` header values, the provider's body text, and the
 //! runtime's redacted `Display` forms. A header map, a raw HTTP library error,
 //! or an unredacted request URL never reaches a message.
 
 use reqwest::header::HeaderMap;
 use schematic_schema::schematic_runtime::{
-    ApiError, BuildError, ErrorKind, Outcome, Response, ResponseMeta, TransportError,
+    ApiError, BuildError, CallError, ErrorKind, ResponseMeta, TransportError,
 };
 
 use crate::error::SniffError;
@@ -44,20 +45,24 @@ impl Replies {
         }
     }
 
-    /// The success value of a send, or the error it classifies as.
-    pub(super) fn value<T, E>(
-        &self,
-        sent: Result<Response<T, E>, TransportError>,
-    ) -> Result<T, SniffError> {
-        let (meta, outcome) = sent.map_err(|error| self.transport(&error))?.into_parts();
-        match outcome {
-            Outcome::Success(value) => Ok(value),
-            Outcome::Failure(error) => Err(self.failure(&meta, &error)),
+    /// The data of an awaited call, or the error it classifies as.
+    pub(super) fn value<T, E>(&self, sent: Result<T, CallError<E>>) -> Result<T, SniffError> {
+        sent.map_err(|error| self.error(&error))
+    }
+
+    /// The error a failed call classifies as.
+    fn error<E>(&self, error: &CallError<E>) -> SniffError {
+        match error {
+            CallError::Transport(error) => self.transport(error),
+            CallError::Api { error, meta } => self.failure(meta, error),
+            // `CallError` is non-exhaustive; a future variant still carries a
+            // redacted `Display`, reported without a status.
+            other => self.remote_api(0, other.to_string()),
         }
     }
 
-    /// A send that received no response head.
-    pub(super) fn transport(&self, error: &TransportError) -> SniffError {
+    /// A call that received no response head.
+    fn transport(&self, error: &TransportError) -> SniffError {
         self.remote_api(0, error.to_string())
     }
 
@@ -67,7 +72,7 @@ impl Replies {
     /// body was cut off. A 2xx body that did not decode, a cut-off 2xx body, a
     /// refused or failed redirect, and a hook rejection are status 0, told
     /// apart by the runtime's description of the failure.
-    pub(super) fn failure<E>(&self, meta: &ResponseMeta, error: &ApiError<E>) -> SniffError {
+    fn failure<E>(&self, meta: &ResponseMeta, error: &ApiError<E>) -> SniffError {
         let has_error_status = !meta.status.is_success() && !meta.status.is_redirection();
         let classify_by_status = match &error.kind {
             ErrorKind::Declared(_) | ErrorKind::Undeclared | ErrorKind::MalformedError => true,

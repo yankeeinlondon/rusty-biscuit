@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::github::*;
-use schematic_schema::schematic_runtime::{AuthMethod, CallOptions};
+use schematic_schema::schematic_runtime::{AuthMethod, CallError};
 
 use super::{
     count_api_request,
@@ -98,9 +98,13 @@ impl GitHubRemote {
         repo: &str,
         default_branch: &str,
     ) -> Result<RemoteTree, SniffError> {
-        let request = GetGitTreeRequest::new(owner, repo, default_branch).with_recursive(true);
         count_api_request("tree");
-        let response = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let response = REPLIES.value(
+            self.client
+                .get_git_tree(owner, repo, default_branch)
+                .recursive(true)
+                .await,
+        )?;
 
         let mut tree = RemoteTree::observed(blobs_of(response.tree), response.truncated);
         if tree.truncated {
@@ -127,14 +131,15 @@ impl GitHubRemote {
         for prefix in CONTINUATION_PREFIXES {
             // `branch:path` addresses a subtree directly, so each continuation is
             // one bounded request rather than a walk.
-            let request = GetGitTreeRequest::new(owner, repo, format!("{default_branch}:{prefix}"))
-                .with_recursive(true);
+            let call = self
+                .client
+                .get_git_tree(owner, repo, format!("{default_branch}:{prefix}"))
+                .recursive(true);
             // Counted under its own slug: a continuation preserves correctness and
             // must stay distinguishable from the duplicate root-tree requests this
             // phase removed.
             count_api_request("tree_continuation");
-            let sent = self.client.send(request, &CallOptions::default()).await;
-            let Some(response) = sent.ok().and_then(|reply| reply.into_result().ok()) else {
+            let Ok(response) = call.await else {
                 // Almost always a 404 for a prefix this repository does not have.
                 continue;
             };
@@ -189,9 +194,8 @@ impl RemoteRepoProvider for GitHubRemote {
     }
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
-        let request = GetRepositoryRequest::new(owner, repo);
         count_api_request("metadata");
-        let info = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let info = REPLIES.value(self.client.get_repository(owner, repo).await)?;
 
         Ok(RepoMetadata {
             name: info.name,
@@ -268,9 +272,12 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
         path: &str,
     ) -> Result<String, SniffError> {
-        let request = GetRepositoryContentRawRequest::new(owner, repo, path);
         count_api_request("contents");
-        REPLIES.value(self.client.send(request, &CallOptions::default()).await)
+        REPLIES.value(
+            self.client
+                .get_repository_content_raw(owner, repo, path)
+                .await,
+        )
     }
 
     async fn list_pull_requests(
@@ -279,23 +286,20 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let mut request = ListPullRequestsRequest::new(owner, repo);
-
         // Map PullRequestState to GitHub API state parameter
-        match state {
-            PullRequestState::Open => {
-                request = request.with_state("open".to_string());
-            }
-            PullRequestState::Closed => {
-                request = request.with_state("closed".to_string());
-            }
-            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
-                request = request.with_state("all".to_string());
-            }
-        }
+        let api_state = match state {
+            PullRequestState::Open => "open",
+            PullRequestState::Closed => "closed",
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => "all",
+        };
 
         count_api_request("pulls");
-        let prs = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let prs = REPLIES.value(
+            self.client
+                .list_pull_requests(owner, repo)
+                .state(api_state.to_string())
+                .await,
+        )?;
 
         let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
@@ -341,9 +345,8 @@ impl RemoteRepoProvider for GitHubRemote {
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
-        let request = ListIssuesRequest::new(owner, repo);
         count_api_request("issues");
-        let issues = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let issues = REPLIES.value(self.client.list_issues(owner, repo).await)?;
 
         // Filter out pull requests (GitHub issues API includes PRs)
         Ok(issues
@@ -370,22 +373,12 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
-        let tags_request = ListTagsRequest::new(owner, repo);
         count_api_request("tags");
-        let tags = REPLIES.value(
-            self.client
-                .send(tags_request, &CallOptions::default())
-                .await,
-        )?;
+        let tags = REPLIES.value(self.client.list_tags(owner, repo).await)?;
 
         // Fetch releases
-        let releases_request = ListReleasesRequest::new(owner, repo);
         count_api_request("releases");
-        let releases = REPLIES.value(
-            self.client
-                .send(releases_request, &CallOptions::default())
-                .await,
-        )?;
+        let releases = REPLIES.value(self.client.list_releases(owner, repo).await)?;
 
         // Convert tags - we can't easily determine if they're annotated without
         // making additional API calls per tag, so we default to false
@@ -455,24 +448,27 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
         limit: usize,
     ) -> Result<Vec<CiCdInfo>, SniffError> {
-        let request = ListWorkflowRunsRequest::new(owner, repo).with_per_page(limit as i64);
+        let call = self
+            .client
+            .list_workflow_runs(owner, repo)
+            .per_page(limit as i64);
 
         count_api_request("workflow_runs");
-        let first = self
-            .client
-            .send(request.clone(), &CallOptions::default())
-            .await
-            .map_err(|error| REPLIES.transport(&error))?;
+        let first = call.clone().await;
         // Public workflow runs are readable anonymously, so a credential the API
         // rejects is retried once without one. A reply to an anonymous request is
         // final: the runtime never retries, and resending it would change nothing.
-        let rejected_credential = matches!(first.meta.status.as_u16(), 401 | 403)
-            && first.meta.request.auth != AuthMethod::Anonymous;
+        let rejected_credential = matches!(
+            &first,
+            Err(CallError::Api { meta, .. })
+                if matches!(meta.status.as_u16(), 401 | 403)
+                    && meta.request.auth != AuthMethod::Anonymous
+        );
         let reply = if rejected_credential {
             count_api_request("workflow_runs");
-            self.client.send(request, &CallOptions::anonymous()).await
+            call.anonymous().await
         } else {
-            Ok(first)
+            first
         };
         let response = REPLIES.value(reply)?;
 
@@ -487,7 +483,7 @@ impl RemoteRepoProvider for GitHubRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // The generated client has ListOrgReposRequest, but this provider does not call
+        // The generated client has `list_org_repos`, but this provider does not call
         // it yet, so organization listings are always empty.
         Ok(Vec::new())
     }

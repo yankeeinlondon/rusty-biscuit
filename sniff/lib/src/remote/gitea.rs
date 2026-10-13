@@ -9,7 +9,6 @@
 
 use async_trait::async_trait;
 use schematic_schema::gitea::*;
-use schematic_schema::schematic_runtime::CallOptions;
 
 use super::{
     count_api_request,
@@ -153,22 +152,24 @@ impl GiteaRemote {
         repo: &str,
         default_branch: &str,
     ) -> Result<RemoteTree, SniffError> {
-        let request = GetGitTreeRecursiveRequest::new(owner, repo, default_branch);
         count_api_request("tree");
-        let response = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let response = REPLIES.value(
+            self.client
+                .get_git_tree_recursive(owner, repo, default_branch)
+                .await,
+        )?;
 
         let mut tree = RemoteTree::observed(blobs_of(response.tree), response.truncated);
         if tree.truncated {
             let mut recovered = Vec::new();
             for prefix in CONTINUATION_PREFIXES {
-                let request = GetGitTreeRecursiveRequest::new(
+                let call = self.client.get_git_tree_recursive(
                     owner,
                     repo,
                     format!("{default_branch}:{prefix}"),
                 );
                 count_api_request("tree_continuation");
-                let sent = self.client.send(request, &CallOptions::default()).await;
-                let Some(response) = sent.ok().and_then(|reply| reply.into_result().ok()) else {
+                let Ok(response) = call.await else {
                     continue;
                 };
                 recovered.extend(
@@ -223,9 +224,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
-        let request = GetRepositoryRequest::new(owner, repo);
         count_api_request("metadata");
-        let info = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let info = REPLIES.value(self.client.get_repository(owner, repo).await)?;
 
         // Gitea types are heavily optional - extract with defaults
         let name = info.name.unwrap_or_else(|| repo.to_string());
@@ -309,9 +309,12 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
         path: &str,
     ) -> Result<String, SniffError> {
-        let request = GetRepositoryContentRawRequest::new(owner, repo, path);
         count_api_request("contents");
-        REPLIES.value(self.client.send(request, &CallOptions::default()).await)
+        REPLIES.value(
+            self.client
+                .get_repository_content_raw(owner, repo, path)
+                .await,
+        )
     }
 
     async fn list_pull_requests(
@@ -320,23 +323,20 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let mut request = ListPullRequestsRequest::new(owner, repo);
-
         // Map PullRequestState to Gitea API state parameter
-        match state {
-            PullRequestState::Open => {
-                request = request.with_state("open".to_string());
-            }
-            PullRequestState::Closed => {
-                request = request.with_state("closed".to_string());
-            }
-            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
-                request = request.with_state("all".to_string());
-            }
-        }
+        let api_state = match state {
+            PullRequestState::Open => "open",
+            PullRequestState::Closed => "closed",
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => "all",
+        };
 
         count_api_request("pulls");
-        let prs = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let prs = REPLIES.value(
+            self.client
+                .list_pull_requests(owner, repo)
+                .state(api_state.to_string())
+                .await,
+        )?;
 
         let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
@@ -400,9 +400,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
-        let request = ListIssuesRequest::new(owner, repo);
         count_api_request("issues");
-        let issues = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let issues = REPLIES.value(self.client.list_issues(owner, repo).await)?;
 
         // Gitea's ListIssues with type=issues already filters out PRs
         Ok(issues
@@ -441,22 +440,12 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
-        let tags_request = ListTagsRequest::new(owner, repo);
         count_api_request("tags");
-        let tags = REPLIES.value(
-            self.client
-                .send(tags_request, &CallOptions::default())
-                .await,
-        )?;
+        let tags = REPLIES.value(self.client.list_tags(owner, repo).await)?;
 
         // Fetch releases
-        let releases_request = ListReleasesRequest::new(owner, repo);
         count_api_request("releases");
-        let releases = REPLIES.value(
-            self.client
-                .send(releases_request, &CallOptions::default())
-                .await,
-        )?;
+        let releases = REPLIES.value(self.client.list_releases(owner, repo).await)?;
 
         // Convert tags - we can determine if annotated from the message field
         let tag_infos: Vec<TagInfo> = tags
@@ -577,7 +566,7 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // The generated client has ListOrgReposRequest, but this provider does not call
+        // The generated client has `list_org_repos`, but this provider does not call
         // it yet, so organization listings are always empty.
         Ok(Vec::new())
     }

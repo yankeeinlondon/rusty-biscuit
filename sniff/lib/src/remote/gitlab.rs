@@ -5,7 +5,7 @@
 //!
 //! ## Limitations
 //!
-//! The generated client has a `GetProjectRequest`, but this provider does not
+//! The generated client has a `get_project` endpoint, but this provider does not
 //! call it yet. Repository metadata is a stub instead:
 //! - Existence is verified via `ListRepositoryTree` (404 if not found)
 //! - Every field a project lookup would supply is `None` or a default
@@ -13,7 +13,6 @@
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use schematic_schema::gitlab::*;
-use schematic_schema::schematic_runtime::CallOptions;
 
 use super::{
     count_api_request,
@@ -117,15 +116,18 @@ impl GitLabRemote {
     /// metadata path pays for a full tree fetch, and the counter names the work
     /// done.
     async fn fetch_tree_items(&self, owner: &str, repo: &str) -> Result<Vec<TreeItem>, SniffError> {
-        let request = ListRepositoryTreeRequest::new(project_path(owner, repo));
         count_api_request("tree");
-        REPLIES.value(self.client.send(request, &CallOptions::default()).await)
+        REPLIES.value(
+            self.client
+                .list_repository_tree(project_path(owner, repo))
+                .await,
+        )
     }
 
     /// Builds the minimal metadata GitLab can report without `GetProject`.
     ///
     /// Pure — the caller has already proven the project exists by fetching its
-    /// tree. Sending the generated `GetProjectRequest` is what would let these
+    /// tree. Calling the generated `get_project` is what would let these
     /// `None`s become real values.
     fn stub_metadata(&self, owner: &str, repo: &str) -> RepoMetadata {
         let full_name = format!("{}/{}", owner, repo);
@@ -183,7 +185,7 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
-        // GetProjectRequest is not called yet; the tree fetch proves the
+        // `get_project` is not called yet; the tree fetch proves the
         // project exists and the metadata is a stub.
         self.fetch_tree_items(owner, repo).await?;
         Ok(self.stub_metadata(owner, repo))
@@ -239,9 +241,12 @@ impl RemoteRepoProvider for GitLabRemote {
         path: &str,
     ) -> Result<String, SniffError> {
         // "HEAD" is the default branch; GitLab accepts it as a ref.
-        let request = GetRepositoryFileRequest::new(project_path(owner, repo), path, "HEAD");
         count_api_request("contents");
-        let file = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let file = REPLIES.value(
+            self.client
+                .get_repository_file(project_path(owner, repo), path, "HEAD")
+                .await,
+        )?;
 
         // GitLab returns Base64-encoded content
         let decoded = BASE64
@@ -265,26 +270,21 @@ impl RemoteRepoProvider for GitLabRemote {
         repo: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let mut request = ListMergeRequestsRequest::new(project_path(owner, repo));
-
         // Map PullRequestState to GitLab API state parameter
-        match state {
-            PullRequestState::Open => {
-                request = request.with_state("opened".to_string());
-            }
-            PullRequestState::Closed => {
-                request = request.with_state("closed".to_string());
-            }
-            PullRequestState::Merged => {
-                request = request.with_state("merged".to_string());
-            }
-            PullRequestState::Draft | PullRequestState::All => {
-                request = request.with_state("all".to_string());
-            }
-        }
+        let api_state = match state {
+            PullRequestState::Open => "opened",
+            PullRequestState::Closed => "closed",
+            PullRequestState::Merged => "merged",
+            PullRequestState::Draft | PullRequestState::All => "all",
+        };
 
         count_api_request("pulls");
-        let mrs = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let mrs = REPLIES.value(
+            self.client
+                .list_merge_requests(project_path(owner, repo))
+                .state(api_state.to_string())
+                .await,
+        )?;
 
         let mut mrs: Vec<PullRequestInfo> = mrs
             .into_iter()
@@ -326,9 +326,8 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
-        let request = ListIssuesRequest::new(project_path(owner, repo));
         count_api_request("issues");
-        let issues = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let issues = REPLIES.value(self.client.list_issues(project_path(owner, repo)).await)?;
 
         // GitLab issues API doesn't include merge requests (unlike GitHub)
         Ok(issues
@@ -356,22 +355,12 @@ impl RemoteRepoProvider for GitLabRemote {
         let project_id = project_path(owner, repo);
 
         // Fetch tags
-        let tags_request = ListTagsRequest::new(&project_id);
         count_api_request("tags");
-        let tags = REPLIES.value(
-            self.client
-                .send(tags_request, &CallOptions::default())
-                .await,
-        )?;
+        let tags = REPLIES.value(self.client.list_tags(&project_id).await)?;
 
         // Fetch releases
-        let releases_request = ListReleasesRequest::new(&project_id);
         count_api_request("releases");
-        let releases = REPLIES.value(
-            self.client
-                .send(releases_request, &CallOptions::default())
-                .await,
-        )?;
+        let releases = REPLIES.value(self.client.list_releases(&project_id).await)?;
 
         // Convert tags - GitLab provides message for annotated tags
         let tag_infos: Vec<TagInfo> = tags
@@ -440,7 +429,7 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // The generated client has ListGroupProjectsRequest, but this provider
+        // The generated client has `list_group_projects`, but this provider
         // does not call it yet, so group listings are always empty.
         Ok(Vec::new())
     }

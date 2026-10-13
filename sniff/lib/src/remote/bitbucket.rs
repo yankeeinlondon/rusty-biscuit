@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::bitbucket::*;
-use schematic_schema::schematic_runtime::CallOptions;
+use schematic_schema::schematic_runtime::CallError;
 
 use super::{
     count_api_request,
@@ -172,10 +172,11 @@ async fn collect_directory_entries(
     let mut entries = Vec::new();
 
     for page in 1..=MAX_LISTING_PAGES {
-        let mut request = GetSourceRequest::new(workspace, repo_slug, commit, path);
-        request.pagelen = Some(100);
+        let mut call = client
+            .get_source(workspace, repo_slug, commit, path)
+            .pagelen(100);
         if page > 1 {
-            request.page = Some(page);
+            call = call.page(page);
             // Pages past the first are continuations, counted separately so a
             // report distinguishes them from the duplicate root listings this
             // phase removed.
@@ -184,7 +185,7 @@ async fn collect_directory_entries(
             count_api_request("tree");
         }
 
-        let body = REPLIES.value(client.send(request, &CallOptions::default()).await)?;
+        let body = REPLIES.value(call.await)?;
         let response = decode_directory_listing(&body)?;
         entries.extend(response.values);
 
@@ -253,9 +254,8 @@ impl RemoteRepoProvider for BitbucketRemote {
         workspace: &str,
         repo_slug: &str,
     ) -> Result<RepoMetadata, SniffError> {
-        let request = GetRepositoryRequest::new(workspace, repo_slug);
         count_api_request("metadata");
-        let info = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let info = REPLIES.value(self.client.get_repository(workspace, repo_slug).await)?;
 
         // Extract values before moving info fields
         let html_url = info
@@ -349,19 +349,17 @@ impl RemoteRepoProvider for BitbucketRemote {
         path: &str,
     ) -> Result<String, SniffError> {
         // First get the repo to find the default branch
-        let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
         count_api_request("metadata");
-        let info = REPLIES.value(
-            self.client
-                .send(repo_request, &CallOptions::default())
-                .await,
-        )?;
+        let info = REPLIES.value(self.client.get_repository(workspace, repo_slug).await)?;
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
-        let request = GetSourceRequest::new(workspace, repo_slug, &commit, path);
         count_api_request("contents");
-        let body = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let body = REPLIES.value(
+            self.client
+                .get_source(workspace, repo_slug, &commit, path)
+                .await,
+        )?;
         Ok(decode_file_text(&body))
     }
 
@@ -371,15 +369,15 @@ impl RemoteRepoProvider for BitbucketRemote {
         repo_slug: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let mut request = ListPullRequestsRequest::new(workspace, repo_slug);
+        let mut call = self.client.list_pull_requests(workspace, repo_slug);
 
         // Map PullRequestState to Bitbucket API state parameter
         match state {
             PullRequestState::Open => {
-                request = request.with_state("OPEN".to_string());
+                call = call.state("OPEN".to_string());
             }
             PullRequestState::Merged => {
-                request = request.with_state("MERGED".to_string());
+                call = call.state("MERGED".to_string());
             }
             PullRequestState::Closed | PullRequestState::Draft | PullRequestState::All => {
                 // Bitbucket doesn't support querying multiple states or "ALL" in a single
@@ -388,7 +386,7 @@ impl RemoteRepoProvider for BitbucketRemote {
         }
 
         count_api_request("pulls");
-        let response = REPLIES.value(self.client.send(request, &CallOptions::default()).await)?;
+        let response = REPLIES.value(call.await)?;
 
         // Extract .values from paginated response (first page only for MVP)
         let mut prs: Vec<PullRequestInfo> = response
@@ -493,20 +491,14 @@ impl RemoteRepoProvider for BitbucketRemote {
         workspace: &str,
         repo_slug: &str,
     ) -> Result<Vec<IssueInfo>, SniffError> {
-        let request = ListIssuesRequest::new(workspace, repo_slug);
-
         // Bitbucket issues may be disabled - handle 404 gracefully
         count_api_request("issues");
-        let reply = self
-            .client
-            .send(request, &CallOptions::default())
-            .await
-            .map_err(|error| REPLIES.transport(&error))?;
-        if reply.meta.status.as_u16() == 404 {
+        let reply = self.client.list_issues(workspace, repo_slug).await;
+        if matches!(&reply, Err(CallError::Api { meta, .. }) if meta.status.as_u16() == 404) {
             // Issue tracker is disabled on this repo
             return Ok(Vec::new());
         }
-        let response = REPLIES.value(Ok(reply))?;
+        let response = REPLIES.value(reply)?;
 
         // Extract .values from paginated response (first page only for MVP)
         Ok(response
@@ -564,13 +556,8 @@ impl RemoteRepoProvider for BitbucketRemote {
         repo_slug: &str,
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
-        let tags_request = ListTagsRequest::new(workspace, repo_slug);
         count_api_request("tags");
-        let tags_response = REPLIES.value(
-            self.client
-                .send(tags_request, &CallOptions::default())
-                .await,
-        )?;
+        let tags_response = REPLIES.value(self.client.list_tags(workspace, repo_slug).await)?;
 
         // Convert tags (first page only for MVP)
         let tag_infos: Vec<TagInfo> = tags_response
@@ -599,16 +586,13 @@ impl RemoteRepoProvider for BitbucketRemote {
             .collect();
 
         // Fetch downloads (Bitbucket's equivalent of releases)
-        let downloads_request = ListDownloadsRequest::new(workspace, repo_slug);
         count_api_request("releases");
         // Any failure, transport or status, reads as "no downloads".
         let downloads_response = self
             .client
-            .send(downloads_request, &CallOptions::default())
+            .list_downloads(workspace, repo_slug)
             .await
-            .ok()
-            .and_then(|reply| reply.into_result().ok())
-            .unwrap_or_else(|| PaginatedResponse {
+            .unwrap_or_else(|_| PaginatedResponse {
                 values: Vec::new(),
                 next: None,
                 previous: None,
@@ -678,7 +662,7 @@ impl RemoteRepoProvider for BitbucketRemote {
     }
 
     async fn list_org_repos(&self, _workspace: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // The generated client has ListWorkspaceReposRequest, but this provider does not call
+        // The generated client has `list_workspace_repos`, but this provider does not call
         // it yet, so workspace listings are always empty.
         Ok(Vec::new())
     }
