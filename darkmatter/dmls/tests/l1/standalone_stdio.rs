@@ -17,7 +17,7 @@ use biscuit_test_harness::bin_exe;
 use serde_json::{Value, json};
 
 use crate::content_policy_baseline::content_policy_fixtures::{
-    ACCEPTANCE_REJECTIONS, MIXED_POLICY_FRONTMATTER, declaration, render,
+    ACCEPTANCE_REJECTIONS, MIXED_POLICY_FRONTMATTER, RULE_SUGGESTIONS, declaration, render,
 };
 use crate::stdio_subprocess::{ChildGuard, read_message, write_message};
 
@@ -25,7 +25,7 @@ use crate::stdio_subprocess::{ChildGuard, read_message, write_message};
 const SCHEMA_VARIABLES: [&str; 3] = ["BASELINE_SCHEMA", "DARKMATTER_NO_BASELINE_SCHEMA", "SCHEMAS_DIR"];
 
 const COMPLETION_DOCUMENT: &str =
-    "---\ncontent_policy:\n  - ValidFor(3mo)\n  - \n  - rule: TimeSensitive\n    action: \n---\n\nBody\n";
+    "---\ncontent_policy:\n  - ValidFor(3mo)\n  - \n  - rule: \n    action: archive\n  - rule: TimeSensitive\n    action: \n---\n\nBody\n";
 
 /// One client side of the stdio conversation. Server notifications that
 /// arrive while a response is awaited are kept for later lookups; server
@@ -102,11 +102,11 @@ impl Client {
     }
 }
 
-/// One opened rejection document: its row, the `(line, character)` starts
-/// the row expects, and what the server published.
+/// One opened rejection document: its row, the `(line, character, instance
+/// path)` the row expects of each diagnostic, and what the server published.
 struct Rejection {
     name: &'static str,
-    expected: Vec<(u64, u64)>,
+    expected: Vec<(u64, u64, String)>,
     diagnostics: Vec<Value>,
 }
 
@@ -115,6 +115,7 @@ struct Observed {
     rejections: Vec<Rejection>,
     example: Vec<Value>,
     item_labels: Vec<String>,
+    rule_labels: Vec<String>,
     action_labels: Vec<String>,
 }
 
@@ -136,14 +137,15 @@ fn converse(client: &mut Client, root: &Path) -> Result<Observed, String> {
     let mut rejections = Vec::new();
     for name in ACCEPTANCE_REJECTIONS {
         let rendered = render(declaration(name).declaration).remove(0);
-        let expected = declaration(name)
+        let mut expected: Vec<(u64, u64, String)> = declaration(name)
             .problems
             .iter()
             .map(|problem| {
                 let (line, column) = rendered.start(problem.at);
-                (u64::from(line) - 1, u64::from(column) - 1)
+                (u64::from(line) - 1, u64::from(column) - 1, problem.path.to_string())
             })
             .collect();
+        expected.sort();
         let (_, diagnostics) = client.open(&root.join(format!("{name}.md")), &rendered.document())?;
         rejections.push(Rejection {
             name,
@@ -155,7 +157,8 @@ fn converse(client: &mut Client, root: &Path) -> Result<Observed, String> {
         client.open(&root.join("example.md"), &format!("---\n{MIXED_POLICY_FRONTMATTER}---\n\nBody\n"))?;
     let (uri, _) = client.open(&root.join("complete.md"), COMPLETION_DOCUMENT)?;
     let item_labels = client.completion_labels(&uri, COMPLETION_DOCUMENT, "ValidFor(3mo)\n  - ")?;
-    let action_labels = client.completion_labels(&uri, COMPLETION_DOCUMENT, "    action: ")?;
+    let rule_labels = client.completion_labels(&uri, COMPLETION_DOCUMENT, "  - rule: ")?;
+    let action_labels = client.completion_labels(&uri, COMPLETION_DOCUMENT, "TimeSensitive\n    action: ")?;
 
     client.request("shutdown", Value::Null)?;
     client.notify("exit", Value::Null);
@@ -163,6 +166,7 @@ fn converse(client: &mut Client, root: &Path) -> Result<Observed, String> {
         rejections,
         example,
         item_labels,
+        rule_labels,
         action_labels,
     })
 }
@@ -254,11 +258,12 @@ fn the_built_server_validates_and_completes_policies_without_schema_files() {
         diagnostics,
     } in &observed.rejections
     {
-        let mut published: Vec<(u64, u64)> = diagnostics
+        let mut published: Vec<(u64, u64, String)> = diagnostics
             .iter()
             .map(|diagnostic| {
                 let start = &diagnostic["range"]["start"];
-                (start["line"].as_u64().unwrap(), start["character"].as_u64().unwrap())
+                let path = diagnostic["data"]["instance_path"].as_str().unwrap_or_default();
+                (start["line"].as_u64().unwrap(), start["character"].as_u64().unwrap(), path.to_string())
             })
             .collect();
         published.sort();
@@ -269,9 +274,15 @@ fn the_built_server_validates_and_completes_policies_without_schema_files() {
         );
     }
     assert!(observed.example.is_empty(), "{:#?}", observed.example);
-    // `Evergreen` is the only shipped suggestion completion offers: the rest
-    // sit on its arm and are linted away there.
-    assert!(observed.item_labels.iter().any(|label| label == "Evergreen"), "{:?}", observed.item_labels);
+    // A blank compact item offers every shipped rule suggestion plus the
+    // long-form keys; a blank long-form `rule:` value, the suggestions alone.
+    let mut item_labels = observed.item_labels.clone();
+    item_labels.sort();
+    let mut expected_item: Vec<String> =
+        RULE_SUGGESTIONS.iter().chain(&["rule", "action"]).map(|label| label.to_string()).collect();
+    expected_item.sort();
+    assert_eq!(item_labels, expected_item, "{:?}", observed.item_labels);
+    assert_eq!(observed.rule_labels, RULE_SUGGESTIONS, "{:?}", observed.rule_labels);
     assert_eq!(observed.action_labels, ["refresh", "archive", "remove"]);
 
     let mut entries: Vec<_> = std::fs::read_dir(&cwd)

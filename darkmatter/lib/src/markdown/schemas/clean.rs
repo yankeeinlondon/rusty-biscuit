@@ -544,9 +544,9 @@ fn raw_type_mismatch_diagnostic(yaml_source: &str, problem: &ValidationProblem) 
         code: YamlDiagnosticCode::SchemaTypeMismatch,
         span: value_span_for(yaml_source, problem),
         classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-        message: format!(
-            "{}; the authored scalar could not be proven safe to quote",
-            problem.message
+        message: located_message(
+            problem,
+            format!("{}; the authored scalar could not be proven safe to quote", problem.message),
         ),
         repairs: Vec::new(),
     }
@@ -565,21 +565,21 @@ fn report_only_diagnostic(
             code: YamlDiagnosticCode::SchemaShapeRepair,
             span: missing_key_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
         ValidationProblemCode::TypeMismatch => YamlDiagnostic {
             code: YamlDiagnosticCode::SchemaTypeMismatch,
             span: value_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
         _ => YamlDiagnostic {
             code: YamlDiagnosticCode::SchemaShapeRepair,
             span: value_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
     }
@@ -607,6 +607,7 @@ fn unknown_key_diagnostic(
         ),
         None => format!("key `{offending}` is not declared by the schema"),
     };
+    let message = located_message(problem, message);
     YamlDiagnostic {
         code: YamlDiagnosticCode::SchemaKeyCorrection,
         span,
@@ -706,6 +707,21 @@ fn edit_distance(first: &str, second: &str) -> usize {
         }
     }
     distances[rows - 1][cols - 1]
+}
+
+/// `message` naming the problem's instance path, `` (at `/content_policy/1`) ``,
+/// in the pointer spelling the S2 diagnostic uses. A missing or unknown key's
+/// pointer is its parent object's, and a root-level problem has none; the
+/// message itself names the key.
+///
+/// The span alone cannot stand in for the path: it falls back to the
+/// document start for a flow-context node.
+fn located_message(problem: &ValidationProblem, message: String) -> String {
+    if problem.path.is_empty() {
+        message
+    } else {
+        format!("{message} (at `{}`)", problem.path)
+    }
 }
 
 /// The authored span of the value `problem` points at, or the zero-width

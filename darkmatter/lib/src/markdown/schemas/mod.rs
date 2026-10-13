@@ -1108,8 +1108,8 @@ impl EffectiveSchema {
     /// Validates like [`Self::validate_with_positions`], then applies the
     /// compose-parity deferral rules from `options` as data (R-5 Priority 3).
     ///
-    /// Top-level values still holding a `$(...)` shell expression or an
-    /// unresolved `{{ ... }}` template are collected into
+    /// Top-level values that are a whole-value `$(...)` shell expression or
+    /// still hold an unresolved `{{ ... }}` template are collected into
     /// [`ValidationReport::pending`]. With [`PendingPolicy::Defer`] (the
     /// default), problems attributable to a pending key are dropped from the
     /// report — mirroring compose, which lets a later shell-expansion pass
@@ -1482,7 +1482,7 @@ pub struct PendingValue {
 /// Why a [`PendingValue`] is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingValueReason {
-    /// The value holds a `$(...)` shell expression that has not run.
+    /// The value is a whole-value `$(...)` shell expression that has not run.
     ShellExpression,
     /// The value holds an unresolved `{{ ... }}` template.
     UnresolvedTemplate,
@@ -1610,10 +1610,12 @@ fn attributable_top_level_key(problem: &ValidationProblem) -> Option<String> {
     problem.instance_path.first().map(str::to_string)
 }
 
-/// Scans a frontmatter instance for top-level values that hold a deferred
-/// composition construct (`$(...)` shell expression or `{{ ... }}` template),
-/// mirroring compose's `value_pending_composition` — lexically only, never
-/// executing anything. `$schema` is skipped (a control key, not data).
+/// Scans a frontmatter instance for top-level values a later compose stage
+/// resolves — a whole-value `$(...)` shell expression or a `{{ ... }}`
+/// template anywhere in the value — mirroring compose's pre-shell deferral,
+/// lexically only, never executing anything. `$(...)` text elsewhere (inside
+/// a list, a mapping, or after other text) is never expanded, so it is not
+/// pending. `$schema` is skipped (a control key, not data).
 fn scan_pending_values(frontmatter: &Value) -> Vec<PendingValue> {
     let Value::Object(map) = frontmatter else {
         return Vec::new();
@@ -1637,11 +1639,16 @@ fn scan_pending_values(frontmatter: &Value) -> Vec<PendingValue> {
     out
 }
 
-/// Classifies a value's deferral reason. A `$(...)` shell expression takes
-/// precedence over a `{{ ... }}` template when both appear (the shell value is
-/// what a later pass resolves first), matching compose's ordering.
+/// Classifies a value's deferral reason. A whole-value `$(...)` shell
+/// expression takes precedence over a `{{ ... }}` template it contains (the
+/// shell value is what a later pass resolves first), matching compose's
+/// ordering.
 fn pending_reason(value: &Value) -> Option<PendingValueReason> {
-    if value_contains_marker(value, "$(") {
+    let shell_candidate = value.as_str().is_some_and(|text| {
+        crate::markdown::compose::value_origin::authored_shell_candidate(text)
+            && crate::markdown::literal_token::holds_pending_syntax(text)
+    });
+    if shell_candidate {
         Some(PendingValueReason::ShellExpression)
     } else if value_contains_marker(value, "{{") {
         Some(PendingValueReason::UnresolvedTemplate)
@@ -2752,6 +2759,21 @@ mod claudine_compat_tests {
         assert!(report.valid, "template-pending value deferred: {:?}", report.problems);
         assert_eq!(report.pending.len(), 1);
         assert_eq!(report.pending[0].reason, PendingValueReason::UnresolvedTemplate);
+    }
+
+    #[test]
+    fn validate_with_options_judges_shell_text_compose_never_expands() {
+        let effective = effective_number_field();
+        for value in [serde_json::json!(["$(echo 1)"]), serde_json::json!("1 $(echo 1)")] {
+            let instance = serde_json::json!({ "n": value });
+            let report = effective.validate_with_options(
+                &instance,
+                &PositionMap::new(),
+                &ValidationOptions::default(),
+            );
+            assert!(!report.valid, "{instance}: never-expanded shell text is judged");
+            assert!(report.pending.is_empty(), "{instance}: {:?}", report.pending);
+        }
     }
 
     #[test]

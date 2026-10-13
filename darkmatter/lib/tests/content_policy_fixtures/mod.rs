@@ -27,6 +27,19 @@ content_policy:\n\
 \x20 - rule: ValidUntil(2027-01-01)\n\
 \x20   action: archive\n";
 
+/// The rule suggestions Content Policy's editor schema ships, in declaration
+/// order. Completion offers all of them wherever a rule is written (a compact
+/// item or a long-form `rule:` value).
+pub const RULE_SUGGESTIONS: [&str; 7] = [
+    "Evergreen",
+    "TimeSensitive",
+    "ValidFor(3mo)",
+    "ValidFor(3mo, @last_updated)",
+    "ValidFor(3mo, 2026-09-28)",
+    "ValidUntil(2027-01-01)",
+    "FileChanged(src/config.rs, @config_fingerprint)",
+];
+
 /// The baseline declaration the runtime baseline gains, with its import
 /// written relative to `darkmatter/docs/schemas/darkmatter.yaml`.
 pub const BASELINE_DECLARATION_LINE: &str =

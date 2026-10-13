@@ -448,6 +448,13 @@ pub struct ComposeOptions {
     /// and reports the verdict. Default: `false`.
     pub(crate) defer_schema_verdict: bool,
 
+    /// When `true`, the caller re-validates the post-shell frontmatter against
+    /// the document and baseline schema itself (and may scrub invalid optional
+    /// values), so compose judges only what that caller cannot: values a shell
+    /// result suffix typed, and trigger schemas. Default: `false`, so compose
+    /// owns the verdict on shell-resolved values.
+    pub(crate) caller_owns_post_shell_verdict: bool,
+
     /// When `true`, body interpolation renders a `ctx.*` variable whose group
     /// the request never captured as `null` instead of failing. Used only by
     /// the shell-command discovery pass, which composes without page blocks:
@@ -916,6 +923,7 @@ impl ComposeOptions {
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
             defer_schema_verdict: false,
+            caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
             suppress_shell_probes: false,
@@ -1923,6 +1931,29 @@ impl ComposeOptions {
         self
     }
 
+    /// Leaves the document and baseline verdict on shell-resolved frontmatter
+    /// to the caller, which re-validates the composed frontmatter itself.
+    ///
+    /// Compose still judges values a shell result suffix (`::ok`,
+    /// `::exit-code`, `::result`) typed, and runs its full post-shell pass
+    /// when trigger schemas are enabled, since the caller does not see
+    /// trigger schemas. Leave it unset unless the caller validates the
+    /// post-shell frontmatter; otherwise a `$(...)` that prints an invalid
+    /// value is accepted.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_caller_owned_post_shell_verdict(true);
+    /// ```
+    #[must_use]
+    pub fn with_caller_owned_post_shell_verdict(mut self, caller_owned: bool) -> Self {
+        self.caller_owns_post_shell_verdict = caller_owned;
+        self
+    }
+
     /// Judges the compose-time schema verdict at a runtime phase instead of
     /// the unphased authoring contract.
     ///
@@ -2625,6 +2656,7 @@ impl ComposeOptions {
             remote_read_config,
             defer_shell_pending_schema_problems,
             defer_schema_verdict,
+            caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
             suppress_shell_probes,
@@ -2955,6 +2987,8 @@ impl ComposeOptions {
         enc.bool(*defer_shell_pending_schema_problems);
         enc.field("defer_schema_verdict");
         enc.bool(*defer_schema_verdict);
+        enc.field("caller_owns_post_shell_verdict");
+        enc.bool(*caller_owns_post_shell_verdict);
         enc.field("defer_missing_runtime_context");
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
@@ -3133,6 +3167,8 @@ impl ComposeOptions {
         cenc.bool(*trigger_schemas);
         cenc.field("defer_schema_verdict");
         cenc.bool(*defer_schema_verdict);
+        cenc.field("caller_owns_post_shell_verdict");
+        cenc.bool(*caller_owns_post_shell_verdict);
         cenc.field("schema_phase");
         cenc.tag(schema_phase_tag(*schema_phase));
         cenc.field("name_coercion_keys");

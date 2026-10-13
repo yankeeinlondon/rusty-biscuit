@@ -15,11 +15,13 @@ use darkmatter::markdown::schemas::completion::{
     for_property_value,
 };
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyDef, SimplifiedSchema, flattened_alternatives,
-    suggestions_for_def, suggestions_for_path,
+    DarkmatterSchemas, EffectiveSchema, PropertyDef, SimplifiedSchema, SuggestionLintReason,
+    SuggestionQuery, TypeExpr, darkmatter_base_schema, flattened_alternatives, lint_suggestions,
+    parse_standalone_schema_document, parse_yaml_schema, suggestions_for_def, suggestions_for_path,
 };
 use serde_json::{Value, json};
 
+use crate::content_policy_fixtures::RULE_SUGGESTIONS;
 use crate::request_support::context_at;
 use crate::union_fixtures::{
     CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, FILE_TYPES, OVERLAPPING_TYPES, TAGGED_TYPES,
@@ -112,9 +114,9 @@ fn content_policy_item_offers_object_keys_and_scalar_values() {
     assert_eq!(completion.selected_arm, None);
     assert_eq!(keys(&completion), ["rule", "action"]);
     assert!(completion.keys.iter().all(|key| key.required), "{:?}", completion.keys);
-    // Only `Evergreen` survives: `suggest(...)` is linted against its own arm,
-    // whose pattern is `^Evergreen$`, not against the whole union.
-    assert_eq!(values(&completion), ["Evergreen"]);
+    // Every shipped candidate survives: the list stored on the `^Evergreen$`
+    // arm is judged against the whole union, which accepts each of them.
+    assert_eq!(values(&completion), RULE_SUGGESTIONS);
     let evergreen = completion
         .values
         .iter()
@@ -408,4 +410,109 @@ fn alternative_accepts_judges_each_item_against_every_flattened_alternative() {
         .map(|(index, _)| index)
         .collect();
     assert_eq!(overlapping, [0, 1], "an overlapping item matches both arms");
+}
+
+fn suggestion_labels(query: Option<SuggestionQuery>) -> Vec<String> {
+    query
+        .expect("suggestions are declared")
+        .items
+        .into_iter()
+        .map(|item| item.label)
+        .collect()
+}
+
+/// The long-form `rule` definition inside the `content_policy` item union.
+fn long_form_rule(def: &PropertyDef) -> &PropertyDef {
+    flattened_alternatives(def)
+        .into_iter()
+        .find_map(|alternative| match &alternative.atom.ty {
+            TypeExpr::InlineObject(shape) => shape.properties.get("rule"),
+            _ => None,
+        })
+        .expect("the long form declares `rule`")
+}
+
+/// Content Policy's editor schema imported from disk offers the same rule
+/// suggestions as the compiled-in baseline, at the list, the compact item, and
+/// the long-form `rule:` value; neither source lints any of them.
+#[test]
+fn disk_imported_policy_schema_suggests_like_the_embedded_baseline() {
+    let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let (_guard, dir) = temp_root();
+    write_files(&dir, &[(CONTENT_POLICY_FILE, &content_policy_union_schema(shipped))]);
+    let (effective, _) = load(
+        &dir,
+        &format!("  content_policy: \"{CONTENT_POLICY_LIST}\"\n"),
+        "content_policy: [null]\n",
+    );
+    let disk = effective.simplified.as_ref().expect("simplified schema");
+    let embedded = &darkmatter_base_schema();
+    let disk_def = property_def(&effective, "content_policy");
+    let SimplifiedSchema::Single(embedded_shape) = embedded else {
+        panic!("the baseline is a single shape");
+    };
+    let embedded_def = &embedded_shape.properties["content_policy"];
+
+    for (source, schema, def) in [("disk", disk, disk_def), ("embedded", embedded, embedded_def)] {
+        assert!(lint_suggestions(schema).expect("lint runs").is_empty(), "{source}");
+        assert_eq!(
+            suggestion_labels(suggestions_for_path(schema, &["content_policy"])),
+            RULE_SUGGESTIONS,
+            "{source}"
+        );
+        assert_eq!(suggestion_labels(suggestions_for_def("content_policy", def)), RULE_SUGGESTIONS, "{source}");
+        assert_eq!(
+            suggestion_labels(suggestions_for_def("rule", long_form_rule(def))),
+            RULE_SUGGESTIONS,
+            "{source}"
+        );
+    }
+    assert_eq!(values(&item(&effective, "content_policy", &Value::Null)), RULE_SUGGESTIONS);
+}
+
+/// Loading the shipped schema file as a standalone document records no
+/// suggestion lint problem, so an editor shows no warning on its list.
+#[test]
+fn the_shipped_policy_schema_loads_without_suggestion_lints() {
+    let shipped = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let document = parse_standalone_schema_document(shipped, Path::new("content-policy.yaml"))
+        .expect("the shipped schema parses")
+        .expect("the shipped schema is a schema document");
+    assert!(document.suggestion_lints.is_empty(), "{:?}", document.suggestion_lints);
+}
+
+fn inline(yaml: &str) -> SimplifiedSchema {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml");
+    parse_yaml_schema(value.get("$schema").expect("$schema")).expect("schema parses")
+}
+
+/// A union's one suggestion list is judged against the effective type at its
+/// insertion site: a candidate stands when any alternative there accepts it,
+/// whether the union is written on the property or reached through a list of
+/// a union, and falls only when none does. An array alternative's elements are
+/// a different site from the scalar alternatives.
+#[test]
+fn union_suggestions_are_judged_against_every_alternative_at_their_site() {
+    let property_union = inline(concat!(
+        "$schema:\n",
+        "  size: [\"string(pattern(^small$); suggest(small, large, 3, huge))\", \"string(pattern(^large$))\", number]\n",
+    ));
+    let problems = lint_suggestions(&property_union).expect("lint runs");
+    let rejected: Vec<_> = problems.iter().map(|problem| (problem.decoded.as_str(), problem.reason)).collect();
+    // `3` is a string candidate; the `number` arm does not accept the string.
+    assert_eq!(rejected, [("3", SuggestionLintReason::Pattern), ("huge", SuggestionLintReason::Pattern)]);
+    assert_eq!(problems[0].property_arm, Some(0));
+    assert_eq!(suggestion_labels(suggestions_for_path(&property_union, &["size"])), ["small", "large"]);
+    let SimplifiedSchema::Single(shape) = &property_union else {
+        panic!("single shape");
+    };
+    assert_eq!(suggestion_labels(suggestions_for_def("size", &shape.properties["size"])), ["small", "large"]);
+
+    let mixed_sites = inline(concat!(
+        "$schema:\n",
+        "  tag: [\"string(pattern(^a$); suggest(a, b))\", \"string(pattern(^b$))[]\"]\n",
+    ));
+    let problems = lint_suggestions(&mixed_sites).expect("lint runs");
+    let rejected: Vec<&str> = problems.iter().map(|problem| problem.decoded.as_str()).collect();
+    assert_eq!(rejected, ["b"], "an element alternative cannot vouch for a scalar candidate");
 }

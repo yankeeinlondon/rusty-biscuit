@@ -630,6 +630,11 @@ pub(crate) struct FrontmatterInterpolationReport {
     /// Templated keys left unscanned because they read a shell-pending value.
     /// [`FrontmatterPass::Deferred`] scans exactly these after shell expansion.
     pub deferred_keys: Vec<String>,
+    /// Templated keys a pass 1 without shell deferral resolved against the
+    /// unexpanded text of a whole-value `$( … )` key, directly or through
+    /// another templated key. Their value is provisional: a pass that runs
+    /// shell expansion resolves them again from the command's output.
+    pub provisional_keys: HashSet<String>,
 }
 
 /// Which frontmatter keys one interpolation pass scans.
@@ -838,11 +843,19 @@ fn interpolate_frontmatter_impl(
     let data = provenance.data().clone();
 
     let defer_shell_pending = matches!(pass, FrontmatterPass::First { defer_shell_pending: true });
-    let shell_pending_keys: HashSet<String> = if defer_shell_pending {
+    // Pass 1 always knows which keys are unexpanded shell commands; only a
+    // deferring pass leaves their readers unscanned. A non-deferring pass 1
+    // resolves those readers provisionally and reports them.
+    let unexpanded_shell_keys: HashSet<String> = if matches!(pass, FrontmatterPass::First { .. }) {
         fm.keys()
             .filter(|k| !exclude_keys.contains(*k) && provenance.is_authored_shell_candidate(k))
             .cloned()
             .collect()
+    } else {
+        HashSet::new()
+    };
+    let shell_pending_keys: HashSet<String> = if defer_shell_pending {
+        unexpanded_shell_keys.clone()
     } else {
         HashSet::new()
     };
@@ -890,6 +903,7 @@ fn interpolate_frontmatter_impl(
             missing_runtime_context: None,
             missing_roots: Vec::new(),
             deferred_keys: Vec::new(),
+            provisional_keys: HashSet::new(),
         });
     }
 
@@ -1176,12 +1190,24 @@ fn interpolate_frontmatter_impl(
         provenance.data_mut().mark(path);
     }
 
+    let provisional_keys = if defer_shell_pending {
+        HashSet::new()
+    } else {
+        transitively_shell_blocked_keys(
+            &templated_keys,
+            &authored_templates,
+            &unexpanded_shell_keys,
+            &state.data,
+        )
+    };
+
     Ok(FrontmatterInterpolationReport {
         replacements: total_replacements,
         warnings: all_warnings,
         missing_runtime_context,
         missing_roots,
         deferred_keys,
+        provisional_keys,
     })
 }
 

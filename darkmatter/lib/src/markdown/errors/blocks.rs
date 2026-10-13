@@ -705,15 +705,22 @@ pub(crate) fn schema_validation_failed_block(
             None => String::new(),
         };
 
-        let target = if let Some(ref prop) = problem.property {
-            Prose::escape_text(prop)
-        } else {
-            let trimmed = problem.path.trim_start_matches('/');
-            if trimmed.is_empty() {
-                "<root>".to_string()
-            } else {
-                Prose::escape_text(trimmed.split('/').next().unwrap_or(trimmed))
-            }
+        // The full instance path, spelled as `md schema validate` spells it
+        // (`content_policy/1/rule`); a missing property has no node of its
+        // own, so its name is appended to the parent's path.
+        let instance = problem.path.trim_start_matches('/');
+        let missing = problem
+            .property
+            .as_deref()
+            .filter(|_| problem.kind == ValidationProblemKind::Missing);
+        let target = match (instance.is_empty(), missing) {
+            (true, Some(property)) => Prose::escape_text(property),
+            (false, Some(property)) => Prose::escape_text(&format!("{instance}/{property}")),
+            (true, None) => problem
+                .property
+                .as_deref()
+                .map_or_else(|| "<root>".to_string(), Prose::escape_text),
+            (false, None) => Prose::escape_text(instance),
         };
 
         let bullet = match problem.kind {
@@ -1319,6 +1326,29 @@ mod tests {
             out.contains("expected string"),
             "missing problem message: {out}",
         );
+    }
+
+    /// A nested problem names its whole instance path, and a missing nested
+    /// property names its parent's path plus its own name.
+    #[test]
+    fn schema_validation_failed_block_names_nested_instance_paths() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let nested = |pointer: &str, kind, property: Option<&str>| ValidationProblem {
+            path: pointer.to_string(),
+            kind,
+            property: property.map(String::from),
+            instance_path: crate::markdown::schemas::JsonPointer::parse(pointer),
+            ..problem_with_description(None)
+        };
+        let problems = [
+            nested("/content_policy/1/rule", ValidationProblemKind::Invalid, None),
+            nested("/content_policy/0", ValidationProblemKind::Missing, Some("rule")),
+            nested("", ValidationProblemKind::Missing, Some("title")),
+        ];
+        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None));
+        assert!(out.contains("invalid content_policy/1/rule: "), "{out}");
+        assert!(out.contains("missing content_policy/0/rule: "), "{out}");
+        assert!(out.contains("missing title: "), "{out}");
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP

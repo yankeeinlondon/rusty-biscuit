@@ -15,12 +15,12 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, PropertyDef, SchemaOriginKind, SimplifiedSchema, TypeExpr,
     ValidationProblemKind, ValidationReport, darkmatter_base_json_schema_ref,
-    darkmatter_base_schema,
+    darkmatter_base_schema, lint_suggestions, suggestions_for_def, suggestions_for_path,
 };
 
 use crate::content_policy_fixtures::{
-    ACCEPTANCE_REJECTIONS, BASELINE_DECLARATION_LINE, DECLARATIONS, MIXED_POLICY_FRONTMATTER, Verdict,
-    declaration, render,
+    ACCEPTANCE_REJECTIONS, BASELINE_DECLARATION_LINE, DECLARATIONS, MIXED_POLICY_FRONTMATTER,
+    RULE_SUGGESTIONS, Verdict, declaration, render,
 };
 use crate::request_support::context_at;
 
@@ -319,4 +319,58 @@ fn triggers_and_documents_override_the_embedded_declaration_without_name_collisi
         check(&format!("{local_only}local: 4\ncontent_policy: [4]\n")),
         (Some(SchemaOriginKind::Baseline), false)
     );
+}
+
+/// The baseline's `content_policy` list definition and its long-form `rule`
+/// definition.
+fn policy_and_rule_defs(schema: &SimplifiedSchema) -> (&PropertyDef, &PropertyDef) {
+    let SimplifiedSchema::Single(shape) = schema else {
+        panic!("the baseline is a single shape");
+    };
+    let policy = &shape.properties["content_policy"];
+    let PropertyDef::Single(list) = policy else {
+        panic!("content_policy is one list atom");
+    };
+    let TypeExpr::Union(arms) = &list.ty else {
+        panic!("list items are a union: {list:?}");
+    };
+    let rule = arms
+        .iter()
+        .find_map(|arm| match &arm.ty {
+            TypeExpr::InlineObject(shape) => shape.properties.get("rule"),
+            _ => None,
+        })
+        .expect("the long form declares `rule`");
+    (policy, rule)
+}
+
+fn labels(query: Option<darkmatter::markdown::schemas::SuggestionQuery>) -> Vec<String> {
+    query
+        .expect("suggestions are declared")
+        .items
+        .into_iter()
+        .map(|item| item.label)
+        .collect()
+}
+
+/// The shipped rule suggestions sit on the first rule form, whose pattern
+/// accepts only `Evergreen`; every query judges them against the whole rule
+/// union, so none is linted away.
+#[test]
+fn every_shipped_rule_suggestion_survives_the_embedded_queries() {
+    let schema = &darkmatter_base_schema();
+    let (policy, rule) = policy_and_rule_defs(schema);
+
+    assert!(lint_suggestions(schema).expect("lint runs").is_empty());
+    let by_path = suggestions_for_path(schema, &["content_policy"]).expect("suggestions are declared");
+    assert!(by_path.is_array);
+    let by_path: Vec<_> = by_path.items.into_iter().map(|item| item.label).collect();
+    assert_eq!(by_path, RULE_SUGGESTIONS);
+
+    let item = suggestions_for_def("content_policy", policy).expect("suggestions are declared");
+    assert!(item.is_array, "a compact item is one element of the list");
+    let item: Vec<_> = item.items.into_iter().map(|item| item.label).collect();
+    assert_eq!(item, RULE_SUGGESTIONS);
+
+    assert_eq!(labels(suggestions_for_def("rule", rule)), RULE_SUGGESTIONS);
 }

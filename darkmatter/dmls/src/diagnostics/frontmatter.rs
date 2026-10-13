@@ -286,6 +286,7 @@ fn schema_problem_diagnostics(
             problem.message.clone(),
         );
         specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        specialized.data = Some(schema_problem_data(problem));
         out.push(specialized);
     }
 
@@ -319,10 +320,7 @@ fn schema_problem_diagnostics(
             problem.message.clone(),
         );
         diagnostic.related_information = schema_origin_related(ctx, bundle, problem);
-        diagnostic.data = problem
-            .file_reference
-            .as_ref()
-            .map(|reference| resolution_failure_data(reference.resolution_failure()));
+        diagnostic.data = Some(schema_problem_data(problem));
         out.push(diagnostic);
     }
 
@@ -331,6 +329,26 @@ fn schema_problem_diagnostics(
     // pure noise. The passive "never executed" guarantee is surfaced on hover
     // (schema description for the key; policy verdict for `$()` shell), not as a
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
+}
+
+/// The `data` payload of a schema-problem diagnostic:
+/// `{"instance_path": "/content_policy/1/rule"}`, plus `resolution_failure`
+/// for a file-reference failure.
+///
+/// The range already marks the node, but a missing key ranges its parent
+/// mapping and a list item shares its line with its fields, so the validator's
+/// JSON Pointer travels with it. A missing key's pointer names the parent
+/// object, as in `md schema validate --format json`; the message names the key.
+fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
+    let mut data = serde_json::Map::new();
+    data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(reference) = &problem.file_reference
+        && let serde_json::Value::Object(failure) =
+            resolution_failure_data(reference.resolution_failure())
+    {
+        data.extend(failure);
+    }
+    serde_json::Value::Object(data)
 }
 
 /// The instance paths at which schema validation reported a problem.
@@ -441,6 +459,7 @@ fn semantic_authored_diagnostics(
         );
         if let Some(problem) = report.problems.iter().find(|problem| problem.path == value.pointer) {
             specialized.related_information = schema_origin_related(ctx, bundle, problem);
+            specialized.data = Some(schema_problem_data(problem));
         }
         out.push(specialized);
         diagnosed.insert(value.pointer.clone());

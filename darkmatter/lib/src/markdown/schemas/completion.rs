@@ -43,10 +43,12 @@ use serde_json::Value;
 
 use super::EffectiveSchema;
 use super::discriminant::select_literal_discriminant_arm;
-use super::simplified::query::{Alternative, flattened_alternatives, yaml_double_quote};
+use super::simplified::query::{
+    Alternative, SuggestionItem, flattened_alternatives, suggestions_by_alternative, yaml_double_quote,
+};
 use super::simplified::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr, suggestions_for_def, to_json_schema,
+    TypeExpr, to_json_schema,
 };
 use super::validate::ValidatorCache;
 
@@ -464,6 +466,9 @@ pub fn alternatives_for_def(
     });
     let selected_arm = selected_arm.flatten();
 
+    // Candidates are judged against the whole definition, so a list a union
+    // stores on one arm keeps the entries its sibling arms accept.
+    let suggestions = suggestions_by_alternative("item", def);
     let mut completion = AlternativeCompletion {
         is_array,
         selected_arm,
@@ -476,7 +481,13 @@ pub fn alternatives_for_def(
         }
         match &atom.ty {
             TypeExpr::InlineObject(shape) => add_keys(&mut completion.keys, shape, arm),
-            TypeExpr::Primitive(_) => add_values(&mut completion.values, atom, arm),
+            TypeExpr::Primitive(_) => {
+                let suggested = suggestions
+                    .iter()
+                    .find(|(alternative, _)| std::ptr::eq(alternative.atom, *atom))
+                    .map_or(&[][..], |(_, items)| items.as_slice());
+                add_values(&mut completion.values, atom, arm, suggested);
+            }
             // An unresolved import has no shape to offer; flattening never
             // yields a union.
             TypeExpr::Imported { .. } | TypeExpr::Union(_) => {}
@@ -571,7 +582,12 @@ fn def_description(def: &PropertyDef) -> Option<String> {
     }
 }
 
-fn add_values(values: &mut Vec<AlternativeValue>, atom: &PropertyAtom, arm: usize) {
+fn add_values(
+    values: &mut Vec<AlternativeValue>,
+    atom: &PropertyAtom,
+    arm: usize,
+    suggested: &[SuggestionItem],
+) {
     let mut push = |label: String, insert_text: String| {
         if !values.iter().any(|value| value.insert_text == insert_text) {
             values.push(AlternativeValue {
@@ -594,12 +610,8 @@ fn add_values(values: &mut Vec<AlternativeValue>, atom: &PropertyAtom, arm: usiz
             }
         }
     }
-    // `suggestions_for_def` lints the arm's candidates and drops invalid ones;
-    // the leaf name only labels lint context.
-    if let Some(query) = suggestions_for_def("item", &PropertyDef::Single(atom.clone())) {
-        for item in query.items {
-            push(item.label, item.insert_text);
-        }
+    for item in suggested {
+        push(item.label.clone(), item.insert_text.clone());
     }
 }
 

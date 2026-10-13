@@ -122,8 +122,8 @@ fn compose_accepts_the_authoring_example_unchanged() {
 }
 
 /// Composes one [`ACCEPTANCE_REJECTIONS`] row: compose fails before
-/// producing output, naming `content_policy` at each expected problem's
-/// authored line and column.
+/// producing output, naming each expected problem's instance path (a missing
+/// field after its parent's path) at its authored line and column.
 fn assert_compose_rejects(case_name: &str) {
     let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
     let case = declaration(case_name);
@@ -138,7 +138,11 @@ fn assert_compose_rejects(case_name: &str) {
     assert!(stderr.contains("schema validation failed"), "{stderr}");
     for expected in case.problems {
         let (line, column) = rendered.start(expected.at);
-        let site = format!("{} content_policy: ", expected.kind);
+        let instance = expected.path.trim_start_matches('/');
+        let site = match expected.kind {
+            "missing" => format!("missing {instance}/"),
+            kind => format!("{kind} {instance}: "),
+        };
         assert!(stderr.contains(&site), "no `{site}` for {}: {stderr}", expected.path);
         assert!(stderr.contains(&format!(" at {line}:{column}")), "{} at {line}:{column}: {stderr}", expected.path);
     }
@@ -210,7 +214,7 @@ fn host_schema_configuration_cannot_stand_in_for_the_embedded_schemas() {
     assert_eq!(problem_paths(&record), ["/content_policy/0"], "{record}");
     let (code, _, stderr) = compose(&process, &document);
     assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains("invalid content_policy: "), "{stderr}");
+    assert!(stderr.contains("invalid content_policy/0: "), "{stderr}");
 
     let valid = only_document(&process, &format!("---\n{MIXED_POLICY_FRONTMATTER}---\nBody\n"));
     let (code, record) = validate_json(&process, &[], &valid);
@@ -351,5 +355,113 @@ fn schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error() {
     for record in &records {
         assert_eq!(record["error"], "frontmatter_parse", "{record}");
         assert_eq!(record["valid"], false, "{record}");
+    }
+}
+
+/// Commands the shell-resolution tests run, approved by the launch
+/// directory's own whitelist.
+const SHELL_WHITELIST: &str =
+    "exact echo words\nexact cat policy.txt\nexact echo TimeSensitive\nexact echo Duration\n";
+
+/// Runs `md compose --frontmatter [extra…]` on a `doc.md` holding
+/// `frontmatter`, beside a fixture-owned shell whitelist and a `policy.txt`
+/// whose text is a JSON list of one unknown rule.
+fn compose_shell_resolved(frontmatter: &str, extra: &[&str]) -> (Option<i32>, String, String) {
+    let process = CliProcessFixture::new();
+    let document = process.write_file("cwd/doc.md", &format!("---\n{frontmatter}---\nBody\n"));
+    process.write_file("cwd/.darkmatter-shell-whitelist", SHELL_WHITELIST);
+    process.write_file("cwd/policy.txt", "[\"Duration(3mo)\"]\n");
+    // `echo` and `cat` run as programs; on Windows they exist only as Git's
+    // executables outside System32, so the host PATH is declared.
+    let output = process
+        .command_builder()
+        .host_path()
+        .plain_terminal(400, 50)
+        .build()
+        .args(["compose", "--frontmatter"])
+        .args(extra)
+        .arg(&document)
+        .output()
+        .expect("run md compose");
+    (
+        output.status.code(),
+        String::from_utf8(output.stdout).expect("utf-8 stdout"),
+        plain(&String::from_utf8(output.stderr).expect("utf-8 stderr")),
+    )
+}
+
+/// Shell output that leaves `content_policy` invalid is rejected after
+/// resolution under the embedded baseline, whether or not trigger discovery
+/// is enabled: disabling triggers removes trigger schemas, not the
+/// baseline's verdict on resolved values.
+fn assert_shell_resolved_policies_rejected(extra: &[&str]) {
+    for frontmatter in [
+        "content_policy: \"$(echo words)\"\n",
+        // Shell stdout is text: a JSON list printed by a command is a string.
+        "content_policy: \"$(cat policy.txt)\"\n",
+        "content_policy: \"$(echo words)::ok\"\n",
+        "value: \"$(echo words)\"\ncontent_policy: \"{{ value }}\"\n",
+        // A rule a template reads from shell output is judged once resolved.
+        "rule: \"$(echo Duration)\"\ncontent_policy: [\"{{ rule }}\"]\n",
+        // `$(...)` inside a list is never run: it is an invalid rule as written.
+        "content_policy: [\"$(echo X)\", TimeSensitive]\n",
+    ] {
+        let (code, stdout, stderr) = compose_shell_resolved(frontmatter, extra);
+        assert_eq!(code, Some(1), "{extra:?} {frontmatter:?} composed:\n{stdout}\n{stderr}");
+        assert!(stdout.is_empty(), "{extra:?} {frontmatter:?}: {stdout}");
+        assert!(stderr.contains("schema validation failed"), "{extra:?} {frontmatter:?}: {stderr}");
+        assert!(stderr.contains("content_policy"), "{extra:?} {frontmatter:?}: {stderr}");
+    }
+}
+
+#[test]
+fn compose_rejects_an_invalid_shell_resolved_policy() {
+    assert_shell_resolved_policies_rejected(&[]);
+}
+
+#[test]
+fn compose_without_trigger_schemas_rejects_an_invalid_shell_resolved_policy() {
+    assert_shell_resolved_policies_rejected(&["--no-trigger-schemas"]);
+}
+
+/// The positive control: shell output that resolves to a value the
+/// baseline accepts composes beside a valid policy in both trigger modes, so
+/// the post-resolution check judges values rather than refusing shell output.
+#[test]
+fn compose_accepts_valid_shell_resolved_values_in_both_trigger_modes() {
+    let frontmatter = "title: \"$(echo words)\"\ncontent_policy: [TimeSensitive]\n";
+    for extra in [&[][..], &["--no-trigger-schemas"][..]] {
+        let (code, stdout, stderr) = compose_shell_resolved(frontmatter, extra);
+        assert_eq!(code, Some(0), "{extra:?}: {stderr}");
+        assert!(stdout.contains("title: words"), "{extra:?}: {stdout}");
+    }
+}
+
+/// A policy that a template builds from shell output waits for that output:
+/// the first schema pass, and the shell-discovery pass before it, see only the
+/// command's unexpanded text, so they defer the value rather than reject it.
+#[test]
+fn compose_accepts_a_policy_template_over_shell_output_in_both_trigger_modes() {
+    for content_policy in ["[\"{{ rule }}\"]", "\"{{ [rule] }}\""] {
+        let frontmatter = format!("rule: \"$(echo TimeSensitive)\"\ncontent_policy: {content_policy}\n");
+        for extra in [&[][..], &["--no-trigger-schemas"][..]] {
+            let (code, stdout, stderr) = compose_shell_resolved(&frontmatter, extra);
+            assert_eq!(code, Some(0), "{extra:?} {content_policy}: {stderr}");
+            assert!(
+                stdout.replace("\r\n", "\n").contains("content_policy:\n- TimeSensitive\n"),
+                "{extra:?} {content_policy}: {stdout}"
+            );
+        }
+    }
+}
+
+/// With the baseline disabled and no document or trigger schema, there is no
+/// effective schema, so the post-resolution check has nothing to apply.
+#[test]
+fn compose_without_any_schema_leaves_shell_resolved_values_unjudged() {
+    for extra in [&["--no-baseline-schema"][..], &["--no-baseline-schema", "--no-trigger-schemas"][..]] {
+        let (code, stdout, stderr) = compose_shell_resolved("content_policy: \"$(echo words)\"\n", extra);
+        assert_eq!(code, Some(0), "{extra:?}: {stderr}");
+        assert!(stdout.contains("content_policy: words"), "{extra:?}: {stdout}");
     }
 }

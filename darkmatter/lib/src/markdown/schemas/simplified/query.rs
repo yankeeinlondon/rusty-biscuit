@@ -17,6 +17,10 @@
 //!   suggestion-bearing definition for the property is used. All arms remain
 //!   linted.
 //!
+//! The selected atom only stores the list: its candidates are kept when any
+//! alternative of the property at their insertion site accepts them, as
+//! [`super::lint_suggestions`] judges.
+//!
 //! ## Side-effect freedom
 //!
 //! The query performs no filesystem discovery, shell execution, composition
@@ -100,34 +104,9 @@ pub fn suggestions_for_path(
 ) -> Option<SuggestionQuery> {
     let (leaf, ancestors) = property_path.split_last()?;
     let (alternative, root_arm) = suggest_atom_and_provenance(schema, ancestors, leaf)?;
-    let atom = alternative.atom;
-    let property_arm = alternative.arm;
-    let candidates = atom.constraints.iter().find_map(|c| match c {
-        Constraint::Suggest(candidates) => Some(candidates.as_slice()),
-        _ => None,
-    })?;
-
-    let is_array = alternative.is_array;
-    let is_string = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::String));
-    let is_number = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::Number));
-
     let lints = lint_suggestions(schema).unwrap_or_default();
-
-    let items = candidates
-        .iter()
-        .filter(|candidate| {
-            !is_lint_problem(
-                candidates,
-                &lints,
-                property_path,
-                &root_arm,
-                &property_arm,
-                candidate,
-            )
-        })
-        .map(|candidate| build_item(candidate, is_string, is_number))
-        .collect();
-
+    let items = alternative_items(&alternative, &lints, property_path, &root_arm);
+    let is_array = alternative.is_array;
     Some(SuggestionQuery { is_array, items })
 }
 
@@ -146,42 +125,90 @@ pub fn suggestions_for_path(
 /// Returns `None` when no atom of `def` carries a `suggest(...)` constraint.
 /// Candidates from every suggest-bearing atom are combined in atom-declaration
 /// order — so a merged union carrying suggestions on more than one arm offers
-/// all of them — with invalid candidates omitted per the same per-atom lint as
-/// [`suggestions_for_path`]. `is_array` is set when any suggest-bearing atom is
-/// an array form or an item alternative of an array of a union (`U[]`).
+/// all of them. A candidate is judged against the whole of `def`, so one stored
+/// on a union arm is kept when any alternative at its insertion site accepts it
+/// (see [`super::lint_suggestions`]). `is_array` is set when any suggest-bearing
+/// atom is an array form or an item alternative of an array of a union (`U[]`).
 ///
 /// ## Side-effect freedom
 ///
 /// No filesystem discovery, shell execution, composition directive evaluation,
 /// or network access occurs.
 pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQuery> {
-    let mut is_array = false;
-    let mut items = Vec::new();
-    let mut found = false;
-    for alternative in flattened_alternatives(def) {
-        let atom = alternative.atom;
-        if !has_suggest(atom) {
-            continue;
-        }
-        found = true;
-        // Lint each suggest-bearing atom in isolation by wrapping it in a
-        // single-property schema and reusing the whole `suggestions_for_path`
-        // lint/filter/build path. The cross-property provenance matching that
-        // path performs is a no-op here (one property, one atom), so this avoids
-        // duplicating the candidate-classification logic.
-        let mut shape = SchemaShape::default();
-        shape
-            .properties
-            .insert(leaf.to_string(), PropertyDef::Single(atom.clone()));
-        let mini = SimplifiedSchema::Single(shape);
-        if let Some(query) = suggestions_for_path(&mini, &[leaf]) {
-            // The arm alone cannot know it sits inside `U[]`; the flattening
-            // carried the container's array-ness.
-            is_array |= alternative.is_array;
-            items.extend(query.items);
-        }
+    let by_alternative = suggestions_by_alternative(leaf, def);
+    if by_alternative.is_empty() {
+        return None;
     }
-    found.then_some(SuggestionQuery { is_array, items })
+    let is_array = by_alternative.iter().any(|(alternative, _)| alternative.is_array);
+    let items = by_alternative
+        .into_iter()
+        .flat_map(|(_, items)| items)
+        .collect();
+    Some(SuggestionQuery { is_array, items })
+}
+
+/// Lint-valid candidates of each suggest-bearing alternative of `def`, in
+/// declaration order, judged against the whole definition.
+///
+/// The alternatives borrow from `def`, so a caller walking
+/// [`flattened_alternatives`] of the same definition can match them by atom
+/// identity.
+pub(crate) fn suggestions_by_alternative<'a>(
+    leaf: &str,
+    def: &'a PropertyDef,
+) -> Vec<(Alternative<'a>, Vec<SuggestionItem>)> {
+    let alternatives: Vec<Alternative<'a>> = flattened_alternatives(def)
+        .into_iter()
+        .filter(|alternative| has_suggest(alternative.atom))
+        .collect();
+    if alternatives.is_empty() {
+        return Vec::new();
+    }
+    // Lint the definition as a one-property schema so every alternative is in
+    // view; isolating the storing atom would judge a shared union list against
+    // that one arm.
+    let mut shape = SchemaShape::default();
+    shape.properties.insert(leaf.to_string(), def.clone());
+    let lints = lint_suggestions(&SimplifiedSchema::Single(shape)).unwrap_or_default();
+    alternatives
+        .into_iter()
+        .map(|alternative| {
+            let items = alternative_items(&alternative, &lints, &[leaf], &None);
+            (alternative, items)
+        })
+        .collect()
+}
+
+/// The lint-valid candidates stored on one alternative.
+fn alternative_items(
+    alternative: &Alternative<'_>,
+    lints: &[SuggestionLintProblem],
+    property_path: &[&str],
+    root_arm: &Option<usize>,
+) -> Vec<SuggestionItem> {
+    let atom = alternative.atom;
+    let Some(candidates) = atom.constraints.iter().find_map(|c| match c {
+        Constraint::Suggest(candidates) => Some(candidates.as_slice()),
+        _ => None,
+    }) else {
+        return Vec::new();
+    };
+    let is_string = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::String));
+    let is_number = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::Number));
+    candidates
+        .iter()
+        .filter(|candidate| {
+            !is_lint_problem(
+                candidates,
+                lints,
+                property_path,
+                root_arm,
+                &alternative.arm,
+                candidate,
+            )
+        })
+        .map(|candidate| build_item(candidate, is_string, is_number))
+        .collect()
 }
 
 /// Resolves the alternative carrying `suggest(...)` for a path together with

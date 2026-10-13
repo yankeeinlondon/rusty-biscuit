@@ -23,9 +23,18 @@ use serde_json::{Value, json};
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 pub(crate) mod content_policy_fixtures;
 
-use content_policy_fixtures::{DECLARATIONS, MIXED_POLICY_FRONTMATTER, Verdict, render};
+use content_policy_fixtures::{DECLARATIONS, MIXED_POLICY_FRONTMATTER, RULE_SUGGESTIONS, Verdict, render};
 
 const ENUM_MEMBER: u64 = 20;
+
+/// The labels of `items` that are value completions.
+fn values(items: &[(String, u64, Option<String>)]) -> Vec<&str> {
+    items
+        .iter()
+        .filter(|(_, kind, _)| *kind == VALUE)
+        .map(|(label, _, _)| label.as_str())
+        .collect()
+}
 
 /// A session over an empty workspace: no schema file exists anywhere in it.
 fn session(workspace: &LspWorkspace) -> LspFixture<'_> {
@@ -36,6 +45,23 @@ fn session(workspace: &LspWorkspace) -> LspFixture<'_> {
 
 fn document(frontmatter: &str) -> String {
     format!("---\n{frontmatter}---\n\nBody\n")
+}
+
+/// `(line, character, instance path)` of each diagnostic: its range start and
+/// the JSON Pointer it carries in `data`, sorted.
+fn located_paths(diagnostics: &[Value]) -> Vec<(u64, u64, String)> {
+    let mut located: Vec<(u64, u64, String)> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic["range"]["start"]["line"].as_u64().unwrap(),
+                diagnostic["range"]["start"]["character"].as_u64().unwrap(),
+                diagnostic["data"]["instance_path"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    located.sort();
+    located
 }
 
 /// `(line, character, code)` of each diagnostic's range start, sorted.
@@ -67,15 +93,15 @@ fn completion_offers_rule_forms_actions_and_long_form_keys_from_the_embedded_sch
         ),
     );
 
-    // A compact item: the shipped suggestion and both long-form keys.
+    // A compact item: every shipped rule suggestion and both long-form keys.
     let item = completion(&mut fixture, &document, "ValidFor(3mo)\n  - ");
-    assert!(item.contains(&("Evergreen".to_string(), VALUE, None)), "{item:?}");
+    assert_eq!(values(&item), RULE_SUGGESTIONS, "{item:?}");
     assert!(item.contains(&("rule".to_string(), FIELD, Some("(required)".to_string()))), "{item:?}");
     assert!(item.contains(&("action".to_string(), FIELD, Some("(required)".to_string()))), "{item:?}");
 
-    // A long-form `rule:` value offers the rule forms' suggestion.
+    // A long-form `rule:` value offers every shipped rule suggestion.
     let rule = completion(&mut fixture, &document, "  - rule: ");
-    assert!(rule.contains(&("Evergreen".to_string(), VALUE, None)), "{rule:?}");
+    assert_eq!(values(&rule), RULE_SUGGESTIONS, "{rule:?}");
 
     // An `action:` value offers exactly the three actions.
     let action = completion(&mut fixture, &document, "rule: TimeSensitive\n    action: ");
@@ -153,11 +179,22 @@ fn diagnostics_address_the_offending_item_field_or_value() {
         ],
         "{diagnostics:#?}"
     );
+    assert_eq!(
+        located_paths(&diagnostics),
+        [
+            (2, 4, "/content_policy/0".to_string()),
+            (4, 12, "/content_policy/1/action".to_string()),
+            (5, 4, "/content_policy/2".to_string()),
+            (6, 10, "/content_policy/3/rule".to_string()),
+        ],
+        "{diagnostics:#?}"
+    );
     assert!(diagnostics.iter().all(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")));
 
     // An empty list, at the `content_policy` value.
     let (_, empty) = open_text(&mut fixture, &workspace, "empty.md", &document("content_policy: []\n"));
     assert_eq!(starts(&empty), [(1, 16, constraint)], "{empty:#?}");
+    assert_eq!(located_paths(&empty), [(1, 16, "/content_policy".to_string())], "{empty:#?}");
 
     fixture.shutdown();
 }
@@ -174,7 +211,8 @@ fn the_authoring_example_and_a_policy_free_document_are_clean() {
 }
 
 /// Every shared declaration case, in every presentation, publishes exactly
-/// the baseline problems the library reports, at the authored anchor.
+/// the baseline problems the library reports, at the authored anchor and
+/// carrying the problem's instance path.
 #[test]
 fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor() {
     let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
@@ -199,19 +237,18 @@ fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor() {
             let params = fixture.wait_for_diagnostics_params(&document.uri);
             assert_eq!(params["version"], json!(version), "{label}: the publication describes this edit");
             let diagnostics = params["diagnostics"].as_array().cloned().unwrap_or_default();
-            let published: Vec<(u64, u64)> =
-                starts(&diagnostics).into_iter().map(|(line, character, _)| (line, character)).collect();
+            let published = located_paths(&diagnostics);
             // DMLS validates as compose does, deferring a value that still holds
             // `{{ … }}` or `$(…)` to after interpolation, so such a declaration
             // publishes nothing here though the passive validator rejects it.
             let pending = is_pending_expression_value(&rendered.frontmatter);
-            let mut expected: Vec<(u64, u64)> = match case.schema {
+            let mut expected: Vec<(u64, u64, String)> = match case.schema {
                 Verdict::Reject if !pending => case
                     .problems
                     .iter()
                     .map(|problem| {
                         let (line, column) = rendered.start(problem.at);
-                        (u64::from(line) - 1, u64::from(column) - 1)
+                        (u64::from(line) - 1, u64::from(column) - 1, problem.path.to_string())
                     })
                     .collect(),
                 _ => Vec::new(),
