@@ -418,6 +418,54 @@ pub enum ShellTimeoutBehavior {
     EmptyString,
 }
 
+/// The complete environment a request's shell children start from.
+///
+/// Without one, a child inherits the composing process's environment. A host
+/// that composes several documents in one process, each under its own
+/// captured environment, supplies the document's here
+/// ([`ComposeOptions::with_shell_child_environment`](crate::markdown::compose::ComposeOptions::with_shell_child_environment)).
+/// It replaces the inherited environment rather than overlaying it, values
+/// are kept as raw OS strings, and the executable is looked up on its `PATH`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellChildEnvironment {
+    vars: Arc<[(std::ffi::OsString, std::ffi::OsString)]>,
+}
+
+impl ShellChildEnvironment {
+    /// A child environment holding exactly `vars`.
+    pub fn new<I, K, V>(vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<std::ffi::OsString>,
+        V: Into<std::ffi::OsString>,
+    {
+        Self {
+            vars: vars
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into()))
+                .collect(),
+        }
+    }
+
+    /// Every variable, in the order supplied.
+    pub fn iter(&self) -> impl Iterator<Item = (&std::ffi::OsStr, &std::ffi::OsStr)> + '_ {
+        self.vars.iter().map(|(key, value)| (key.as_os_str(), value.as_os_str()))
+    }
+
+    /// The `PATH` an executable is looked up on (case-insensitive on Windows).
+    pub(crate) fn path(&self) -> Option<&std::ffi::OsStr> {
+        self.iter()
+            .find(|(key, _)| {
+                if cfg!(windows) {
+                    key.eq_ignore_ascii_case("PATH")
+                } else {
+                    *key == "PATH"
+                }
+            })
+            .map(|(_, value)| value)
+    }
+}
+
 /// Options for shell expansion behavior.
 pub struct ShellExpansionOptions {
     pub timeout: std::time::Duration,

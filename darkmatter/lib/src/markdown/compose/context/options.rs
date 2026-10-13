@@ -306,6 +306,11 @@ pub struct ComposeOptions {
     /// (if known) or the current working directory.
     pub(crate) shell_working_directory: Option<PathBuf>,
 
+    /// The environment `::shell` and frontmatter `$( … )` children start from.
+    ///
+    /// When `None`, they inherit this process's environment.
+    pub(crate) shell_child_environment: Option<super::super::shell_expansion::ShellChildEnvironment>,
+
     /// Callback for interactive shell command approval.
     ///
     /// When set, commands that require approval call this handler
@@ -614,6 +619,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
+            .field("shell_child_environment", &self.shell_child_environment.is_some())
             .field(
                 "shell_approval_handler",
                 if self.shell_approval_handler.is_some() {
@@ -899,6 +905,7 @@ impl ComposeOptions {
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
             shell_working_directory: None,
+            shell_child_environment: None,
             shell_approval_handler: None,
             pre_approved_commands: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
@@ -1397,6 +1404,24 @@ impl ComposeOptions {
     pub fn with_shell_working_directory(mut self, path: impl Into<PathBuf>) -> Self {
         self.shell_working_directory = Some(path.into());
         self
+    }
+
+    /// Start every shell child from `environment` instead of this process's.
+    #[must_use]
+    pub fn with_shell_child_environment(
+        mut self,
+        environment: super::super::shell_expansion::ShellChildEnvironment,
+    ) -> Self {
+        self.shell_child_environment = Some(environment);
+        self
+    }
+
+    /// The environment shell children start from; `None` inherits this
+    /// process's.
+    pub(crate) fn shell_child_environment(
+        &self,
+    ) -> Option<&super::super::shell_expansion::ShellChildEnvironment> {
+        self.shell_child_environment.as_ref()
     }
 
     /// Sets the shell approval handler directly on flat compose options.
@@ -2634,6 +2659,7 @@ impl ComposeOptions {
             shell_timeout_behavior,
             shell_policy_root,
             shell_working_directory,
+            shell_child_environment,
             shell_approval_handler,
             pre_approved_commands,
             shell_strip_ansi,
@@ -2837,6 +2863,21 @@ impl ComposeOptions {
             Some(p) => {
                 enc.tag(1);
                 enc.path(p);
+            }
+            None => enc.tag(0),
+        }
+        enc.field("shell_child_environment");
+        match shell_child_environment {
+            Some(environment) => {
+                enc.tag(1);
+                // Raw OS strings, through the exact native encoding paths use.
+                let mut entries: Vec<_> = environment.iter().collect();
+                entries.sort_unstable();
+                enc.count(entries.len());
+                for (name, value) in entries {
+                    enc.path(Path::new(name));
+                    enc.path(Path::new(value));
+                }
             }
             None => enc.tag(0),
         }

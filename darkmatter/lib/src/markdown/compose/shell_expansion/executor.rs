@@ -15,8 +15,8 @@ use shared_child::SharedChild;
 use tracing::{debug, instrument, warn};
 
 use super::types::{
-    ChainOperator, CommandAction, PipelineAction, RedirectionConfig, ShellCommandOrigin,
-    ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior,
+    ChainOperator, CommandAction, PipelineAction, RedirectionConfig, ShellChildEnvironment,
+    ShellCommandOrigin, ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior,
     StderrTarget, StdoutTarget,
 };
 use crate::markdown::compose::ComposeSource;
@@ -215,7 +215,7 @@ pub(crate) fn execute_command_detailed(
     context: &FileResolutionContext,
 ) -> Result<CommandExecution, ShellExpansionError> {
     let first = directive_actions(directive).into_iter().take(1).collect();
-    let outcome = run_actions(directive, first, shell_opts, source, context)?;
+    let outcome = run_actions(directive, first, shell_opts, source, context, None)?;
     outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
@@ -228,7 +228,7 @@ pub(crate) fn execute_directive_impl(
     source: &ComposeSource,
     context: &FileResolutionContext,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    let outcome = execute_directive_outcome(directive, shell_opts, source, context)?;
+    let outcome = execute_directive_outcome(directive, shell_opts, source, context, None)?;
     outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
@@ -244,13 +244,24 @@ pub(crate) fn execute_directive_impl(
 ///
 /// Only failures that leave no outcome: a missing executable, a spawn or wait
 /// failure, or a capture thread that panicked.
+///
+/// `child_environment`, when supplied, replaces the inherited environment of
+/// every command the directive runs; see [`ShellChildEnvironment`].
 pub(crate) fn execute_directive_outcome(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
     context: &FileResolutionContext,
+    child_environment: Option<&ShellChildEnvironment>,
 ) -> Result<ShellOutcome, ShellExpansionError> {
-    run_actions(directive, directive_actions(directive), shell_opts, source, context)
+    run_actions(
+        directive,
+        directive_actions(directive),
+        shell_opts,
+        source,
+        context,
+        child_environment,
+    )
 }
 
 /// The directive's commands with their chain operators. A directive without a
@@ -275,6 +286,7 @@ fn run_actions(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
     context: &FileResolutionContext,
+    child_environment: Option<&ShellChildEnvironment>,
 ) -> Result<ShellOutcome, ShellExpansionError> {
     let working_dir = resolve_working_directory(shell_opts, source, context);
     let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
@@ -302,6 +314,7 @@ fn run_actions(
             &directive.raw_command,
             &directive.origin,
             &directive.ctx,
+            child_environment,
         )?;
         join_stream(&mut stdout, run.stdout);
         join_stream(&mut stderr, run.stderr);
@@ -397,6 +410,7 @@ struct ActionRun {
 /// OS pipe (via `std::io::pipe`) before spawning so that emission order is
 /// preserved by the kernel rather than reconstructed after exit. A timed-out
 /// command reports no output.
+#[allow(clippy::too_many_arguments)]
 fn run_action(
     action: &CommandAction,
     working_dir: &std::path::Path,
@@ -405,18 +419,32 @@ fn run_action(
     raw_command: &str,
     origin: &super::types::ShellCommandOrigin,
     ctx: &biscuit_terminal::errors::SourceContext,
+    child_environment: Option<&ShellChildEnvironment>,
 ) -> Result<ActionRun, ShellExpansionError> {
-    let resolved_path =
-        which::which(&action.executable).map_err(|_| ShellExpansionError::CommandNotFound {
-            ctx: Box::new(ctx.clone()),
-            command: action.executable.clone(),
-            origin: origin.clone(),
-        })?;
+    // A supplied environment names the `PATH` the child would search, so the
+    // executable is found there rather than on this process's.
+    let resolved_path = match child_environment {
+        Some(environment) => which::which_in(&action.executable, environment.path(), working_dir),
+        None => which::which(&action.executable),
+    }
+    .map_err(|_| ShellExpansionError::CommandNotFound {
+        ctx: Box::new(ctx.clone()),
+        command: action.executable.clone(),
+        origin: origin.clone(),
+    })?;
 
     let mut cmd = Command::new(&resolved_path);
     cmd.args(&action.args)
         .current_dir(working_dir)
         .stdin(std::process::Stdio::null());
+    if let Some(environment) = child_environment {
+        cmd.env_clear().envs(environment.iter());
+        // The supplied `PWD` describes where its owner was, not where this
+        // child runs.
+        if working_dir.is_absolute() {
+            cmd.env("PWD", working_dir);
+        }
+    }
 
     if shell_opts.strip_ansi {
         cmd.env("NO_COLOR", "1");
