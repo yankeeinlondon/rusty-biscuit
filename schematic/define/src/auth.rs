@@ -7,11 +7,14 @@
 //!
 //! ## Update Strategy
 //!
-//! When creating API variants with the generated `variant()` builder method,
-//! the [`UpdateStrategy`] enum controls how the authentication strategy is handled:
+//! [`UpdateStrategy`] describes how an API variant's authentication strategy
+//! is handled:
 //!
 //! - [`UpdateStrategy::NoChange`] - Keep the existing auth strategy
 //! - [`UpdateStrategy::ChangeTo`] - Switch to a different auth strategy
+//!
+//! Generated clients no longer have a `variant()` method, so no generated code
+//! reads it; a client is reconfigured through its `{Api}::builder()`.
 
 use serde::{Deserialize, Serialize};
 
@@ -342,9 +345,8 @@ pub enum ApiKeyLocation {
 
 /// Strategy for updating authentication when creating API variants.
 ///
-/// Used with the generated `variant()` method to control how the authentication
-/// strategy is handled when creating a new API client instance with different
-/// configuration.
+/// No generated code reads it: the generated `variant()` method it served was
+/// removed, and a client is reconfigured through its `{Api}::builder()`.
 ///
 /// ## Examples
 ///

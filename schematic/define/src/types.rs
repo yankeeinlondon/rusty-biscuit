@@ -123,10 +123,10 @@ pub enum RestMethod {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestApi {
-    /// Unique identifier for this API (used for generated struct/enum names).
+    /// Unique identifier for this API (used for generated type names).
     ///
-    /// This becomes the generated client struct name (e.g., "OpenAI" generates
-    /// `struct OpenAI` and `enum OpenAIRequest`).
+    /// "OpenAI", for example, generates the API marker `enum OpenAI {}` and
+    /// the client alias `type OpenAIClient = schematic_runtime::Client<OpenAI>`.
     pub name: String,
     /// Human-readable description of the API.
     pub description: String,
@@ -147,9 +147,9 @@ pub struct RestApi {
     pub auth_policy: Option<AuthPolicy>,
     /// Environment variable names for authentication credentials.
     ///
-    /// For `BearerToken` and `ApiKey` auth strategies, this is a fallback chain.
-    /// The first env var that is set will be used. If none is set, the request
-    /// is sent anonymously.
+    /// For `BearerToken`, `ApiKey`, and `ApiKeyParam` auth strategies, this is
+    /// a fallback chain. The first non-empty env var is used. If none is set,
+    /// the request is sent anonymously.
     ///
     /// Example: `vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()]`
     pub env_auth: Vec<String>,
@@ -336,11 +336,10 @@ impl RestApi {
     /// [`EnvMapping`].
     ///
     /// An [`AuthStrategy::ApiKeyParam`] strategy yields an empty mapping:
-    /// [`EnvMapping`] only describes header credentials. The generated client
-    /// resolves a query or cookie key from `env_auth` itself, and only while
-    /// its effective policy's env fallback is
-    /// [`EnvAuthStrategy::ApiKeyParam`]; that interim scan is replaced when
-    /// credentials move to a shared runtime.
+    /// [`EnvMapping`] only describes header credentials. For an
+    /// [`EnvAuthStrategy::ApiKeyParam`] fallback the generator reads the
+    /// variables from `env_auth` directly and gives them to the runtime's
+    /// environment fallback with a query or cookie placement.
     #[must_use]
     pub fn legacy_env_mapping_for(
         auth: &AuthStrategy,

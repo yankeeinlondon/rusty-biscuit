@@ -26,7 +26,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `OAuth2GrantType` | OAuth2 grant type (AuthorizationCodePkce, ClientCredentials, DeviceCode) |
 | `PkceRequirement` | PKCE requirement level (Required, Supported, NotUsed) |
 | `OAuth2ClientAuthMethod` | Client credential delivery method (ClientSecretBasic, ClientSecretPost, None) |
-| `UpdateStrategy` | Strategy for updating auth in API variants (NoChange, ChangeTo) |
+| `UpdateStrategy` | Auth-update choice (NoChange, ChangeTo); still exported, but no generated code reads it |
 | `CrossOrigin` | API-level policy for redirects and next-page links to other origins |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
@@ -39,7 +39,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 
 | Type | Purpose |
 |------|---------|
-| `Headers` | Fluent builder for HTTP headers with auth support |
+| `Headers` | Fluent builder for HTTP headers with auth support; used by generated WebSocket clients |
 | `SensitiveString` | Secure wrapper for passwords/tokens (redacts Debug output) |
 | `EnvList` | Environment variable fallback chain for credentials |
 | `ApiKeyEnv` | API key header configuration with environment source |
@@ -115,14 +115,16 @@ Authentication can be modeled in two ways:
 1. `RestApi::auth` with legacy `env_auth` / `env_username` fields for backward-compatible single-strategy auth
 2. `RestApi::auth_policy` plus `EnvMapping` for explicit multi-method auth and authoritative env fallback
 
-Generated clients always apply this precedence:
+The definition only says *where* a credential goes and which environment variables can supply one. The generator translates it into the API's runtime `ApiDefinition`: each accepted method becomes a credential placement (an OAuth2 method is accepted as a bearer access token), and the environment mapping becomes the API's environment fallback. At send time [`schematic-runtime`](../runtime/README.md) resolves one credential per request, first match wins:
 
-1. Explicit auth already attached to `Headers`
-2. Explicit auth injected with generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, or `.oauth_token(...)`
-3. Environment-variable fallback from `EnvMapping`
-4. `SchematicError::AuthenticationRequired`
+1. A per-call credential (`CallOptions::credential(...)`)
+2. A client credential (`{Api}::builder().credentials(...)`)
+3. The first set, non-empty variable of the environment fallback
+4. None: the request is sent anonymously, and the server's reply (typically a 401) arrives in the response envelope
 
-Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before runtime auth resolution.
+`CallOptions::anonymous()` skips every source. See [Credentials](../docs/runtime/credentials.md) for the full rules.
+
+Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before translating the fallback.
 
 ### Bearer Token (Most Common)
 
@@ -226,7 +228,7 @@ let api = RestApi {
 };
 ```
 
-OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients surface `SchematicError::AuthenticationRequired` when no acceptable credential is available and, for OAuth-enabled clients, point callers to `schematic-oauth` before injecting the token with `.oauth_token(...)` or an explicit `Headers` builder.
+OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients do not run OAuth flows: obtain a token with `schematic-oauth` (or any other source) and pass it as `Credential::access_token(token)`, either per client or per call.
 
 ### Multi-Method Auth Policy
 
@@ -305,46 +307,28 @@ If `oauth_scopes` is `None`, the API-level `default_scopes` from `OAuth2Config` 
 
 ### Missing Credentials
 
-If neither explicit auth nor environment fallback can satisfy the API requirements, the generated code returns `SchematicError::AuthenticationRequired`:
-
-```rust
-Err(SchematicError::AuthenticationRequired {
-    message: "Authentication required: an explicit API key in `PRIVATE-TOKEN`, an explicit OAuth access token or set one of the fallback env vars `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`.".to_string(),
-    explicit_methods: vec![
-        "an explicit API key in `PRIVATE-TOKEN`".to_string(),
-        "an explicit OAuth access token".to_string(),
-    ],
-    env_fallback_vars: vec![
-        "GITLAB_TOKEN".to_string(),
-        "GITLAB_PRIVATE_TOKEN".to_string(),
-    ],
-})
-```
+A missing credential is not an error. When neither an explicit credential nor the environment fallback supplies one, the generated client sends the request without one, and the server's reply arrives in the `Response` envelope with the runtime's `AuthMethod::Anonymous` (not this crate's `AuthMethod`) recorded in `response.meta.request.auth`. See [A missing credential is not an error](../docs/runtime/credentials.md#a-missing-credential-is-not-an-error).
 
 ### Programmatic Authentication
 
-To inject tokens programmatically (without environment variables), use the `Headers` builder:
+To inject a credential without environment variables, hand a `Credential` to the generated client, for the whole client or for one call:
 
 ```rust
-use schematic_define::Headers;
+use schematic_schema::prelude::*;
 
-// Token from runtime source (Vault, OAuth, config file, etc.)
+// Token from a runtime source (Vault, OAuth, config file, etc.)
 let token = get_token_from_somewhere();
 
-// Create client with programmatic token - no env vars needed!
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token(token))
-    .build();
+// Every send of this client carries the token
+let client = OpenAI::builder()
+    .credentials(Credential::access_token(token))
+    .build()?;
 
-// Or with basic auth
-let client = SomeApi::new()
-    .variant()
-    .headers_builder(Headers::default().use_basic_auth("user", "pass"))
-    .build();
+// Or one send only, overriding the client credential
+let options = CallOptions::new().credential(Credential::basic("user", "pass"));
 ```
 
-When `Headers` has explicit auth set via `use_bearer_token()`, `use_basic_auth()`, or `use_api_key()`, env-based auth fallback is automatically skipped. The generated code checks `headers.has_explicit_auth()` so explicit API keys now win over env fallback the same way bearer/basic auth already did.
+A credential's kind must match a placement the definition accepts: `Credential::access_token` for bearer and OAuth2, `Credential::api_key` for key headers, query parameters, and cookies, and `Credential::basic` for Basic. An explicit credential always wins over the environment fallback.
 
 This is useful for:
 
@@ -355,23 +339,11 @@ This is useful for:
 
 ### UpdateStrategy
 
-When creating API variants with the generated `variant()` method, use `UpdateStrategy` to control auth:
-
-```rust
-use schematic_define::{AuthStrategy, UpdateStrategy};
-
-// Keep existing auth strategy
-let strategy = UpdateStrategy::NoChange;
-
-// Change to a different auth strategy
-let strategy = UpdateStrategy::ChangeTo(AuthStrategy::ApiKey {
-    header: "X-API-Key".to_string(),
-});
-```
+`UpdateStrategy` (`NoChange` or `ChangeTo(AuthStrategy)`) is still exported, but no generated code reads it: the generated `variant()` method it served no longer exists. Reconfigure a client through its `{Api}::builder()` instead.
 
 ## Headers Builder
 
-The `Headers` type provides a fluent API for building HTTP headers:
+The `Headers` type provides a fluent API for building HTTP headers. Generated WebSocket clients use it for their handshake headers and credentials; generated REST clients do not, since their credentials go through the runtime (see [Programmatic Authentication](#programmatic-authentication)).
 
 ```rust
 use schematic_define::Headers;

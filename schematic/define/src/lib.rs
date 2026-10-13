@@ -14,7 +14,7 @@
 //! - [`AuthStrategy`] - Legacy single-strategy authentication model
 //! - [`AuthPolicy`] - Explicit auth methods plus environment fallback policy
 //! - [`CrossOrigin`] - Policy for following redirects and next-page links to other origins
-//! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
+//! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo); no generated code reads it
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
