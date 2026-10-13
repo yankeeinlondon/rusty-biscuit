@@ -50,7 +50,7 @@ Whether speed is included in the cache key depends on how the provider handles s
 | gTTS        | No           | Playa adjusts playback speed at play time |
 | EchoGarden  | Yes          | Speed baked into audio via `--speed` flag |
 | ElevenLabs  | Yes          | Speed baked into audio via API parameter |
-| Say (detached) | Yes       | Speed baked into PCM WAV by `say -r` |
+| Say         | Yes          | Speed baked into PCM WAV by `say -r` |
 
 Providers where playa handles speed can share a single cached file across different speed settings. Providers that bake speed into the generated audio need separate cache entries per speed value.
 
@@ -60,25 +60,34 @@ Kokoro, gTTS, EchoGarden, and ElevenLabs implement a `generate_to_cache` method 
 
 1. Build a `CacheKey` from provider-specific inputs
 2. Call `cache_exists()` -- if `true`, return `(cache_path, true)` immediately
-3. Generate the audio, writing to `cache_path` (or using `write_atomic()` for byte data)
+3. Generate the audio into a staging file beside `cache_path`, then rename it into place (or use `write_atomic()` for byte data)
 4. Return `(cache_path, false)`
+
+A cache entry therefore only ever appears complete. If synthesis fails, or the
+caller drops the future mid-synthesis, the tool's child process is killed and
+the staging file (named `.biscuit-speaks-staging-*`) is deleted:
+
+```text
+kokoro-tts input.txt /tmp/.biscuit-speaks-staging-a1B2c3.wav --voice af_heart
+  ok   -> rename to /tmp/biscuit-speaks-<hash>.wav
+  fail -> delete staging file, no cache entry
+```
 
 The return tuple is `(PathBuf, bool)` where the bool indicates a cache hit. This flows into `SpeakResult.cache_hit` which the CLI displays as `Cache: hit` or `Cache: miss`.
 
 Providers that use audio caching:
 
-- **Kokoro** -- generates WAV via `kokoro-cli`, writes directly to cache path
-- **gTTS** -- generates MP3 via `gtts-cli --output`, writes directly to cache path
-- **EchoGarden** -- generates WAV via `echogarden speak-to-file`, writes directly to cache path
-- **ElevenLabs** -- fetches MP3 bytes from API, uses `write_atomic()` to persist
+- **Kokoro** -- generates WAV via `kokoro-tts`; keyed by the voice, which is the requested voice or the best built-in voice for the language and gender
+- **gTTS** -- generates MP3 via `gtts-cli --output`; keyed by the language code
+- **EchoGarden** -- generates WAV via `echogarden speak`; keyed by engine, voice, and speed. The voice is the requested one, the Kokoro engine's English default for the gender (`Heart` or `Michael`), or the best match from `echogarden list-voices <engine>`. When none of these yields a voice, echogarden picks its own default, which can change outside this library, so that audio is synthesized into a temporary file and never cached
+- **ElevenLabs** -- fetches MP3 bytes from API, uses `write_atomic()` to persist; keyed by voice, model, and speed. Without a requested voice, the voice is selected from the account's voice list, and each selection from a successful listing is recorded locally (beside the voice-capability cache file) for 24 hours so a detached request can find the file without listing voices again
+- **Say** -- generates PCM WAV via `say -o`; keyed by the voice and the exact integer words per minute, in foreground and detached playback alike. The voice is the requested one, `Alex`/`Samantha` for a gender, or the system voice read through AppKit's `NSSpeechSynthesizer`; the rate comes from an explicit speed (175 WPM times the multiplier). The system's own rate is not read yet, so normal-speed Say speech is synthesized into a temporary file and never cached. Volume is applied at playback
 
-Say synthesizes a temporary PCM WAV to preserve the selected voice and rate
-while applying volume at playback. Foreground playback removes the temporary
-file on completion or failure. Detached preparation atomically stores it in the
-audio cache before publishing the ready job. Named or gender-selected voices
-reuse a cache key containing the resolved voice and exact integer words per
-minute. An unspecified OS default voice or rate uses a unique synthesis identity
-and is never reused, since those defaults can change independently of the request.
+Audio for a voice or rate the library cannot pin down (an unresolved system
+default) is never read from or published to the cache, since those defaults can
+change independently of the request. Foreground playback deletes that temporary
+file afterwards; a detached job keeps it, because Playa deletes only files it
+owns. Say never reads legacy `system-default` cache entries.
 
 Providers that do **not** use audio caching:
 
@@ -93,7 +102,7 @@ The `write_atomic()` function in `audio_cache.rs` prevents partial writes from c
 2. `sync_all()` to flush to disk
 3. `rename()` to the final path (atomic on POSIX filesystems)
 
-ElevenLabs uses this for API response bytes; Say uses it for detached PCM WAV. Other providers write directly to the cache path via their CLI tools' `--output` flags.
+ElevenLabs uses this for API response bytes. The CLI-based providers have their tool write a staging file beside the entry and rename it into place, as described above.
 
 ### Cache Lifetime
 
@@ -150,7 +159,7 @@ Playa's native-first builder pipeline:
 2. `play_audio_file()` converts biscuit-speaks types to playa types via `playa_bridge.rs`
 3. `Playa::play_async_with_report()` performs playback and returns route/timing evidence
 
-The playa bridge maps volume (`VolumeLevel` to `f32`) and speed (`SpeedLevel` to `f32`) for providers where playa controls playback speed. For providers that bake speed into audio, the speed option still passes through but the audio already contains the adjusted tempo.
+The playa bridge maps volume (`VolumeLevel` to `f32`) and speed (`SpeedLevel` to `f32`) for providers where playa controls playback speed. Say, EchoGarden, and ElevenLabs already contain the requested tempo, so they play at normal speed and the speed is applied once.
 
 For detached cache misses, the requested sequence is reserved before synthesis.
 A private helper creates or reuses the cache file, atomically publishes the

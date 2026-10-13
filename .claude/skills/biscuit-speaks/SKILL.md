@@ -138,10 +138,15 @@ spool, journal, or subprocess side effects.
 output gain. eSpeak uses `-a` scaled to 0–100 (100 is unity, not its amplified
 200 maximum), and SAPI uses native percentage volume. Say synthesizes PCM WAV
 with the same selected voice/rate, then uses native Playa at the requested gain;
-without `playa`, it uses macOS `afplay -v`. Say detached jobs reserve preparation
-before synthesis and publish cached files, matching the other file providers.
-Temporary synthesis files are removed before handoff.
-Never apply playback speed a second time to Say's already rate-adjusted output.
+without `playa`, it uses macOS `afplay -v`. Say caches only when both the voice
+and the integer WPM rate are resolved (requested, gender, explicit speed, or the
+system voice via `osascript`/`NSSpeechSynthesizer`); the system *rate* is
+deliberately unresolved until the author confirms it tracks Spoken Content, so
+normal-speed Say speech is never cached. Unresolved audio goes to a
+`.biscuit-speaks-uncached-*` temp file. A fake `say` must write bytes to its
+`-o` path: Say refuses empty output rather than publish it to the cache.
+Never apply playback speed a second time to Say's, Echogarden's, or
+ElevenLabs' already rate-adjusted output.
 
 Real speech tests must use zero volume and explicit test-message wording. They
 are named `real_*` — including the ones inside `#[cfg(test)] mod tests` in
@@ -162,11 +167,18 @@ instead: it owns `PATH`, the temp dir, `BISCUIT_SPEAKS_CACHE`, and an
 uncreated `PLAYA_SPOOL_DIR`, installs recording `say`/`kokoro-tts`/`gtts-cli`/
 `echogarden` fakes that synthesize, fail, or hang after a partial write, and an
 `mpv` fake that is the playback boundary, because Playa falls back to it when
-native decoding of the fake bytes fails. The fakes are `/bin/sh` scripts, so
+native decoding of the fake bytes fails (`afplay` is the boundary for Say
+without `playa`). `set_say_voices` scripts the `say -v '?'` listing and
+`set_system_voice_lookup` scripts the fake `osascript` behind Say's system-voice
+lookup. The fakes are `/bin/sh` scripts, so
 these tests are Unix-only: Windows resolves a bare program name only to an
 `.exe`. ElevenLabs tests inject `fake::FakeTransport`/`FakeClock` through the
 crate-private `ElevenLabsProvider::with_transport` instead of making network
-calls.
+calls; `with_account_context` turns on its default-voice records, which live
+beside the `BISCUIT_SPEAKS_CACHE` file. An in-crate fixture that isolates the
+audio cache must set `TMP` and `TEMP` as well as `TMPDIR`: Windows'
+`temp_dir()` ignores `TMPDIR`, and a `TMPDIR`-only fixture wrote into, and then
+hit, the Windows host's real temp directory.
 
 CLI fixtures must also set `BISCUIT_SPEAKS_CACHE` to a private voice-capability
 cache and supply a controlled provider inventory. `--voice Samantha` alone did

@@ -40,8 +40,14 @@ impl Speak {
     /// Speak and return metadata about what was used.
     pub async fn play_with_result(self) -> Result<SpeakResult, TtsError>;
 
-    /// Pre-generate audio for later playback.
-    pub async fn prepare(self) -> Result<PreparedSpeech, TtsError>;
+    /// Synthesize into the shared audio cache with the first available
+    /// provider, without playing; a fresh `Speak` with the same settings
+    /// reuses the file. No-op under `PLAYA_DRY_RUN`, for eSpeak/SAPI, and
+    /// for an unresolvable default.
+    pub async fn prepare(self) -> Result<Self, TtsError>;
+
+    /// Whether `prepare` on this object published a cache file.
+    pub fn is_prepared(&self) -> bool;
 }
 ```
 

@@ -198,7 +198,7 @@ Speak::new("Custom").with_speed(SpeedLevel::Explicit(1.5)).play().await?;
 
 **Provider-Specific Speed Handling**:
 - **Kokoro, Gtts**: Speed handled at playback (by playa)
-- **EchoGarden, ElevenLabs**: Speed baked into audio generation
+- **EchoGarden, ElevenLabs, Say**: Speed baked into audio generation; played at normal speed
 
 ---
 
@@ -307,6 +307,7 @@ update_provider_in_cache(TtsProvider::Host(HostTtsProvider::Say)).await?;
 | Gtts | No | Playa handles speed at playback |
 | EchoGarden | Yes | Speed baked into audio |
 | ElevenLabs | Yes | Speed baked into audio |
+| Say | Yes (as integer WPM) | Rate baked into audio by `say -r` |
 
 **Atomic Writes**: Uses temp file + rename pattern to prevent corruption.
 
