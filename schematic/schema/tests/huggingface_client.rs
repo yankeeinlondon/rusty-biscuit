@@ -23,8 +23,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TOKEN_VARS: [&str; 3] = ["HF_TOKEN", "HUGGING_FACE_API_KEY", "HF_API_KEY"];
 
-fn client(base_url: &str) -> HuggingFaceHubClient {
-    HuggingFaceHub::builder()
+fn client(base_url: &str) -> HuggingFaceHub {
+    HuggingFaceHub::new()
         .base_url(base_url)
         .build()
         .expect("client builds")
@@ -191,7 +191,7 @@ async fn pre_response_json_reshapes_body_before_decode() {
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::builder()
+    let client = HuggingFaceHub::new()
         .base_url(mock_server.uri())
         .pre_response_json(|_meta: &ResponseMeta, mut value: serde_json::Value| {
             value
@@ -229,7 +229,7 @@ async fn mutate_response_runs_only_for_its_endpoint() {
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::builder()
+    let client = HuggingFaceHub::new()
         .base_url(mock_server.uri())
         .mutate_response::<WhoAmIRequest, _>(|meta, user| {
             assert_eq!(meta.request.endpoint_id, "WhoAmI");
@@ -269,7 +269,7 @@ async fn refusing_hook_yields_hook_failure_with_original_body() {
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::builder()
+    let client = HuggingFaceHub::new()
         .base_url(mock_server.uri())
         .mutate_response::<WhoAmIRequest, _>(|_, _| Err(HookError::new()))
         .build()
@@ -313,7 +313,7 @@ async fn pre_response_json_skips_error_replies_and_text_endpoints() {
 
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);
-    let client = HuggingFaceHub::builder()
+    let client = HuggingFaceHub::new()
         .base_url(mock_server.uri())
         .pre_response_json(move |_: &ResponseMeta, value: serde_json::Value| {
             counted.fetch_add(1, Ordering::SeqCst);

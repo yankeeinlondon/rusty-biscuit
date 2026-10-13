@@ -39,8 +39,8 @@ fn repository_json() -> serde_json::Value {
 }
 
 /// A client that ignores the host's `GITHUB_TOKEN`/`GH_TOKEN`.
-fn client_without_env(base_url: &str) -> GitHubClient {
-    GitHub::builder()
+fn client_without_env(base_url: &str) -> GitHub {
+    GitHub::new()
         .base_url(base_url)
         .env_order(Vec::<String>::new())
         .build()
@@ -54,13 +54,13 @@ fn authorization(request: &Request) -> Option<String> {
         .map(|value| value.to_str().expect("ASCII header").to_string())
 }
 
-/// Every generated GitHub request names `GitHub` as its API, which is what
-/// lets `GitHubClient::send` accept it; a request of another API sent through
+/// Every generated GitHub request names `GitHubApi` as its API, which is what
+/// lets `GitHub::send` accept it; a request of another API sent through
 /// this client is rejected at compile time (proven over real generated output
 /// by schematic-gen's `slow_generated_types_reject_misuse_at_compile_time`).
 #[test]
 fn generated_requests_belong_to_their_own_api() {
-    fn assert_api<R: EndpointSpec<Api = GitHub>>() {}
+    fn assert_api<R: EndpointSpec<Api = schematic_schema::github::GitHubApi>>() {}
     assert_api::<GetRepositoryRequest>();
     assert_api::<GetRepositoryContentRawRequest>();
     assert_api::<GetIssueRequest>();
@@ -188,12 +188,12 @@ async fn credential_precedence_per_call_client_env_anonymous() {
         .mount(&mock_server)
         .await;
 
-    let with_client_credential = GitHub::builder()
+    let with_client_credential = GitHub::new()
         .base_url(mock_server.uri())
         .credentials(Credential::access_token("client-token"))
         .build()
         .expect("client builds");
-    let without_client_credential = GitHub::builder()
+    let without_client_credential = GitHub::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
@@ -272,7 +272,7 @@ async fn no_credential_sends_anonymously_and_returns_the_401() {
         .mount(&mock_server)
         .await;
 
-    let response = GitHub::builder()
+    let response = GitHub::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds")
@@ -315,7 +315,7 @@ async fn anonymous_call_options_send_no_credential_despite_client_and_env() {
         .mount(&mock_server)
         .await;
 
-    let response = GitHub::builder()
+    let response = GitHub::new()
         .base_url(mock_server.uri())
         .credentials(Credential::access_token("client-token"))
         .build()
@@ -407,7 +407,7 @@ async fn redirects_follow_the_same_origin_policy() {
         .mount(&foreign)
         .await;
 
-    let client = GitHub::builder()
+    let client = GitHub::new()
         .base_url(base.uri())
         .env_order(Vec::<String>::new())
         .credentials(Credential::access_token("client-token"))

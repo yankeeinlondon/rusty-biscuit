@@ -33,7 +33,7 @@ async fn text_endpoint_decodes_into_string() {
         .mount(&mock_server)
         .await;
 
-    let client = GitHub::builder()
+    let client = GitHub::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
@@ -62,7 +62,7 @@ async fn binary_endpoint_decodes_into_bytes() {
         .mount(&mock_server)
         .await;
 
-    let client = Bitbucket::builder()
+    let client = Bitbucket::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
@@ -90,7 +90,7 @@ async fn empty_endpoint_decodes_into_unit() {
         .mount(&mock_server)
         .await;
 
-    let client = SamsungSmartTv::builder()
+    let client = SamsungSmartTv::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
@@ -131,7 +131,7 @@ async fn send_raw_returns_status_headers_and_body_unchanged() {
         .mount(&mock_server)
         .await;
 
-    let client = Bitbucket::builder()
+    let client = Bitbucket::new()
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");

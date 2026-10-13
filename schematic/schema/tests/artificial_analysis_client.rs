@@ -20,40 +20,30 @@ use schematic_schema::artificial_analysis::{
     ListTextToImageModelsRequest, LlmModelsResponse, MediaModelsResponse,
 };
 use schematic_schema::prelude::*;
-use schematic_schema::schematic_runtime::{AuthMethod, EndpointSpec, ErrorKind, Outcome};
+use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, NoDeclaredError, Outcome};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const ENV_KEY: &str = "ARTIFICIAL_ANALYSIS_API_KEY";
 
-fn data_client(base_url: &str) -> ArtificialAnalysisDataClient {
-    ArtificialAnalysisData::builder()
+fn data_client(base_url: &str) -> ArtificialAnalysisData {
+    ArtificialAnalysisData::new()
         .base_url(base_url)
         .build()
         .expect("client builds")
 }
 
-fn critpt_client(base_url: &str) -> ArtificialAnalysisCritPtClient {
-    ArtificialAnalysisCritPt::builder()
+fn critpt_client(base_url: &str) -> ArtificialAnalysisCritPt {
+    ArtificialAnalysisCritPt::new()
         .base_url(base_url)
         .build()
         .expect("client builds")
 }
 
-/// Sends `request` with default options and returns the decoded success value,
-/// failing the test on a transport error or a failure outcome.
-async fn send_ok<A, R>(
-    client: &schematic_schema::schematic_runtime::Client<A>,
-    request: R,
-) -> R::Success
-where
-    A: schematic_schema::schematic_runtime::Api,
-    R: EndpointSpec<Api = A>,
-{
-    let response = client
-        .send(request, &CallOptions::default())
-        .await
-        .expect("a response head arrived");
+/// The decoded success value of a send, failing the test on a transport
+/// error or a failure outcome.
+fn ok<T>(sent: Result<Response<T, NoDeclaredError>, TransportError>) -> T {
+    let response = sent.expect("a response head arrived");
     let status = response.meta.status;
     match response.into_result() {
         Ok(value) => value,
@@ -233,7 +223,7 @@ async fn list_text_to_image_models_emits_include_categories_query() {
 
     let client = data_client(&mock_server.uri());
     let request = ListTextToImageModelsRequest::default().with_include_categories(true);
-    let body: MediaModelsResponse = send_ok(&client, request).await;
+    let body: MediaModelsResponse = ok(client.send(request, &CallOptions::default()).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
@@ -257,7 +247,7 @@ async fn list_llm_models_uses_no_query_string() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let body: LlmModelsResponse = send_ok(&client, ListLlmModelsRequest::default()).await;
+    let body: LlmModelsResponse = ok(client.send(ListLlmModelsRequest::default(), &CallOptions::default()).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 1);
@@ -326,7 +316,7 @@ async fn client_api_key_overrides_env_fallback() {
         .mount(&mock_server)
         .await;
 
-    let client = ArtificialAnalysisData::builder()
+    let client = ArtificialAnalysisData::new()
         .base_url(mock_server.uri())
         .credentials(Credential::api_key("explicit-key"))
         .build()
@@ -413,7 +403,7 @@ async fn critpt_evaluate_serializes_populated_batch_metadata() {
         batch_metadata: serde_json::json!({ "run_id": "abc" }),
     };
 
-    let body: CritPtEvaluateResponse = send_ok(&client, EvaluateCritPtRequest::new(body)).await;
+    let body: CritPtEvaluateResponse = ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
 
     assert_eq!(body.accuracy, 0.0);
     assert_eq!(body.timeout_rate, 0.0);
@@ -461,7 +451,7 @@ async fn critpt_evaluate_omits_null_batch_metadata() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    send_ok(&client, EvaluateCritPtRequest::new(body)).await;
+    ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
 
     let received = mock_server
         .received_requests()
@@ -490,7 +480,7 @@ async fn list_llm_models_decodes_populated_response() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let body: LlmModelsResponse = send_ok(&client, ListLlmModelsRequest::default()).await;
+    let body: LlmModelsResponse = ok(client.send(ListLlmModelsRequest::default(), &CallOptions::default()).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 4);
@@ -528,7 +518,7 @@ async fn list_text_to_image_models_decodes_populated_categories() {
 
     let client = data_client(&mock_server.uri());
     let request = ListTextToImageModelsRequest::default().with_include_categories(true);
-    let body: MediaModelsResponse = send_ok(&client, request).await;
+    let body: MediaModelsResponse = ok(client.send(request, &CallOptions::default()).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
@@ -566,7 +556,7 @@ async fn list_image_editing_models_decodes_response_without_optional_fields() {
 
     let client = data_client(&mock_server.uri());
     let body: MediaModelsResponse =
-        send_ok(&client, ListImageEditingModelsRequest::default()).await;
+        ok(client.send(ListImageEditingModelsRequest::default(), &CallOptions::default()).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, None);
@@ -612,7 +602,7 @@ async fn critpt_evaluate_decodes_realistic_response() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    let body: CritPtEvaluateResponse = send_ok(&client, EvaluateCritPtRequest::new(body)).await;
+    let body: CritPtEvaluateResponse = ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
 
     assert_eq!(body.accuracy, 0.5);
     assert_eq!(body.timeout_rate, 0.25);
