@@ -2,6 +2,8 @@
 //!
 //! Uses the built-in `say` command on macOS for text-to-speech.
 
+mod system_defaults;
+
 use std::process::Stdio;
 
 use tokio::io::AsyncWriteExt;

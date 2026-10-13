@@ -19,7 +19,10 @@
 //! provider.speak("Hello, world!", &TtsConfig::default()).await?;
 //! ```
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use schematic_schema::elevenlabs::{
     CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
@@ -64,7 +67,12 @@ const DEFAULT_MODEL_ID: &str = "eleven_multilingual_v2";
 /// ```
 pub struct ElevenLabsProvider {
     /// The schematic-generated ElevenLabs client.
-    client: ElevenLabs,
+    client: Arc<ElevenLabs>,
+    /// Voice listing and speech synthesis requests; replaceable so tests can
+    /// count requests without a network.
+    transport: Arc<dyn ElevenLabsTransport>,
+    #[allow(dead_code, reason = "scaffolding: no caller reads the clock yet")]
+    clock: Arc<dyn Clock>,
     /// Default voice ID to use when none specified.
     default_voice_id: String,
     /// Default model ID to use.
@@ -104,11 +112,7 @@ impl ElevenLabsProvider {
             });
         }
 
-        Ok(Self {
-            client: ElevenLabs::new(),
-            default_voice_id: DEFAULT_VOICE_ID.into(),
-            default_model_id: DEFAULT_MODEL_ID.into(),
-        })
+        Ok(Self::from_client(ElevenLabs::new()))
     }
 
     /// Create a new ElevenLabs provider with a custom base URL.
@@ -130,11 +134,37 @@ impl ElevenLabsProvider {
             });
         }
 
-        Ok(Self {
-            client: ElevenLabs::with_base_url(url),
+        Ok(Self::from_client(ElevenLabs::with_base_url(url)))
+    }
+
+    fn from_client(client: ElevenLabs) -> Self {
+        let client = Arc::new(client);
+        Self {
+            transport: Arc::new(HttpTransport {
+                client: Arc::clone(&client),
+            }),
+            client,
+            clock: Arc::new(SystemClock),
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
-        })
+        }
+    }
+
+    /// Construct a provider whose API requests and clock are supplied by the
+    /// caller. No API key is required: `transport` decides what every request
+    /// returns.
+    #[cfg(test)]
+    pub(crate) fn with_transport(
+        transport: Arc<dyn ElevenLabsTransport>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            client: Arc::new(ElevenLabs::with_base_url("http://127.0.0.1:9")),
+            transport,
+            clock,
+            default_voice_id: DEFAULT_VOICE_ID.into(),
+            default_model_id: DEFAULT_MODEL_ID.into(),
+        }
     }
 
     /// Set the default voice ID.
@@ -352,12 +382,7 @@ impl ElevenLabsProvider {
 
         let request = CreateSpeechRequest::new(voice_id.to_string(), body);
 
-        // Make the API request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(Self::map_api_error)?;
+        let audio_bytes = self.transport.create_speech(request).await?;
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
@@ -485,19 +510,14 @@ impl ElevenLabsProvider {
             "Sending ElevenLabs TTS request"
         );
 
-        // Use the generated client to make the request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(Self::map_api_error)?;
+        let audio_bytes = self.transport.create_speech(request).await?;
 
         tracing::debug!(
             audio_size = audio_bytes.len(),
             "Received ElevenLabs audio response"
         );
 
-        Ok(audio_bytes.to_vec())
+        Ok(audio_bytes)
     }
 
     /// List available voices from the ElevenLabs API with full response details.
@@ -523,6 +543,123 @@ impl ElevenLabsProvider {
     /// }
     /// ```
     pub async fn list_voices_raw(&self) -> Result<ListVoicesResponse, TtsError> {
+        self.transport.list_voices().await
+    }
+
+    /// List available models from the ElevenLabs API.
+    ///
+    /// ## Returns
+    ///
+    /// A list of available model information.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError::HttpError` if the request fails.
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, TtsError> {
+        use schematic_schema::elevenlabs::ListModelsRequest;
+
+        let request = ListModelsRequest {};
+
+        self.client
+            .request::<Vec<ModelInfo>>(request)
+            .await
+            .map_err(Self::map_api_error)
+    }
+
+    /// Create a sound effect from a text description.
+    ///
+    /// ## Arguments
+    ///
+    /// * `prompt` - Text description of the sound effect (e.g., "dog barking").
+    /// * `duration_seconds` - Optional duration in seconds (0.5 to 22).
+    ///
+    /// ## Returns
+    ///
+    /// Audio bytes in MP3 format.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError::HttpError` if the request fails.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// let provider = ElevenLabsProvider::new()?;
+    /// let audio = provider.create_sound_effect("dog barking loudly", Some(3.0)).await?;
+    /// ```
+    pub async fn create_sound_effect(
+        &self,
+        prompt: &str,
+        duration_seconds: Option<f64>,
+    ) -> Result<Vec<u8>, TtsError> {
+        let body = CreateSoundEffectBody {
+            text: prompt.to_string(),
+            duration_seconds,
+            ..Default::default()
+        };
+
+        let request = CreateSoundEffectRequest { body };
+
+        tracing::debug!(
+            prompt = %prompt,
+            duration = ?duration_seconds,
+            "Creating ElevenLabs sound effect"
+        );
+
+        let audio_bytes = self
+            .client
+            .create_sound_effect(request)
+            .await
+            .map_err(Self::map_api_error)?;
+
+        Ok(audio_bytes.to_vec())
+    }
+}
+
+/// A boxed `Send` future, so [`ElevenLabsTransport`] stays object-safe.
+pub(crate) type TransportFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// The ElevenLabs API requests that voice resolution and synthesis make.
+///
+/// Every request either path sends goes through this trait, so a replacement
+/// sees all network traffic the provider would produce.
+pub(crate) trait ElevenLabsTransport: Send + Sync {
+    /// Fetch every page of the account's voice list as one response.
+    fn list_voices(&self) -> TransportFuture<'_, Result<ListVoicesResponse, TtsError>>;
+
+    /// Synthesize one request and return the encoded audio.
+    fn create_speech(
+        &self,
+        request: CreateSpeechRequest,
+    ) -> TransportFuture<'_, Result<Vec<u8>, TtsError>>;
+}
+
+/// The production transport: HTTPS requests through the schematic client.
+struct HttpTransport {
+    client: Arc<ElevenLabs>,
+}
+
+impl ElevenLabsTransport for HttpTransport {
+    fn list_voices(&self) -> TransportFuture<'_, Result<ListVoicesResponse, TtsError>> {
+        Box::pin(self.fetch_all_voices())
+    }
+
+    fn create_speech(
+        &self,
+        request: CreateSpeechRequest,
+    ) -> TransportFuture<'_, Result<Vec<u8>, TtsError>> {
+        Box::pin(async move {
+            self.client
+                .create_speech(request)
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(ElevenLabsProvider::map_api_error)
+        })
+    }
+}
+
+impl HttpTransport {
+    async fn fetch_all_voices(&self) -> Result<ListVoicesResponse, TtsError> {
         // Get API key header from the schematic client
         let (header_name, api_key) =
             self.client
@@ -624,74 +761,23 @@ impl ElevenLabsProvider {
             next_page_token: None,
         })
     }
+}
 
-    /// List available models from the ElevenLabs API.
-    ///
-    /// ## Returns
-    ///
-    /// A list of available model information.
-    ///
-    /// ## Errors
-    ///
-    /// Returns `TtsError::HttpError` if the request fails.
-    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, TtsError> {
-        use schematic_schema::elevenlabs::ListModelsRequest;
+/// Wall-clock source for deciding whether persisted state is still trusted.
+#[allow(dead_code, reason = "scaffolding: no caller reads the clock yet")]
+pub(crate) trait Clock: Send + Sync {
+    /// Seconds since the Unix epoch.
+    fn now_unix_seconds(&self) -> u64;
+}
 
-        let request = ListModelsRequest {};
+/// The system clock. A time before the Unix epoch reads as `0`.
+struct SystemClock;
 
-        self.client
-            .request::<Vec<ModelInfo>>(request)
-            .await
-            .map_err(Self::map_api_error)
-    }
-
-    /// Create a sound effect from a text description.
-    ///
-    /// ## Arguments
-    ///
-    /// * `prompt` - Text description of the sound effect (e.g., "dog barking").
-    /// * `duration_seconds` - Optional duration in seconds (0.5 to 22).
-    ///
-    /// ## Returns
-    ///
-    /// Audio bytes in MP3 format.
-    ///
-    /// ## Errors
-    ///
-    /// Returns `TtsError::HttpError` if the request fails.
-    ///
-    /// ## Examples
-    ///
-    /// ```ignore
-    /// let provider = ElevenLabsProvider::new()?;
-    /// let audio = provider.create_sound_effect("dog barking loudly", Some(3.0)).await?;
-    /// ```
-    pub async fn create_sound_effect(
-        &self,
-        prompt: &str,
-        duration_seconds: Option<f64>,
-    ) -> Result<Vec<u8>, TtsError> {
-        let body = CreateSoundEffectBody {
-            text: prompt.to_string(),
-            duration_seconds,
-            ..Default::default()
-        };
-
-        let request = CreateSoundEffectRequest { body };
-
-        tracing::debug!(
-            prompt = %prompt,
-            duration = ?duration_seconds,
-            "Creating ElevenLabs sound effect"
-        );
-
-        let audio_bytes = self
-            .client
-            .create_sound_effect(request)
-            .await
-            .map_err(Self::map_api_error)?;
-
-        Ok(audio_bytes.to_vec())
+impl Clock for SystemClock {
+    fn now_unix_seconds(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs())
     }
 }
 
@@ -898,6 +984,131 @@ impl TtsVoiceInventory for ElevenLabsProvider {
                 );
                 Ok(Self::rachel_default_voice())
             }
+        }
+    }
+}
+
+/// Scripted stand-ins for the ElevenLabs API and the wall clock.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    use schematic_schema::elevenlabs::{CreateSpeechRequest, ListVoicesResponse, VoiceResponseModel};
+
+    use super::{Clock, ElevenLabsTransport, TransportFuture};
+    use crate::errors::TtsError;
+
+    /// Audio bytes every scripted synthesis returns.
+    pub(crate) const FAKE_AUDIO: &[u8] = b"fake elevenlabs mp3";
+
+    /// One recorded speech request.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct SpeechCall {
+        pub voice_id: String,
+        pub model_id: Option<String>,
+        pub text: String,
+    }
+
+    /// An API whose voice list is scripted and whose requests are counted.
+    ///
+    /// `None` as the voice list makes listing fail, as an unreachable API does.
+    #[derive(Debug, Default)]
+    pub(crate) struct FakeTransport {
+        voices: Mutex<Option<Vec<VoiceResponseModel>>>,
+        list_requests: AtomicUsize,
+        speech_calls: Mutex<Vec<SpeechCall>>,
+    }
+
+    impl FakeTransport {
+        pub(crate) fn with_voices(voices: Vec<VoiceResponseModel>) -> Self {
+            Self {
+                voices: Mutex::new(Some(voices)),
+                ..Self::default()
+            }
+        }
+
+        /// A transport whose voice listing always fails.
+        pub(crate) fn unreachable() -> Self {
+            Self::default()
+        }
+
+        pub(crate) fn set_voices(&self, voices: Option<Vec<VoiceResponseModel>>) {
+            *self.voices.lock().unwrap() = voices;
+        }
+
+        pub(crate) fn list_requests(&self) -> usize {
+            self.list_requests.load(Ordering::SeqCst)
+        }
+
+        pub(crate) fn speech_calls(&self) -> Vec<SpeechCall> {
+            self.speech_calls.lock().unwrap().clone()
+        }
+
+        /// Every request of either kind.
+        pub(crate) fn total_requests(&self) -> usize {
+            self.list_requests() + self.speech_calls.lock().unwrap().len()
+        }
+    }
+
+    impl ElevenLabsTransport for FakeTransport {
+        fn list_voices(&self) -> TransportFuture<'_, Result<ListVoicesResponse, TtsError>> {
+            self.list_requests.fetch_add(1, Ordering::SeqCst);
+            let voices = self.voices.lock().unwrap().clone();
+            Box::pin(async move {
+                let voices = voices.ok_or_else(|| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: "scripted voice-list failure".into(),
+                })?;
+                Ok(ListVoicesResponse {
+                    total_count: Some(voices.len() as i64),
+                    voices,
+                    has_more: false,
+                    next_page_token: None,
+                })
+            })
+        }
+
+        fn create_speech(
+            &self,
+            request: CreateSpeechRequest,
+        ) -> TransportFuture<'_, Result<Vec<u8>, TtsError>> {
+            self.speech_calls.lock().unwrap().push(SpeechCall {
+                voice_id: request.voice_id,
+                model_id: request.body.model_id,
+                text: request.body.text,
+            });
+            Box::pin(async { Ok(FAKE_AUDIO.to_vec()) })
+        }
+    }
+
+    /// A voice as the API lists it, with an optional `gender` label.
+    pub(crate) fn voice(voice_id: &str, gender: Option<&str>) -> VoiceResponseModel {
+        VoiceResponseModel {
+            voice_id: voice_id.into(),
+            name: voice_id.into(),
+            labels: gender.map(|gender| [("gender".to_string(), gender.to_string())].into()),
+            ..Default::default()
+        }
+    }
+
+    /// A clock that reads whatever the test last set.
+    #[derive(Debug)]
+    pub(crate) struct FakeClock(AtomicU64);
+
+    impl FakeClock {
+        pub(crate) fn at(unix_seconds: u64) -> Self {
+            Self(AtomicU64::new(unix_seconds))
+        }
+
+        pub(crate) fn advance(&self, seconds: u64) {
+            self.0.fetch_add(seconds, Ordering::SeqCst);
+        }
+    }
+
+    impl Clock for FakeClock {
+        fn now_unix_seconds(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
         }
     }
 }
@@ -1460,5 +1671,93 @@ mod tests {
             audio[0] == 0xFF || audio.starts_with(b"ID3"),
             "Should be valid MP3 data"
         );
+    }
+
+    // ========================================================================
+    // Injected transport: voice selection through the request seam
+    // ========================================================================
+
+    fn fake_provider(transport: &Arc<fake::FakeTransport>) -> ElevenLabsProvider {
+        ElevenLabsProvider::with_transport(
+            Arc::clone(transport) as Arc<dyn ElevenLabsTransport>,
+            Arc::new(fake::FakeClock::at(1_800_000_000)),
+        )
+    }
+
+    async fn selected_voice(transport: &Arc<fake::FakeTransport>, config: &TtsConfig) -> String {
+        let audio = fake_provider(transport)
+            .generate_audio("This is a test message.", config)
+            .await
+            .expect("scripted synthesis succeeds");
+        assert_eq!(audio, fake::FAKE_AUDIO);
+        transport.speech_calls().last().expect("one speech request").voice_id.clone()
+    }
+
+    #[tokio::test]
+    async fn selection_prefers_the_first_voice_matching_the_requested_gender() {
+        let transport = Arc::new(fake::FakeTransport::with_voices(vec![
+            fake::voice("m1", Some("male")),
+            fake::voice("f1", Some("Female")),
+            fake::voice("f2", Some("female")),
+        ]));
+        let config = TtsConfig::new().with_gender(Gender::Female);
+        assert_eq!(selected_voice(&transport, &config).await, "f1");
+        assert_eq!(transport.list_requests(), 1);
+        let call = &transport.speech_calls()[0];
+        assert_eq!(call.model_id.as_deref(), Some(DEFAULT_MODEL_ID));
+        assert_eq!(call.text, "This is a test message.");
+    }
+
+    #[tokio::test]
+    async fn selection_without_a_gender_match_uses_the_first_listed_voice() {
+        let transport = Arc::new(fake::FakeTransport::with_voices(vec![
+            fake::voice("unlabeled", None),
+            fake::voice("m1", Some("male")),
+        ]));
+        assert_eq!(selected_voice(&transport, &TtsConfig::new().with_gender(Gender::Female)).await, "unlabeled");
+        assert_eq!(selected_voice(&transport, &TtsConfig::new()).await, "unlabeled");
+    }
+
+    #[tokio::test]
+    async fn selection_falls_back_to_the_configured_voice_when_listing_fails_or_is_empty() {
+        let transport = Arc::new(fake::FakeTransport::unreachable());
+        assert_eq!(selected_voice(&transport, &TtsConfig::new()).await, DEFAULT_VOICE_ID);
+        transport.set_voices(Some(Vec::new()));
+        assert_eq!(selected_voice(&transport, &TtsConfig::new()).await, DEFAULT_VOICE_ID);
+        assert_eq!(transport.list_requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_requested_voice_and_model_skip_the_voice_list() {
+        let transport = Arc::new(fake::FakeTransport::with_voices(vec![fake::voice("listed", None)]));
+        let config = TtsConfig::new().with_voice("chosen").with_model("eleven_turbo_v2");
+        assert_eq!(selected_voice(&transport, &config).await, "chosen");
+        assert_eq!(transport.list_requests(), 0);
+        assert_eq!(transport.speech_calls()[0].model_id.as_deref(), Some("eleven_turbo_v2"));
+    }
+
+    #[tokio::test]
+    async fn a_changed_account_voice_list_changes_the_next_selection() {
+        let transport = Arc::new(fake::FakeTransport::with_voices(vec![fake::voice("before", None)]));
+        assert_eq!(selected_voice(&transport, &TtsConfig::new()).await, "before");
+        transport.set_voices(Some(vec![fake::voice("after", None)]));
+        assert_eq!(selected_voice(&transport, &TtsConfig::new()).await, "after");
+        assert_eq!(transport.total_requests(), 4);
+    }
+
+    #[test]
+    fn fake_clock_reads_the_time_it_was_set_to() {
+        let clock = fake::FakeClock::at(1_800_000_000);
+        clock.advance(24 * 60 * 60);
+        assert_eq!(clock.now_unix_seconds(), 1_800_086_400);
+    }
+
+    #[test]
+    fn system_clock_reads_the_current_unix_time() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(SystemClock.now_unix_seconds().abs_diff(now) <= 5);
     }
 }
