@@ -10,57 +10,7 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
-human_review: true
-human_review_items:
-    - |-
-      **Shell approval when each sequence task gets its own environment**
-
-      **Why this is needed before Phase 3 (Phase 2 can go ahead without it):**
-      this feature makes every sequence task read its *own* copy of the
-      environment variables, captured when that task starts, instead of one
-      copy taken when the whole run started. Shell commands in a sequence are
-      approved once, up front, as exact text. If a task's environment differs
-      from the start of the run, a command such as `deploy {{ env.TARGET }}`
-      can turn into different text than the text that was approved. The spec
-      assumes a later feature (`2026-10-23-shell-template-approval`, step 13
-      of the pipeline; this feature is step 8) already approves commands as
-      *templates* and checks the values at run time. That feature is not built
-      yet, and the plan says only you can decide how to bridge the gap.
-
-      What happens today: task shell commands run exactly as approved (never
-      re-filled), and a loop iteration whose command text changed is refused
-      before it runs. Prompt documents inside a sequence, however, go through
-      normal approval again at run time, so new text can be approved there by
-      a whitelist, a handler, or an interactive prompt.
-
-      **Options:**
-
-      - **A. Interim rule: exact text or refuse (recommended).** Keep today's
-        exact-text approval. When a task's own environment would produce
-        command text different from what was approved, refuse the task before
-        anything runs, with a clear error. Record this as a deliberate
-        departure from the spec until template approval lands.
-        - Pros: never runs an unapproved command; no new approval machinery;
-          the pipeline order is unchanged; template approval later simply
-          relaxes the refusal.
-        - Cons: a sequence whose tasks really do see different environment
-          values fails until step 13 lands; the spec's sentence about
-          template approval stays untrue for a while.
-      - **B. Build template approval first.** Move
-        `2026-10-23-shell-template-approval` ahead of this feature's Phase 3.
-        - Pros: the spec is implemented exactly as written.
-        - Cons: reorders a pipeline designed to run front to back; this
-          feature stalls half-finished for a much larger piece of work.
-      - **C. Split the feature.** Ship the `doc` → `fm` / `hook` rename and the
-        `current_env` removal now, and move "one environment per document"
-        to land after step 13.
-        - Pros: no interim behavior at all.
-        - Cons: the spec's acceptance criterion 5 is only half met; the
-          environment work has to be re-planned separately.
-
-      **Recommendation: A.** It is the safe default the plan itself
-      suggests: it can only refuse, never run something unapproved, and it
-      costs nothing to undo once template approval exists.
+human_review: false
 message_to_agent: |-
   Phase 1 inventory, spike, and approval evidence are in this log under
   "## Phase 1". Points that change the plan's assumptions for Phase 2:
@@ -96,8 +46,10 @@ message_to_agent: |-
   5. `darkmatter/lib/tests/l1/shipped_schema_corpus.rs:109-128, 267` names
      `darkmatter/schemas/partials/doc.yaml` by path; update it with the
      `git mv` to `partials/fm.yaml`.
-  6. The approval ruling is unresolved (see `human_review_items`); it blocks
-     Phase 3 only. The environment-only seam is proven at the Darkmatter
+  6. The approval ruling is decided (2026-10-13, option A; see "### Approval
+     ruling"): exact-text approval is retained and a later task's command
+     whose text changes under its own captured map is refused before
+     execution. Phase 3 is unblocked. The environment-only seam is proven at the Darkmatter
      level by `request_context_builder.rs::an_environment_only_replacement_enters_a_document_under_another_map`;
      Claudine's `InvocationContext` still lacks an environment-only
      derivation, and `composition/select.rs` / `looping/config.rs` read the
@@ -322,11 +274,26 @@ and `lifecycle/control/tests.rs::lifecycle_proxy_reuses_request_snapshot_after_e
   not the task's map. Without template approval, the task must re-resolve its
   bytes against its own map and refuse when they differ from the approved
   bytes, before execution.
-- **Ruling: unresolved — author decision required before Phase 3.** Raised as
-  `human_review_items`. Recommendation (per plan): accept the interim
-  contract of exact-byte approval with refusal of changed commands before
-  execution, recorded as a spec departure. Phase 2 (namespace rename) does not
-  depend on it.
+- **Ruling (author, 2026-10-13): option A — retain exact-text approval and
+  refuse changed commands.** This is a recorded, temporary departure from
+  spec §4's template-approval sentence; the spec is left as decided.
+  - Phase 3 implements per-document capture in full (task, serial/parallel
+    group leg, and `proxy` target; selectors, loop settings, lazy evidence,
+    file references, schema inputs).
+  - At each later task, preflight-approved shell text is re-resolved against
+    that task's captured map. Identical text runs as approved; different
+    text is refused before execution through the existing enforcement
+    (`NotPreApproved` / the sequence shell-resolution refusal), with an error
+    naming the command and the change. Stale approvals never authorize new
+    text, and no template approval is introduced here.
+  - JIT prompt/step documents keep their existing run-time approval of the
+    exact text they are about to run; the refusal applies only to text
+    approved at sequence preflight.
+  - Tests use supplied maps: an unchanged map runs the approved text, a
+    changed map that alters command text is refused before execution, and a
+    changed map that leaves command text identical runs.
+  - `2026-10-23-shell-template-approval` (pipeline step 13) replaces the
+    refusal for later tasks when it lands.
 
 ### Phase 1 tests and gates
 
@@ -364,5 +331,87 @@ Gates re-run on macOS:
 - `claudine/`: `just test` — 8699 passed, 9 skipped; `just lint` — exit 0
   (one unrelated macOS linker note about `__eh_frame` size).
 
-The approval ruling is still unresolved; `human_review` stays `true`, and the
-`message_to_agent` above still applies to Phase 2.
+The approval ruling was unresolved at this point; it was decided on
+2026-10-13 (option A, see "### Approval ruling").
+
+## Review cycle 1 migration audit
+
+Scope: review-1 finding 1's artifact rows (shipped prompts, frozen fixtures,
+topic pages, READMEs, skills) and acceptance criterion 1's discovery searches,
+run on the working tree on 2026-10-12 after the migration edits. Historical
+records excluded by path: `**/features/**`, `**/fixes/**`, `**/reviews/**`,
+`**/research/**`, and `.claude/skills/claudine/timeline.md` entries dated
+before 2026-10-12. `current_env` hits are out of scope here (the live-root
+removal is a separate work unit) and are not classified.
+
+### What was migrated
+
+| Class | Sites | Change |
+| --- | --- | --- |
+| Shipped prompt | `prompts/clarify.md` (5 spans) | `doc.doc` → `doc`: the prompt reads its own ordinary `doc` property |
+| Frozen prompt fixtures | `claudine/lib/tests/fixtures/frozen_prompts/prompts/clarify.md`; new copy `claudine/cli/tests/fixtures/frozen_prompts/prompts/clarify.md` | byte-identical to the shipped prompt; the CLI copy feeds the new end-to-end test |
+| Darkmatter docs | `topics/darkmatter-expressions.md` (availability invariant, value sources, reserved list, Mermaid root diagram, variable access, Namespaces table, new "The `fm` namespace" section with shadowing example and `doc` → `fm` migration table, token resolution, condition shortcut order, Host Bindings, bracket-access note), `inline/fm-interpolation.md`, `inline/interpolation.md`, `topics/state-management/index.md`, `topics/schemas/authoring-schemas.md`, `topics/schemas/parsing/lexing.md` | `doc` root → `fm`; reserved-root shadowing and ordinary `doc` stated |
+| Claudine docs | `topics/flow-control/lifecycle.md` (early-binding list, unavailable-global note, lifecycle context, `fm.err` escape hatch now covering `timing` and the fixed roots), `flow-control/sequences.md`, `flow-control/looping.md`, `frontmatter-properties.md`, `composition.md`, `state-management/expression-engine.md` (plus a shadowing paragraph) | `doc` root → `fm` |
+| Claudine hook docs | `topics/configuring-actions.md` (`hook` row in Available Paths, new "The `hook` root" section with hook `doc` → `hook` migration table, `{{hook}}` template row, expression-mode matchers), `topics/unified-events.md` §3.7, `cli/README.md`, `lib/README.md` | hook-only `hook` root documented |
+| Skills | darkmatter `compose.md`, `library-surfaces.md`, `dmls.md`; claudine `hook-actions.md`, `architecture.md` (`EventMetaExpressionLookup` resolution list); claudine `timeline.md` new 2026-10-12 entry | `doc` → `fm`; `hook` added |
+| Rust tests with stale spellings | `claudine/lib/src/composition/lifecycle/tests/validation.rs` (`doc.err` escape-hatch test → `fm.err`, renamed), `claudine/cli/tests/level2/level2_lifecycle_action_forms.rs` (literal `LITERAL=doc.title` → `fm.title`, matching its module doc), `darkmatter/dmls/src/overlay/expressions.rs` (two kebab-path unit tests), `darkmatter/lib/src/markdown/compose/expression/parser.rs` (object-key list half-migrated), `darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs` (assertion message) | spelling only; assertions unchanged |
+
+Clean (no old-root use found): `darkmatter/docs/topics/compose-requests.md`,
+`darkmatter/dmls/docs/diagnostics.md`, `hover.md`, `autocomplete.md` (already
+migrated by the passive-tooling unit), all Darkmatter READMEs,
+`claudine/docs/topics/state-management/context-variables.md`,
+`topics/pre-flight-checks.md`, darkmatter skill `schema.md` and `testing.md`,
+claudine skill `cli-commands.md` and `cli-reference.md`, `darkmatter/prompts/`,
+`claudine/prompts/`, and the darkmatter lib/cli and claudine cli/lib frozen
+prompt trees other than `clarify.md`.
+
+### Classification of remaining hits
+
+Search 1 (`{{ … doc … }}`):
+
+| Hit | Class |
+| --- | --- |
+| `prompts/clarify.md` and its two frozen copies (`{{doc}}`, `parent_dir(doc)`, `basename(doc)`) | ordinary property (the prompt declares `doc: "{{spec \|\| design}}"`) |
+| `darkmatter/lib/tests/l1/binding_contract.rs:179`, `fm_namespace_contract.rs:198-216`, `darkmatter/dmls/tests/l1/no_side_effects.rs:336`, `undeclared_property.rs:226,313`, `claudine/cli/tests/l1/compose_schema_cli.rs:1806` | ordinary property tests (`doc` declared, or asserted undeclared) |
+| `claudine/cli/tests/l1/compose_schema_cli.rs:1268-1305` | ordinary property test (new frozen `clarify.md` test) |
+| `claudine/lib/src/dispatch/template/tests.rs:380-381`, `dispatch/runner/report.rs:222-227` | explicit migration test: the old hook spelling stays literal |
+| `darkmatter/docs/topics/darkmatter-expressions.md:366,406-408`, `state-management/index.md:22`, `claudine/docs/topics/state-management/expression-engine.md:84`, `darkmatter/dmls/docs/hover.md:147` | ordinary-property documentation or explicit migration table |
+| `claudine/docs/topics/configuring-actions.md:317`, `unified-events.md:941`, `claudine/cli/README.md:95` | explicit hook migration guidance |
+| `darkmatter/dmls/tests/fixtures/mapping_only_corpus/validate.md:6` (`{{doc.doc}}`) | unrelated literal: a frozen corpus of prompts as of commit `3df43cc67` whose source prompt no longer exists; its byte-identical diagnostics baseline is the test's subject, and the document also declares `doc`, so it is an ordinary-property path under the new contract |
+
+Search 2 (`when` with `doc.`): `claudine/lib/src/dispatch/runner/tests.rs:472`
+(explicit migration test: the old condition skips the action) and
+`claudine/docs/topics/configuring-actions.md:316` (migration table).
+
+Search 3 (quoted `doc.` paths in Rust): `fm_namespace.rs:150,159,196` and
+`claudine/lib/src/dispatch/expression/tests.rs:602-603` (explicit migration
+tests: `doc.` is not the root), `darkmatter/dmls/src/overlay/expressions.rs:1341-1342`,
+`claudine/lib/src/composition/looping/expression.rs:421`, and
+`darkmatter/dmls/tests/l1/undeclared_property.rs:297` (ordinary property tests).
+
+Additional forms the regexes miss: a multiline `{{ … }}` search and a `$( … )`
+token search over the three prompt folders, both `docs/` trees, and the two
+skills found only `doc.md` file paths. Bracket forms (`doc['…']`/`doc["…"]`) in
+Rust are all `serde_json`/`toml_edit` locals named `doc`. A production-source
+search for `"doc"`, `"doc."`, `"doc["`, and `starts_with("doc` outside test
+modules found only the `err.detail.doc` payload key
+(`claudine/lib/src/diagnostics/registry.rs`, `composition/error/render/mod.rs`),
+JSON-schema property names in validator tests, and the `doc` file extension:
+no production code special-cases a `doc` root.
+
+Defects found and fixed in this audit: the five stale Rust test spellings in
+the table above, and the availability invariant on the main expressions page,
+which claimed `fm.*` resolves in Claudine hook conditions (hooks have no
+frontmatter; they read `hook`).
+
+Coverage of the three evaluation families: document composition is exercised
+by `fm_namespace_contract.rs` and the new
+`compose_schema_cli::compose_frozen_clarify_reads_its_ordinary_doc_property`
+(the frozen shipped prompt through `claudine compose --dry-run`); hook
+dispatch (templates, `when`, matchers, report messages) by the hook-adapter
+unit's tests named in the log; harness validation has no separate message that
+names the payload root (report/speak/message templates share `interpolate`).
+
+Not a `docs/` defect, recorded for the author: `claudine/docs/rollout-strategy.md`
+names this feature by slug. It is a roadmap of scheduled features rather than a
+behavior topic page, and every row there names a slug, so it was left as is.
