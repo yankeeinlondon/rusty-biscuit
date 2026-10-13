@@ -2,7 +2,8 @@
 //! directory.
 //!
 //! An on-demand fact, absent from host inventory: one process-table refresh
-//! that reads only names, ancestry, and current directories.
+//! that reads only names, command lines, ancestry, start times, and current
+//! directories.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,13 @@ pub struct WorkingProcess {
     pub pid: u32,
     /// The executable's short name as the OS reports it.
     pub name: String,
+    /// The command line, program first; empty when the OS will not reveal it.
+    /// A script run by an interpreter shows the script here, where `name`
+    /// shows only the interpreter.
+    pub command: Vec<String>,
+    pub parent: Option<u32>,
+    /// Seconds since the Unix epoch.
+    pub started: u64,
     pub cwd: PathBuf,
 }
 
@@ -40,7 +48,9 @@ pub fn processes_working_in(dir: &Path) -> Vec<WorkingProcess> {
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
+        ProcessRefreshKind::nothing()
+            .with_cwd(UpdateKind::Always)
+            .with_cmd(UpdateKind::Always),
     );
     let excluded = self_and_ancestors(&system);
 
@@ -57,6 +67,13 @@ pub fn processes_working_in(dir: &Path) -> Vec<WorkingProcess> {
                 .then(|| WorkingProcess {
                     pid: pid.as_u32(),
                     name: process.name().to_string_lossy().into_owned(),
+                    command: process
+                        .cmd()
+                        .iter()
+                        .map(|arg| arg.to_string_lossy().into_owned())
+                        .collect(),
+                    parent: process.parent().map(Pid::as_u32),
+                    started: process.start_time(),
                     cwd: cwd.to_path_buf(),
                 })
         })
@@ -129,6 +146,9 @@ mod tests {
         let found = find(dir.path(), holder.0.id()).expect("the holder is listed");
 
         assert!(!found.name.is_empty());
+        assert!(!found.command.is_empty(), "{found:?}");
+        assert_eq!(found.parent, Some(std::process::id()));
+        assert!(found.started > 0, "{found:?}");
         assert!(found.cwd.ends_with(Path::new("a").join("b")), "{found:?}");
     }
 
