@@ -345,7 +345,8 @@ the document lookup first, and refuses to register a global under one
   the authoring-fatal `ExpressionError::ReservedRootPathUnknown`.
 - `current_env` is not reserved: it is an ordinary frontmatter property
   (absent → `null` plus `dm.expression.undeclared_property`). No expression
-  reads the live process environment; `env` is the request's one captured map.
+  reads the live process environment; `env` is the request's one captured map,
+  and a request composes one document (see [requests.md](requests.md)).
 
 `DeferredCapabilities` (`capture/capabilities.rs`) is the planning twin of
 `ContextRequirements`: it names the `current` keys and cataloged function
