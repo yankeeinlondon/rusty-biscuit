@@ -502,6 +502,24 @@ which processes hold it.
   It has no directory or long-path support, it is slower per path, and a
   missing path returns success with an empty list.
 
+### Transient system holders refuse `wt remove`
+
+Observed 2026-10-12 on `BUILD_WIN_NATIVE` while running the `worktree-cli`
+L1 suite through `cross-check`:
+
+- `SearchProtocolHost.exe` (Windows Search) held an open handle on a file a
+  test had just written under `%TEMP%`, although the index scope excludes
+  `C:\Users\*\AppData\` (`include=0` in
+  `HKLM:\SOFTWARE\Microsoft\Windows Search\CrawlScopeManager\Windows\SystemIndex\WorkingSetRules`).
+  The file-side query above reported it, so `wt remove`'s usage check paused
+  the removal (exit 3) and two `example_*` tests failed in one run.
+- It is intermittent: 2 failures in about 300 lifecycle runs that day, none in
+  14 immediate reruns. Any test that writes a file and then runs `wt remove`
+  on Windows can hit it, and so can a user.
+- Do not chase it with retries, `#[cfg]` skips, or a slow marker. The policy
+  for transient OS holders is a product decision about the usage check, not a
+  test fix.
+
 ## COM lifetime and cpal
 
 Found 2026-10-08 on the `B:` dev host: `playa effect drop-4` exited with an

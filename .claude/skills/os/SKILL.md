@@ -61,6 +61,7 @@ environment's cell and how to record an execution ban.
 | WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit (fixed; do not re-diagnose) | [wsl.md](wsl.md) |
 | WSL guest "lost communication with the server", killed at ~45 min, no log | runner agent died during provisioning (open, instrumented) | [wsl.md](wsl.md) |
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
+| `wt remove` exits 3 on Windows naming `SearchProtocolHost.exe` | a transient Windows Search handle on a fresh file; the usage check refuses by design | [windows.md](windows.md#transient-system-holders-refuse-wt-remove) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Windows cell red although every test passed, `UnicodeEncodeError` in the last step | Python's piped stdout is cp1252; workflows must set `PYTHONUTF8=1` | [windows.md](windows.md#environment-and-processes) |
 | Red on Windows only when the agent ran it, a git child exiting `0xC0000005` with empty stderr | the run descended from Git Bash (the agent's Bash tool); rerun from PowerShell | [windows.md](windows.md#environment-and-processes) |

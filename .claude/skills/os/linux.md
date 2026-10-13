@@ -74,6 +74,8 @@ WSL2 follows these Linux code paths; its archive-mode traps are in
   beside other sessions' builds). It is not a code error.
 - Retry once with fewer parallel builds; extra arguments go to
   `cargo nextest run`: `just cross-check <package> --os linux --build-jobs 2`.
+  The flag must follow the package name; before it the script exits 2 with
+  `unknown flag --build-jobs`.
   The retry reused the cached build and passed.
 
 ## inotify through `notify`: a renamed watch root goes quiet
