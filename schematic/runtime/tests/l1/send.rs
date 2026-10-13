@@ -415,3 +415,21 @@ async fn a_provider_echo_stays_in_the_raw_body_and_out_of_metadata_and_display()
     assert!(!response.to_string().contains(SENTINEL));
     assert!(!error.to_string().contains(SENTINEL));
 }
+
+/// A consumer that joins several sends in one future (homelab joins eight)
+/// must not need a large stack, so the request state machine lives on the
+/// heap and the future a caller holds stays small.
+#[test]
+fn send_futures_stay_small_enough_to_join_many() {
+    const BOUND: usize = 64;
+    let client = plain_client("http://127.0.0.1:9");
+    let options = CallOptions::new();
+
+    let send = client.send(Call::<Json<Item>, ProviderError>::get("/item"), &options);
+    let send_size = std::mem::size_of_val(&send);
+    let raw = client.send_raw(Call::<Json<Item>>::get("/item"), &options);
+    let raw_size = std::mem::size_of_val(&raw);
+
+    assert!(send_size <= BOUND, "send future is {send_size} bytes");
+    assert!(raw_size <= BOUND, "send_raw future is {raw_size} bytes");
+}

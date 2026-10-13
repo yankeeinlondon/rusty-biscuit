@@ -14,9 +14,9 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send`
  --> src/client.rs
   |
-  |     pub async fn send<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
-  |                  ---- required by a bound in this associated function
-  |     where
+  |     pub fn send<R>(
+  |            ---- required by a bound in this associated function
+...
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send`
 
@@ -34,9 +34,9 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send`
  --> src/client.rs
   |
-  |     pub async fn send<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
-  |                  ---- required by a bound in this associated function
-  |     where
+  |     pub fn send<R>(
+  |            ---- required by a bound in this associated function
+...
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send`
 
@@ -54,9 +54,9 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send`
  --> src/client.rs
   |
-  |     pub async fn send<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
-  |                  ---- required by a bound in this associated function
-  |     where
+  |     pub fn send<R>(
+  |            ---- required by a bound in this associated function
+...
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send`
 
@@ -76,8 +76,8 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send_raw`
  --> src/client.rs
   |
-  |     pub async fn send_raw<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
-  |                  -------- required by a bound in this associated function
+  |     pub fn send_raw<R>(&self, request: R, options: &CallOptions) -> impl Future<Output = Result<RawResponse, TransportError>>
+  |            -------- required by a bound in this associated function
   |     where
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send_raw`
@@ -96,8 +96,8 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send_raw`
  --> src/client.rs
   |
-  |     pub async fn send_raw<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
-  |                  -------- required by a bound in this associated function
+  |     pub fn send_raw<R>(&self, request: R, options: &CallOptions) -> impl Future<Output = Result<RawResponse, TransportError>>
+  |            -------- required by a bound in this associated function
   |     where
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send_raw`
@@ -116,8 +116,8 @@ note: expected this to be `Github`
 note: required by a bound in `Client::<A>::send_raw`
  --> src/client.rs
   |
-  |     pub async fn send_raw<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
-  |                  -------- required by a bound in this associated function
+  |     pub fn send_raw<R>(&self, request: R, options: &CallOptions) -> impl Future<Output = Result<RawResponse, TransportError>>
+  |            -------- required by a bound in this associated function
   |     where
   |         R: EndpointSpec<Api = A>,
   |                         ^^^^^^^ required by this bound in `Client::<A>::send_raw`

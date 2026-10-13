@@ -481,7 +481,24 @@ impl<A: Api> Client<A> {
     /// argument, URL, or cross-origin target was refused before sending, the
     /// shared deadline had already expired, or the connection, TLS
     /// handshake, or wait for the first head failed.
-    pub async fn send<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
+    ///
+    /// ## Notes
+    ///
+    /// The returned future is one heap pointer: the request's state machine
+    /// is boxed, so joining many sends in one future needs no large stack.
+    pub fn send<R>(
+        &self,
+        request: R,
+        options: &CallOptions,
+    ) -> impl Future<Output = Result<Response<R::Success, R::Failure>, TransportError>>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        Box::pin(self.send_unboxed(request, options))
+    }
+
+    /// The body of [`send`](Self::send), before boxing.
+    async fn send_unboxed<R>(&self, request: R, options: &CallOptions) -> Result<Response<R::Success, R::Failure>, TransportError>
     where
         R: EndpointSpec<Api = A>,
     {
@@ -518,7 +535,19 @@ impl<A: Api> Client<A> {
     ///
     /// Returns [`TransportError`] in exactly the cases [`send`](Self::send)
     /// does: when no response head arrived.
-    pub async fn send_raw<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
+    ///
+    /// ## Notes
+    ///
+    /// The returned future is boxed, as [`send`](Self::send)'s is.
+    pub fn send_raw<R>(&self, request: R, options: &CallOptions) -> impl Future<Output = Result<RawResponse, TransportError>>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        Box::pin(self.send_raw_unboxed(request, options))
+    }
+
+    /// The body of [`send_raw`](Self::send_raw), before boxing.
+    async fn send_raw_unboxed<R>(&self, request: R, options: &CallOptions) -> Result<RawResponse, TransportError>
     where
         R: EndpointSpec<Api = A>,
     {
