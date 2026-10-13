@@ -24,7 +24,7 @@ implemented: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 2
 depends-on:
   - 2026-10-05-filesystem-watchers
 human_review: true
@@ -66,6 +66,15 @@ human_review_items:
     Recommendation: **B.** It keeps the safety rule for every real program,
     costs at most one short wait in the rare case, and is the smallest change
     that makes Windows CI reliable.
+
+    **Decided 2026-10-12 by the author: option B**, with two conditions. A
+    holder counts as Windows Search only by its full image path in the
+    system directory (`%SystemRoot%\System32\`, from the query's process
+    evidence); the same name anywhere else, or no image path, is an ordinary
+    holder. The recheck is recorded in the saved report, so the exception is
+    never silent. Exactly one recheck after about 500 ms (measured holds:
+    at most 17 ms); anything still holding a file then refuses as before.
+    Amended into **Preflight and refusal** and decision 3.
 message_to_agent: |-
   All 12 phases are implemented; read implementation-log.md "## Phase 12"
   first. It holds the acceptance (items 1-12) to test table, the structural
@@ -86,6 +95,7 @@ message_to_agent: |-
   - Not wired: Environment::interrupted is `|| false` (no signal crate in
     worktree-cli).
   - cross-check: flags such as --build-jobs go after the package name.
+completed: true
 ---
 
 # Graceful removal under filesystem contention
@@ -208,6 +218,18 @@ Refuse with the existing refusal exit code (3), keeping the checkout and branche
 in place. Ask the user to stop the listed work and rerun `wt remove`; there is no
 "continue anyway" question, automatic kill, or force-flag bypass. Explain that
 some handles are harmless but removal was paused because usage was observed.
+
+**Amended 2026-10-12 (author decision, option B of the human review item):
+one bounded exception to "no automatic retry".** When every holder the
+decisive query finds is a Windows Search process (`SearchProtocolHost.exe`,
+`SearchFilterHost.exe`, `SearchIndexer.exe`) identified by its full image
+path under `%SystemRoot%\System32\` from the query's own process evidence,
+wait about 500 ms and run the usage query exactly once more; refuse exactly as
+above if any process still holds anything. A same-named process elsewhere, a
+holder without an image path, or any other holder in the first query refuses
+immediately, with no recheck. Record the recheck in the saved report;
+successful removal stays quiet on screen, and a refusal after a recheck says
+that a recheck happened. Other operating systems are unchanged.
 
 If no matches are found, continue with move-then-delete even when discovery is
 partial, unavailable, or unsupported. Preserve coverage in the operation report
@@ -581,7 +603,9 @@ implementation log). Each was the recommendation offered.
    inventory and targeted checks.
 3. **Sniff budget (R3):** accept the landed `query_path_usage` contract as
    written under **Preflight and refusal**: default budget, no flag, no
-   automatic retry, typed errors matched by variant.
+   automatic retry, typed errors matched by variant. (Amended 2026-10-12: one
+   bounded recheck when only Windows Search holds files; see **Preflight and
+   refusal**.)
 4. **Watcher adapters (R4):** three focused native adapters behind one
    internal observer type (Linux inotify, macOS FSEvents with
    `FSEventStreamFlushSync`, Windows `ReadDirectoryChangesW`), not `notify`,
