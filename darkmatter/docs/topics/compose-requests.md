@@ -169,5 +169,5 @@ environment changes or differs.
 A `ComposeContext` captured on its own (`ComposeContext::capture_for_document`
 and its siblings) reads no process environment either: its `env` starts empty,
 so `ctx.agent` is `"unknown"` until a request installs the snapshot's
-environment over it. Only `current_env.NAME` reads the live process
-environment, by design: it names the value at the moment it is referenced.
+environment over it. No expression reads the live process environment, so
+`env` does not change during a composition.

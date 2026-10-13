@@ -135,6 +135,19 @@ The frontmatter surface does not emit that note — it is DMLS-owned because it 
 
 Classification requires an explicit `ctx.` prefix (the D2 rule): a bare `{{ today }}` is a **frontmatter** variable even when `today` is also a known context-variable tail, and an unknown `ctx.<name>` keeps the generic expression hover without borrowing a similarly named bare key's value. The hover range remains the complete `{{ … }}` expression.
 
+## Formatting rule: reserved-root and `fm.<key>` hover
+
+A cursor on a bare reserved root (`fm`, `ctx`, `env`, `current`, and any other
+name in Darkmatter's reserved-root catalog) appends one line, `` **`<root>`** — <description> ``,
+with the catalog description. A reserved root shadows a frontmatter key of the
+same name, so this line wins over any static value.
+
+A cursor on `fm.<key>` hovers the frontmatter key `<key>` exactly as a bare
+`{{ <key> }}` would: its static value, or the schema block for a declared but
+unset property. `doc` and `hook` are ordinary properties: `{{ doc.title }}`
+shows the static value of the nested key `doc.title`, never a root
+description.
+
 ## Formatting rule: function-call hover
 
 A cursor on a known function-name identifier — the name token of a `FunctionCall` such as `as_csv(...)` — renders the catalog typed signature and description through `overlay::expressions::format_function_block`.

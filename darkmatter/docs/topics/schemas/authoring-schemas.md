@@ -316,23 +316,23 @@ For the matching model and its implementation status, read [Schema Triggers in D
 
 ### Schemas for Global Variables
 
-Every global variable has a schema, including `doc`, `ctx`, `current`, `env`,
+Every global variable has a schema, including `fm`, `ctx`, `current`, `env`,
 `err`, and `tracking`. Darkmatter's built-in definitions start in
 [`darkmatter.yaml`](../../../schemas/darkmatter.yaml), which imports reusable
 named types from its `partials` directory. `ctx` and `current` share the same
 context type, so both expose properties such as `cwd` directly.
 
-Frontmatter is the value of `doc`. Most expressions can omit that namespace:
-`title` and `doc.title` refer to the same property. This shorthand does not change
+Frontmatter is the value of `fm`. Most expressions can omit that namespace:
+`title` and `fm.title` refer to the same property. This shorthand does not change
 how its schema is defined. A frontmatter property named `ctx`, accessed as
-`doc.ctx`, is separate from the `ctx` global.
+`fm.ctx`, is separate from the `ctx` global.
 
 The schema describes what a value can contain. The application supplies the value
 and determines when it is available. Knowing the fields of `err`, for example,
 does not make an error available during initialization. Editor assistance uses
 the schema and availability declarations without running value providers.
 
-The layering rules below apply to the properties of `doc`. Authored document
+The layering rules below apply to the properties of `fm`. Authored document
 schemas cannot redefine the other globals. The registered built-in global schema
 is not automatically applied as a collection of frontmatter properties.
 

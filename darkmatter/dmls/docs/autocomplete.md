@@ -37,7 +37,7 @@ characters:
 | `/` | link and wiki path segments |
 | `#` | heading anchors (`[...](doc.md#…)`, `[[target#…]]`) |
 | `(` | directive options / expression function arguments |
-| `.` | `ctx.` members inside an open `{{ }}` interpolation |
+| `.` | `ctx.` and `fm.` members inside an open `{{ }}` interpolation |
 
 Each provider re-checks context, so a trigger character in ordinary prose
 produces nothing. In particular, a `.` outside an open interpolation yields no
@@ -124,12 +124,19 @@ without a number.
 
 ## Interpolation completion (`{{ … }}`)
 
-Inside an interpolation, the DSL provider offers three candidate families:
+Inside an interpolation, the DSL provider offers four candidate families:
 
-1. **Frontmatter keys** — the document's own top-level keys.
-2. **`ctx.*` context variables** — offered fully qualified (`ctx.today`,
+1. **Frontmatter keys** — the document's own top-level keys, plus the
+   top-level properties its own `$schema` declares but leaves unset. A key
+   named `doc`, `hook`, or `current_env` is offered like any other key.
+2. **The `fm` root and its members** — `fm` itself, documented with its
+   description from Darkmatter's reserved-root catalog, and, once the partial
+   starts with `fm.`, each frontmatter key as `fm.<key>`. A key the dotted
+   form cannot reach as one path (for example `$schema`) is not offered after
+   `fm.`.
+3. **`ctx.*` context variables** — offered fully qualified (`ctx.today`,
    `ctx.packages`, …).
-3. **Expression functions** — every function in the catalog, including the
+4. **Expression functions** — every function in the catalog, including the
    eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
    `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
    `as_json5`).

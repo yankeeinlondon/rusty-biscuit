@@ -45,7 +45,7 @@ precedes it, so kebab-case frontmatter keys are ordinary identifiers:
 | Expression | Lexes as |
 | --- | --- |
 | `spec-name`, `depends-on`, `phase-2`, `iteration-1` | one `Variable` |
-| `doc.spec-name` | one `Variable("doc.spec-name")` — every dotted segment follows the rule |
+| `fm.spec-name` | one `Variable("fm.spec-name")` — every dotted segment follows the rule |
 | `false-1`, `true-value` | one `Variable` — only the exact words `true` and `false` are booleans |
 | `a - b`, `a -b`, `a- b` | subtraction |
 | `4-2`, `f(x)-1`, `arr[0]-1`, `"x"-1` | subtraction — the left operand is not an identifier |
@@ -67,7 +67,7 @@ Bracket access still reaches any key the identifier grammar cannot spell — one
 containing `.` or `--`, or starting with a digit, or ending in `-`:
 
 ```md
-{{ doc['release.channel'] }}  {{ doc['2fa-enabled'] }}
+{{ fm['release.channel'] }}  {{ fm['2fa-enabled'] }}
 ```
 
 Editor-side code that finds the identifier partial before a cursor must use
