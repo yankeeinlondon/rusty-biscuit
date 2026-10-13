@@ -2240,6 +2240,30 @@ $schema:
         );
     }
 
+    /// A field missing inside a state value is located by the value's
+    /// instance pointer; the message names the field.
+    #[test]
+    fn a_nested_missing_field_reports_its_instance_path() {
+        let error = plan_from(
+            r#"kind: sequence
+sequence:
+  - name: blue
+    config: {}
+$schema:
+  config: "{ shade: string(required) }"
+"#,
+        )
+        .unwrap_err();
+
+        match error {
+            CompositionError::SequenceStateSchemaViolation { index: 0, ref property, ref message, .. } => {
+                assert_eq!(property, "/config");
+                assert!(message.contains("shade"), "{message}");
+            }
+            other => panic!("expected SequenceStateSchemaViolation, got {other}"),
+        }
+    }
+
     /// The schema judges the *state* portion only: executable and task keys
     /// are not state and must not be validated as such.
     #[test]

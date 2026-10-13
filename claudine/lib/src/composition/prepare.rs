@@ -381,6 +381,9 @@ fn canonical_compose_options(
     compose_opts
         .with_deferred_schema_verdict(options.defer_schema_verdict)
         .with_schema_phase(schema_phase)
+        // `prepare_*_with_schema` re-validates the post-shell frontmatter and
+        // drops invalid optional values rather than failing on them.
+        .with_caller_owned_post_shell_verdict(true)
 }
 
 /// `compose_opts` prepared against the options' file-resolution context.

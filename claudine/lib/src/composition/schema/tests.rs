@@ -1092,6 +1092,26 @@ fn missing_object_property_has_no_interactive_shape() {
     }
 }
 
+/// A field missing inside a value is a problem of that value: it keeps its
+/// instance path and is never offered as a top-level property to collect.
+#[test]
+fn missing_nested_field_reports_its_instance_path() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  config: '{ name: string(required) }(required)'\nconfig: {}\n---\nbody\n",
+    );
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    match err {
+        CompositionError::SchemaValidation { message, problems, .. } => {
+            assert_eq!(problems, ["/config"]);
+            assert!(message.starts_with("/config: "), "{message}");
+            assert!(message.contains("name"), "{message}");
+        }
+        other => panic!("expected SchemaValidation, got {other:?}"),
+    }
+}
+
 // -- build_schema_status_report ---------------------------------------
 
 #[test]
@@ -1137,6 +1157,18 @@ fn status_report_marks_invalid_required_correctly() {
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
     let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    assert_eq!(report.required[0].state, PropertyState::Invalid);
+}
+
+#[test]
+fn status_report_marks_a_value_missing_a_nested_field_invalid() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  config: '{ name: string(required) }(required)'\nconfig: {}\n---\nbody\n",
+    );
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    assert_eq!(report.required[0].name, "config");
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
 
@@ -1842,6 +1874,32 @@ fn pre_validation_drop_surfaces_diagnostic() {
         pre.dropped_optionals[0].stage,
         DroppedOptionalStage::PreValidation
     );
+}
+
+/// A drop names only the property, so a problem inside its value leads the
+/// reason with its instance path; a problem on the value itself does not.
+#[test]
+fn drop_reason_locates_a_problem_inside_the_value() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  count: 'number'\n  config: '{ size: number }'\ncount: nope\nconfig:\n  size: big\n---\nbody\n",
+    );
+    let reasons = |drops: &[DroppedOptional]| -> Vec<(String, String)> {
+        let mut reasons: Vec<_> = drops.iter().map(|d| (d.property.clone(), d.reason.clone())).collect();
+        reasons.sort();
+        reasons
+    };
+
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
+    for drops in [reasons(&pre.dropped_optionals), reasons(&prepared.dropped_optionals)] {
+        assert_eq!(drops.len(), 2, "{drops:?}");
+        assert_eq!(drops[0].0, "config");
+        assert!(drops[0].1.starts_with("/config/size: "), "{drops:?}");
+        assert_eq!(drops[1].0, "count");
+        assert!(!drops[1].1.starts_with('/'), "{drops:?}");
+    }
 }
 
 // ── Phase 4 regression: $schema references stay document-relative when ──

@@ -25,7 +25,10 @@ pub(super) fn categorize_problems(
     for problem in problems {
         pointer_paths.push(problem.path.clone());
         match problem.kind {
-            ValidationProblemKind::Missing => {
+            // Only a top-level property can be collected; a field missing
+            // inside a value (`/content_policy/0` lacks `rule`) is a problem
+            // of that value and keeps its instance path.
+            ValidationProblemKind::Missing if problem.path.is_empty() => {
                 let name = problem
                     .property
                     .clone()
@@ -46,7 +49,9 @@ pub(super) fn categorize_problems(
                     interactive_shape,
                 });
             }
-            ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
+            ValidationProblemKind::Missing
+            | ValidationProblemKind::Type
+            | ValidationProblemKind::Invalid => {
                 let top = top_level_pointer_segment(&problem.path);
                 let hard_at_this_phase = top
                     .as_deref()
@@ -628,14 +633,17 @@ pub(in crate::composition) fn status_report_from_validation(
         std::collections::BTreeSet::new();
     for problem in &report.problems {
         match problem.kind {
-            ValidationProblemKind::Missing => {
+            // A field missing inside a value makes that value invalid.
+            ValidationProblemKind::Missing if problem.path.is_empty() => {
                 let name = problem
                     .property
                     .clone()
                     .unwrap_or_else(|| problem.path.clone());
                 missing_by_name.insert(name);
             }
-            ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
+            ValidationProblemKind::Missing
+            | ValidationProblemKind::Type
+            | ValidationProblemKind::Invalid => {
                 let Some(name) = top_level_pointer_segment(&problem.path) else {
                     continue;
                 };
