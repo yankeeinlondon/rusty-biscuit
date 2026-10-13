@@ -131,6 +131,16 @@ source snapshot, shared by every problem and root-union arm):
   = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
 - `md schema validate` prints `(at line L, column C)`; the compose block
   prints ` at L:C`; DMLS ranges start at the same nodes.
+- Every projection keeps the instance path beside the position; a position
+  alone does not name the list item or field. `md schema validate` and the
+  compose block print the pointer without its leading `/`
+  (`content_policy/1/rule`; compose appends a missing property's name to its
+  parent's path); DMLS puts it in `data.instance_path`; `md clean` suffixes
+  report-only schema messages with `` (at `/pointer`) ``; Claudine keeps it in
+  `SchemaValidation`, dropped-optional reasons, and sequence-state violations,
+  and treats a field missing inside a value as that value's problem, never as
+  a top-level property to collect. Never reduce a problem to its first
+  pointer segment for display.
 
 ## Runtime baseline
 
@@ -390,8 +400,12 @@ needs `@this`.
 `suggest(...)` attaches advisory completion candidates without changing
 validation. `lint_suggestions()` reports malformed or misplaced suggestions;
 `suggestions_for_path()` supplies structured completion items. A property has
-at most one `suggest(...)` (across union atoms too), and it is linted against
-the arm carrying it, so `content_policy` completion offers only `Evergreen`.
+at most one `suggest(...)` (across union atoms too); its candidates are linted
+against the property's effective union at their insertion site (scalar or
+element), so any accepting alternative keeps a candidate. `content_policy`
+completion offers all seven rules stored on the `Evergreen` arm. Never isolate
+the storing atom when linting (`suggestions_for_def` and `alternatives_for_def`
+lint the whole definition).
 DMLS validates with `PendingPolicy::Defer`, so it reports nothing for a
 `{{ … }}` value.
 

@@ -169,8 +169,9 @@ Parser rejects, schema accepts: `ValidUntil(2027-02-30)`,
 `FileChanged(docs/{{HOME}}.md, @fp)`, `[Evergreen, "ValidFor(3mo)"]`, and
 `content_policy: null`. Both accept `FileChanged(notes/a(b.md, @fp)`,
 `&Cargo.toml`, `^README.md`, and a nonexistent file. DMLS skips `{{ … }}`
-values and suggests only `Evergreen` (a single `suggest(...)` is linted
-against its own union arm; spreading it fails preparation).
+values and suggests all seven shipped rules (the single `suggest(...)` list
+sits on the `Evergreen` arm and is linted against the whole rule union;
+spreading it across arms fails preparation).
 
 Cases live in `darkmatter/lib/tests/content_policy_fixtures/` (`DECLARATIONS`).
 Tests: `darkmatter/lib/tests/l1/content_policy_*.rs`, `schemas_union_postfix.rs`,
