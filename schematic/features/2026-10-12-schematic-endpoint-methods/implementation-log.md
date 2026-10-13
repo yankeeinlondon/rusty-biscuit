@@ -42,6 +42,66 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/bitbucket/responses.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/eversolo/responses.rs
+    - schematic/schema/src/gitea.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/gitea/responses.rs
+    - schematic/schema/src/github.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/github/responses.rs
+    - schematic/schema/src/gitlab.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/gitlab/responses.rs
+    - schematic/schema/src/huggingface.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/huggingface/responses.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+docs_updated_during_phase_3:
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - schematic-runtime
     - schematic-gen
@@ -322,3 +382,167 @@ The Input Robustness Matrix does not apply: no parser or configuration reader ch
 
 - `just test` and `just lint` pass in the `schematic` area. That covers more than the plan's checkpoint asked: the generator tests were migrated rather than left failing.
 - Status: Phase 2 implementation complete, ready for review.
+
+## Phase 3
+
+Phase 3 adds the generator side: every REST endpoint now gets an inherent method on its API struct and a generated call type. The work is in a new `schematic/gen/src/codegen/endpoint_methods/` module, wired into `output/assemble`. Skills used: `rust-testing` conventions (L1 placement, no tier markers, repository reads through `include_str!` and `CARGO_MANIFEST_DIR` joins) and `os` from Phase 1. No `#[cfg]`, path-comparison, or process code changed.
+
+### What was built
+
+- **`endpoint_methods/names.rs`: the name resolver (Task 3.1).** `resolve_names(api)` returns, for each endpoint:
+    - the method name;
+    - the request and call type names;
+    - each setter, with its field, location, and parameter;
+    - the rename list (`Rename`: API, endpoint, target, from, to, reason);
+    - the remaining conflicts (`NameConflict`).
+
+  `endpoint_method_renames(apis)` returns the flat list that Task 4.3 pins. The rules:
+    - The method name is the endpoint id put through `sanitize_rust_field_ident`, the request-field sanitizer, so a keyword becomes `type_` and is listed as `NotAnIdentifier`.
+    - A method named like an API-struct method gets the `_endpoint` suffix.
+    - A setter is named after its request field, so it matches `with_<field>`. A setter named like a call-type method gets the `_param` suffix.
+    - A name that two endpoints still share, or that two setters of one call type still share, is a conflict.
+- **Reserved names (ruling 6), in five consts:**
+
+  | Const | Contents |
+  | --- | --- |
+  | `SHARED_CALL_METHODS` | `anonymous`, `credential`, `deadline`, `full`, `build` |
+  | `PLANNED_CALL_METHODS` | `pages`, `fetch_page`, `collect_all` |
+  | `CALL_TYPE_TRAIT_METHODS` | `clone`, `clone_from`, `fmt`, `into_future` |
+  | `API_CLIENT_METHODS` | the 19 `api_client!` methods |
+  | `API_STRUCT_METHODS` / `API_STRUCT_TRAIT_METHODS` | `new`, `definition`, `basic_auth` / `clone`, `clone_from`, `fmt`, `default` |
+
+  Drift tests prove three of them against the code:
+    - `API_CLIENT_METHODS` equals the `pub fn`s of the `api_client!` macro, read from `runtime/src/api_client.rs` with `include_str!`.
+    - `API_STRUCT_METHODS` equals the inherent `fn`s that `generate_api_struct` emits for a Basic-auth API.
+    - Every `SHARED_CALL_METHODS` entry is a method of the runtime `Call`, and of `FullCall` (except `full`), parsed from `runtime/src/call.rs`.
+
+  Trait-method names are reserved because an inherent `clone(self, v)` or `default(&self)` would shadow the trait method in method-call syntax.
+- **Diagnostics (Task 3.2).**
+    - New `Feature::EndpointMethodRename` (`endpoint-method-rename`). `validate_rust_client` reports each rename as a **warning**, with one line per rename naming the API, endpoint, old and new name, and reason.
+    - Conflicts are `generated-name-collision` **errors**.
+    - `check_group_type_names` now also claims each call-type name, so these cases are errors too:
+        - two APIs of one module whose call types collide;
+        - a body or response type named like a call type.
+- **`endpoint_methods/docs.rs`: the rustdoc (Task 3.3, R7).** The method doc has:
+    - the description, verbatim, multi-line, and omitted with no blank line when it is empty;
+    - a `` `METHOD /path` `` line;
+    - a "Returns a [`XCall`]" sentence;
+    - `## Arguments`, listing the name, type, and role of each required argument, and omitted when there are none;
+    - `## Optional values`, linking each setter to `XCall::setter` with its wire name, location, type, and description collapsed to one line, and omitted when there are none.
+
+  Setter docs reuse the same summary. There is no H1, and no format-string narration.
+- **`endpoint_methods/mod.rs`: emission (Task 3.4).** `generate_endpoint_methods(api)` emits each call type and **one** `impl {Api} { … }` block with every endpoint method. The call type is:
+
+  ```rust
+  #[derive(Clone, Debug)]
+  #[must_use = "a call sends nothing until it is awaited"]
+  pub struct XCall<'a>(schematic_runtime::Call<'a, Tag, XRequest>);
+  ```
+
+    - Setters are `Self(self.0.map_request(|request| request.with_field(value)))`, taking the `with_*` argument type (ruling 8).
+    - Forwards for `anonymous`, `credential`, `deadline`, `full` (which returns the runtime `FullCall`, per ruling 3), and `build`.
+    - `IntoFuture` uses `Output = <Call<..> as IntoFuture>::Output` and `IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>`.
+    - The endpoint method is `XCall(self.0.send(XRequest::new(args…)))`, or `XRequest::default()` when there are no required arguments. Its arguments are the path parameters in path order, then `body`, which is `new`'s order (R1).
+
+  No WebSocket code is touched. `request_body_type_name` was extracted from `generate_request_struct_with_options` so the request struct and the endpoint method agree on the body type.
+- **Assembly (Task 3.6).** `api_requests` appends the endpoint methods after the requests, so in a split module they land in `requests.rs`. That file now imports the API struct beside its tag (`use super::{GitHub, GitHubApi};`). A child module may reach the struct's private `.0`.
+- **Docs strings (Task 3.6).**
+    - `module_docs.rs`'s example, `lib_rs.rs`'s quick start, and `prelude.rs` now show endpoint methods, through a new `example_invocation` helper.
+    - The `lib.rs` "Results" section describes `CallError` and `.full()`.
+    - The prelude also re-exports `Call`, `CallError`, and `FullCall`, but not the call types, following the request-type pattern.
+    - The `schematic-gen` crate docs (`gen/src/lib.rs`) show the call type and the method.
+
+### Decisions and departures (spec untouched)
+
+1. **Task 3.5, shared helpers: not touched.** The call types use only `schematic_runtime` items. `shared.rs` is byte-identical after regeneration, so `encode_cookie_value`, `combine_cookie_headers`, and `FormFile` stay where they are.
+2. **Method names use `schematic_define`'s `to_snake_case` (through `sanitize_rust_field_ident`), not `schematic-gen`'s.** Phase 1's inventory used the generator's `to_snake_case`. D2 says to reuse the request-field sanitizer, and that sanitizer is built on the definitions crate's snake case, which keeps acronyms together. For ordinary ids (`ListReleases` → `list_releases`) the two agree. They differ only on the uncased OpenAI ids Phase 1 flagged, for example `CreateanAPIkeyforaserviceaccount` → `createan_apikeyforaserviceaccount`, not `createan_a_p_ikeyforaserviceaccount`. A re-run of `validate` over the shipped definitions reports **zero** renames and **zero** collisions, so the expected rename list is still empty.
+3. **Trait-method names are reserved too** (`clone`, `clone_from`, `fmt`, `default` on the API struct; `clone`, `clone_from`, `fmt`, `into_future` on call types). Ruling 6 named only inherent methods. Without these, an endpoint or parameter named `default` or `clone` would compile but shadow the trait method.
+4. **A keyword endpoint id is listed as a rename** (`NotAnIdentifier`). A keyword *setter* is not listed, because the setter takes the request field's existing name (`type_`, matching `with_type_`), so nothing a caller already uses changes.
+5. **`schematic/schema/src` was regenerated in this phase** with `cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman` (`just generate` without its notification). `slow_real_apis_compile_offline` compares fresh output with the committed tree byte for byte, so `just test` would fail otherwise. OpenAPI and Postman outputs are byte-identical.
+6. **Six modules crossed the generator's 2,000-line split threshold and became directories:** `bitbucket`, `eversolo`, `gitea`, `github`, `gitlab`, and `huggingface`. For example, `github.rs` became `github/{mod,requests,responses}.rs`. Public paths do not change, because `mod.rs` re-exports `requests::*` and `responses::*`, so `schematic_schema::github::GitHub` and `…::github::ListReleasesRequest` still resolve. Task 4.1's churn review should expect this layout change.
+7. **Generated size roughly doubled.** This is for Phase 4's R8 measurement; Phase 3 did not time any builds:
+
+   | Scope | Phase 1 baseline | Now |
+   | --- | --- | --- |
+   | Whole `schema/src` | 41,610 lines, 1,516,000 bytes, 30 files | 78,634 lines, 3,188,410 bytes, 42 files |
+   | REST only | 37,494 lines, 1,342,153 bytes | 74,518 lines, 3,014,563 bytes |
+   | `openai/` | 19,703 lines, 716,506 bytes | 38,438 lines, 1,598,362 bytes |
+
+   Most of the growth is rustdoc, plus five forwards and an `IntoFuture` impl per endpoint. A debug `cargo build --manifest-path schematic/schema/Cargo.toml` of the regenerated crate succeeds, and `cargo clippy --manifest-path schematic/schema/Cargo.toml --lib -- -D warnings` is clean. The crate's own tests still do not compile; that is the known breakage Task 4.2 fixes.
+8. **No validation-time check against glob-imported definitions names.** The generator cannot see every `schematic-definitions` type, so Phase 1's silent-shadowing hazard is guarded by an L1 test over the shipped definitions source instead (`no_shipped_call_type_shares_a_name_with_a_definitions_type`). A body or response type named like a call type is still a validation error.
+
+### Test changes required by the new surface
+
+These old assertions forbade what this phase adds. Each now asserts the new contract.
+
+- `gen/tests/l1/http_client.rs::module_has_no_send_path_of_its_own` forbade `.send(` and `fn get_items`. It now requires that the only `.send(` calls are the two endpoint methods' `self.0.send(..)`, and it pins both methods' signatures and bodies.
+- `gen/tests/l1/e2e_generation.rs` previously used `assert_no_send_methods`. It is now `assert_endpoint_methods`: no `async fn` or `fn request`, and each named endpoint method returns its call type.
+- `fresh_output_compile.rs::RUNTIME_DEFINITIONS` forbade `fn variant`, meaning the old API-struct method. OpenAI now has a legitimate `variant` setter, so the entry is narrowed to `fn variant(&self`. `generated_rest_code_…` reads `github/requests.rs` (the split layout) and asserts that `list_releases(&self, owner, repo) -> ListReleasesCall<'_>` exists.
+- `output::tests::split_module_public_api_is_accessible` expects `use super::{LargeApi, LargeApiApi};`.
+- `validation::tests::group_members_whose_emitted_names_collide_name_both_apis` now expects two collisions, the request struct and the call type.
+
+### Requirement-to-test mapping
+
+Two boundaries are involved:
+
+- **Generator output:** tokens from the `schematic-gen` library, tested in-crate at fidelity F1, tier L1.
+- **The generated crate compiled and run against the real runtime:** `fresh_output_compile`'s `slow_` tests, which build a fresh crate outside the checkout with Cargo, run its child nextest against wiremock, and check a set of misuse cases with `cargo check`. That is fidelity F3, L1 tier. These tests run in `just test-fresh-output`, part of the area's `just test`.
+
+| Behavior | Test |
+| --- | --- |
+| Method = snake-case id; call type follows the request name; no conflicts for an ordinary API | `codegen::endpoint_methods::tests::methods_are_snake_case_ids_and_call_types_follow_the_request_name` |
+| Request suffix carries into the call type (`BasicRequest` → `…BasicCall`, non-`Request` suffix) | `…::a_request_suffix_carries_into_the_call_type_name` |
+| Setters keep field names; `full`/`build`/`pages` → `_param`; keyword field → `type_` | `…::setters_keep_field_names_and_shared_call_method_names_gain_param` |
+| Exact rename list with reasons, API, endpoint, target | `…::the_rename_list_names_every_rename_with_its_reason` |
+| Keyword endpoint id → `type_`, listed | `…::a_keyword_endpoint_id_takes_the_field_sanitizer_suffix_and_is_listed` |
+| Every API-struct and trait method name → `_endpoint` | `…::every_api_struct_and_trait_method_name_is_renamed` |
+| Two endpoints sharing a method name (including after an `_endpoint` rename) is a conflict naming both | `…::two_endpoints_with_one_method_name_are_a_conflict_naming_both` |
+| A renamed setter colliding with another field is a conflict | `…::a_renamed_setter_that_meets_another_field_is_a_conflict` |
+| Rename list across APIs | `…::endpoint_method_renames_spans_every_api` |
+| Renames are warnings (exact rendered lines); conflicts are errors | `…::renames_are_warnings_and_conflicts_are_errors_of_the_rust_output` |
+| Call type vs referenced type collision; call types of two module members | `…::a_call_type_name_shared_with_a_referenced_type_is_a_collision`, `…::call_types_of_two_apis_in_one_module_collide_only_without_distinct_suffixes` |
+| Required args in `new` order (path, then body); `default()` when none; method sends nothing | `…::an_endpoint_method_takes_the_required_values_in_new_order_and_sends_nothing` |
+| Call type shape: newtype, derives, `must_use`, every setter location, forwards, `IntoFuture` | `…::a_call_type_wraps_the_runtime_call_with_setters_and_shared_forwards` |
+| Inherent method sets are exactly setters plus shared methods, and the API struct gains exactly the endpoint methods | `…::each_call_type_has_exactly_its_setters_and_the_shared_methods`, `…::an_api_with_no_endpoints_gains_an_empty_impl_and_no_call_types` |
+| R7 docs: description (with Markdown characters, multi-paragraph), route, arguments, setters | `…::method_docs_carry_description_route_arguments_and_setters` |
+| Body argument documented; empty sections omitted; no blank line for a missing description | `…::method_docs_list_the_body_and_omit_empty_sections`, `…::a_missing_description_leaves_no_leading_blank_line` |
+| Setter and call-type docs | `…::setter_and_call_type_docs_name_the_parameter_and_the_method` |
+| Single-file and split assembly (split: `requests.rs` imports the API struct) | `…::a_module_holds_the_call_types_and_the_endpoint_methods`, `…::a_split_module_puts_call_types_and_methods_beside_the_requests_and_imports_the_api_struct`, `output::tests::split_module_public_api_is_accessible` |
+| Docs examples use endpoint methods | `…::example_invocation_passes_path_parameters_and_the_body`, `codegen::module_docs::tests::example_section_*` |
+| Reserved names are true to the code (ruling 6) | `…::api_client_methods_are_exactly_the_methods_api_client_emits`, `…::api_struct_methods_are_exactly_the_methods_generate_api_struct_emits`, `…::shared_call_methods_are_methods_of_the_runtime_call` |
+| No shipped call type shadows a definitions type | `…::no_shipped_call_type_shares_a_name_with_a_definitions_type` |
+| Every shipped API generates endpoint methods; GitHub has `list_releases(owner, repo)` | `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` |
+| The whole shipped crate compiles and equals the committed tree | `fresh_output_compile::slow_real_apis_compile_offline` |
+| **Task 3.8.** Only the API struct imported: an endpoint method, setters, per-call settings, `.await`, `.full()`, `.build()`, and `Clone` all compile, with no trait import | `slow_generated_types_reject_misuse_at_compile_time` (`endpoint_methods_control` target, `ENDPOINT_METHODS_CONTROL`) |
+| A setter after `.full()` fails (E0599 naming `limit`); awaiting `.full()` yields a `Response`, not the data (E0308) | `MISUSES` entries "an endpoint's own setter after full" and "the data, not the envelope, after full" |
+| End to end against wiremock: setters reach the query in order, a per-call `anonymous` reaches the send, `.await` returns the data, `.full()` returns the envelope, a 404 is `CallError::Api` with status and body | child test `an_endpoint_method_sends_its_values_and_awaits_to_the_data` (in `slow_fixture_apis_compile_and_send_offline`) |
+| End to end, renamed names (`new_endpoint`, `full_param`, `type_`) send under their wire names; a built call sent twice makes two requests | child test `renamed_endpoint_methods_and_setters_send_under_their_wire_names` (new fixture API `FixtureNames`) |
+| **Task 3.9.** Partial generation still passes at ABI 3; a group recorded as ABI 2 is refused | `partial_generation` suite (unchanged cases pass), new `refuses_modules_generated_against_abi_2` |
+
+The Input Robustness Matrix does not apply: no parser, manifest reader, or configuration loader changed. The new code reads `RestApi` values the definitions crate builds in Rust. The passive corpus test over every shipped artifact is `slow_real_apis_compile_offline`, which generates all 18 shipped APIs, compares them byte for byte with the committed tree, and compiles them. Validation over the same corpus reports no renames or collisions.
+
+### Gates run
+
+- `just test` in `schematic/`: 1923 passed, 12 skipped (tier-skipped as before). `test-fresh-output` passed 6 of 6, and `test-compile-fail` passed 1 of 1.
+- `just lint` in `schematic/`: exit 0.
+- `cargo clippy --manifest-path schematic/schema/Cargo.toml --lib -- -D warnings`: clean. `--all-targets` is not run, because the schema tests are the known Phase 4 breakage.
+- Not run, still expected to fail: `schematic-schema`'s own tests (Task 4.2) and the consumers biscuit-speaks, homelab, and sniff (Phase 6).
+- Cross-OS: not run. The new code generates and compares strings only, with no `#[cfg]`, process, or path-comparison logic. The one new path read (`../definitions/src`, walked with `read_dir`) and the split-layout lookup (`github/requests.rs`) go through `snapshot_tree`, which already joins components with `/` on every OS. The fresh-output tests run on every CI OS's build job as before.
+
+### Repository state note
+
+While this phase's gates were running, an outside process (the pipeline's separate commit step) staged the working tree and committed it. This session ran no `git add` or `git commit`. The Phase 2 and Phase 3 work is now in these commits on `feat/modern-config`:
+
+- `138358330` (runtime)
+- `d694c7f5c` (generator)
+- `97c5949a3` (regenerated schema)
+- `f9328b142` (validation docs)
+- `ce12aed8b` (Phase 2 planning close)
+
+`5bfe641f5`, where the phase started, is the base for the file lists in this frontmatter. Only this log and the plan and spec frontmatter edits are uncommitted.
+
+### Checkpoint 3
+
+- `just test` and `just lint` pass for the `schematic` area, including `schematic-gen`.
+- Generating the fixture APIs produces a crate that compiles against the new runtime and sends correctly through endpoint methods. All 18 shipped APIs also generate, compile, and are committed.
+- Status: Phase 3 implementation complete, ready for review.
