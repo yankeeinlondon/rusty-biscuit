@@ -11,8 +11,14 @@ use serde::{Deserialize, Serialize};
 use tempfile::TempPath;
 
 use crate::errors::TtsError;
-use crate::providers::host::EchogardenEngine;
-use crate::types::SpeedLevel;
+use crate::providers::cloud::ElevenLabsProvider;
+use crate::providers::host::{
+    EchogardenEngine, EchogardenProvider, GttsProvider, KokoroTtsProvider, SayProvider,
+    SayResolution as Resolution,
+};
+use crate::types::{
+    CloudTtsProvider, HostTtsProvider, SpeakResult, SpeedLevel, TtsConfig, TtsProvider,
+};
 
 /// Whether Playa's dry-run switch is set, in any spelling Playa accepts.
 ///
@@ -47,6 +53,132 @@ pub(crate) enum ResolvedSynthesis {
         model: String,
         speed: SpeedLevel,
     },
+}
+
+/// Playback with settings a preparation retained.
+///
+/// Each method goes straight to the provider that resolved the settings and
+/// skips its default resolution, so a changed system or account default
+/// cannot change what a prepared object plays. `config` supplies only the
+/// playback inputs (volume, and speed where it is not baked in) and the
+/// metadata hints. A missing cache file is synthesized again with the
+/// retained settings.
+impl ResolvedSynthesis {
+    /// The provider that resolved these settings and plays them.
+    pub(crate) fn provider(&self) -> TtsProvider {
+        match self {
+            Self::Say { .. } => TtsProvider::Host(HostTtsProvider::Say),
+            Self::Kokoro { .. } => TtsProvider::Host(HostTtsProvider::KokoroTts),
+            Self::Gtts { .. } => TtsProvider::Host(HostTtsProvider::Gtts),
+            Self::Echogarden { .. } => TtsProvider::Host(HostTtsProvider::EchoGarden),
+            Self::ElevenLabs { .. } => TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+        }
+    }
+
+    pub(crate) async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        match self {
+            Self::Say { voice, rate_wpm } => {
+                SayProvider::speak_resolved(text, &Resolution::retained(voice, *rate_wpm), config)
+                    .await
+            }
+            Self::Kokoro { voice } => KokoroTtsProvider::new().speak_resolved(text, voice, config).await,
+            Self::Gtts { language } => GttsProvider::new().speak_resolved(text, language, config).await,
+            Self::Echogarden { engine, voice, speed } => {
+                EchogardenProvider::with_engine(*engine)
+                    .speak_resolved(text, Some(voice), *speed, config)
+                    .await
+            }
+            Self::ElevenLabs { voice, model, speed } => {
+                ElevenLabsProvider::new()?
+                    .speak_resolved(text, voice, model, *speed, config)
+                    .await
+            }
+        }
+    }
+
+    pub(crate) async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        match self {
+            Self::Say { voice, rate_wpm } => {
+                SayProvider
+                    .speak_resolved_with_result(text, Resolution::retained(voice, *rate_wpm), config)
+                    .await
+            }
+            Self::Kokoro { voice } => {
+                KokoroTtsProvider::new()
+                    .speak_resolved_with_result(text, voice, config)
+                    .await
+            }
+            Self::Gtts { language } => {
+                GttsProvider::new()
+                    .speak_resolved_with_result(text, language, config)
+                    .await
+            }
+            Self::Echogarden { engine, voice, speed } => {
+                EchogardenProvider::with_engine(*engine)
+                    .speak_resolved_with_result(text, Some(voice), *speed, config)
+                    .await
+            }
+            Self::ElevenLabs { voice, model, speed } => {
+                ElevenLabsProvider::new()?
+                    .speak_resolved_with_result(text, voice, model, *speed, config)
+                    .await
+            }
+        }
+    }
+
+    /// A ready job, synthesizing the file first if it is missing. Runs in the
+    /// detached preparation helper, never in the requesting process.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        match self {
+            Self::Say { voice, rate_wpm } => {
+                SayProvider::resolved_job(text, &Resolution::retained(voice, *rate_wpm), config).await
+            }
+            Self::Kokoro { voice } => KokoroTtsProvider::new().resolved_job(text, voice, config).await,
+            Self::Gtts { language } => GttsProvider::new().resolved_job(text, language, config).await,
+            Self::Echogarden { engine, voice, speed } => {
+                EchogardenProvider::with_engine(*engine)
+                    .resolved_job(text, Some(voice), *speed, config)
+                    .await
+            }
+            Self::ElevenLabs { voice, model, speed } => {
+                ElevenLabsProvider::new()?
+                    .resolved_job(text, voice, model, *speed, config)
+                    .await
+            }
+        }
+    }
+
+    /// A ready job when the file is still cached; no subprocess or request.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        match self {
+            Self::Say { voice, rate_wpm } => SayProvider::cached_resolved_job(
+                text,
+                &Resolution::retained(voice, *rate_wpm),
+                config,
+            ),
+            Self::Kokoro { voice } => KokoroTtsProvider::cached_resolved_job(text, voice, config),
+            Self::Gtts { language } => GttsProvider::cached_resolved_job(text, language, config),
+            Self::Echogarden { engine, voice, speed } => EchogardenProvider::with_engine(*engine)
+                .cached_resolved_job(text, voice, *speed, config),
+            Self::ElevenLabs { voice, model, speed } => {
+                ElevenLabsProvider::cached_resolved_job(text, voice, model, *speed, config)
+            }
+        }
+    }
 }
 
 /// Create the file a synthesizer writes before it is published at `cache_path`.
@@ -118,6 +250,21 @@ mod tests {
             let again = serde_json::to_string(&decoded).unwrap();
             assert_eq!(again, json);
         }
+    }
+
+    #[test]
+    fn each_variant_names_the_provider_that_resolved_it() {
+        let providers: Vec<_> = every_variant().iter().map(ResolvedSynthesis::provider).collect();
+        assert_eq!(
+            providers,
+            [
+                TtsProvider::Host(HostTtsProvider::Say),
+                TtsProvider::Host(HostTtsProvider::KokoroTts),
+                TtsProvider::Host(HostTtsProvider::Gtts),
+                TtsProvider::Host(HostTtsProvider::EchoGarden),
+                TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+            ]
+        );
     }
 
     #[test]

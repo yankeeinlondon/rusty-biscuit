@@ -254,18 +254,18 @@ impl GttsProvider {
             language: language.to_string(),
         }))
     }
-}
 
-impl TtsExecutor for GttsProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+    /// Play `lang`'s cached file at `config`'s volume and speed, synthesizing
+    /// it first on a miss.
+    pub(crate) async fn speak_resolved(
+        &self,
+        text: &str,
+        lang: &str,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
         self.ensure_connectivity()?;
-
-        let lang = Self::resolve_language(config);
-
-        // Generate to cache (or get cached file)
         let (audio_path, _cache_hit) = self.generate_to_cache(text, lang).await?;
 
-        // Play the audio file
         #[cfg(feature = "playa")]
         {
             crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await
@@ -273,9 +273,99 @@ impl TtsExecutor for GttsProvider {
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = audio_path;
+            let _ = (audio_path, config);
             Err(TtsError::NoAudioPlayer)
         }
+    }
+
+    /// [`Self::speak_resolved`], reporting the language and cache entry played.
+    pub(crate) async fn speak_resolved_with_result(
+        &self,
+        text: &str,
+        lang_code: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        self.ensure_connectivity()?;
+
+        // Try to get the voice from the voice list for better metadata
+        let voice = if let Ok(voices) = self.list_voices().await {
+            // Find the voice matching this language code
+            voices
+                .iter()
+                .find(|v| v.identifier.as_deref() == Some(lang_code))
+                .cloned()
+                .unwrap_or_else(|| {
+                    Voice::new(lang_code)
+                        .with_gender(Gender::Any)
+                        .with_quality(VoiceQuality::Good)
+                        .with_language(config.language.clone())
+                        .with_identifier(lang_code)
+                })
+        } else {
+            // Fallback if voice list unavailable
+            Voice::new(lang_code)
+                .with_gender(Gender::Any)
+                .with_quality(VoiceQuality::Good)
+                .with_language(config.language.clone())
+                .with_identifier(lang_code)
+        };
+
+        let (audio_path, cache_hit) = self.generate_to_cache(text, lang_code).await?;
+
+        #[cfg(feature = "playa")]
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            AudioFormat::Mp3,
+            config,
+        )
+        .await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit, voice);
+            Err(TtsError::NoAudioPlayer)
+        }
+
+        // Return the result with cache metadata
+        #[cfg(feature = "playa")]
+        Ok(
+            SpeakResult::new(TtsProvider::Host(HostTtsProvider::Gtts), voice)
+                .with_audio_file(audio_path)
+                .with_codec("mp3")
+                .with_cache_hit(cache_hit)
+                .with_playback(playback),
+        )
+    }
+
+    /// A ready detached job for `lang`, synthesizing it first on a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        &self,
+        text: &str,
+        lang: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let (path, _) = self.generate_to_cache(text, lang).await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    /// A ready detached job for `lang` when its file is already cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        text: &str,
+        lang: &str,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        let path = Self::cache_key(text, lang).cache_path();
+        path.is_file()
+            .then(|| crate::playa_bridge::file_job(path, config))
+    }
+}
+
+impl TtsExecutor for GttsProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.speak_resolved(text, Self::resolve_language(config), config)
+            .await
     }
 
     async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
@@ -306,61 +396,8 @@ impl TtsExecutor for GttsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        self.ensure_connectivity()?;
-
-        // Resolve language code
-        let lang_code = Self::resolve_language(config);
-
-        // Try to get the voice from the voice list for better metadata
-        let voice = if let Ok(voices) = self.list_voices().await {
-            // Find the voice matching this language code
-            voices
-                .iter()
-                .find(|v| v.identifier.as_deref() == Some(lang_code))
-                .cloned()
-                .unwrap_or_else(|| {
-                    Voice::new(lang_code)
-                        .with_gender(Gender::Any)
-                        .with_quality(VoiceQuality::Good)
-                        .with_language(config.language.clone())
-                        .with_identifier(lang_code)
-                })
-        } else {
-            // Fallback if voice list unavailable
-            Voice::new(lang_code)
-                .with_gender(Gender::Any)
-                .with_quality(VoiceQuality::Good)
-                .with_language(config.language.clone())
-                .with_identifier(lang_code)
-        };
-
-        // Generate to cache (or get cached file)
-        let (audio_path, cache_hit) = self.generate_to_cache(text, lang_code).await?;
-
-        // Play the audio file (requires playa feature)
-        #[cfg(feature = "playa")]
-        let playback = crate::playback::play_audio_file_with_report(
-            &audio_path,
-            AudioFormat::Mp3,
-            config,
-        )
-        .await?;
-
-        #[cfg(not(feature = "playa"))]
-        {
-            let _ = (&audio_path, cache_hit, voice);
-            Err(TtsError::NoAudioPlayer)
-        }
-
-        // Return the result with cache metadata
-        #[cfg(feature = "playa")]
-        Ok(
-            SpeakResult::new(TtsProvider::Host(HostTtsProvider::Gtts), voice)
-                .with_audio_file(audio_path)
-                .with_codec("mp3")
-                .with_cache_hit(cache_hit)
-                .with_playback(playback),
-        )
+        self.speak_resolved_with_result(text, Self::resolve_language(config), config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -369,10 +406,8 @@ impl TtsExecutor for GttsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let (path, _) = self
-            .generate_to_cache(text, Self::resolve_language(config))
-            .await?;
-        Ok(crate::playa_bridge::file_job(path, config))
+        self.resolved_job(text, Self::resolve_language(config), config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -381,10 +416,7 @@ impl TtsExecutor for GttsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        let path = Self::cache_key(text, Self::resolve_language(config)).cache_path();
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, config)))
+        Ok(Self::cached_resolved_job(text, Self::resolve_language(config), config))
     }
 }
 

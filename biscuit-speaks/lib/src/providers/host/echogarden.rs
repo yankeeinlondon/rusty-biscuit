@@ -4,6 +4,10 @@
 //! Supports multiple TTS backends, with focus on `vits` and `kokoro` engines.
 //!
 //! Echogarden is an npm package: <https://github.com/echogarden-project/echogarden>
+//!
+//! Audio is cached by engine, voice, and speed. When no voice resolves, the
+//! engine picks its own default, which can change outside this library, so
+//! that audio is synthesized fresh, never cached, and `prepare` does nothing.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -368,34 +372,19 @@ impl EchogardenProvider {
             speed: config.speed,
         }))
     }
-}
 
-/// Audio an echogarden entry point plays.
-enum Synthesized {
-    /// A shared cache entry, and whether it already existed.
-    Cached {
-        path: PathBuf,
-        #[cfg_attr(not(feature = "playa"), allow(dead_code))]
-        hit: bool,
-    },
-    /// Audio for an unresolved default, deleted when dropped.
-    Uncached(tempfile::TempPath),
-}
-
-impl Synthesized {
-    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
-    fn path(&self) -> &Path {
-        match self {
-            Self::Cached { path, .. } => path,
-            Self::Uncached(path) => path,
-        }
-    }
-}
-
-impl TtsExecutor for EchogardenProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        let voice = self.resolve_voice(config).await;
-        let audio = self.synthesize(text, voice.as_deref(), config.speed).await?;
+    /// Play `voice` synthesized at `speed`, at `config`'s volume.
+    ///
+    /// `None` is an unresolved default: echogarden picks the voice and the
+    /// audio bypasses the shared cache.
+    pub(crate) async fn speak_resolved(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let audio = self.synthesize(text, voice, speed).await?;
 
         debug!(
             path = %audio.path().display(),
@@ -414,33 +403,22 @@ impl TtsExecutor for EchogardenProvider {
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = audio;
+            let _ = (audio, config);
             Err(TtsError::NoAudioPlayer)
         }
     }
 
-    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        self.prepare_resolved(text, config).await.map(|_| ())
-    }
-
-    async fn is_ready(&self) -> bool {
-        Self::echogarden_binary_exists().await
-    }
-
-    fn info(&self) -> &str {
-        "Echogarden - Speech processing engine with multiple high-quality TTS backends (VITS, Kokoro)"
-    }
-
-    async fn speak_with_result(
+    /// [`Self::speak_resolved`], reporting the voice and cache entry played.
+    pub(crate) async fn speak_resolved_with_result(
         &self,
         text: &str,
+        resolved: Option<&str>,
+        speed: SpeedLevel,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        let resolved = self.resolve_voice(config).await;
-        let audio = self.synthesize(text, resolved.as_deref(), config.speed).await?;
-        let voice_name = resolved.unwrap_or_else(|| "default".to_string());
+        let audio = self.synthesize(text, resolved, speed).await?;
+        let voice_name = resolved.unwrap_or("default").to_string();
 
-        // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
         let playback = crate::playback::play_audio_file_with_report(
             audio.path(),
@@ -451,7 +429,7 @@ impl TtsExecutor for EchogardenProvider {
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (audio, voice_name);
+            let _ = (audio, voice_name, config);
             Err(TtsError::NoAudioPlayer)
         }
 
@@ -488,14 +466,17 @@ impl TtsExecutor for EchogardenProvider {
         }
     }
 
+    /// A ready detached job for `voice` at `speed`, synthesizing it first on
+    /// a miss.
     #[cfg(feature = "playa")]
-    async fn detached_job(
+    pub(crate) async fn resolved_job(
         &self,
         text: &str,
+        voice: Option<&str>,
+        speed: SpeedLevel,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let voice = self.resolve_voice(config).await;
-        let path = match self.synthesize(text, voice.as_deref(), config.speed).await? {
+        let path = match self.synthesize(text, voice, speed).await? {
             Synthesized::Cached { path, .. } => path,
             // Playa may delete only spool-owned files, so this uncached audio
             // outlives the job, as Say's unresolved detached audio does.
@@ -504,6 +485,84 @@ impl TtsExecutor for EchogardenProvider {
             })?,
         };
         Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
+    /// A ready detached job for `voice` at `speed` when its file is already
+    /// cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        &self,
+        text: &str,
+        voice: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        let path = self.cache_key(text, voice, speed).cache_path();
+        path.is_file()
+            .then(|| crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+}
+
+/// Audio an echogarden entry point plays.
+enum Synthesized {
+    /// A shared cache entry, and whether it already existed.
+    Cached {
+        path: PathBuf,
+        #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+        hit: bool,
+    },
+    /// Audio for an unresolved default, deleted when dropped.
+    Uncached(tempfile::TempPath),
+}
+
+impl Synthesized {
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn path(&self) -> &Path {
+        match self {
+            Self::Cached { path, .. } => path,
+            Self::Uncached(path) => path,
+        }
+    }
+}
+
+impl TtsExecutor for EchogardenProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        let voice = self.resolve_voice(config).await;
+        self.speak_resolved(text, voice.as_deref(), config.speed, config)
+            .await
+    }
+
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.prepare_resolved(text, config).await.map(|_| ())
+    }
+
+    async fn is_ready(&self) -> bool {
+        Self::echogarden_binary_exists().await
+    }
+
+    fn info(&self) -> &str {
+        "Echogarden - Speech processing engine with multiple high-quality TTS backends (VITS, Kokoro)"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let voice = self.resolve_voice(config).await;
+        self.speak_resolved_with_result(text, voice.as_deref(), config.speed, config)
+            .await
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let voice = self.resolve_voice(config).await;
+        self.resolved_job(text, voice.as_deref(), config.speed, config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -515,10 +574,7 @@ impl TtsExecutor for EchogardenProvider {
         let Some(voice) = self.resolve_voice(config).await else {
             return Ok(None);
         };
-        let path = self.cache_key(text, &voice, config.speed).cache_path();
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, &Self::playback_config(config))))
+        Ok(self.cached_resolved_job(text, &voice, config.speed, config))
     }
 }
 

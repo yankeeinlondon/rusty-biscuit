@@ -582,6 +582,132 @@ impl ElevenLabsProvider {
         }))
     }
 
+    /// Play `voice` and `model` synthesized at `speed`, at `config`'s volume.
+    ///
+    /// Makes no voice-list request; a cache miss makes one synthesis request.
+    pub(crate) async fn speak_resolved(
+        &self,
+        text: &str,
+        voice: &str,
+        model: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let (audio_path, _cache_hit) = self.generate_to_cache(text, voice, model, speed).await?;
+
+        #[cfg(feature = "playa")]
+        {
+            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, &Self::playback_config(config))
+                .await
+        }
+        #[cfg(not(feature = "playa"))]
+        {
+            // Playback requires the playa feature
+            let _ = (audio_path, config);
+            Err(TtsError::NoAudioPlayer)
+        }
+    }
+
+    /// [`Self::speak_resolved`], reporting the voice, model, and cache entry
+    /// played.
+    pub(crate) async fn speak_resolved_with_result(
+        &self,
+        text: &str,
+        voice_id: &str,
+        model_used: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let (audio_path, cache_hit) = self
+            .generate_to_cache(text, voice_id, model_used, speed)
+            .await?;
+
+        #[cfg(feature = "playa")]
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            AudioFormat::Mp3,
+            &Self::playback_config(config),
+        )
+        .await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit, model_used, voice_id, config);
+            Err(TtsError::NoAudioPlayer)
+        }
+
+        #[cfg(feature = "playa")]
+        {
+            let mut voice = if let Ok(voices) = self.list_voices().await {
+                let found = voices
+                    .iter()
+                    .find(|v| v.identifier.as_deref() == Some(voice_id));
+                tracing::debug!(
+                    voice_id = %voice_id,
+                    found = found.is_some(),
+                    "Looking up voice metadata"
+                );
+                found.cloned().unwrap_or_else(|| {
+                    Voice::new(voice_id)
+                        .with_identifier(voice_id)
+                        .with_gender(config.gender)
+                        .with_quality(VoiceQuality::Excellent)
+                        .with_language(config.language.clone())
+                })
+            } else {
+                Voice::new(voice_id)
+                    .with_identifier(voice_id)
+                    .with_gender(config.gender)
+                    .with_quality(VoiceQuality::Excellent)
+                    .with_language(config.language.clone())
+            };
+
+            if voice.identifier.is_none() {
+                voice.identifier = Some(voice_id.to_string());
+            }
+
+            Ok(SpeakResult::with_model(
+                TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+                voice,
+                model_used.to_string(),
+            )
+            .with_audio_file(audio_path)
+            .with_codec("mp3")
+            .with_cache_hit(cache_hit)
+            .with_playback(playback))
+        }
+    }
+
+    /// A ready detached job for `voice` and `model` at `speed`, synthesizing
+    /// it first on a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        &self,
+        text: &str,
+        voice: &str,
+        model: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let (path, _) = self.generate_to_cache(text, voice, model, speed).await?;
+        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
+    /// A ready detached job for `voice` and `model` at `speed` when its file
+    /// is already cached. Makes no API request.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        text: &str,
+        voice: &str,
+        model: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        let path = Self::cache_key(text, voice, model, speed).cache_path();
+        path.is_file()
+            .then(|| crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
     /// Generate audio bytes from text using the ElevenLabs API.
     ///
     /// ## Arguments
@@ -933,21 +1059,8 @@ impl Clock for SystemClock {
 impl TtsExecutor for ElevenLabsProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
         let selection = self.select_and_record(config).await;
-        let (audio_path, _cache_hit) = self
-            .generate_to_cache(text, &selection.voice, &selection.model, config.speed)
-            .await?;
-
-        #[cfg(feature = "playa")]
-        {
-            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, &Self::playback_config(config))
-                .await
-        }
-        #[cfg(not(feature = "playa"))]
-        {
-            // Playback requires the playa feature
-            let _ = audio_path;
-            Err(TtsError::NoAudioPlayer)
-        }
+        self.speak_resolved(text, &selection.voice, &selection.model, config.speed, config)
+            .await
     }
 
     async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
@@ -976,80 +1089,13 @@ impl TtsExecutor for ElevenLabsProvider {
         );
 
         // This may fetch the voice list for gender matching.
-        let Selection {
-            voice: voice_id,
-            model: model_used,
-            ..
-        } = self.select_and_record(config).await;
+        let selection = self.select_and_record(config).await;
         tracing::debug!(
-            voice_id = %voice_id,
+            voice_id = %selection.voice,
             "speak_with_result resolved voice_id"
         );
-
-        // Generate to cache (or get cached file)
-        let (audio_path, cache_hit) = self
-            .generate_to_cache(text, &voice_id, &model_used, config.speed)
-            .await?;
-
-        // Play the audio file (requires playa feature)
-        #[cfg(feature = "playa")]
-        let playback = crate::playback::play_audio_file_with_report(
-            &audio_path,
-            AudioFormat::Mp3,
-            &Self::playback_config(config),
-        )
-        .await?;
-
-        #[cfg(not(feature = "playa"))]
-        {
-            let _ = (&audio_path, cache_hit, model_used, voice_id);
-            Err(TtsError::NoAudioPlayer)
-        }
-
-        // Try to get full voice metadata from the voice list
-        #[cfg(feature = "playa")]
-        {
-            let mut voice = if let Ok(voices) = self.list_voices().await {
-                // Find the voice with this ID
-                let found = voices
-                    .iter()
-                    .find(|v| v.identifier.as_deref() == Some(&voice_id));
-                tracing::debug!(
-                    voice_id = %voice_id,
-                    found = found.is_some(),
-                    "Looking up voice metadata"
-                );
-                found.cloned().unwrap_or_else(|| {
-                    Voice::new(&voice_id)
-                        .with_identifier(&voice_id)
-                        .with_gender(config.gender)
-                        .with_quality(VoiceQuality::Excellent)
-                        .with_language(config.language.clone())
-                })
-            } else {
-                Voice::new(&voice_id)
-                    .with_identifier(&voice_id)
-                    .with_gender(config.gender)
-                    .with_quality(VoiceQuality::Excellent)
-                    .with_language(config.language.clone())
-            };
-
-            // Ensure the voice has its identifier set (for display)
-            if voice.identifier.is_none() {
-                voice.identifier = Some(voice_id.clone());
-            }
-
-            // Return the result with model info and cache metadata
-            Ok(SpeakResult::with_model(
-                TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
-                voice,
-                model_used,
-            )
-            .with_audio_file(audio_path)
-            .with_codec("mp3")
-            .with_cache_hit(cache_hit)
-            .with_playback(playback))
-        }
+        self.speak_resolved_with_result(text, &selection.voice, &selection.model, config.speed, config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -1059,10 +1105,8 @@ impl TtsExecutor for ElevenLabsProvider {
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
         let selection = self.select_and_record(config).await;
-        let (path, _) = self
-            .generate_to_cache(text, &selection.voice, &selection.model, config.speed)
-            .await?;
-        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+        self.resolved_job(text, &selection.voice, &selection.model, config.speed, config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -2263,6 +2307,50 @@ mod tests {
         provider.detached_job(TEXT, &female()).await.unwrap();
         assert_eq!(fixture.record()["voice"], "f1");
         assert!(detached_hit(&recording_provider(&transport, NOW, Some(ACCOUNT)), &transport, &female()).await);
+    }
+
+    /// Retained settings keep the prepared voice after the account's voice
+    /// list changes: the cached file is found, and a vanished file is
+    /// synthesized again, with no voice-list request. Speed is sent to the
+    /// API once and never applied again at playback.
+    #[cfg(feature = "playa")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn retained_settings_skip_the_voice_list_and_apply_speed_once() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT));
+        let fast = female().with_speed(SpeedLevel::Fast);
+        let Some(ResolvedSynthesis::ElevenLabs { voice, model, speed }) =
+            provider.prepare_resolved(TEXT, &fast).await.unwrap()
+        else {
+            panic!("a listed default voice prepares");
+        };
+        assert_eq!((voice.as_str(), speed), ("f1", SpeedLevel::Fast));
+        transport.set_voices(Some(vec![fake::voice("f2", Some("female"))]));
+        let requests = transport.total_requests();
+
+        let job_speed = |job: playa::detached::SpoolJob| match job {
+            playa::detached::SpoolJob::PlayFile { playback, .. } => playback.options.speed,
+            other => panic!("a ready ElevenLabs job plays a file: {other:?}"),
+        };
+        let cached = ElevenLabsProvider::cached_resolved_job(TEXT, &voice, &model, speed, &fast)
+            .expect("the retained settings name the prepared file");
+        assert_eq!(job_speed(cached), Some(1.0));
+        assert_eq!(transport.total_requests(), requests, "a cached lookup makes no request");
+
+        for entry in std::fs::read_dir(fixture.root.path().join("tmp")).unwrap() {
+            std::fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        assert!(ElevenLabsProvider::cached_resolved_job(TEXT, &voice, &model, speed, &fast).is_none());
+        let job = provider.resolved_job(TEXT, &voice, &model, speed, &fast).await.unwrap();
+        assert_eq!(job_speed(job), Some(1.0), "baked speed is not applied again");
+        assert_eq!(transport.list_requests(), 1, "only the preparation listed voices");
+        let calls = transport.speech_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].voice_id, "f1", "not the account's new default");
+        assert_eq!(calls[1].speed.as_deref(), Some("1.2"));
+        assert_eq!(fixture.audio_files(), 1);
     }
 
     #[test]

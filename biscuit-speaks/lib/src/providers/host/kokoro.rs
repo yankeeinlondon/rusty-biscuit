@@ -309,14 +309,17 @@ impl KokoroTtsProvider {
         self.generate_to_cache(text, &voice).await?;
         Ok(Some(ResolvedSynthesis::Kokoro { voice }))
     }
-}
 
-impl TtsExecutor for KokoroTtsProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        let voice = Self::resolve_voice(config);
-        let (audio_path, _cache_hit) = self.generate_to_cache(text, &voice).await?;
+    /// Play `voice`'s cached file at `config`'s volume and speed, synthesizing
+    /// it first on a miss.
+    pub(crate) async fn speak_resolved(
+        &self,
+        text: &str,
+        voice: &str,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let (audio_path, _cache_hit) = self.generate_to_cache(text, voice).await?;
 
-        // Play the audio file
         #[cfg(feature = "playa")]
         {
             crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
@@ -325,9 +328,82 @@ impl TtsExecutor for KokoroTtsProvider {
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = audio_path;
+            let _ = (audio_path, config);
             Err(TtsError::NoAudioPlayer)
         }
+    }
+
+    /// [`Self::speak_resolved`], reporting the voice and cache entry played.
+    pub(crate) async fn speak_resolved_with_result(
+        &self,
+        text: &str,
+        voice_name: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let (audio_path, cache_hit) = self.generate_to_cache(text, voice_name).await?;
+
+        #[cfg(feature = "playa")]
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            crate::types::AudioFormat::Wav,
+            config,
+        )
+        .await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit, voice_name, config);
+            Err(TtsError::NoAudioPlayer)
+        }
+
+        // Build voice metadata
+        #[cfg(feature = "playa")]
+        {
+            let (gender, language) = Self::parse_voice_prefix(voice_name);
+            let voice = Voice::new(voice_name)
+                .with_gender(gender)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(language);
+
+            Ok(
+                SpeakResult::new(TtsProvider::Host(HostTtsProvider::KokoroTts), voice)
+                    .with_audio_file(audio_path)
+                    .with_codec("wav")
+                    .with_cache_hit(cache_hit)
+                    .with_playback(playback),
+            )
+        }
+    }
+
+    /// A ready detached job for `voice`, synthesizing it first on a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        &self,
+        text: &str,
+        voice: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let (path, _) = self.generate_to_cache(text, voice).await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    /// A ready detached job for `voice` when its file is already cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        text: &str,
+        voice: &str,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        let path = Self::cache_key(text, voice).cache_path();
+        path.is_file()
+            .then(|| crate::playa_bridge::file_job(path, config))
+    }
+}
+
+impl TtsExecutor for KokoroTtsProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.speak_resolved(text, &Self::resolve_voice(config), config)
+            .await
     }
 
     async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
@@ -352,41 +428,8 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        let voice_name = Self::resolve_voice(config);
-        let (audio_path, cache_hit) = self.generate_to_cache(text, &voice_name).await?;
-
-        // Play the audio file (requires playa feature)
-        #[cfg(feature = "playa")]
-        let playback = crate::playback::play_audio_file_with_report(
-            &audio_path,
-            crate::types::AudioFormat::Wav,
-            config,
-        )
-        .await?;
-
-        #[cfg(not(feature = "playa"))]
-        {
-            let _ = (&audio_path, cache_hit, voice_name);
-            Err(TtsError::NoAudioPlayer)
-        }
-
-        // Build voice metadata
-        #[cfg(feature = "playa")]
-        {
-            let (gender, language) = Self::parse_voice_prefix(&voice_name);
-            let voice = Voice::new(&voice_name)
-                .with_gender(gender)
-                .with_quality(VoiceQuality::Excellent)
-                .with_language(language);
-
-            Ok(
-                SpeakResult::new(TtsProvider::Host(HostTtsProvider::KokoroTts), voice)
-                    .with_audio_file(audio_path)
-                    .with_codec("wav")
-                    .with_cache_hit(cache_hit)
-                    .with_playback(playback),
-            )
-        }
+        self.speak_resolved_with_result(text, &Self::resolve_voice(config), config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -395,9 +438,8 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let voice = Self::resolve_voice(config);
-        let (path, _) = self.generate_to_cache(text, &voice).await?;
-        Ok(crate::playa_bridge::file_job(path, config))
+        self.resolved_job(text, &Self::resolve_voice(config), config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -406,10 +448,7 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        let path = Self::cache_key(text, &Self::resolve_voice(config)).cache_path();
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, config)))
+        Ok(Self::cached_resolved_job(text, &Self::resolve_voice(config), config))
     }
 }
 

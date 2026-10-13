@@ -75,13 +75,15 @@ fn fakes_record_each_tool_argument_shape() {
     ];
     for (tool, args, file) in cases {
         let program = fixture.install(tool, Behavior::Synthesize);
-        let mut child = std::process::Command::new(program)
-            .args(&args)
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        use std::io::Write as _;
-        child.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+        // Only `say` reads stdin; writing to a fake that exits without reading
+        // races its exit and fails with a broken pipe.
+        let reads_stdin = tool == FakeTool::Say;
+        let stdin = if reads_stdin { std::process::Stdio::piped() } else { std::process::Stdio::null() };
+        let mut child = std::process::Command::new(program).args(&args).stdin(stdin).spawn().unwrap();
+        if reads_stdin {
+            use std::io::Write as _;
+            child.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+        }
         assert!(child.wait().unwrap().success());
 
         let syntheses = fixture.syntheses(tool);
@@ -281,22 +283,26 @@ async fn prepared_file_is_reused(tool: FakeTool, host: HostTtsProvider, voice: &
 
     let fresh = || Speak::new(&text).with_config(config.clone());
     let returned = prepared.clone().play().await;
+    let returned_result = prepared.clone().play_with_result().await;
     let fresh_play = fresh().play().await;
     let with_result = fresh().play_with_result().await;
     if cfg!(feature = "playa") {
         returned.expect("the prepared object plays the cached file");
         fresh_play.expect("a fresh object plays the cached file");
-        let result = with_result.expect("a fresh object reports the cached file");
-        assert_eq!(result.provider, TtsProvider::Host(host));
-        assert_eq!(result.voice.name, voice);
-        assert!(result.cache_hit);
-        assert_eq!(result.audio_file_path.as_deref(), Some(cache[0].as_path()));
+        for result in [returned_result, with_result] {
+            let result = result.expect("both objects report the cached file");
+            assert_eq!(result.provider, TtsProvider::Host(host));
+            assert_eq!(result.voice.name, voice);
+            assert!(result.cache_hit);
+            assert_eq!(result.audio_file_path.as_deref(), Some(cache[0].as_path()));
+        }
         let played = fixture.invocations(FakeTool::Mpv);
-        assert_eq!(played.len(), 3);
+        assert_eq!(played.len(), 4);
         let path = cache[0].to_string_lossy();
         assert!(played.iter().all(|call| call.args.iter().any(|arg| *arg == path)), "{played:?}");
     } else {
         assert_no_player(returned);
+        assert_no_player(returned_result);
         assert_no_player(fresh_play);
         assert_no_player(with_result);
     }
@@ -306,11 +312,16 @@ async fn prepared_file_is_reused(tool: FakeTool, host: HostTtsProvider, voice: &
     {
         let spool = fixture.lock_spool();
         assert_eq!(biscuit_speaks::run_if_worker().await, None);
-        let id = fresh().play_detached().await.unwrap();
+        let ids = [
+            prepared.play_detached().await.unwrap(),
+            fresh().play_detached().await.unwrap(),
+        ];
         let snapshot = playa::detached::snapshot().unwrap();
-        assert_eq!(snapshot.pending.len(), 1);
-        assert_eq!(snapshot.pending[0].job_id.as_str(), id.as_str());
-        assert_eq!(snapshot.pending[0].state, "ready");
+        assert_eq!(snapshot.pending.len(), 2);
+        for (pending, id) in snapshot.pending.iter().zip(&ids) {
+            assert_eq!(pending.job_id.as_str(), id.as_str());
+            assert_eq!(pending.state, "ready");
+        }
         spool.clear_pending().expect("pending work is removed while owned");
     }
     assert_eq!(fixture.syntheses(tool).len(), 1, "every reuse was a cache hit");
@@ -807,4 +818,307 @@ async fn speak_retains_say_preparation_only_when_both_settings_resolve() {
     let normal = Speak::new(text).with_config(pinned(HostTtsProvider::Say)).prepare().await.unwrap();
     assert!(!normal.is_prepared(), "the system rate is unresolved");
     assert_eq!(fixture.syntheses(FakeTool::Say).len(), 1);
+}
+
+// ============================================================================
+// Playback with retained settings
+// ============================================================================
+
+/// The default stack with only the fakes installed: Kokoro, then Echogarden.
+fn kokoro_then_echogarden(fixture: &TtsFixture) -> (TtsConfig, test_toolkit::EnvGuard) {
+    let default_order = test_toolkit::EnvGuard::remove_safe("TTS_PROVIDER");
+    fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
+    fixture.install(FakeTool::Echogarden, Behavior::Synthesize);
+    fixture.install(FakeTool::Mpv, Behavior::Synthesize);
+    let config = TtsConfig::new()
+        .with_volume(VolumeLevel::Explicit(0.0))
+        .with_failover(TtsFailoverStrategy::FirstAvailable);
+    assert_eq!(
+        biscuit_speaks::get_providers_for_strategy(&config.failover_strategy)[..2],
+        [
+            TtsProvider::Host(HostTtsProvider::KokoroTts),
+            TtsProvider::Host(HostTtsProvider::EchoGarden)
+        ]
+    );
+    (config, default_order)
+}
+
+fn remove_cache(fixture: &TtsFixture) {
+    for entry in fixture.audio_cache_entries() {
+        std::fs::remove_file(entry).unwrap();
+    }
+}
+
+/// When the prepared provider fails, playback falls over to the next
+/// provider with the caller's configuration, never the retained voice, and
+/// does not retry the prepared provider with that configuration.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_failed_prepared_provider_falls_back_with_the_original_configuration() {
+    let fixture = TtsFixture::new();
+    let (config, _order) = kokoro_then_echogarden(&fixture);
+    let text = "This is a test message: retained fallback";
+    let prepared = Speak::new(text)
+        .with_config(config.clone().with_gender(biscuit_speaks::Gender::Male))
+        .prepare()
+        .await
+        .unwrap();
+    assert!(prepared.is_prepared());
+    remove_cache(&fixture);
+    fixture.install(FakeTool::KokoroTts, Behavior::FailAfterPartialWrite);
+
+    let played = prepared.clone().play().await;
+    let reported = prepared.play_with_result().await;
+    let kokoro = fixture.syntheses(FakeTool::KokoroTts);
+    assert_eq!(kokoro.len(), 3, "one preparation, then one retained attempt per call: {kokoro:?}");
+    assert!(kokoro.iter().all(|call| has_args(&call.args, &["--voice", "am_adam"])), "{kokoro:?}");
+    let echogarden = fixture.syntheses(FakeTool::Echogarden);
+    assert_eq!(echogarden.len(), 1, "the second call reuses the fallback's file");
+    assert!(echogarden[0].args.contains(&"--voice=Michael".to_string()), "{echogarden:?}");
+    assert!(!echogarden[0].args.iter().any(|arg| arg.contains("am_adam")), "{echogarden:?}");
+    let cache = fixture.audio_cache_entries();
+    assert_eq!(cache.len(), 1, "no partial Kokoro entry: {cache:?}");
+    assert_eq!(std::fs::read(&cache[0]).unwrap(), fake_audio(FakeTool::Echogarden));
+    if cfg!(feature = "playa") {
+        played.expect("the fallback plays");
+        let result = reported.expect("the fallback reports");
+        assert_eq!(result.provider, TtsProvider::Host(HostTtsProvider::EchoGarden));
+        assert_eq!(result.voice.name, "Michael");
+        assert_eq!(result.audio_file_path.as_deref(), Some(cache[0].as_path()));
+    } else {
+        // Without a player the fallback synthesizes and then cannot play.
+        for result in [played, reported.map(|_| ())] {
+            match result {
+                Err(TtsError::AllProvidersFailed(failed)) => {
+                    let providers: Vec<_> = failed.errors.iter().map(|(provider, _)| *provider).collect();
+                    assert_eq!(
+                        providers[..2],
+                        [
+                            TtsProvider::Host(HostTtsProvider::KokoroTts),
+                            TtsProvider::Host(HostTtsProvider::EchoGarden)
+                        ]
+                    );
+                    assert!(matches!(failed.errors[0].1, TtsError::ProcessFailed { .. }), "{failed:?}");
+                    assert!(matches!(failed.errors[1].1, TtsError::NoAudioPlayer), "{failed:?}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+    fixture.assert_spool_absent();
+}
+
+/// `SpecificProvider` never switches, even when its retained attempt fails.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_specific_provider_does_not_fall_back_after_a_failed_retained_attempt() {
+    let fixture = TtsFixture::new();
+    fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
+    fixture.install(FakeTool::Echogarden, Behavior::Synthesize);
+    let text = "This is a test message: no switching";
+    let prepared = Speak::new(text)
+        .with_config(pinned(HostTtsProvider::KokoroTts))
+        .prepare()
+        .await
+        .unwrap();
+    remove_cache(&fixture);
+    fixture.install(FakeTool::KokoroTts, Behavior::FailAfterPartialWrite);
+
+    for result in [prepared.clone().play().await.map(|_| ()), prepared.play_with_result().await.map(|_| ())] {
+        match result {
+            Err(TtsError::AllProvidersFailed(failed)) => {
+                assert_eq!(failed.errors.len(), 1, "{failed:?}");
+                assert_eq!(failed.errors[0].0, TtsProvider::Host(HostTtsProvider::KokoroTts));
+                assert!(matches!(failed.errors[0].1, TtsError::ProcessFailed { .. }), "{failed:?}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(fixture.syntheses(FakeTool::KokoroTts).len(), 3);
+    assert!(fixture.invocations(FakeTool::Echogarden).is_empty());
+    assert!(fixture.temp_entries().is_empty(), "{:?}", fixture.temp_entries());
+}
+
+/// A prepared file that vanished is synthesized again with the retained
+/// settings and republished, then reused.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_missing_prepared_file_is_synthesized_again_with_the_retained_settings() {
+    let fixture = TtsFixture::new();
+    fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
+    fixture.install(FakeTool::Mpv, Behavior::Synthesize);
+    let text = "This is a test message: vanished";
+    let prepared = Speak::new(text)
+        .with_config(pinned(HostTtsProvider::KokoroTts).with_gender(biscuit_speaks::Gender::Male))
+        .prepare()
+        .await
+        .unwrap();
+    let cache = fixture.audio_cache_entries();
+    remove_cache(&fixture);
+
+    let played = prepared.clone().play().await;
+    let reported = prepared.play_with_result().await;
+    let syntheses = fixture.syntheses(FakeTool::KokoroTts);
+    assert_eq!(syntheses.len(), 2, "synthesized again once, then reused");
+    assert!(syntheses.iter().all(|call| has_args(&call.args, &["--voice", "am_adam"])), "{syntheses:?}");
+    assert_eq!(fixture.audio_cache_entries(), cache, "republished under the same key");
+    assert_eq!(fixture.temp_entries(), cache);
+    if cfg!(feature = "playa") {
+        played.unwrap();
+        let result = reported.unwrap();
+        assert_eq!(result.voice.name, "am_adam");
+        assert!(result.cache_hit);
+    } else {
+        assert_no_player(played);
+        assert_no_player(reported);
+    }
+}
+
+/// Cancelling playback while it synthesizes a vanished prepared file kills
+/// the child and publishes nothing; concurrent playback leaves one complete
+/// file, and duplicate synthesis is allowed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial]
+async fn retained_resynthesis_is_cancellable_and_concurrent_publication_is_complete() {
+    let fixture = TtsFixture::new();
+    fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
+    fixture.install(FakeTool::Mpv, Behavior::Synthesize);
+    let text = "This is a test message: retained cancellation";
+    let prepared = Speak::new(text)
+        .with_config(pinned(HostTtsProvider::KokoroTts))
+        .prepare()
+        .await
+        .unwrap();
+    remove_cache(&fixture);
+
+    fixture.install(FakeTool::KokoroTts, Behavior::HangAfterPartialWrite);
+    let task = tokio::spawn(prepared.clone().play());
+    wait_until("the hanging fake to start", || fixture.syntheses(FakeTool::KokoroTts).len() == 2).await;
+    let hanging = fixture
+        .syntheses(FakeTool::KokoroTts)
+        .into_iter()
+        .find(|call| common::process_running(call.pid))
+        .expect("the retained synthesis is running");
+    wait_until("the partial write", || hanging.output.as_ref().unwrap().is_file()).await;
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    wait_until("the child to be killed", || !common::process_running(hanging.pid)).await;
+    assert!(fixture.temp_entries().is_empty(), "{:?}", fixture.temp_entries());
+
+    fixture.install(FakeTool::KokoroTts, Behavior::Synthesize);
+    let (first, second) = tokio::join!(prepared.clone().play(), prepared.clone().play());
+    if cfg!(feature = "playa") {
+        first.unwrap();
+        second.unwrap();
+    } else {
+        assert_no_player(first);
+        assert_no_player(second);
+    }
+    assert!((3..=4).contains(&fixture.syntheses(FakeTool::KokoroTts).len()));
+    let cache = fixture.audio_cache_entries();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(std::fs::read(&cache[0]).unwrap(), fake_audio(FakeTool::KokoroTts));
+    assert_eq!(fixture.temp_entries(), cache);
+}
+
+/// One row per provider of the spec's playback table: speed baked into the
+/// audio is not applied again, and speed the tool cannot bake in is applied
+/// by the player. Every row plays through retained settings.
+#[cfg(feature = "playa")]
+#[tokio::test]
+#[serial_test::serial]
+async fn retained_playback_applies_speed_exactly_once_per_provider() {
+    let fixture = TtsFixture::new();
+    for tool in [FakeTool::KokoroTts, FakeTool::GttsCli, FakeTool::Echogarden, FakeTool::Mpv] {
+        fixture.install(tool, Behavior::Synthesize);
+    }
+    let text = "This is a test message: retained tempo";
+    // (provider, its tool, the speed argument synthesis bakes in, the player's speed)
+    let rows = [
+        (HostTtsProvider::KokoroTts, FakeTool::KokoroTts, None, "--speed=1.25"),
+        (HostTtsProvider::Gtts, FakeTool::GttsCli, None, "--speed=1.25"),
+        (HostTtsProvider::EchoGarden, FakeTool::Echogarden, Some("--speed=1.25"), "--speed=1"),
+    ];
+    for (host, tool, baked, player_speed) in rows {
+        let before = fixture.audio_cache_entries();
+        let prepared = Speak::new(text)
+            .with_config(pinned(host).with_speed(SpeedLevel::Fast))
+            .prepare()
+            .await
+            .unwrap();
+        assert!(prepared.is_prepared(), "{host:?}");
+        let entry = fixture
+            .audio_cache_entries()
+            .into_iter()
+            .find(|entry| !before.contains(entry))
+            .expect("the row's prepared file");
+        prepared.play().await.unwrap();
+
+        let synthesis = fixture.syntheses(tool);
+        assert_eq!(synthesis.len(), 1, "{host:?}: playback reused the prepared file");
+        let baked_args: Vec<&str> =
+            synthesis[0].args.iter().map(String::as_str).filter(|arg| arg.starts_with("--speed")).collect();
+        assert_eq!(baked_args, baked.into_iter().collect::<Vec<_>>(), "{host:?} synthesis");
+        let path = entry.to_string_lossy();
+        let plays: Vec<_> = fixture
+            .invocations(FakeTool::Mpv)
+            .into_iter()
+            .filter(|call| call.args.iter().any(|arg| *arg == path))
+            .collect();
+        assert_eq!(plays.len(), 1, "{host:?}");
+        let player_args: Vec<&str> =
+            plays[0].args.iter().map(String::as_str).filter(|arg| arg.starts_with("--speed")).collect();
+        assert_eq!(player_args, [player_speed], "{host:?} playback");
+    }
+}
+
+/// The returned object keeps the system voice it prepared with after the
+/// default changes; a fresh object follows the new default and misses.
+/// `Speak` selects Say only on macOS.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[serial_test::serial]
+async fn a_prepared_say_object_keeps_its_settings_after_the_system_voice_changes() {
+    let fixture = say_fixture("Ava (Premium)");
+    let config = pinned(HostTtsProvider::Say).with_speed(SpeedLevel::Fast);
+    let text = "This is a test message: retained Say";
+    let prepared = Speak::new(text).with_config(config.clone()).prepare().await.unwrap();
+    assert!(prepared.is_prepared());
+    let cache = fixture.audio_cache_entries();
+    assert_eq!(cache.len(), 1);
+    let lookups = fixture.invocations(FakeTool::Osascript).len();
+
+    fixture.set_system_voice_lookup(Some(r#"{"voice":"Samantha","rate":175}"#));
+    prepared.clone().play().await.unwrap();
+    let returned = prepared.clone().play_with_result().await.unwrap();
+    assert_eq!(returned.provider, TtsProvider::Host(HostTtsProvider::Say));
+    assert_eq!(returned.voice.name, "Ava (Premium)");
+    assert!(returned.cache_hit);
+    assert_eq!(returned.audio_file_path.as_deref(), Some(cache[0].as_path()));
+    assert_eq!(fixture.invocations(FakeTool::Osascript).len(), lookups, "retained settings skip the lookup");
+    assert_eq!(fixture.syntheses(FakeTool::Say).len(), 1);
+    let played = players(&fixture);
+    assert_eq!(played.len(), 2);
+    if cfg!(feature = "playa") {
+        assert!(played.iter().all(|call| call.args.contains(&"--speed=1".to_string())), "{played:?}");
+    }
+
+    #[cfg(feature = "playa")]
+    {
+        let spool = fixture.lock_spool();
+        assert_eq!(biscuit_speaks::run_if_worker().await, None);
+        prepared.clone().play_detached().await.unwrap();
+        let snapshot = playa::detached::snapshot().unwrap();
+        assert_eq!(snapshot.pending.len(), 1);
+        assert_eq!(snapshot.pending[0].state, "ready");
+        spool.clear_pending().expect("pending work is removed while owned");
+    }
+
+    let fresh = Speak::new(text).with_config(config).play_with_result().await.unwrap();
+    assert_eq!(fresh.voice.name, "Samantha");
+    assert!(!fresh.cache_hit, "a fresh object follows the new default");
+    let syntheses = fixture.syntheses(FakeTool::Say);
+    assert_eq!(syntheses.len(), 2);
+    assert!(syntheses.iter().any(|call| has_args(&call.args, &["-v", "Samantha"])), "{syntheses:?}");
+    assert_eq!(fixture.audio_cache_entries().len(), 2);
 }

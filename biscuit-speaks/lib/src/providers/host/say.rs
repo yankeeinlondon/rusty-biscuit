@@ -1,6 +1,12 @@
 //! macOS Say TTS provider.
 //!
 //! Uses the built-in `say` command on macOS for text-to-speech.
+//!
+//! Audio is cached by voice and words-per-minute rate. With no requested voice
+//! or gender, the system voice comes from `system_defaults`; a request whose
+//! voice or rate stays unresolved is synthesized fresh and never cached, so
+//! `prepare` does nothing for it. The system rate is not read yet, so this
+//! holds for every normal-speed request.
 
 mod system_defaults;
 
@@ -456,6 +462,85 @@ impl SayProvider {
         }))
     }
 
+    /// Play `resolution` at `config`'s volume, through the shared cache when
+    /// it is fully resolved.
+    pub(crate) async fn speak_resolved(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let audio = Self::synthesize(text, resolution).await?;
+        Self::play_report(audio.path(), config).await.map(|_| ())
+    }
+
+    /// [`Self::speak_resolved`], reporting the voice and cache entry played.
+    ///
+    /// Without a resolved voice, the best listed match is named and spoken
+    /// with, so the metadata names the voice actually heard.
+    pub(crate) async fn speak_resolved_with_result(
+        &self,
+        text: &str,
+        mut resolution: Resolution,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let listed = self.list_voices().await;
+        let voice = match &resolution.voice {
+            Some(name) => listed
+                .ok()
+                .and_then(|voices| voices.into_iter().find(|voice| voice.name == *name))
+                .unwrap_or_else(|| Voice::new(name.clone()).with_language(Language::English)),
+            None => {
+                let selected = Self::select_best_voice(&listed?, config).ok_or_else(|| {
+                    TtsError::VoiceEnumerationFailed {
+                        provider: Self::PROVIDER_NAME.into(),
+                        message: "No matching voice found for the given constraints".into(),
+                    }
+                })?;
+                resolution.voice = Some(selected.name.clone());
+                selected
+            }
+        };
+
+        let audio = Self::synthesize(text, &resolution).await?;
+        let playback = Self::play_report(audio.path(), config).await?;
+        let result = SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), voice)
+            .with_codec("wav")
+            .with_playback(playback);
+        Ok(match audio {
+            Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),
+            Synthesized::Uncached(_) => result,
+        })
+    }
+
+    /// A ready detached job for `resolution`, synthesizing it first on a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let path = match Self::synthesize(text, resolution).await? {
+            Synthesized::Cached { path, .. } => path,
+            // Playa may delete only spool-owned files, so this uncached audio
+            // outlives the job.
+            Synthesized::Uncached(path) => path.keep().map_err(|error| TtsError::TempFileError {
+                source: error.error,
+            })?,
+        };
+        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
+    /// A ready detached job for a fully resolved request whose file is cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        Self::cached_path(text, resolution)
+            .map(|path| crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
     /// Check if the `say` binary exists on the system.
     async fn say_binary_exists() -> bool {
         which::which("say").is_ok()
@@ -464,12 +549,20 @@ impl SayProvider {
 
 /// The voice and rate a request resolved to; `None` is unresolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Resolution {
+pub(crate) struct Resolution {
     voice: Option<String>,
     rate_wpm: Option<u32>,
 }
 
 impl Resolution {
+    /// The settings a preparation retained, both known.
+    pub(crate) fn retained(voice: &str, rate_wpm: u32) -> Self {
+        Self {
+            voice: Some(voice.to_owned()),
+            rate_wpm: Some(rate_wpm),
+        }
+    }
+
     /// Both settings, when both are known: only then may the audio be cached.
     fn concrete(&self) -> Option<(&str, u32)> {
         Some((self.voice.as_deref()?, self.rate_wpm?))
@@ -496,8 +589,7 @@ impl Synthesized {
 impl TtsExecutor for SayProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
         let resolution = Self::resolve(config, &OsSpeechDefaults).await;
-        let audio = Self::synthesize(text, &resolution).await?;
-        Self::play_report(audio.path(), config).await.map(|_| ())
+        Self::speak_resolved(text, &resolution, config).await
     }
 
     async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
@@ -526,35 +618,8 @@ impl TtsExecutor for SayProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        let mut resolution = Self::resolve(config, &OsSpeechDefaults).await;
-        let listed = self.list_voices().await;
-        let voice = match &resolution.voice {
-            Some(name) => listed
-                .ok()
-                .and_then(|voices| voices.into_iter().find(|voice| voice.name == *name))
-                .unwrap_or_else(|| Voice::new(name.clone()).with_language(Language::English)),
-            // Without a known voice, name the best listed match and speak with it.
-            None => {
-                let selected = Self::select_best_voice(&listed?, config).ok_or_else(|| {
-                    TtsError::VoiceEnumerationFailed {
-                        provider: Self::PROVIDER_NAME.into(),
-                        message: "No matching voice found for the given constraints".into(),
-                    }
-                })?;
-                resolution.voice = Some(selected.name.clone());
-                selected
-            }
-        };
-
-        let audio = Self::synthesize(text, &resolution).await?;
-        let playback = Self::play_report(audio.path(), config).await?;
-        let result = SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), voice)
-            .with_codec("wav")
-            .with_playback(playback);
-        Ok(match audio {
-            Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),
-            Synthesized::Uncached(_) => result,
-        })
+        let resolution = Self::resolve(config, &OsSpeechDefaults).await;
+        self.speak_resolved_with_result(text, resolution, config).await
     }
 
     #[cfg(feature = "playa")]
@@ -564,15 +629,7 @@ impl TtsExecutor for SayProvider {
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
         let resolution = Self::resolve(config, &OsSpeechDefaults).await;
-        let path = match Self::synthesize(text, &resolution).await? {
-            Synthesized::Cached { path, .. } => path,
-            // Playa may delete only spool-owned files, so this uncached audio
-            // outlives the job.
-            Synthesized::Uncached(path) => path.keep().map_err(|error| TtsError::TempFileError {
-                source: error.error,
-            })?,
-        };
-        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+        Self::resolved_job(text, &resolution, config).await
     }
 
     #[cfg(feature = "playa")]
@@ -582,8 +639,7 @@ impl TtsExecutor for SayProvider {
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
         let resolution = Self::resolve(config, &OsSpeechDefaults).await;
-        Ok(Self::cached_path(text, &resolution)
-            .map(|path| crate::playa_bridge::file_job(path, &Self::playback_config(config))))
+        Ok(Self::cached_resolved_job(text, &resolution, config))
     }
 }
 
