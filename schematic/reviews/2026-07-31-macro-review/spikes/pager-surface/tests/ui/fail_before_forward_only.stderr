@@ -1,0 +1,16 @@
+error[E0277]: `ListEvents` has no backward direction
+ --> tests/ui/fail_before_forward_only.rs:4:34
+  |
+4 |     let _ = client.list_events().before("e1");
+  |                                  ^^^^^^ this needs a backward leg (`Cursor.backward` or `NextLink.prev`) in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `ListEvents`
+help: the following other types implement trait `HasPrev`
+ --> /kache/workspace/src/generated.rs:65:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:110:0
+  |
+  = note: `ListCommits`
+note: required by a bound in `Pager::<E>::before`
+ --> /kache/workspace/src/pager.rs:116:4

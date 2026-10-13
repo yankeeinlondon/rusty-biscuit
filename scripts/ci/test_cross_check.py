@@ -35,11 +35,13 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import affected_scope  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "cross-check.sh"
+HOSTS_SCRIPT = ROOT / "scripts" / "cross-check-hosts.sh"
 PACKAGE = "alpha"
 
 #: What the stub planner writes wherever the real planner would write the head
@@ -66,6 +68,20 @@ import json, os, subprocess, sys
 with open(os.environ['CROSS_CHECK_LOG'], 'a', encoding='utf-8') as log:
     log.write(json.dumps({'tool': 'ssh', 'argv': sys.argv[1:]}) + '\\n')
 command = sys.argv[-1]
+host = sys.argv[-2] if len(sys.argv) > 1 else ''
+runs = json.loads(os.environ.get('CROSS_CHECK_REMOTE_RUNS', '{}'))
+if host in runs and 'cross-check-' in command and ('.sh' in command or '.ps1' in command):
+    # The remote run itself: replay what a real host printed and exited with.
+    import signal, time
+    run = runs[host]
+    sys.stdout.write(run['output'].replace('{TREE}', os.environ.get('CROSS_CHECK_TREE', '')))
+    sys.stdout.flush()
+    if run.get('interrupt'):
+        # Ctrl-C at the terminal reaches the whole foreground process group.
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.killpg(os.getpgrp(), signal.SIGINT)
+        time.sleep(30)
+    raise SystemExit(run.get('exit', 0))
 if '-EncodedCommand' in command:
     print('clone-dir: ' + os.environ['CROSS_CHECK_WIN_CLONE_DIR'])
 elif command == 'bash -ls':
@@ -95,6 +111,26 @@ import json, os, shutil, sys
 argv = sys.argv[1:]
 with open(os.environ['CROSS_CHECK_LOG'], 'a', encoding='utf-8') as log:
     log.write(json.dumps({'tool': 'scp', 'argv': argv}) + '\\n')
+positional = []
+skip = False
+for arg in argv:
+    if skip:
+        skip = False
+        continue
+    if arg == '-o':
+        skip = True
+        continue
+    if not arg.startswith('-'):
+        positional.append(arg)
+if len(positional) >= 2 and ':' in positional[0] and ':' not in positional[-1]:
+    # A fetch (`scp -r host:dir local/`): serve the directory the fixture names
+    # for that host, or fail the way a remote that left nothing behind does.
+    host, remote = positional[0].split(':', 1)
+    source = json.loads(os.environ.get('CROSS_CHECK_FETCH_DIRS', '{}')).get(host)
+    if not source:
+        raise SystemExit(1)
+    shutil.copytree(source, os.path.join(positional[-1], os.path.basename(remote.rstrip('/'))))
+    raise SystemExit(0)
 files = []
 skip = False
 for arg in argv:
@@ -118,7 +154,7 @@ for path in files:
 """
 
 
-def planner_stub(package: str) -> str:
+def planner_stub(package: str, delegate: bool = False) -> str:
     """A planner that answers one `--all --resolved-plan` call with a fixed plan.
 
     The real planner needs `cargo metadata` over this repository; what the
@@ -147,6 +183,12 @@ def planner_stub(package: str) -> str:
             "base": "a" * 40,
             "head": HEAD_PLACEHOLDER,
             "change_class": "full",
+            # The real producers, so the plan stays valid for the publisher that
+            # reads it back (`schema.validate_resolved_plan`).
+            "change_inventory": affected_scope.change_inventory(
+                [f"{package}/src/lib.rs"], False
+            ),
+            "archive_guard": plan_fixtures.archive_guard([f"{package}/src/lib.rs"]),
             "full_scope": True,
             "full_scope_gates": [],
             "areas": [
@@ -201,11 +243,27 @@ def planner_stub(package: str) -> str:
     # The stub answers with the head it was ASKED for. `ci-build` binds every
     # archive to `plan.head`, so a fixture whose plan named a fixed revision
     # could not tell a correct orchestration from a broken one.
-    return (
+    body = (
         "import sys\n"
         "argv = sys.argv[1:]\n"
         f"head = argv[argv.index('--head') + 1] if '--head' in argv else {HEAD_PLACEHOLDER!r}\n"
         f"print({schema.canonical(plan)!r}.replace({HEAD_PLACEHOLDER!r}, head))\n"
+    )
+    if not delegate:
+        return body
+    # The publisher imports the real module by this name. Run as a script this
+    # file is the planner stub; imported, it hands over to the real planner so
+    # the stub and the real publisher can share one `scripts/ci` directory.
+    return (
+        "import sys\n"
+        "if __name__ != '__main__':\n"
+        "    import importlib.util\n"
+        f"    spec = importlib.util.spec_from_file_location('affected_scope', {str(ROOT / 'scripts' / 'ci' / 'affected_scope.py')!r})\n"
+        "    module = importlib.util.module_from_spec(spec)\n"
+        "    sys.modules['affected_scope'] = module\n"
+        "    spec.loader.exec_module(module)\n"
+        "else:\n"
+        + "".join(f"    {line}\n" for line in body.splitlines())
     )
 
 
@@ -223,6 +281,11 @@ class CrossCheckHarness(unittest.TestCase):
         coding_dir: str | None = None,
         worktree: str | None = None,
         remote_setup: Callable[[Path], None] | None = None,
+        publisher: bool = False,
+        declared: tuple[str, ...] | None = None,
+        os_arg: str | None = None,
+        remote_runs: dict[str, dict] | None = None,
+        fetch_dirs: dict[str, Path] | None = None,
     ) -> dict:
         """Run the script for one OS and return everything it shipped.
 
@@ -235,6 +298,14 @@ class CrossCheckHarness(unittest.TestCase):
         `CODING_DIR`; `worktree` runs the script from a linked worktree of that
         name instead of the main checkout. `remote_setup` is handed the remote
         host's coding dir before the run, to plant existing clones there.
+
+        `publisher` installs the REAL evidence tooling beside the stub planner,
+        so the leg-end publication runs for real against the fixture's repository
+        and bare origin; `remote_runs` (SSH destination -> `{output, exit,
+        interrupt}`) replays what a rig printed for its run script, and
+        `fetch_dirs` (destination -> directory) is what `scp -r` fetches from it.
+        `declared` names every OS the environment declares and `os_arg` is the
+        `--os` value (default: `os_name`).
         """
         with tempfile.TemporaryDirectory(prefix="cross-check-") as temporary:
             root = Path(temporary)
@@ -244,8 +315,14 @@ class CrossCheckHarness(unittest.TestCase):
             bin_dir.mkdir()
             (repo / "scripts" / "ci").mkdir(parents=True)
             shutil.copyfile(SCRIPT, repo / "scripts" / "cross-check.sh")
+            # The script sources its clone-layout and pruning rules.
+            shutil.copyfile(HOSTS_SCRIPT, repo / "scripts" / "cross-check-hosts.sh")
+            if publisher:
+                for module in (ROOT / "scripts" / "ci").glob("*.py"):
+                    if module.name != "affected_scope.py" and not module.name.startswith("test_"):
+                        shutil.copyfile(module, repo / "scripts" / "ci" / module.name)
             (repo / "scripts" / "ci" / "affected_scope.py").write_text(
-                planner_stub(PACKAGE), encoding="utf-8"
+                planner_stub(PACKAGE, delegate=publisher), encoding="utf-8"
             )
             (repo / "README.md").write_text("fixture\n", encoding="utf-8")
 
@@ -304,19 +381,29 @@ class CrossCheckHarness(unittest.TestCase):
                 "CROSS_CHECK_WIN_CLONE_DIR": WIN_CODING_DIR
                 + "\\"
                 + clone_offset(worktree or "main"),
-                HOSTS[os_name][0]: HOSTS[os_name][1],
+                "CROSS_CHECK_TREE": git("rev-parse", "HEAD^{tree}"),
+                "CROSS_CHECK_REMOTE_RUNS": json.dumps(remote_runs or {}),
+                "CROSS_CHECK_FETCH_DIRS": json.dumps(
+                    {host: str(path) for host, path in (fetch_dirs or {}).items()}
+                ),
+                "BISCUIT_CI_EVIDENCE_DIR": str(root / "evidence"),
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.com",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.com",
             }
             # The developer's own layout is not the remote's.
             environment.pop("CODING_DIR", None)
-            for other, (variable, _) in HOSTS.items():
-                if other != os_name:
+            for other, (variable, name) in HOSTS.items():
+                environment[variable] = name
+                if other not in (declared or (os_name,)):
                     environment.pop(variable, None)
             result = subprocess.run(
                 [
                     "/bin/bash" if sys.platform == "darwin" else "bash",
                     str(checkout / "scripts" / "cross-check.sh"),
                     "--os",
-                    os_name,
+                    os_arg or os_name,
                     PACKAGE,
                     *extra,
                 ],
@@ -325,6 +412,7 @@ class CrossCheckHarness(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 timeout=120,
+                start_new_session=True,
             )
             calls = [
                 json.loads(line)
@@ -357,10 +445,31 @@ class CrossCheckHarness(unittest.TestCase):
                 "local_status": git("status", "--porcelain"),
                 "local_stash": git("stash", "list"),
                 "local_refs": git("for-each-ref", "--format=%(refname)"),
+                "notes": {
+                    name: self.note_of(git, "refs/notes/ci-local/" + name)
+                    for name in schema.ENVIRONMENTS
+                },
+                "remote_refs": subprocess.run(
+                    ["git", "--git-dir", str(origin), "for-each-ref", "--format=%(refname)",
+                     "refs/notes"],
+                    capture_output=True, text=True,
+                ).stdout.split(),
+                "evidence": sorted(
+                    str(p.relative_to(root / "evidence"))
+                    for p in (root / "evidence").rglob("*") if p.is_file()
+                ),
             }
             if replay:
                 report.update(self.replay_prelude(Path(clone_dir), shipped, remote))
             return report
+
+    @staticmethod
+    def note_of(git: Callable[..., str], ref: str) -> dict | None:
+        """The collection on the fixture's HEAD under `ref`, or `None`."""
+        try:
+            return json.loads(git("notes", "--ref", ref, "show", "HEAD"))
+        except subprocess.CalledProcessError:
+            return None
 
     @staticmethod
     def settled_entries(coding: Path) -> list[str]:
@@ -817,7 +926,8 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
 
     A clone is `<host>--<worktree>`, and the host part never contains `--`,
     so the first `--` always separates the two and only this origin host's
-    clones are candidates.
+    clones are stale candidates. Every pass re-deletes all leftover trash,
+    whichever origin left it.
     """
 
     def test_a_clone_for_a_removed_worktree_is_deleted(self) -> None:
@@ -826,7 +936,8 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         self.assertNotIn(stale, run["remote_entries"])
         self.assertIn(
-            f"removing stale clone build-linux:{run['clone_dir'].rsplit('/', 1)[0]}/{stale} in the background",
+            f"removing clone build-linux:{run['clone_dir'].rsplit('/', 1)[0]}/{stale} in the background"
+            " (worktree no longer exists)",
             run["stdout"],
         )
         # Renamed to trash, then deleted detached: nothing of it remains.
@@ -846,7 +957,7 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         run = self.ship("linux", prepare=extra_worktree, remote_setup=lambda c: plant_clone(c, live))
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         self.assertIn(live, run["remote_entries"])
-        self.assertNotIn("stale clone", run["stdout"])
+        self.assertNotIn("removing clone", run["stdout"])
 
     def test_a_worktree_whose_directory_is_gone_counts_as_removed(self) -> None:
         # `git worktree list` still names it, marked `prunable`.
@@ -866,18 +977,20 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
             f"{host}-mini--main",  # another origin whose name extends this one
             f"other--{host}",
             "rusty-biscuit",
-            ".cross-check-trash--other--gone-1-1",  # another origin's trash
         )
+        others_trash = ".cross-check-trash--other--gone-1-1"
 
         def plant(coding: Path) -> None:
-            for name in others:
+            for name in (*others, others_trash):
                 plant_clone(coding, name)
 
         run = self.ship("linux", remote_setup=plant)
         self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
         for name in others:
             self.assertIn(name, run["remote_entries"])
-        self.assertNotIn("stale clone", run["stdout"])
+        self.assertNotIn("removing clone", run["stdout"])
+        # Trash is never a candidate clone, but leftover trash is deleted whoever left it.
+        self.assertNotIn(others_trash, run["remote_entries"])
 
     def test_a_locked_stale_clone_is_kept_and_reported(self) -> None:
         stale = f"{origin_host()}--gone"
@@ -888,9 +1001,11 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
 
     def test_pruning_happens_before_anything_is_shipped(self) -> None:
         run = self.ship("linux")
-        tools = [c["tool"] for c in run["calls"]]
+        # `ssh -G` only resolves the client configuration; it never connects.
+        calls = [c for c in run["calls"] if "-G" not in c["argv"]]
+        tools = [c["tool"] for c in calls]
         self.assertEqual("ssh", tools[0])
-        self.assertEqual(["bash -ls"], run["calls"][0]["argv"][-1:])
+        self.assertEqual(["bash -ls"], calls[0]["argv"][-1:])
         self.assertIn("scp", tools[1:])
 
     def test_windows_prunes_under_the_same_rules(self) -> None:
@@ -901,14 +1016,383 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         ).decode("utf-16-le")
         self.assertIn("$live = @('main')", command)
         self.assertIn(f"$prefix = '{origin_host()}--'", command)
-        self.assertIn("if ($live -contains $entry.Name.Substring($prefix.Length)) { continue }", command)
+        self.assertIn("-not ($live -contains $name.Substring($prefix.Length))", command)
         self.assertIn(".cross-check.lock", command)
         # Renamed at once, deleted outside the SSH session's job, past MAX_PATH.
         self.assertIn("Rename-Item -LiteralPath $dir -NewName $trash", command)
         self.assertIn("Invoke-CimMethod -ClassName Win32_Process -MethodName Create", command)
         self.assertIn('''rd /s /q "\\\\?\\''', command)
-        self.assertIn(f'".cross-check-trash--$prefix"', command)
+        self.assertIn('".cross-check-trash--$name-$PID-', command)
         self.assertNotIn("Remove-Item", command)
+
+class RigPublicationRunTests(CrossCheckHarness):
+    """The leg-end publication, EXECUTED against a fixture repository and bare origin.
+
+    `ssh` and `scp` are stubs, so what the rig printed and what `scp -r` fetches
+    are the fixture's; everything after that is the real script, the real
+    `observation_notes.py publish-receipt --kind rig`, the real `completion.py`,
+    and real notes in the fixture's repository. That is a faithful offline model
+    of the orchestrating host; what it cannot model is the rig itself, which is
+    exercised by `just cross-check` on the real hosts.
+    """
+
+    ENVIRONMENT = {"wsl": "wsl2-ubuntu", "windows": "windows-latest"}
+
+    def markers(self, *, exit_code: int = 0, manifest: int = 0, dirty: int = 0, tree: str = "{TREE}") -> str:
+        return (
+            f"cross-check-tree: {tree}\n"
+            f"cross-check-dirty: {dirty}\n"
+            "cross-check-key: 0f1e2d3c4b5a6978\n"
+            "cross-check-digest: 9a8b7c6d5e4f3021\n"
+            f"cross-check-manifest-exit: {manifest}\n"
+            f"cross-check-exit: {exit_code}\n"
+            "cross-check-duration: 12\n"
+        )
+
+    def reports(self, tmp: Path, os_name: str, **kwargs) -> Path:
+        import test_evidence_reuse  # the shared builder of a rig's staging directory
+
+        return test_evidence_reuse.write_rig_reports(
+            tmp / f"rig-{os_name}", PACKAGE, self.ENVIRONMENT[os_name], **kwargs
+        )
+
+    def leg(self, os_name: str, *extra: str, output: str | None = None, exit_code: int = 0,
+            reports: dict | None = None, fetch: bool = True, **options) -> dict:
+        """One rig leg: what it printed, what it left behind, and the script's reaction."""
+        host = HOSTS[os_name][1]
+        with tempfile.TemporaryDirectory(prefix="rig-reports-") as scratch:
+            fetch_dirs = {}
+            if fetch:
+                fetch_dirs[host] = self.reports(Path(scratch), os_name, **(reports or {}))
+            return self.ship(
+                os_name,
+                *extra,
+                publisher=True,
+                remote_runs={
+                    host: {"output": self.markers() if output is None else output, "exit": exit_code}
+                },
+                fetch_dirs=fetch_dirs,
+                **options,
+            )
+
+    def observations(self, run: dict, os_name: str) -> list[dict]:
+        note = run["notes"][self.ENVIRONMENT[os_name]]
+        return note["observations"] if note else []
+
+    # -- publication: one leg, its own environment -------------------------------
+
+    def test_a_wsl_leg_publishes_a_wsl2_observation_and_nothing_else(self) -> None:
+        run = self.leg("wsl")
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertIn("published a passing wsl2-ubuntu observation", run["stdout"])
+        (observation,) = self.observations(run, "wsl")
+        self.assertEqual("rig", observation["producer"]["kind"])
+        self.assertEqual("Linux", observation["producer"]["host"]["os"])
+        self.assertEqual("pass", observation["cell"]["outcome"])
+        self.assertEqual(
+            {"refs/notes/ci-local/wsl2-ubuntu"}, {r for r in run["remote_refs"] if "ci-local" in r},
+            "published to the remote, under the WSL2 environment only",
+        )
+        self.assertIsNone(run["notes"]["windows-latest"])
+        # The proof the observation cites survives the work directory's removal.
+        retained = Path(observation["producer"]["host"]["report_dir"])
+        self.assertTrue(any(e.endswith("alpha-L1.completion.json") for e in run["evidence"]), run["evidence"])
+        self.assertEqual("evidence", retained.parent.parent.parent.name)
+
+    def test_a_native_windows_leg_publishes_a_windows_observation_and_nothing_else(self) -> None:
+        run = self.leg("windows")
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertIn("published a passing windows-latest observation", run["stdout"])
+        (observation,) = self.observations(run, "windows")
+        self.assertEqual("Windows", observation["producer"]["host"]["os"])
+        self.assertEqual("x86_64-pc-windows-msvc", observation["proof"]["target"])
+        self.assertEqual({"refs/notes/ci-local/windows-latest"}, {r for r in run["remote_refs"] if "ci-local" in r})
+        self.assertIsNone(run["notes"]["wsl2-ubuntu"], "WSL2 is never filed under Windows or the reverse")
+        # PowerShell and `scp` spell the fetched path with forward slashes.
+        fetches = [c["argv"] for c in run["calls"] if c["tool"] == "scp" and "-r" in c["argv"]]
+        self.assertEqual(1, len(fetches), run["calls"])
+        self.assertRegex(fetches[0][-2], r"^build-win-native:B:/coding/.+-reports$")
+
+    def test_the_remote_reports_are_discarded_after_each_leg(self) -> None:
+        wsl = self.leg("wsl")
+        self.assertTrue(
+            [c for c in wsl["calls"] if c["tool"] == "ssh" and c["argv"][-1].startswith("rm -rf ")
+             and "-reports" in c["argv"][-1]], wsl["calls"])
+        windows = self.leg("windows")
+        self.assertTrue(
+            [c for c in windows["calls"] if c["tool"] == "ssh"
+             and c["argv"][-1].startswith("Remove-Item -Recurse -Force ") and "-reports" in c["argv"][-1]],
+            windows["calls"])
+
+    def test_a_completed_failure_is_published_as_a_failing_observation(self) -> None:
+        run = self.leg(
+            "windows", output=self.markers(exit_code=100), exit_code=100,
+            reports={"reported": {"t_one": "fail", "t_two": "pass", "t_three": "pass"}},
+        )
+        self.assertEqual(1, run["returncode"], "the failing leg still fails the script")
+        self.assertIn("published a FAILING windows-latest observation", run["stdout"])
+        (observation,) = self.observations(run, "windows")
+        self.assertEqual("fail", observation["cell"]["outcome"])
+        self.assertNotIn("completion_record_digest", observation["proof"])
+        self.assertIn("windows  FAIL", run["stdout"])
+
+    def test_a_leg_retries_the_observation_that_existed_when_it_started(self) -> None:
+        failing = self.leg(
+            "wsl", output=self.markers(exit_code=100), exit_code=100,
+            reports={"reported": {"t_one": "fail", "t_two": "pass", "t_three": "pass"}},
+        )
+        (failed,) = self.observations(failing, "wsl")
+
+        def plant_the_failure(repo: Path, git: Callable[..., str]) -> None:
+            head = git("rev-parse", "HEAD")
+            note = repo.parent / "failure-note.json"
+            note.write_text(json.dumps({**failing["notes"]["wsl2-ubuntu"], "head": head}), encoding="utf-8")
+            git("notes", "--ref", "refs/notes/ci-local/wsl2-ubuntu", "add", "-F", str(note), head)
+
+        run = self.leg("wsl", prepare=plant_the_failure)
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        passed = [o for o in self.observations(run, "wsl") if o["cell"]["outcome"] == "pass"]
+        self.assertEqual([failed["observation_id"]], [o.get("retry_of") for o in passed])
+
+    def test_a_leg_with_nothing_to_retry_names_no_predecessor(self) -> None:
+        (observation,) = self.observations(self.leg("wsl"), "wsl")
+        self.assertNotIn("retry_of", observation)
+
+    # -- publication declined, with the reason printed ----------------------------
+
+    def assertDeclined(self, run: dict, os_name: str, reason: str) -> None:
+        self.assertIn(f"publishing no {self.ENVIRONMENT[os_name]} observation", run["stdout"] + run["stderr"])
+        self.assertIn(reason, run["stdout"] + run["stderr"])
+        for name, note in run["notes"].items():
+            self.assertIsNone(note, f"a declined leg must leave no {name} note")
+        self.assertEqual([], run["evidence"], "nothing is retained for a declined leg")
+
+    def test_a_failed_manifest_step_declines_but_the_tests_ran(self) -> None:
+        for os_name in ("wsl", "windows"):
+            with self.subTest(os=os_name):
+                run = self.leg(os_name, output=self.markers(manifest=1))
+                self.assertEqual(0, run["returncode"], "the tests passed, so the leg passes")
+                self.assertDeclined(run, os_name, "expected-test manifest step reported '1'")
+
+    def test_a_run_that_never_reached_its_tests_declines(self) -> None:
+        run = self.leg("wsl", output="cross-check-tree: {TREE}\n", exit_code=1)
+        self.assertDeclined(run, "wsl", "no cross-check-exit marker")
+        self.assertEqual(1, run["returncode"])
+
+    def test_a_tree_that_is_not_the_heads_declines(self) -> None:
+        run = self.leg("wsl", output=self.markers(tree="0" * 40))
+        self.assertDeclined(run, "wsl", "is not this head's tree")
+
+    def test_a_dirty_remote_declines(self) -> None:
+        run = self.leg("windows", output=self.markers(dirty=3))
+        self.assertDeclined(run, "windows", "worktree was dirty")
+
+    def test_a_filtered_run_declines(self) -> None:
+        run = self.leg("wsl", "level2_")
+        self.assertDeclined(run, "wsl", "narrowed by")
+
+    def test_a_leg_whose_reports_cannot_be_fetched_declines(self) -> None:
+        run = self.leg("wsl", fetch=False)
+        self.assertDeclined(run, "wsl", "left no staged reports to fetch")
+
+    def test_an_incomplete_run_declines_with_completions_codes(self) -> None:
+        run = self.leg("windows", reports={"reported": {"t_one": "pass"}})
+        self.assertDeclined(run, "windows", "completion-test-missing")
+
+    def test_a_native_mode_run_publishes_nothing_and_fetches_nothing(self) -> None:
+        for os_name in ("wsl", "windows"):
+            with self.subTest(os=os_name):
+                run = self.leg(os_name, "--features", "extra")
+                self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+                self.assertIn("mode: native", run["stdout"])
+                self.assertNotIn("publishing no", run["stdout"] + run["stderr"])
+                self.assertFalse(
+                    [c for c in run["calls"] if c["tool"] == "scp" and "-r" in c["argv"]],
+                    "a native run stages no reports",
+                )
+                for note in run["notes"].values():
+                    self.assertIsNone(note)
+
+    def test_an_unreachable_origin_keeps_the_observation_local(self) -> None:
+        def break_origin(repo: Path, git: Callable[..., str]) -> None:
+            git("remote", "set-url", "--push", "origin", str(repo.parent / "gone.git"))
+
+        run = self.leg("wsl", prepare=break_origin)
+        self.assertEqual(0, run["returncode"], "the leg passed; only the remote copy failed")
+        self.assertIn("locally; it could not be pushed", run["stdout"] + run["stderr"])
+        self.assertEqual(1, len(self.observations(run, "wsl")), "the proof is on this host")
+        self.assertEqual([], [r for r in run["remote_refs"] if "ci-local" in r])
+
+    # -- rig busy, unreachable, interrupted ---------------------------------------
+
+    def test_a_busy_rig_is_reported_as_busy_not_as_a_test_failure(self) -> None:
+        run = self.leg("wsl", output="cross-check: gave up after 1800s\n", exit_code=75)
+        self.assertEqual(1, run["returncode"])
+        self.assertIn("wsl      BUSY", run["stdout"])
+        self.assertIn("rig busy", run["stdout"] + run["stderr"])
+        self.assertNotIn("publishing no", run["stdout"] + run["stderr"])
+        self.assertFalse([c for c in run["calls"] if c["tool"] == "scp" and "-r" in c["argv"]])
+
+    def test_an_unreachable_rig_is_reported_as_unreachable(self) -> None:
+        run = self.leg("windows", output="", exit_code=255)
+        self.assertIn("windows  UNREACHABLE", run["stdout"])
+        self.assertEqual(1, run["returncode"])
+
+    def test_an_interrupted_leg_records_nothing_and_keeps_earlier_proof(self) -> None:
+        if sys.platform.startswith("linux") and "microsoft" in Path("/proc/version").read_text().lower():
+            self.skipTest("--os all skips the local WSL2 leg on a WSL2 host")
+        with tempfile.TemporaryDirectory(prefix="rig-reports-") as scratch:
+            fetch_dirs = {
+                HOSTS["windows"][1]: self.reports(Path(scratch), "windows"),
+                HOSTS["wsl"][1]: self.reports(Path(scratch), "wsl"),
+            }
+            run = self.ship(
+                "windows",
+                publisher=True,
+                declared=("windows", "wsl"),
+                os_arg="all",
+                remote_runs={
+                    HOSTS["windows"][1]: {"output": self.markers()},
+                    HOSTS["wsl"][1]: {"output": "cross-check-tree: {TREE}\n", "interrupt": True},
+                },
+                fetch_dirs=fetch_dirs,
+            )
+        self.assertNotEqual(0, run["returncode"])
+        self.assertIn("cross-check: wsl interrupted; no observation recorded", run["stderr"])
+        self.assertIn("windows  pass", run["stdout"])
+        self.assertIn("wsl      INTERRUPTED", run["stdout"])
+        self.assertEqual(1, len(self.observations(run, "windows")), "earlier proof is intact")
+        self.assertIsNone(run["notes"]["wsl2-ubuntu"])
+        self.assertEqual({"refs/notes/ci-local/windows-latest"}, {r for r in run["remote_refs"] if "ci-local" in r})
+
+    def test_each_leg_is_published_before_the_next_leg_is_contacted(self) -> None:
+        if sys.platform.startswith("linux") and "microsoft" in Path("/proc/version").read_text().lower():
+            self.skipTest("--os all skips the local WSL2 leg on a WSL2 host")
+        with tempfile.TemporaryDirectory(prefix="rig-reports-") as scratch:
+            run = self.ship(
+                "windows",
+                publisher=True,
+                declared=("windows", "wsl"),
+                os_arg="all",
+                remote_runs={
+                    HOSTS["windows"][1]: {"output": self.markers()},
+                    HOSTS["wsl"][1]: {"output": self.markers()},
+                },
+                fetch_dirs={
+                    HOSTS["windows"][1]: self.reports(Path(scratch), "windows"),
+                    HOSTS["wsl"][1]: self.reports(Path(scratch), "wsl"),
+                },
+            )
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        windows = run["stdout"].index("published a passing windows-latest observation")
+        wsl_leg = run["stdout"].index(f"== wsl ({HOSTS['wsl'][1]}")
+        wsl = run["stdout"].index("published a passing wsl2-ubuntu observation")
+        self.assertLess(windows, wsl_leg, "windows is published before the WSL2 leg starts")
+        self.assertLess(wsl_leg, wsl)
+        self.assertEqual(
+            {"refs/notes/ci-local/windows-latest", "refs/notes/ci-local/wsl2-ubuntu"},
+            {r for r in run["remote_refs"] if "ci-local" in r},
+        )
+
+    # -- what the rig is told to do ------------------------------------------------
+
+    def test_every_rig_lists_its_expected_tests_before_running_them(self) -> None:
+        for os_name, listing in (
+            ("wsl", "just _expected_manifest L1 'alpha' \\\n    --archive-file \"$archive_file\" --workspace-remap \"$src\""),
+            ("windows", "just _expected_manifest L1 'alpha' --archive-file $archiveFile --workspace-remap $nativeSrc"),
+        ):
+            with self.subTest(os=os_name):
+                remote = self.ship(os_name)["remote"]
+                self.assertIn(listing, remote)
+                self.assertLess(remote.index("_expected_manifest L1"), remote.index("just _test "))
+                self.assertIn("cross-check-manifest-exit", remote)
+                binding = "export BISCUIT_CI_ENVIRONMENT" if os_name == "wsl" else "$env:BISCUIT_CI_ENVIRONMENT"
+                self.assertLess(
+                    remote.index(binding), remote.index("_expected_manifest L1"),
+                    "the manifest is keyed by the environment the leg exports",
+                )
+
+    def test_the_staging_directory_survives_for_the_fetch(self) -> None:
+        unix = self.ship("wsl")["remote"]
+        self.assertIn('cp -R "$reports" "$reports_out"', unix)
+        self.assertNotIn("-report.xml", unix)
+        windows = self.ship("windows")["remote"]
+        self.assertIn("Copy-Item $reports $reportsOut -Recurse -Force", windows)
+        self.assertNotIn("-report.xml", windows)
+        # The cleanup removes the consumer directory but not the per-run copy.
+        self.assertNotIn("reportsOut -ErrorAction", windows.split("finally")[1])
+
+class RigPublicationContractTests(unittest.TestCase):
+    """The shape of the leg-end publication, read from the script.
+
+    The behavior itself is executed in `RigPublicationRunTests`; these pin what
+    a run cannot show from the outside: that nothing but the publisher writes
+    notes, and the ordering the "publish as each cell finishes" contract needs.
+    """
+
+    def text(self) -> str:
+        return SCRIPT.read_text(encoding="utf-8")
+
+    def function_body(self, name: str) -> str:
+        text = self.text()
+        start = text.index(f"{name}() {{")
+        return text[start : text.index("\n}\n", start)]
+
+    def test_publication_goes_through_the_observation_publisher_only(self) -> None:
+        body = self.function_body("publish_rig_observation")
+        self.assertIn("scripts/ci/observation_notes.py publish-receipt --kind rig", body)
+        self.assertNotIn("git notes", body)
+        self.assertNotIn("git push", body)
+        self.assertNotIn("publish_wsl_receipt", self.text())
+
+    def test_the_proof_is_retained_where_the_publisher_creates_the_per_run_directory(self) -> None:
+        body = self.function_body("publish_rig_observation")
+        self.assertIn("BISCUIT_CI_EVIDENCE_DIR", body)
+        self.assertIn('--run-id "${run_id}"', body)
+
+    def test_each_leg_is_recorded_before_the_next_one_starts(self) -> None:
+        loop = self.text()[self.text().index('for os in "${ORDER[@]}"; do\n    [[ -n "${want[${os}]:-}" && -z'):]
+        self.assertLess(loop.index("run_unix"), loop.index("publish_rig_observation"))
+        self.assertLess(loop.index("publish_rig_observation"), loop.index("\ndone\n"))
+        self.assertLess(loop.index("\ndone\n"), loop.index("print_summary"))
+
+    def test_a_legs_predecessor_is_fixed_before_the_leg_runs(self) -> None:
+        loop = self.text()[self.text().index('for os in "${ORDER[@]}"; do\n    [[ -n "${want[${os}]:-}" && -z'):]
+        self.assertLess(loop.index("retry-predecessor"), loop.index("run_windows"))
+        self.assertLess(loop.index("retry-predecessor"), loop.index("run_unix"))
+        self.assertIn('--retry-of "${RETRY_OF[${os}]}"', self.function_body("publish_rig_observation"))
+
+    def test_both_rig_oses_are_recorded_and_no_other(self) -> None:
+        body = self.function_body("is_rig")
+        self.assertIn('"$1" == "wsl"', body)
+        self.assertIn('"$1" == "windows"', body)
+        self.assertNotIn("linux", body)
+        self.assertNotIn("macos", body)
+
+    def test_interrupts_are_trapped_and_leave_a_nonzero_exit(self) -> None:
+        text = self.text()
+        self.assertIn("trap 'on_interrupt 130' INT", text)
+        self.assertIn("trap 'on_interrupt 143' TERM", text)
+        body = self.function_body("on_interrupt")
+        self.assertIn("interrupted; no observation recorded", body)
+        self.assertIn('exit "$1"', body)
+
+    def test_the_script_still_parses(self) -> None:
+        completed = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_shellcheck_has_no_warnings_when_installed(self) -> None:
+        if shutil.which("shellcheck") is None:
+            self.skipTest("shellcheck is not installed")
+        completed = subprocess.run(
+            # `-x` follows the script's `source` of cross-check-hosts.sh, which
+            # assigns the globals it reads.
+            ["shellcheck", "-x", "-P", "SCRIPTDIR", "-S", "warning", str(SCRIPT)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

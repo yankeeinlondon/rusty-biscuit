@@ -1,8 +1,9 @@
 //! Phase 6: Neovim Query Reuse
 //!
-//! Tests for query provenance, nvim-treesitter inventory, predicate
-//! compatibility, and upstream drift detection.
+//! Tests for query provenance, nvim-treesitter inventory, and predicate
+//! compatibility.
 
+use crate::language_cases::language_tests;
 use tree_hugger::ProgrammingLanguage;
 use tree_hugger::queries::{
     GrammarRef, QueryKind,
@@ -10,7 +11,6 @@ use tree_hugger::queries::{
         CompatibilityRegistry, CompatibilityStatus, find_hook_predicates,
         find_unsupported_predicates,
     },
-    drift::{DriftItem, check_all_drift, check_query_drift, summarize_drift},
     inventory::{NvimQuerySuite, QueryInventory, suite_for_kind},
     provenance::{TranslationStatus, all_query_provenance, query_provenance},
     query_for,
@@ -20,35 +20,35 @@ use tree_hugger::queries::{
 // Query Compilation with Provenance
 // =============================================================================
 
-/// Every supported language must have queries that compile, and vendored
-/// locals queries must carry provenance metadata.
-#[test]
-fn all_queries_compile_with_provenance() {
-    let _provenance = all_query_provenance();
+language_tests!(all_queries_compile_with_provenance => check_query_provenance);
 
-    for language in ProgrammingLanguage::all() {
-        let grammar = language.tree_sitter_language();
-        let grammar_ref = GrammarRef {
-            language,
-            grammar: &grammar,
-            id: language.query_name(),
-        };
+/// Every supported language must have queries that compile, and every
+/// query must carry a provenance record with a recorded upstream revision.
+fn check_query_provenance(language: ProgrammingLanguage) {
+    let grammar = language.tree_sitter_language();
+    let grammar_ref = GrammarRef {
+        language,
+        grammar: &grammar,
+        id: language.query_name(),
+    };
 
-        for kind in [
-            QueryKind::Locals,
-            QueryKind::Lint,
-            QueryKind::References,
-            QueryKind::Comments,
-        ] {
-            let query = query_for(grammar_ref, kind);
-            assert!(query.is_ok(), "{language} {kind} query should compile");
+    for kind in [
+        QueryKind::Locals,
+        QueryKind::Lint,
+        QueryKind::References,
+        QueryKind::Comments,
+    ] {
+        let query = query_for(grammar_ref, kind);
+        assert!(query.is_ok(), "{language} {kind} query should compile");
 
-            // Provenance should exist for locals (vendored) and overlays
-            if let Some(prov) = query_provenance(language, kind) {
-                assert!(!prov.source_project.is_empty());
-                assert!(!prov.local_path.is_empty());
-            }
-        }
+        let prov = query_provenance(language, kind)
+            .unwrap_or_else(|| panic!("{language} {kind} query has no provenance"));
+        assert!(!prov.source_project.is_empty());
+        assert!(!prov.local_path.is_empty());
+        assert!(
+            !prov.upstream_revision.is_empty(),
+            "{language} {kind}: upstream_revision should not be empty"
+        );
     }
 }
 
@@ -93,6 +93,53 @@ fn capture_parity_for_rust() {
         .expect("highlights should be present");
     assert!(highlights.iter().any(|c| c.name == "function" && !c.reused));
     assert!(highlights.iter().any(|c| c.name == "type" && !c.reused));
+}
+
+language_tests!(every_locals_definition_capture_is_inventoried => check_locals_inventory);
+
+/// Every definition capture a locals query uses is inventoried as reused, so
+/// the inventory changes together with the queries.
+fn check_locals_inventory(language: ProgrammingLanguage) {
+    let inventory = QueryInventory::new();
+    let mut checked = 0;
+    let grammar = language.tree_sitter_language();
+    let grammar_ref = GrammarRef {
+        language,
+        grammar: &grammar,
+        id: language.query_name(),
+    };
+    let query = query_for(grammar_ref, QueryKind::Locals).expect("locals query compiles");
+    let locals = inventory
+        .for_language(language)
+        .and_then(|entry| entry.suite_captures(NvimQuerySuite::Locals))
+        .expect("locals inventory");
+    for name in query.capture_names() {
+        if !name.starts_with("local.definition") || name.ends_with(".context") {
+            continue;
+        }
+        assert!(
+            locals.iter().any(|capture| capture.name == *name && capture.reused),
+            "{language}: @{name} is used by the locals query but not inventoried as reused"
+        );
+        checked += 1;
+    }
+
+    assert!(checked >= crate::language_cases::corpus_minimums(language).captures, "{language}: no definition captures checked");
+}
+
+/// Perl's locals query is Tree Hugger's own work, compiles, and uses only
+/// natively supported predicates.
+#[test]
+fn perl_locals_query_is_an_original() {
+    let prov = query_provenance(ProgrammingLanguage::Perl, QueryKind::Locals)
+        .expect("perl locals provenance");
+    assert_eq!(prov.source_project, "tree-hugger");
+    assert_eq!(prov.translation_status, TranslationStatus::Original);
+    assert_ne!(prov.license, "Apache-2.0");
+
+    let source = include_str!("../../queries/vendor/perl/locals.scm");
+    assert!(find_unsupported_predicates(source).is_empty());
+    assert!(find_hook_predicates(source).is_empty());
 }
 
 #[test]
@@ -306,83 +353,11 @@ fn simple_query_has_no_issues() {
 }
 
 // =============================================================================
-// Upstream Drift Detection
+// Integration: Provenance + Compatibility
 // =============================================================================
 
-/// When the upstream revision matches, drift should not be actionable.
-#[test]
-fn no_actionable_drift_when_revision_matches() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.10.4"));
-    assert!(report.is_some());
-    assert!(!report.unwrap().actionable);
-}
-
-/// When the upstream revision differs, drift should be actionable.
-#[test]
-fn actionable_drift_when_revision_differs() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.11.0"));
-    assert!(report.is_some());
-    let report = report.unwrap();
-    assert!(report.actionable);
-    assert!(
-        report
-            .items
-            .iter()
-            .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. }))
-    );
-}
-
-/// Original (non-vendored) queries should not produce drift reports.
-#[test]
-fn original_queries_have_no_drift() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Lint, Some("0.11.0"));
-    assert!(report.is_none());
-}
-
-/// Bulk drift check should cover all vendored queries.
-#[test]
-fn bulk_drift_check_covers_all_vendored() {
-    let reports = check_all_drift(Some("0.10.4"));
-    // Every language has a locals query vendored from nvim-treesitter
-    let expected_count = ProgrammingLanguage::all().len();
-    assert_eq!(
-        reports.len(),
-        expected_count,
-        "should check drift for every language's locals query"
-    );
-}
-
-/// Drift summary should be human-readable.
-#[test]
-fn drift_summary_format() {
-    let reports = check_all_drift(Some("0.11.0"));
-    let summary = summarize_drift(&reports);
-    assert!(summary.contains("Upstream drift detected"));
-    assert!(summary.contains("0.10.4"));
-    assert!(summary.contains("0.11.0"));
-}
-
-/// Empty drift reports produce a friendly message.
-#[test]
-fn empty_drift_summary() {
-    let summary = summarize_drift(&[]);
-    assert_eq!(summary, "No drift detected.");
-}
-
-/// Up-to-date drift reports produce a friendly message.
-#[test]
-fn up_to_date_drift_summary() {
-    let reports = check_all_drift(Some("0.10.4"));
-    let summary = summarize_drift(&reports);
-    assert_eq!(summary, "Drift checked: all queries up to date.");
-}
-
-// =============================================================================
-// Integration: Provenance + Compatibility + Drift
-// =============================================================================
-
-/// A full workflow that checks a query file for provenance, compatibility,
-/// and drift all at once.
+/// A full workflow that checks a query file for provenance and
+/// compatibility together.
 #[test]
 fn full_query_audit_workflow() {
     let language = ProgrammingLanguage::Rust;
@@ -399,14 +374,6 @@ fn full_query_audit_workflow() {
     assert!(
         unsupported.is_empty(),
         "rust locals should not contain unsupported predicates"
-    );
-
-    // 3. Drift check
-    let drift = check_query_drift(language, kind, Some(&prov.upstream_revision));
-    assert!(drift.is_some());
-    assert!(
-        !drift.unwrap().actionable,
-        "same revision should not be actionable"
     );
 }
 

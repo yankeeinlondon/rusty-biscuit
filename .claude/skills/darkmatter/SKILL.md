@@ -55,6 +55,7 @@ definitions away from their references or replace them with placeholders.
 | Terminal rendering options | [terminal.md](terminal.md) |
 | Frontmatter model, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
 | Error/status block conventions | [errors.md](errors.md) |
+| `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |
 | Module layout | [structure.md](structure.md) |
 | Parser details | [pulldown-cmark.md](pulldown-cmark.md) |
@@ -203,6 +204,5 @@ rows) are in [testing.md](testing.md); read it before writing an `md`
 integration test, adding a file-resolving entry point, or touching a guard's
 allowlist.
 
-Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
-and GitNexus first to include actual downstream consumers such as Claudine when
-a public Darkmatter type or behavior changes.
+Do not run workspace-wide Cargo gates for a Darkmatter-only change; when a
+public type or behavior changes, find consumers (Claudine) with Sniff/GitNexus.

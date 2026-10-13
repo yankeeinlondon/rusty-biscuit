@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::kinds::SymbolKindV2;
 use super::types::{SymbolId, TextSpan};
 
 /// Identity metadata for a symbol.
@@ -9,10 +10,34 @@ use super::types::{SymbolId, TextSpan};
 pub struct IdentityFacet {
     pub name: String,
     pub display_name: String,
+    /// The in-file qualified name: the enclosing named declarations
+    /// (namespaces, packages, modules, types, `impl` targets, functions)
+    /// joined with the language's own separators, ending in `name`. Never
+    /// empty, and built from this file's source alone, so it does not depend
+    /// on where the file is read from. A query result prefixes it unless
+    /// `is_namespace_rooted` ([`SymbolQueryResult::name_prefix`](crate::SymbolQueryResult::name_prefix));
+    /// cache entries and symbol IDs keep the in-file form.
+    #[serde(deserialize_with = "non_empty_string")]
+    pub qualified_name: String,
+    /// `qualified_name` starts at a namespace or package the source declares
+    /// (Java/Scala/Go `package`, C#/C++/PHP `namespace`, Perl `package`), so
+    /// it is complete without a file prefix. A Rust `mod` or a type does not
+    /// root a name.
+    pub is_namespace_rooted: bool,
+    /// Name of the declaration that directly contains this one (a type,
+    /// module, namespace or function); absent at file level.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub qualified_name: Option<String>,
+    pub container_name: Option<String>,
+    /// Kind of the container named by `container_name`; absent when there is
+    /// no container or its kind cannot be determined from the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_kind: Option<SymbolKindV2>,
+    /// The keyword token that introduces the declaration (`fn`, `struct`,
+    /// `def`, `const`, `my`, ...), read from the syntax tree, never from
+    /// source text; absent when the construct has none (a Java method, a C
+    /// variable).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_path: Option<String>,
+    pub keyword: Option<String>,
     pub stable_key: String,
 }
 
@@ -29,8 +54,13 @@ pub struct SourceFacet {
     pub doc_span: Option<TextSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_text: Option<String>,
+    /// Evidence: the declaration node's text up to its body, including
+    /// initializers and the annotations the grammar parses inside the node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declaration_text: Option<String>,
+    /// Display header: a contiguous sub-range of `declaration_text` without
+    /// leading in-node annotations, initializers, a terminator or a trailing
+    /// `=`, `=>` or `:`; absent when the header cannot be isolated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,6 +77,10 @@ pub enum VisibilityLevel {
     Package,
     Crate,
     ModulePrivate,
+    /// C# `protected internal`
+    ProtectedInternal,
+    /// C# `private protected`
+    PrivateProtected,
     Unknown,
 }
 
@@ -63,6 +97,9 @@ pub struct VisibilityFacet {
     pub is_synthetic: bool,
     pub is_deprecated: bool,
     pub is_experimental: bool,
+    /// Test-only code: a declaration in a recognized test file, with a test
+    /// attribute, or inside a Rust `#[cfg(test)]` item.
+    pub is_test: bool,
 }
 
 impl Default for VisibilityFacet {
@@ -78,6 +115,7 @@ impl Default for VisibilityFacet {
             is_synthetic: false,
             is_deprecated: false,
             is_experimental: false,
+            is_test: false,
         }
     }
 }
@@ -158,16 +196,87 @@ pub struct Attribute {
 }
 
 /// Modifier information kept language-agnostic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// The derived `Ord` is the serialized order of a record's `modifiers`
+/// (variant declaration order, then `Custom` values lexically); reordering
+/// the variants changes output. See [`normalize_modifiers`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Modifier {
+    /// Member usable without an instance.
     Static,
+    /// Storage or linkage `static` (Rust `static` items, C/C++ file-scope
+    /// and function-local `static`); never implies `Static`.
+    StaticStorage,
     Async,
     Const,
     Readonly,
     Unsafe,
     Mut,
     Custom(String),
+}
+
+/// Puts a declaration's modifiers in their one serialized order and drops
+/// repeats, so extractors may push them in any order and more than once.
+pub(crate) fn normalize_modifiers(modifiers: &mut Vec<Modifier>) {
+    modifiers.sort();
+    modifiers.dedup();
+}
+
+/// Per-symbol measurements, present on a record only when requested. Inside
+/// the facet each metric is required: `None` (serialized `null`) means the
+/// metric is unsupported for this declaration, never "not computed".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsFacet {
+    /// Declared parameters, excluding a separate receiver; a variadic
+    /// parameter counts once.
+    #[serde(deserialize_with = "nullable")]
+    pub parameters: Option<u32>,
+    /// Non-empty attached documentation.
+    #[serde(deserialize_with = "nullable")]
+    pub has_docs: Option<bool>,
+    /// Physical lines intersecting a Function, Method or Constructor's
+    /// `source.body_span`; `Some(0)` for an empty span, `None` for other kinds
+    /// and for a callable without a body.
+    #[serde(deserialize_with = "nullable")]
+    pub lines: Option<u32>,
+    /// Cyclomatic complexity of a Function, Method or Constructor's body
+    /// (the one `lines` counts): 1 plus one per decision the language's
+    /// reviewed rules count, nested callables and types excluded. `None`
+    /// means unavailable for this declaration: another kind, no body, a
+    /// language without reviewed rules, a syntax error in the counted body,
+    /// or a total beyond `u32`. Never read `None` as zero.
+    #[serde(deserialize_with = "nullable")]
+    pub cyclomatic: Option<u32>,
+}
+
+/// A required value that may be `null`; unlike a plain `Option` field, an
+/// absent key is an error rather than `None`.
+fn nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+/// A present facet; `null` is an error rather than `None`. Pair with
+/// `#[serde(default)]` so an absent key reads as `None`.
+pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+fn non_empty_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::invalid_length(0, &"a non-empty string"));
+    }
+    Ok(value)
 }
 
 /// Different projections for type strings.
@@ -229,13 +338,17 @@ pub struct TypeFacet {
 }
 
 /// Reference to another symbol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<SymbolId>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified_name: Option<String>,
+    /// Written relation location, when needed to distinguish a declaration's
+    /// header from conformance added by a Swift extension in the same file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<TextSpan>,
 }
 
 /// Cross-symbol relation facet.
@@ -251,6 +364,9 @@ pub struct RelationFacet {
     pub extends: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub implements: Vec<SymbolRef>,
+    /// Written bases whose inheritance or conformance category is unknown.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub unclassified_bases: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub overrides: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -272,7 +388,7 @@ pub enum TriState {
 }
 
 /// Semantic facet.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticFacet {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_pure: Option<TriState>,
@@ -282,6 +398,10 @@ pub struct SemanticFacet {
     pub may_throw: Option<TriState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub may_panic: Option<TriState>,
+    /// Direct recursion: `Yes` only for a `Scoped` call to the callable's
+    /// own ID, `No` only with complete call coverage and no call that might
+    /// be to itself, otherwise `Unknown`; `None` when semantics were not
+    /// computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_recursive: Option<TriState>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -304,6 +424,4 @@ pub struct ProvenanceFacet {
     pub extractor: String,
     pub extractor_version: String,
     pub parse_pass: String,
-    pub created_at_epoch_ms: u64,
-    pub updated_at_epoch_ms: u64,
 }

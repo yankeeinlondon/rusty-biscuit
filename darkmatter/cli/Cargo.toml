@@ -60,6 +60,10 @@ syntect = "5.2"
 # ungated targets resolve fixtures through `manifest_dir!()`, which the optional
 # `[dependencies]` entry above cannot supply without the feature.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# The process-global broken-pass hook, so an in-process `run_clean` can prove
+# a refused body is never saved; a dev-dependency feature, so no non-test
+# build of `md` compiles it.
+darkmatter = { path = "../lib", features = ["cleanup-test-hooks"] }
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a
@@ -76,10 +80,12 @@ required-features = ["terminal-tests"]
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
 # (render-tree terminal) tier tests.
 [package.metadata.ci.tests]
-# The entry-point parity runner includes darkmatter's shared matrix, the
-# union-reference suites its union fixtures, and the diagnostic-position suite
-# its position fixtures, by `#[path]`; each test spells the file it reads.
+# The entry-point parity runner and the clean parity suite include
+# darkmatter's shared matrices, the union-reference suites its union fixtures,
+# and the diagnostic-position suite its position fixtures, by `#[path]`; each
+# test spells the file it reads.
 source-inputs = [
+    "darkmatter/lib/tests/common/clean_parity/mod.rs",
     "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
     "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
     "darkmatter/lib/tests/position_fixtures/mod.rs",

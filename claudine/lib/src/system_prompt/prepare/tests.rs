@@ -92,8 +92,10 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
     let result = prepare_system_prompt_with_ctx(input, &shared, None).unwrap();
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {
+            // The empty `ctx.area` leaves its following space, which
+            // cleanup keeps (it never normalizes whitespace).
             assert!(
-                prepared.composed_markdown.starts_with("/ "),
+                prepared.composed_markdown.trim_start().starts_with("/ "),
                 "got {:?}",
                 prepared.composed_markdown
             );

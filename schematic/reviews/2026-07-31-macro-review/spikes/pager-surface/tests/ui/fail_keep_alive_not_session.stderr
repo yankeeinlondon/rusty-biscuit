@@ -1,0 +1,11 @@
+error[E0277]: `ListIssues` has no adjustable keep-alive
+ --> tests/ui/fail_keep_alive_not_session.rs:4:34
+  |
+4 |     let _ = client.list_issues().keep_alive("1m");
+  |                                  ^^^^^^^^^^ `.keep_alive(..)` needs an adjustable `KeepAlive` in the definition
+  |
+  = help: the trait `KeepAliveKnob` is not implemented for `ListIssues`
+help: the trait `KeepAliveKnob` is implemented for `SearchScroll`
+ --> /kache/workspace/src/generated.rs:140:0
+note: required by a bound in `Pager::<E>::keep_alive`
+ --> /kache/workspace/src/pager.rs:125:4

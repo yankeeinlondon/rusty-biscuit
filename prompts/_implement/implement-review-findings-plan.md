@@ -139,4 +139,6 @@ You are done when:
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
 
+::file "../_finish-before-exit.md"
+
 ::file "../_os.md"

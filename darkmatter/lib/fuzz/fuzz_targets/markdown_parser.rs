@@ -1,5 +1,6 @@
 #![no_main]
 
+use darkmatter::markdown::cleanup::rules::{Leaf, ListItemPadding, MarkdownRuleOverrides};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -26,8 +27,14 @@ fuzz_target!(|data: &[u8]| {
     md2.cleanup();
 
     let mut md3 = md.clone();
-    md3.cleanup_compact();
+    md3.cleanup_with(&MarkdownRuleOverrides {
+        list_item_padding: Leaf::Value(ListItemPadding::None),
+        ..MarkdownRuleOverrides::default()
+    });
 
     let mut md4 = md.clone();
-    md4.cleanup_loose();
+    md4.cleanup_with(&MarkdownRuleOverrides {
+        list_item_padding: Leaf::Value(ListItemPadding::One),
+        ..MarkdownRuleOverrides::default()
+    });
 });

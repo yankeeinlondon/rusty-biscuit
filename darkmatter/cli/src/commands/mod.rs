@@ -82,7 +82,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             let options = CleanOptions {
                 save,
                 indent,
-                list_spacing: clean::resolve_list_spacing(compact, loose),
+                list_item_padding: clean::resolve_list_spacing(compact, loose),
                 fixed_width,
                 ignore_incidental_newlines,
                 verbose: cli.verbose > 0,
@@ -128,7 +128,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             cache_root,
         } => {
             let parsed = parse_compose_positionals(&args)?;
-            let mode = clean::resolve_list_spacing(compact, loose);
+            let mode = clean::resolve_list_spacing(compact, loose)
+                .unwrap_or(darkmatter::markdown::cleanup::rules::ListItemPadding::Preserve);
             let allow = ComposeAllowFlags {
                 hyperlinks: allow_missing_hyperlinks || allow_any_missing_reference,
                 image_refs: allow_missing_image_refs || allow_any_missing_reference,

@@ -410,8 +410,8 @@ fn test_json_report_only_diagnostic_has_empty_repairs_array() {
     assert_eq!(diagnostic["repairs"], Value::Array(vec![]));
     assert_eq!(
         report["changed"],
-        Value::Bool(true),
-        "document cleanup may change independently of the report-only finding"
+        Value::Bool(false),
+        "a report-only finding changes nothing, and the blank line after the frontmatter stays"
     );
     assert_eq!(report["applied"], Value::Array(vec![]));
 }
@@ -595,7 +595,7 @@ fn test_json_with_save_writes_file_and_prints_envelope() {
 fn test_json_changed_reports_body_only_cleanup() {
     let fixture =
         CliProcessFixture::named("clean-json-test-json-changed-reports-body-only-cleanup");
-    let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body  \n");
+    let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body\n\nIntro:\n- a\n");
     let report = envelope(&fixture, &path, &[]);
 
     assert_eq!(report["applied"], Value::Array(vec![]));
@@ -607,7 +607,7 @@ fn test_json_changed_reports_body_only_cleanup() {
 fn test_json_with_save_suppresses_delta_report() {
     let fixture =
         CliProcessFixture::named("clean-json-test-json-with-save-suppresses-delta-report");
-    let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body  \n");
+    let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body\n\nIntro:\n- a\n");
 
     let assert = fixture
         .command()

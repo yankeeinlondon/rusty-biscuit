@@ -572,8 +572,8 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
 
 // ── AC10: the shipped implementation router ─────────────────────────────────
 
-/// Stage a frozen copy of the router, intentionally not kept in step with
-/// `prompts/`, and the drift-guarded `implement-plan.md` fixture under `prompts/`, with fixture-owned spec/plan data at the reported
+/// Stage a frozen router and side-effect-free target under `prompts/`, with
+/// fixture-owned spec/plan data at the reported
 /// `fixes/2026-09-14-cicd-improvements/` location and no log file.
 fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str) {
     let manifest = biscuit_test_harness::manifest_dir!();
@@ -582,7 +582,7 @@ fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str
         &["implement.md", "_implement/implement-plan.md"],
     );
     let target = fs::read_to_string(
-        manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
+        manifest.join("tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md"),
     )
     .unwrap();
     write(

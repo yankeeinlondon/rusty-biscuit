@@ -8,3 +8,6 @@ description = "Deterministic web-page and site context extraction (placeholder; 
 [lib]
 name = "reaper"
 path = "src/lib.rs"
+
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"

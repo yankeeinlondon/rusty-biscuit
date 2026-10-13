@@ -23,6 +23,10 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
   (`git show :<path> > /tmp/staged; cp <path> /tmp/wt; cp /tmp/staged <path>;
   commit; cp /tmp/wt <path>`). Save the staged blob **before** the first
   `--only`, because `--only` rewrites the index entry to what it committed.
+- Do the staged-blob swap in one script (save both copies, swap, commit,
+  restore) so the window stays short, and restore a path only if it still
+  equals the staged blob; otherwise leave it and report. Tell sub-agents the
+  swap is sanctioned, or they refuse and the orchestrator must run it.
 - Do not use temp-index plumbing (`update-index` → `write-tree` →
   `commit-tree`). It writes a tree containing only the captured paths, so the
   commit deletes every other file in the repository, and every later `--only`
@@ -127,6 +131,12 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
   sub-agent must refuse if the staged diff and the body disagree. A
   sub-agent that "completes the job" by editing beyond the staged snapshot
   commits a tree the message does not describe.
+- The developer's own flow may commit a staged group while the batch runs.
+  Re-run `git status --short -- <paths>` immediately before `--only`; if the
+  paths are no longer staged, `--only` commits only their live working-tree
+  edits under a message describing the whole group. Check that
+  `git show --stat <hash>` matches the brief right after committing, and undo
+  a mismatch with the `update-ref` compare-and-swap below.
 - An empty sub-agent report is not success. Verify each agent's commit by
   hash while its pathspec is still in context.
 

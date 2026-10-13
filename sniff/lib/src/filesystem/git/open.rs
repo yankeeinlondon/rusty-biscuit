@@ -55,13 +55,45 @@ pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
 /// sizes the cache proportionally to the index entry count (~10 MB per 10 k
 /// tracked files), matching the recommendation in the migration spec.
 ///
+/// An unreadable or malformed index skips this optional optimization; metadata
+/// queries remain usable. Status readers independently propagate index failures.
+///
 /// Callers should invoke this before object-intensive operations (revwalk,
 /// diff, ref enumeration) rather than unconditionally at open time.
 pub(crate) fn configure_cache(repo: &mut gix::Repository) {
-    if let Ok(index) = repo.index_or_empty() {
+    if let Ok(index) = read_index(repo) {
         let size = repo.compute_object_cache_size_for_tree_diffs(&index);
         repo.object_cache_size_if_unset(size);
     }
+}
+
+/// Contain the upstream index decoder's panic on malformed external bytes.
+///
+/// The closure must only initialize an index-dependent operation: this boundary
+/// must not turn unrelated programming errors into repository corruption.
+pub(crate) fn guard_index_read<T>(read: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).map_err(|_| {
+        SniffError::git(
+            "index",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Git index decoder panicked on malformed input",
+            ),
+        )
+    })?
+}
+
+/// Missing indexes are valid empty state; malformed indexes are Git errors.
+pub(crate) fn read_index(repo: &gix::Repository) -> Result<gix::worktree::Index> {
+    guard_index_read(|| repo.index_or_empty().map_err(|error| SniffError::git("index", error)))
+}
+
+/// gix builds attribute mappings from the live index even for committed diffs.
+pub(crate) fn tree_diff_cache(repo: &gix::Repository) -> Result<gix::diff::blob::Platform> {
+    guard_index_read(|| {
+        repo.diff_resource_cache_for_tree_diff()
+            .map_err(|error| SniffError::git("diff index", error))
+    })
 }
 
 /// Open a trusted repository at a known `path` without an upward search.

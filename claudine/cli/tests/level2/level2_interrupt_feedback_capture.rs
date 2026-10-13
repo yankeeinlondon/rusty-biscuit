@@ -128,22 +128,22 @@ while :; do /bin/sleep 1; done
     harness.send_command_with_env(&cmd, &[]).expect("send wrapper command");
 
     // Wait until the wrapper PID is recorded — the child is in its run loop and
-    // the per-child SIGINT handler is installed.
+    // the per-child SIGINT handler is installed. Poll for a parseable PID, not
+    // mere existence: the shell's `>` creates the file before `printf` writes.
     let marker_deadline = Instant::now() + Duration::from_secs(30);
-    while !pid_marker.exists() {
+    let wrapper_pid: i32 = loop {
+        if let Some(pid) = fs::read_to_string(&pid_marker)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+        {
+            break pid;
+        }
         if Instant::now() >= marker_deadline {
             kill_session_by_name(&session);
             panic!("wrapped child never recorded the wrapper PID within 30s");
         }
         std::thread::sleep(Duration::from_millis(25));
-    }
-    let wrapper_pid: i32 = fs::read_to_string(&pid_marker)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or_else(|| {
-            kill_session_by_name(&session);
-            panic!("could not parse wrapper PID from marker");
-        });
+    };
 
     // One SIGINT to the wrapper: its handler emits the visible feedback line to
     // stderr, which the pane renders.

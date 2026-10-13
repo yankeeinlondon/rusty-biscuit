@@ -23,3 +23,9 @@
 (sizeof_expression
   type: (type_descriptor
     type: (type_identifier) @reference))
+
+; A function-pointer member invoked through a field access (`s.cb()`,
+; `p->cb()`): the callee name, an occurrence only
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @reference.member))

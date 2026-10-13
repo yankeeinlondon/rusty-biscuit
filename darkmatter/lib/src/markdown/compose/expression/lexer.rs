@@ -32,7 +32,6 @@
 //! ```
 
 use crate::markdown::span::Spanned;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt;
 use tracing::debug;
 
@@ -134,6 +133,16 @@ impl<'a> ExpressionFinder<'a> {
         Self {
             content,
             code_regions,
+        }
+    }
+
+    /// [`Self::new`] with code-block regions the caller already computed for
+    /// `content` (the `blocks` of
+    /// [`scan_code_regions`](crate::markdown::compose::parse_utils::scan_code_regions)).
+    pub(crate) fn with_code_blocks(content: &'a str, code_blocks: Vec<(usize, usize)>) -> Self {
+        Self {
+            content,
+            code_regions: code_blocks,
         }
     }
 
@@ -340,29 +349,7 @@ impl<'a> ExpressionFinder<'a> {
     /// here — interpolation runs inside them so that templated identifiers
     /// like `` `var_{{ phase }}` `` expand as expected.
     fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
-        let mut regions = Vec::new();
-        let parser = Parser::new_ext(content, Options::all()).into_offset_iter();
-
-        let mut in_code_block = false;
-        let mut code_block_start = 0;
-
-        for (event, range) in parser {
-            match event {
-                Event::Start(Tag::CodeBlock(_)) => {
-                    // Start of fenced/indented code block
-                    in_code_block = true;
-                    code_block_start = range.start;
-                }
-                // End of code block
-                Event::End(TagEnd::CodeBlock) if in_code_block => {
-                    regions.push((code_block_start, range.end));
-                    in_code_block = false;
-                }
-                _ => {}
-            }
-        }
-
-        regions
+        crate::markdown::compose::parse_utils::scan_code_regions(content).blocks
     }
 }
 

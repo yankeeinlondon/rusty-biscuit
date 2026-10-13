@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
 
 use crate::shared::{
     DiagnosticCategory, DiagnosticConfidence, DiagnosticMetadata, DiagnosticSeverity,
@@ -79,6 +80,13 @@ impl RuleRegistry {
         };
         registry.register_builtin_rules();
         registry
+    }
+
+    /// The registry [`Self::new`] builds, built once per process and shared.
+    /// A registry has no mutators, so every caller sees the built-in rules.
+    pub fn builtin() -> &'static Self {
+        static BUILTIN: LazyLock<RuleRegistry> = LazyLock::new(RuleRegistry::new);
+        &BUILTIN
     }
 
     /// Looks up rule metadata by ID.
@@ -279,7 +287,7 @@ impl RuleRegistry {
 
         self.register_rule(RuleMetadata {
             id: "eval-call".to_string(),
-            version: "1.0.0".to_string(),
+            version: "1.1.0".to_string(),
             title: "Use of eval()".to_string(),
             category: DiagnosticCategory::Suspicious,
             default_severity: DiagnosticSeverity::Warning,
@@ -287,16 +295,25 @@ impl RuleRegistry {
             languages: vec![
                 ProgrammingLanguage::JavaScript,
                 ProgrammingLanguage::TypeScript,
+                ProgrammingLanguage::Python,
                 ProgrammingLanguage::Php,
             ],
             enabled_by_default: true,
             requires_experimental_semantics: false,
-            examples: vec![RuleExample {
-                description: "eval with string".to_string(),
-                code: "eval('console.log(1)');".to_string(),
-                fixed: None,
-                language: ProgrammingLanguage::JavaScript,
-            }],
+            examples: vec![
+                RuleExample {
+                    description: "eval with string".to_string(),
+                    code: "eval('console.log(1)');".to_string(),
+                    fixed: None,
+                    language: ProgrammingLanguage::JavaScript,
+                },
+                RuleExample {
+                    description: "Python eval with string".to_string(),
+                    code: "eval('1 + 1')".to_string(),
+                    fixed: None,
+                    language: ProgrammingLanguage::Python,
+                },
+            ],
             caveats: vec!["Sometimes used in build tools and bundlers.".to_string()],
             needs_project_context: false,
             aliases: Vec::new(),
@@ -304,21 +321,33 @@ impl RuleRegistry {
 
         self.register_rule(RuleMetadata {
             id: "exec-call".to_string(),
-            version: "1.0.0".to_string(),
-            title: "Use of exec()".to_string(),
+            version: "1.1.0".to_string(),
+            title: "Dynamic code or command execution (exec)".to_string(),
             category: DiagnosticCategory::Suspicious,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
             languages: vec![ProgrammingLanguage::Python, ProgrammingLanguage::Php],
             enabled_by_default: true,
             requires_experimental_semantics: false,
-            examples: vec![RuleExample {
-                description: "exec with string".to_string(),
-                code: "exec('x = 1')".to_string(),
-                fixed: None,
-                language: ProgrammingLanguage::Python,
-            }],
-            caveats: vec!["Sometimes used in dynamic code generation.".to_string()],
+            examples: vec![
+                RuleExample {
+                    description: "Python exec runs a string as code".to_string(),
+                    code: "exec('x = 1')".to_string(),
+                    fixed: None,
+                    language: ProgrammingLanguage::Python,
+                },
+                RuleExample {
+                    description: "PHP exec runs a shell command".to_string(),
+                    code: "exec('ls -l');".to_string(),
+                    fixed: None,
+                    language: ProgrammingLanguage::Php,
+                },
+            ],
+            caveats: vec![
+                "Sometimes used in dynamic code generation.".to_string(),
+                "PHP: flags exec() and the global \\exec() only, in any letter case; a call in another namespace such as Foo\\exec() is not flagged.".to_string(),
+                "PHP: shell_exec, system, passthru, proc_open, popen and the backtick operator are not flagged.".to_string(),
+            ],
             needs_project_context: false,
             aliases: Vec::new(),
         });
@@ -553,55 +582,6 @@ impl RuleRegistry {
             needs_project_context: false,
             aliases: vec!["unreachable-code".to_string()],
         });
-
-        // Legacy/deprecated rules
-        self.register_rule(RuleMetadata {
-            id: "unused-variable".to_string(),
-            version: "0.1.0".to_string(),
-            title: "Potentially unused variable".to_string(),
-            category: DiagnosticCategory::Style,
-            default_severity: DiagnosticSeverity::Warning,
-            confidence: DiagnosticConfidence::Low,
-            languages: ProgrammingLanguage::all(),
-            enabled_by_default: false,
-            requires_experimental_semantics: true,
-            examples: Vec::new(),
-            caveats: vec!["Deprecated: use unused-symbol instead.".to_string()],
-            needs_project_context: false,
-            aliases: Vec::new(),
-        });
-
-        self.register_rule(RuleMetadata {
-            id: "shadowed-variable".to_string(),
-            version: "0.1.0".to_string(),
-            title: "Variable shadows outer binding".to_string(),
-            category: DiagnosticCategory::Style,
-            default_severity: DiagnosticSeverity::Warning,
-            confidence: DiagnosticConfidence::Low,
-            languages: ProgrammingLanguage::all(),
-            enabled_by_default: false,
-            requires_experimental_semantics: true,
-            examples: Vec::new(),
-            caveats: vec!["Deprecated: not actively maintained.".to_string()],
-            needs_project_context: false,
-            aliases: Vec::new(),
-        });
-
-        self.register_rule(RuleMetadata {
-            id: "deprecated-syntax".to_string(),
-            version: "0.1.0".to_string(),
-            title: "Deprecated syntax".to_string(),
-            category: DiagnosticCategory::Style,
-            default_severity: DiagnosticSeverity::Warning,
-            confidence: DiagnosticConfidence::Medium,
-            languages: ProgrammingLanguage::all(),
-            enabled_by_default: false,
-            requires_experimental_semantics: false,
-            examples: Vec::new(),
-            caveats: vec!["This rule is not actively maintained.".to_string()],
-            needs_project_context: false,
-            aliases: Vec::new(),
-        });
     }
 }
 
@@ -772,6 +752,23 @@ mod tests {
         let registry = RuleRegistry::new();
         assert!(registry.has_rule("unwrap-call"));
         assert!(registry.has_rule("undefined-symbol"));
+    }
+
+    /// The shared registry is one instance holding what `new` builds,
+    /// aliases included.
+    #[test]
+    fn builtin_is_one_shared_new_registry() {
+        let (builtin, fresh) = (RuleRegistry::builtin(), RuleRegistry::new());
+        assert!(std::ptr::eq(builtin, RuleRegistry::builtin()));
+        let ids = |registry: &RuleRegistry| {
+            let mut ids: Vec<String> = registry.rule_ids().cloned().collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(builtin), ids(&fresh));
+        for id in ids(&fresh).iter().map(String::as_str).chain(["unreachable-code", "no-such-rule"]) {
+            assert_eq!(format!("{:?}", builtin.get_or_default(id)), format!("{:?}", fresh.get_or_default(id)), "{id}");
+        }
     }
 
     #[test]

@@ -199,8 +199,12 @@ Refactoring and formatting that respect workspace-wide references:
   close an unclosed `::block`, wrap a malformed `{{ … }}` in an
   interpolation literal (`{{{ … }}}`), and replace a subtraction that spells a
   frontmatter key (`foo--bar`) with a reference to it (`fm['foo--bar']`).
-- **Formatting** — whole-document formatting that is byte-equivalent to the
-  `md clean` cleanup sequence, with optional reflow to a fixed width.
+- **Formatting** — whole-document formatting that runs `md clean`'s
+  transaction on the unsaved buffer: frontmatter repair plus body formatting
+  under the document's `style.markdown`, over the workspace
+  `[formatting.markdown]` settings. When cleanup cannot format the document
+  without changing its meaning, or the frontmatter cannot be read, it returns
+  no edits and shows a warning.
 
 ## Editor support matrix
 

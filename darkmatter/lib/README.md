@@ -133,8 +133,7 @@ This results in a document which:
     - this replacement will happen not only in the `main.md` file but all child files too (unless these children redefine the `name` property)
 - In the `main.md` file's "My Favorite Things" section we use a `::file` reference which interpolates the content from the external file `favorites.md`, before this external content is brought in, however, the child document(s) will first be run through the Markdown pipeline itself. This results in:
     - The document is "cleaned up", in this particular case it will:
-        - add a **blank line** after `## Football` as all heading lines should have blank lines above and below them
-        - changed the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
+        - change the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
         - because `main.md` injects the `favorites.md` file into a section defined by an **H2** heading, the injected content will be _normalized_ to have it's headings start at **H3**
     - Were the `favorites.md` file to have it's own `::file` reference then the recursive process would continue.
 
@@ -510,41 +509,53 @@ let output = md.as_string();  // Includes frontmatter if present
 
 ### Document Cleanup
 
-Cleanup normalizes markdown formatting: blank lines between block elements, table alignment, list marker preservation, and list item spacing.
+Cleanup formats Markdown under the `style.markdown` rules without changing
+what the document means: rules edit the authored bytes in place, directive
+lines and expressions are never touched, and a final check returns the input
+unchanged when the result would differ in meaning.
 
 ```rust
+use darkmatter::markdown::cleanup::rules::{Indentation, Leaf, ListItemPadding, MarkdownRuleOverrides};
+
 let mut md: Markdown = content.into();
-md.cleanup();              // Normal mode (default)
-md.cleanup_compact();      // Compact mode
-md.cleanup_loose();        // Loose mode
-md.cleanup_with_indent(4); // Any mode + forced 4-space list indentation
+md.cleanup(); // the runtime default rules
+
+// Explicit rule values take precedence over the defaults.
+md.cleanup_with(&MarkdownRuleOverrides {
+    list_item_padding: Leaf::Value(ListItemPadding::None), // no blank lines between sibling items
+    indentation: Leaf::Value(Indentation::Two),
+    ..MarkdownRuleOverrides::default()
+});
 ```
 
-#### List Spacing Modes
-
-The cleanup module provides three list spacing modes via `ListSpacingMode`:
-
-| Mode | Behavior |
-|------|----------|
-| **Normal** (default) | Blank lines only at indentation level transitions — when a list enters or leaves a sub-list. Same-level items remain tight. |
-| **Compact** | No blank lines between any list items. Tightest possible output. |
-| **Loose** | Blank lines between all list items regardless of level changes. |
-
-All three modes preserve the standard markdown rule that a blank line must separate a list from following prose content.
+`Markdown::cleanup*` and the free functions `cleanup_content` /
+`cleanup_content_with` format the body only and return it unchanged on
+refusal. To clean a raw document (frontmatter repair, the document's own
+`style.markdown`, and the outcome and diagnostics), call
+`cleanup::clean_document`:
 
 ```rust
-use darkmatter::markdown::cleanup::{cleanup_content, cleanup_content_compact, cleanup_content_loose, ListSpacingMode};
+use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, clean_document};
+use darkmatter::markdown::cleanup::rules::MarkdownRuleOverrides;
+use darkmatter::markdown::schemas::CleanSchemaConfig;
 
-// Freestanding functions
-let normal  = cleanup_content(input);
-let compact = cleanup_content_compact(input);
-let loose   = cleanup_content_loose(input);
+let overrides = MarkdownRuleOverrides::default();
+let request = CleanRequest { source: &raw, overrides: &overrides, workspace: None, document_path: None };
+let result = clean_document(&request, || Ok::<_, std::convert::Infallible>(CleanSchemaConfig::new(context)))?;
+match result.outcome {
+    CleanOutcome::Changed => std::fs::write(path, &result.text)?,
+    CleanOutcome::Unchanged | CleanOutcome::Declined | CleanOutcome::Invalid => {}
+}
+```
 
-// Via the compose pipeline
+Compose's cleanup step takes the same rule values as options:
+
+```rust
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 
 let options = ComposeOptions::new()
-    .with_list_spacing(ListSpacingMode::Compact);
+    .with_list_spacing(ListItemPadding::None)
+    .with_indentation(Indentation::Two);
 let request = ComposeRequest::prepare(options, &snapshot)?;
 let (composed, report) = md.compose_with(&request)?;
 ```

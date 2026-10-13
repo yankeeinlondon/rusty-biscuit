@@ -393,3 +393,163 @@ fn base_schema_ctx_is_darkmatter_owned_generated_context() {
         "base ctx must expose generated metadata for known runtime keys: {ctx_object:?}"
     );
 }
+
+/// The baseline's `style.markdown` declarations agree with the runtime rule
+/// validator (`markdown::cleanup::rules`) on every legal and illegal shape,
+/// so DMLS validation and cleanup never disagree about a setting. Quoted
+/// numerals are not coerced into rule values.
+#[test]
+fn base_style_markdown_schema_agrees_with_the_rule_validator() {
+    let control = "style:\n  markdown:\n    frontmatter: false\n    table-layout: false\n    \
+                   fixed-width: 80\n    unwrap: true\n    indentation: 2\n    ordered-lists: false\n    \
+                   list-padding: false\n    list-item-padding: one\n    list-interior-padding: all\n    \
+                   default-language: sh\n";
+    let report = validate_with_base(control);
+    assert!(report.valid, "control rules must pass: {:?}", report.problems);
+
+    let cases: &[(&str, &str, bool)] = &[
+        ("fixed-width", "true", true),
+        ("fixed-width", "false", true),
+        ("fixed-width", "1", true),
+        ("fixed-width", "1000", true),
+        ("fixed-width", "0", false),
+        ("fixed-width", "1001", false),
+        ("fixed-width", "80.5", false),
+        ("fixed-width", "\"80\"", false),
+        ("fixed-width", "[80]", false),
+        ("indentation", "preserve", true),
+        ("indentation", "4", true),
+        ("indentation", "8", true),
+        ("indentation", "3", false),
+        ("indentation", "\"4\"", false),
+        ("indentation", "\"\"", false),
+        ("unwrap", "\"true\"", false),
+        ("unwrap", "[true]", false),
+        ("list-item-padding", "none", true),
+        ("list-item-padding", "two", false),
+        ("list-interior-padding", "except-nested-lists", true),
+        ("list-interior-padding", "some", false),
+        ("default-language", "\"\"", true),
+        ("default-language", "plain", true),
+        ("default-language", "[sh]", false),
+        ("default-language", "{}", false),
+        ("default-language", "5", false),
+        ("list-item-padding", "1", false),
+        ("list-padding", "\"false\"", false),
+        ("fixed-width", "\"true\"", false),
+        ("bogus-rule", "true", false),
+    ];
+    let mut disagreements = Vec::new();
+    for (rule, value, expected) in cases {
+        let yaml = format!("style:\n  markdown:\n    {rule}: {value}\n");
+        let schema_valid = validate_with_base(&yaml).valid;
+        let parsed: serde_json::Value = serde_yaml_ng::from_str::<YamlValue>(value)
+            .map(|yaml| serde_json::to_value(yaml).unwrap())
+            .unwrap();
+        let runtime_valid = darkmatter::markdown::cleanup::rules::validate_rule(rule, &parsed).is_ok();
+        if schema_valid != *expected || runtime_valid != *expected {
+            disagreements.push(format!(
+                "{rule}: {value} expected {expected}, schema {schema_valid}, runtime {runtime_valid}"
+            ));
+        }
+    }
+    assert!(disagreements.is_empty(), "{}", disagreements.join("; "));
+}
+
+/// The baseline documents each rule's runtime default, and that documented
+/// default is what `ResolvedMarkdownRules::defaults()` actually uses.
+#[test]
+fn base_style_markdown_defaults_match_the_runtime_defaults() {
+    use darkmatter::markdown::cleanup::rules::{
+        FixedWidth, Indentation, ListInteriorPadding, ListItemPadding, ResolvedMarkdownRules,
+        RuleSource,
+    };
+
+    fn first_default(value: &serde_json::Value) -> Option<serde_json::Value> {
+        match value {
+            serde_json::Value::Object(map) => map
+                .get("default")
+                .cloned()
+                .or_else(|| map.values().find_map(first_default)),
+            serde_json::Value::Array(items) => items.iter().find_map(first_default),
+            _ => None,
+        }
+    }
+
+    let schema = darkmatter_base_json_schema();
+    let markdown = &schema["properties"]["style"];
+    let markdown = std::iter::successors(Some(markdown), |node| match node {
+        serde_json::Value::Object(map) => map
+            .get("anyOf")
+            .and_then(|arms| arms.as_array())
+            .and_then(|arms| arms.iter().find(|arm| arm.get("properties").is_some())),
+        _ => None,
+    })
+    .find(|node| node.get("properties").is_some())
+    .expect("style object")["properties"]["markdown"]
+        .clone();
+    assert!(!markdown.is_null(), "style.markdown must be declared");
+
+    let defaults = ResolvedMarkdownRules::defaults();
+    let runtime = [
+        ("frontmatter", serde_json::json!(defaults.frontmatter.value)),
+        ("table-layout", serde_json::json!(defaults.table_layout.value)),
+        (
+            "fixed-width",
+            serde_json::json!(defaults.fixed_width.value != FixedWidth::Off),
+        ),
+        ("unwrap", serde_json::json!(defaults.unwrap.value)),
+        (
+            "indentation",
+            serde_json::json!(defaults.indentation.value.spaces().expect("numeric default")),
+        ),
+        ("ordered-lists", serde_json::json!(defaults.ordered_lists.value)),
+        ("list-padding", serde_json::json!(defaults.list_padding.value)),
+        (
+            "list-item-padding",
+            serde_json::json!(match defaults.list_item_padding.value {
+                ListItemPadding::Preserve => "preserve",
+                ListItemPadding::None => "none",
+                ListItemPadding::One => "one",
+            }),
+        ),
+        (
+            "list-interior-padding",
+            serde_json::json!(match defaults.list_interior_padding.value {
+                ListInteriorPadding::Preserve => "preserve",
+                ListInteriorPadding::None => "none",
+                ListInteriorPadding::ExceptNestedLists => "except-nested-lists",
+                ListInteriorPadding::All => "all",
+            }),
+        ),
+        (
+            "default-language",
+            serde_json::json!(defaults.default_language.value.as_str()),
+        ),
+    ];
+    assert_eq!(defaults.indentation.value, Indentation::Four);
+    for (rule, expected) in runtime {
+        let property = markdown
+            .pointer(&format!("/properties/{rule}"))
+            .or_else(|| {
+                std::iter::successors(Some(&markdown), |node| {
+                    node.get("anyOf")
+                        .and_then(|arms| arms.as_array())
+                        .and_then(|arms| arms.iter().find(|arm| arm.get("properties").is_some()))
+                })
+                .find_map(|node| node.pointer(&format!("/properties/{rule}")))
+            })
+            .unwrap_or_else(|| panic!("baseline must declare style.markdown.{rule}"));
+        assert_eq!(
+            first_default(property),
+            Some(expected),
+            "style.markdown.{rule}: the baseline default must equal the runtime default"
+        );
+    }
+    let sources = [
+        defaults.frontmatter.source,
+        defaults.indentation.source,
+        defaults.default_language.source,
+    ];
+    assert!(sources.iter().all(|source| *source == RuleSource::Default));
+}

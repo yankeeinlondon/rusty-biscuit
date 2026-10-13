@@ -70,6 +70,10 @@ sanity:
 test *args="":
     @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth" {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # test the generated schematic-schema crate (excluded from the workspace; uses its generated manifest)
 test-schema *args="":
     @echo ""

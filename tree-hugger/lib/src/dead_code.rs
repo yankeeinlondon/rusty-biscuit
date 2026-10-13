@@ -5,6 +5,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::shared::ProgrammingLanguage;
 
 /// Rust macros that never return (unconditionally terminate execution).
@@ -156,7 +157,7 @@ fn is_rust_exit_call(node: Node, source: &str) -> bool {
     }
 
     // Get the function being called
-    if let Some(func_node) = node.child_by_field_name("function")
+    if let Some(func_node) = node.child_by_field_name("function").map(unparenthesized)
         && let Ok(text) = func_node.utf8_text(source.as_bytes())
     {
         return RUST_TERMINAL_FUNCTIONS.contains(&text);
@@ -171,7 +172,7 @@ fn is_go_panic_call(node: Node, source: &str) -> bool {
         return false;
     }
 
-    if let Some(func_node) = node.child_by_field_name("function")
+    if let Some(func_node) = node.child_by_field_name("function").map(unparenthesized)
         && let Ok(text) = func_node.utf8_text(source.as_bytes())
     {
         return GO_TERMINAL_FUNCTIONS.contains(&text);
@@ -186,13 +187,26 @@ fn is_c_exit_call(node: Node, source: &str) -> bool {
         return false;
     }
 
-    if let Some(func_node) = node.child_by_field_name("function")
+    if let Some(func_node) = node.child_by_field_name("function").map(unparenthesized)
         && let Ok(text) = func_node.utf8_text(source.as_bytes())
     {
         return C_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
+}
+
+/// The callee inside any parentheses around it: `(exit)(1)` calls `exit`.
+/// Swift writes them as a one-element, unlabeled `tuple_expression`.
+fn unparenthesized(mut callee: Node) -> Node {
+    while matches!(callee.kind(), "parenthesized_expression" | "tuple_expression")
+        && callee.named_child_count() == 1
+        && callee.child_by_field_name("name").is_none()
+        && let Some(inner) = callee.named_child(0)
+    {
+        callee = inner;
+    }
+    callee
 }
 
 /// Checks if a Swift node is a fatalError/preconditionFailure call.
@@ -202,7 +216,7 @@ fn is_swift_fatal_error(node: Node, source: &str) -> bool {
     }
 
     // Swift uses the first child for function name, not a field
-    if let Some(func_node) = node.child(0)
+    if let Some(func_node) = node.child(0).map(unparenthesized)
         && let Ok(text) = func_node.utf8_text(source.as_bytes())
     {
         return SWIFT_TERMINAL_FUNCTIONS.contains(&text);
@@ -240,7 +254,7 @@ fn is_lua_error_call(node: Node, source: &str) -> bool {
     }
 
     // Get function name
-    if let Some(func_node) = node.child(0)
+    if let Some(func_node) = node.child(0).map(unparenthesized)
         && let Ok(text) = func_node.utf8_text(source.as_bytes())
     {
         return LUA_TERMINAL_FUNCTIONS.contains(&text);
@@ -272,7 +286,7 @@ pub fn find_dead_code_after<'tree>(
     let mut current = terminal;
 
     loop {
-        let parent = match current.parent() {
+        let parent = match current.indexed_parent() {
             Some(p) => p,
             None => return dead_nodes,
         };
@@ -295,11 +309,8 @@ pub fn find_dead_code_after<'tree>(
             // Found the block. 'current' is now the direct child of the block
             // (e.g., expression_statement that contains the terminal macro_invocation)
             let mut found_statement = false;
-            let named_child_count = parent.named_child_count();
-            for index in 0..named_child_count {
-                let Some(child) = parent.named_child(index as u32) else {
-                    continue;
-                };
+            let mut cursor = parent.walk();
+            for child in parent.named_children(&mut cursor) {
                 if child.id() == current.id() {
                     found_statement = true;
                     continue;
@@ -577,5 +588,35 @@ mod tests {
         let dead_nodes = find_dead_code_after(return_node, ProgrammingLanguage::JavaScript);
         assert_eq!(dead_nodes.len(), 1, "Should find dead code after return");
         assert_eq!(dead_nodes[0].kind(), "lexical_declaration");
+    }
+
+    #[test]
+    fn parenthesized_terminal_callees_are_terminal() {
+        use tree_sitter::Parser;
+
+        fn find_call(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if matches!(node.kind(), "call_expression" | "function_call") {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            let children: Vec<_> = node.children(&mut cursor).collect();
+            children.into_iter().find_map(find_call)
+        }
+
+        for (language, grammar, source, terminal) in [
+            (ProgrammingLanguage::Rust, tree_sitter::Language::from(tree_sitter_rust::LANGUAGE), "fn f() { ((std::process::exit))(1); }", true),
+            (ProgrammingLanguage::Go, tree_sitter_go::LANGUAGE.into(), "package p\nfunc f() { (panic)(1) }", true),
+            (ProgrammingLanguage::C, tree_sitter_c::LANGUAGE.into(), "void f() { (exit)(1); }", true),
+            (ProgrammingLanguage::Swift, tree_sitter_swift::LANGUAGE.into(), "func f() { (fatalError)() }", true),
+            (ProgrammingLanguage::Lua, tree_sitter_lua::LANGUAGE.into(), "function f() (error)(1) end", true),
+            // A sequence computes another value: not the terminal function.
+            (ProgrammingLanguage::C, tree_sitter_c::LANGUAGE.into(), "void f() { (g, exit)(1); }", false),
+        ] {
+            let mut parser = Parser::new();
+            parser.set_language(&grammar).expect("grammar");
+            let tree = parser.parse(source, None).expect("parse");
+            let call = find_call(tree.root_node()).expect("a call");
+            assert_eq!(is_terminal_statement(call, language, source), terminal, "{source}");
+        }
     }
 }

@@ -149,6 +149,17 @@ The second run deletes nothing when anything approved has changed in between: pr
 
 On Windows a worktree folder another program holds (a terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4.
 
+On every OS, `wt remove` also refuses with exit 4, before the report and again right before deleting, while another program's current directory is inside the worktree (your own shell and its ancestors are exempt). A program writing into the folder while git deletes it would leave it half deleted, so no flag overrides this. The refusal lists each program once, by its full command line, so a shell script shows as the script it runs rather than as `bash`. Processes a listed program started are counted, not listed. Each entry gives the program's age and says `orphaned` when its parent has exited, which usually means a leaked script. The last line is a command that ends them all:
+
+```text
+Error: Nothing was removed: the folder /…/fix-x is in use by 2 other programs (and 2 processes they started):
+  - pid 11231, started 3 days ago, orphaned: /bin/sh /tmp/.tmpNwXLnV/bin/opencode run -- Body
+  - pid 39871, started 12 min ago: rust-analyzer
+Close them, or move them out of it, and run wt remove again. To end them: kill 11231 39871
+```
+
+On Windows the last command is `Stop-Process -Id …`. On macOS and Linux only current directories are visible: a program holding an open file in the folder without standing in it is not detected.
+
 ## Worktrees Git can't read
 
 A linked worktree can lose its connection to the repository while Git still records it. `git worktree list --porcelain` then marks the entry `prunable`, and `wt list` shows it as `✕` (see [`wt list`](list.md#worktrees-git-cant-read)). `wt remove` looks at the recorded path on disk and handles three cases differently. "Gone" always means the operating system answered "not found"; a permission or I/O error is never read as absence.
@@ -283,6 +294,6 @@ The path is checked before anything else, again after a [repair](#the-directory-
 | 1 | Something failed. Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). When a later step fails, the message says what was already removed (`removed worktree X, but could not delete branch B`) |
 | 2 | Invalid arguments |
 | 3 | Refused, to avoid losing work. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
-| 4 | Blocked by the environment (no shell wrapper, a folder in use on Windows, an expired handoff); nothing was removed, and no flag helps |
+| 4 | Blocked by the environment (no shell wrapper, a folder another program is using, an expired handoff); nothing was removed, and no flag helps |
 
 Exit 3 means "nothing removed", not "nothing changed": `wt remove` never prints "nothing was changed" after a repair attempt.
