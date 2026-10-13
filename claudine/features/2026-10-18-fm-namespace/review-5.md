@@ -16,11 +16,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-12T23:20:27-07:00
 spec: 2026-10-18-fm-namespace/spec.md
-implemented: false
+implemented: true
+next: 2026-10-18-fm-namespace/review-6.md
 description: A **feature** review of `2026-10-18-fm-namespace/spec.md`
 feature: 2026-10-18-fm-namespace/review-5.md
 previous: 2026-10-18-fm-namespace/review-4.md
 log: claudine/features/2026-10-18-fm-namespace/log.md
+implemented_by: claude/opus
 ---
 
 # Review of the `fm` namespace, iteration 5

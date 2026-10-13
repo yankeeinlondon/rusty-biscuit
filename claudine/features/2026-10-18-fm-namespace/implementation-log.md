@@ -415,3 +415,210 @@ names the payload root (report/speak/message templates share `interpolate`).
 Not a `docs/` defect, recorded for the author: `claudine/docs/rollout-strategy.md`
 names this feature by slug. It is a roadmap of scheduled features rather than a
 behavior topic page, and every row there names a slug, so it was left as is.
+
+## Review cycle 5: per-document environment
+
+Scope: review-5's one finding ("Per-document environment capture and its
+acceptance tests are not implemented"), unblocked by the author's ruling of
+2026-10-13 (option A, recorded under "### Approval ruling" above). Work units
+1, 2, and 2b of "## Implementation of Review Findings #5" in the
+[repair log](log.md) carry the full detail; this section is the inventory.
+
+### The seam
+
+- `InvocationContext` is now a view of one document.
+  `enter_document(DocumentEnvironment) -> InvocationContext` replaces only the
+  environment-dependent state, together: the request snapshot map, the launch
+  `FileResolutionContext` map and the `VAULT`-selected tree root, and the
+  child-process baseline. Home, launch CWD, repository and host evidence and
+  caches, the launch `@` scope, source anchors, and work accounting stay
+  shared.
+- `capture_document()` enters a map from the installed `EnvironmentSource`
+  (`with_environment_source(..)`); with none installed it re-enters the
+  launch map, so the library never reads the process.
+  `document_environment()` and `DocumentEpoch::environment()` expose the map.
+  New types `DocumentEnvironment` and `EnvironmentSource` live in
+  `lib/src/invocation_context/document_environment.rs`.
+- CLI boundary: the launch document is the one
+  `RequestSnapshot::from_process()` in `cli/src/request.rs`;
+  `request::document_environment_source()` (`biscuit_file::capture_env`, with
+  a reasoned allowance in the CLI context-construction guard) is installed on
+  the compose and sequence invocations. Production captures pin `PWD` to the
+  launch value, because Claudine rewrites `PWD` on every child-CWD switch
+  (`switch_process_cwd`).
+- Child processes start from the launch raw baseline with only the variables
+  the document's map changes, adds, or removes rewritten; home variables are
+  never rewritten (`HomeBaseline` is request-owned).
+- Observable capture count: `InvocationWorkSnapshot::document_environment_captures`
+  is 1 for the launch document plus 1 per entered document; epochs,
+  re-preparation, extension, and transclusion add none.
+
+### Routes
+
+| Document | Capture site |
+| --- | --- |
+| Sequence step (its composition, `initialize`, task, prompt document, body request, loop iterations, retry/resume, handlers, `finalize`) | `iterate::run_one_step` → `capture_document()`, then `CompositionPrepContext::for_document` and `SequenceRunContext::for_document` |
+| Serial group leg | `WrapperPromptRunner::open_member_run` |
+| Parallel group leg | new `PromptTaskRunner::open_leg_run`, every leg in declaration order before any leg starts, joining the group's shared `RunEvidence` |
+| Prompt task | composes and launches under `PromptTaskRequest.document` (the leg's or step's view) |
+| `proxy` target | the owning coordinator (`compose/prep.rs` command loop, `iterate::run_step_proxy_loop`), after the commit resolves the target in the source's file context and before the target is prepared |
+
+Consumers rerouted to the view: lazy `current.*` (`refresh_evidence`), `ctx`
+evidence, `derive_source`, event environment contexts, library selectors
+(`ambient_env_lookup` removed; `prepared_environment(prepared)`, hint
+selectors take `&DocumentEnvironment`), loop settings
+(`resolve_*_from_env(&DocumentEnvironment)`), CLI model resolution
+(`resolve_document_model`, including the retry/resume rebuild via
+`LaunchRebuildIntent.environment`), and the provider model stage
+(`exec_prep::resolve_model_and_validate`, `LaunchPlanInputs.environment`).
+
+### Approval refusal (implemented spec departure)
+
+Implemented under the 2026-10-13 ruling, as a temporary departure from spec
+§4's template-approval sentence; the spec is left as decided.
+
+- Preflight records a `PreflightApproval` (authored text, stage, step
+  frontmatter, both contexts, file-resolution context) for every
+  interpolating `shell:`/`setup:`/`teardown:` command.
+- `TaskExecution` (new `document` field) re-resolves each, in stage order and
+  before any stage runs, under its document's map through the same
+  `compose_shell_text` preflight uses (`sequence/preflight/reapproval.rs`).
+- Identical text runs. Changed text fails the task with
+  `CompositionError::SequenceShellApprovalChanged`, naming the command, the
+  approved and resolved text, and the changed variables. The refused command
+  never runs.
+- Prompt and step documents keep run-time exact-text approval
+  (`jit::compose_step` unchanged).
+- `2026-10-23-shell-template-approval` replaces the refusal when it lands;
+  the `verify_preflight_approvals` comment and the `reapproval.rs` module doc
+  mark the interim contract.
+
+### Model re-selection (design choice)
+
+Preflight keeps planning every step's target under the launch map, because
+the review screen, the forwarded-switch check, and `--dry-run` need it before
+any step runs. At step entry (`run_one_step`) and when a group leg or a
+step's prompt task runs (`WrapperPromptRunner::document_target`),
+`sequence::resolve::StepSelection::for_document` re-selects the model under
+that document's map, and that model runs: it becomes the request's
+`resolved_target`, the `MODEL` override, and the rebuild intent's
+`fallback_model`. "Use" was chosen over "refuse" because model selection is
+not an approval: a `SequenceReview` or `ExplicitCli` model stands, and every
+other reason is a reading of the environment and is re-read. The provider is
+never re-selected (`classify_agent_resolution` and the picker read no
+environment variable). `proxy` targets already select under their own epoch.
+
+### Shell child environment
+
+- Darkmatter: `ComposeOptions::with_shell_child_environment(ShellChildEnvironment)`
+  (new public type in `shell_expansion::types`). When set, `run_action` clears
+  the inherited environment, applies the supplied raw `OsString` pairs, looks
+  the executable up on the supplied `PATH` (`which::which_in`), and sets `PWD`
+  to the command directory; `NO_COLOR` stripping still applies. Encoded in the
+  options' graph identity, left out of the compose-cache fingerprint. Reaches
+  `run_action` through `execute_directive_outcome` (`::shell`,
+  `::shell-block`, frontmatter `$( … )`).
+- Claudine: `canonical_compose_options` sets it from the epoch's (else the
+  view's) `env_baseline()`; `system_prompt/prepare.rs` and `wrap/overlay.rs`
+  set it from their view. `ShellRunner`/`TaskShellRunner::for_child_environment`
+  (default `None`); `SystemShellRunner` returns `DocumentShellRunner`,
+  `SystemTaskShell` gained `in_environment`; `TaskExecution::{run_shell,
+  run_stack}` ask for the task's `document` environment. Each view holds its
+  `DocumentShellRunner` (`shell_runner()`, also on `DocumentEpoch`), handed to
+  the stacks in `task_run.rs`, `compose/prep.rs`, and
+  `harness_orch/loop_control/lifecycle_events.rs`.
+
+### Tests
+
+All use supplied maps; none mutates the process environment.
+
+- Unit 1, lib `invocation_context/document_tests.rs`:
+  `every_consumer_of_the_launch_document_reads_its_captured_map`,
+  `a_second_document_reads_its_own_map_and_the_first_keeps_its_own`,
+  `re_preparing_a_document_captures_no_new_environment`,
+  `a_captured_document_reads_the_installed_source_or_else_the_launch_map`,
+  `a_child_process_starts_from_the_document_map_with_the_launch_home`,
+  `a_preparation_without_a_snapshot_reads_its_resolution_context_map`.
+- Unit 2, lib: `composition::sequence::tests::an_external_sequence_reference_resolves_under_each_documents_own_map`
+  and `composition::lifecycle::control::tests::a_proxy_target_reference_resolves_under_the_map_of_the_document_that_authors_it`
+  (rewritten from the two request-snapshot-reuse tests);
+  `composition::sequence::task::tests::document_environment::{an_unchanged_map_runs_the_approved_text,
+  a_changed_map_that_leaves_the_text_identical_runs_it,
+  a_changed_map_that_changes_the_text_is_refused_before_anything_runs,
+  a_task_with_no_document_view_runs_the_approved_text}`.
+- Unit 2, CLI `cli/tests/l1/document_environment_routes.rs` (through
+  `CliProcessFixture` and the `test-fixtures` seam
+  `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS`):
+  `successive_sequence_steps_each_read_the_map_they_captured`,
+  `serial_group_legs_each_capture_their_own_map`,
+  `parallel_group_legs_each_capture_their_own_map`,
+  `a_proxy_target_captures_its_own_map_before_its_initialize`,
+  `re_entering_a_document_reads_its_map_without_capturing_again`,
+  `a_failure_handler_and_its_retry_read_the_documents_map` (Unix),
+  `a_later_step_runs_approved_text_only_while_its_map_leaves_it_unchanged`,
+  `a_prompt_task_and_its_transclusion_read_their_legs_map` (Unix).
+- Unit 2b, CLI (same file): `task_shells_start_from_the_map_their_step_captured`,
+  `serial_group_leg_shells_start_from_their_legs_map`,
+  `parallel_group_leg_shells_start_from_their_legs_map`,
+  `a_later_step_selects_its_model_and_starts_its_shells_from_its_own_map`
+  (Unix), `each_prompt_leg_selects_its_model_from_its_own_map` (Unix).
+  Darkmatter `lib/tests/l1/shell_child_environment.rs` (Unix):
+  `a_body_directive_and_a_frontmatter_command_read_the_supplied_environment`,
+  `the_supplied_environment_replaces_the_inherited_one_and_pwd_names_the_working_directory`.
+- Mutation checks (from the log): reverting `refresh_evidence` and the
+  resolution-context replacement fails three unit-1 tests; reverting the
+  step/leg/target captures fails all seven unit-2 CLI route tests; disabling
+  only the refusal fails the option-A test; disabling the runners'
+  `for_child_environment`, `DocumentShellRunner`'s environment, and the
+  compose child environment fails all four CLI shell tests; disabling only
+  re-selection fails both model tests.
+
+### Gate evidence
+
+| Unit | Gates |
+| --- | --- |
+| 1 | claudine `just lint` passed; claudine `just test` 8719 passed, 9 skipped, 0 failed; `just check-tier-coverage claudine` 0 stranded |
+| 2 | claudine `just lint` passed; claudine `just test` 8731 passed, 9 skipped, 0 failed; `just check-tier-coverage claudine` 0 stranded |
+| 2b | claudine `just lint` passed; claudine `just test` 8736 passed, 9 skipped, 0 failed; darkmatter `just lint` passed; darkmatter `just test` 9778 passed, 11 skipped, 0 failed; `just check-tier-coverage` claudine and darkmatter 0 stranded |
+
+All on macOS. The `$DOC_MARK`-through-`printenv` tests are Unix-only; the
+task and leg shell tests are cross-platform through `%DOC_MARK%` but had only
+run on macOS when this section was written.
+
+### Plan checkboxes
+
+- **Document Snapshot** is checked: the entry API exists (`enter_document`,
+  `capture_document`), the unit-1 consumer agreement test covers `env.*`,
+  `ctx.agent`, lazy `current`, an env-expanded reference, a transclusion,
+  approved and executed `::shell` text, the `SCHEMAS_DIR` schema root, the
+  model selector, and the loop settings, and source anchors and
+  request-owned state are shared, not replaced.
+- **Entry Routing** is checked: every document boundary (step, serial leg,
+  parallel leg, `proxy` target) has changed-map evidence, and loop
+  iterations, `success` retry, failure handlers and their retry, `finalize`,
+  and transclusion have stable-map evidence. No test named in the log
+  exercises `resume` specifically; it shares the retry rebuild path
+  (`LaunchRebuildIntent.environment`).
+- **Lifecycle Bindings** is checked on review-cycle-1 evidence:
+  `LATE_NAMESPACES = ["current"]`, retired `current_env` errors removed,
+  `binding_contract::{lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads,
+  reserved_roots_shadow_same_named_frontmatter_keys_in_a_lifecycle_event,
+  a_set_is_read_by_bare_and_qualified_fm_and_an_earlier_snapshot_is_unchanged}`,
+  and `prepare::tests::current_env_in_a_lifecycle_shell_command_reads_the_frontmatter`.
+  The task's bullet on sequence-owned frontmatter properties (`fm.state`
+  reading the same value as `state`) has no named test in the log.
+
+### Documentation
+
+Topic pages updated to the per-document contract: Darkmatter
+`docs/topics/compose-requests.md` ("One environment per document", with an
+anchor kept for the old `#one-environment-per-request` link, plus the shell
+child environment subsection); Claudine `docs/topics/composition.md` (new
+"One Environment per Document" section with a Mermaid diagram, approval and
+model sub-sections, and corrections to "One owner", the Git-state bullet,
+target identity, Request-Owned Context, and the sequence summary),
+`flow-control/sequences.md`, `flow-control/lifecycle.md`,
+`flow-control/flow-control-reference.md`,
+`state-management/context-variables.md`, and `pre-flight-checks.md`. Skills:
+claudine `architecture.md`, `cli-commands.md`, `cli-reference.md`, and a
+2026-10-13 `timeline.md` entry; darkmatter `requests.md` and `compose.md`.

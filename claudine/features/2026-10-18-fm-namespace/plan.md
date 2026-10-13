@@ -198,7 +198,7 @@ is passive, and released names remain usable document properties.
 
 ### Wave 4 — Environment Authority (sequential)
 
-- [ ] **Document Snapshot**
+- [x] **Document Snapshot**
   - Prerequisites: Phase 1 design and resolved approval ruling, Phase 2 runtime.
     Own shared request/context APIs and the minimal Claudine input plumbing.
     Add the smallest explicit document-entry environment seam needed by the
@@ -221,7 +221,7 @@ pass, and source anchors/request-owned state remain unchanged by map replacement
 
 ### Wave 5 — Lifecycle Routing (parallel)
 
-- [ ] **Entry Routing**
+- [x] **Entry Routing**
   - Own Claudine preparation, sequence task/group execution, proxy control,
     and CLI boundary plumbing. Route each direct/inline/wrapper document,
     sequence task, serial or parallel group leg, and proxy target through the
@@ -239,7 +239,7 @@ pass, and source anchors/request-owned state remain unchanged by map replacement
     are available, test runtime value checks, otherwise test the approved
     interim refusal and record its departure from the spec.
 
-- [ ] **Lifecycle Bindings**
+- [x] **Lifecycle Bindings**
   - Own `lifecycle/bindings.rs`, related binding/error tests, and approval
     refusal/error definitions; coordinate shared fixtures with Entry Routing.
     Set `LATE_NAMESPACES` to `["current"]`, remove retired namespace errors,
