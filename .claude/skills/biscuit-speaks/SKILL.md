@@ -157,6 +157,16 @@ all-or-nothing `PLAYA_REAL_AUDIO_REQUIRED=1`.
 Kokoro completion coverage pins `af_heart`, deliberately independent of Claudine's
 normal provider/voice. `lib/tests/volume_control.rs` uses recording executables
 and invalid audio to verify zero and intermediate gains without audible output.
+New synthesis and cache tests use the shared `lib/tests/common` `TtsFixture`
+instead: it owns `PATH`, the temp dir, `BISCUIT_SPEAKS_CACHE`, and an
+uncreated `PLAYA_SPOOL_DIR`, installs recording `say`/`kokoro-tts`/`gtts-cli`/
+`echogarden` fakes that synthesize, fail, or hang after a partial write, and an
+`mpv` fake that is the playback boundary, because Playa falls back to it when
+native decoding of the fake bytes fails. The fakes are `/bin/sh` scripts, so
+these tests are Unix-only: Windows resolves a bare program name only to an
+`.exe`. ElevenLabs tests inject `fake::FakeTransport`/`FakeClock` through the
+crate-private `ElevenLabsProvider::with_transport` instead of making network
+calls.
 
 CLI fixtures must also set `BISCUIT_SPEAKS_CACHE` to a private voice-capability
 cache and supply a controlled provider inventory. `--voice Samantha` alone did

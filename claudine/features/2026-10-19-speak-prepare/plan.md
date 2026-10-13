@@ -4,6 +4,18 @@ created: 2026-10-12
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/host/say.rs
+    - biscuit-speaks/lib/src/providers/host/say/system_defaults.rs
+    - biscuit-speaks/lib/tests/common/mod.rs
+    - biscuit-speaks/lib/tests/prepare.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+    - .claude/skills/biscuit-speaks/SKILL.md
+packages:
+    - biscuit-speaks
 ---
 # Speak Prepare — Implementation Plan
 
