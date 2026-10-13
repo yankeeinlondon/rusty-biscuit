@@ -14,7 +14,7 @@ use assert_cmd::cargo::cargo_bin;
 use worktree::remove::handoff::canonical;
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = worktree::git::command()
         .current_dir(dir)
         .args(args)
         .output()
@@ -37,14 +37,13 @@ impl Scene {
         let repo = root.path().join("repo");
         fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
-        for (key, value) in [
-            ("user.email", "test@example.com"),
-            ("user.name", "Test User"),
-            ("commit.gpgsign", "false"),
-            ("gc.auto", "0"),
-        ] {
-            git(&repo, &["config", key, value]);
-        }
+        // One write, where a `git config` per key starts a process each.
+        let mut config = fs::OpenOptions::new().append(true).open(repo.join(".git").join("config")).unwrap();
+        std::io::Write::write_all(
+            &mut config,
+            b"[user]\n\temail = test@example.com\n\tname = Test User\n[commit]\n\tgpgsign = false\n[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n",
+        )
+        .unwrap();
         fs::write(repo.join("README.md"), "readme\n").unwrap();
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-q", "-m", "initial"]);

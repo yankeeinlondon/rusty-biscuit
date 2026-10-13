@@ -16,7 +16,7 @@ use std::process::{Command, Output, Stdio};
 pub const FOREIGN: &str = if cfg!(windows) { "/home/me/wt" } else { r"b:\wt" };
 
 pub fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git").current_dir(repo).args(args).env("GIT_TERMINAL_PROMPT", "0").output().unwrap();
+    let output = worktree::git::command().current_dir(repo).args(args).env("GIT_TERMINAL_PROMPT", "0").output().unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
     String::from_utf8(output.stdout).unwrap()
 }

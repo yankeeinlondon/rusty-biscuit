@@ -158,7 +158,7 @@ fn completion_offers_every_listing_flag() {
 #[test]
 #[serial]
 fn refresh_waits_for_both_halves_and_asks_again_like_every_listing() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
@@ -201,7 +201,7 @@ enum Seeded {
 /// that request is answered `holder_reply` once `wt -r`'s worker has recorded
 /// the contention. Returns `wt -r`'s collapsed stderr and the PR requests made.
 fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String, usize) {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     for (stale, _) in receipts_beside(&fixture.pr_store(), "prs.json") {
         let _ = fs::remove_file(stale);
     }
@@ -336,7 +336,7 @@ mod ignore_api {
     #[test]
     #[serial]
     fn the_repository_is_recorded_before_the_run_and_no_provider_is_asked() {
-        let fixture = MixedFixture::new().with_github_origin();
+        let fixture = MixedFixture::small().with_github_origin();
         // A young stored answer, from before the repository was ignored.
         fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
         let proxy = ProxyStub::closing_after(Duration::ZERO);
@@ -375,7 +375,7 @@ mod ignore_api {
     #[test]
     #[serial]
     fn a_corrupt_file_ignores_nothing_and_is_never_overwritten() {
-        let fixture = MixedFixture::new().with_github_origin();
+        let fixture = MixedFixture::small().with_github_origin();
         fs::write(preference(&fixture), b"{not json").expect("corrupt file");
         let proxy = ProxyStub::closing_after(Duration::ZERO);
 
@@ -395,8 +395,8 @@ mod ignore_api {
     #[test]
     #[serial]
     fn without_an_identifiable_origin_the_flag_fails_and_records_nothing() {
-        let no_origin = MixedFixture::new();
-        let local = MixedFixture::new().with_origin("/srv/git/repo.git");
+        let no_origin = MixedFixture::small();
+        let local = MixedFixture::small().with_origin("/srv/git/repo.git");
         for (fixture, reason) in [(&no_origin, "no origin"), (&local, "a local path")] {
             let output = fixture.wt_command().arg("--ignore-api").output().expect("wt --ignore-api");
             let stderr = String::from_utf8_lossy(&output.stderr);
