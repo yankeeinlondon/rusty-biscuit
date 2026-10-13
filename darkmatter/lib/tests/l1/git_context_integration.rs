@@ -328,6 +328,56 @@ fn merge_conflicts_are_native_sorted_deduped_portable_arrays_and_empty_is_falsy(
 }
 
 #[test]
+fn supplied_evidence_takes_merge_conflicts_from_its_own_slot_not_git_info() {
+    use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextRequirements};
+    use gix::index::entry::Stage;
+    use std::collections::HashMap;
+
+    let repo = init_repo("fixture/evidence", true);
+    write_conflict_index(
+        repo.path(),
+        &[("nested/conflict.md", Stage::Ours), ("nested/conflict.md", Stage::Theirs)],
+    );
+    let observation = sniff::filesystem::FilesystemObservation::discover(repo.path());
+    // A summary request carries no per-file changes, as an embedding
+    // producer such as Claudine supplies it.
+    let git = observation
+        .detect_git(&sniff::request::GitRequest::summary())
+        .expect("detect git")
+        .expect("fixture is a repository");
+    assert!(git.file_changes.is_empty(), "summary GitInfo has no file changes");
+    let content = "{{ ctx.merge_conflicts }}";
+    let requirements = ContextRequirements::for_content(content);
+    let with_git = ContextCaptureEvidence::new(HashMap::new()).with_git(Some(git));
+
+    let unsupplied = ComposeContext::capture_with_evidence(repo.path(), &requirements, &with_git);
+    assert_eq!(unsupplied.values().get("merge_conflicts"), Some(&json!([])));
+    assert!(
+        unsupplied
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| format!("{diagnostic:?}").contains("git.merge_conflicts")),
+        "a repository without conflict evidence must say so: {:?}",
+        unsupplied.diagnostics()
+    );
+
+    let conflicts = observation
+        .detect_merge_conflicts()
+        .expect("read index")
+        .expect("fixture is a repository");
+    let supplied = ComposeContext::capture_with_evidence(
+        repo.path(),
+        &requirements,
+        &with_git.with_merge_conflicts(conflicts),
+    );
+    assert_eq!(
+        supplied.values().get("merge_conflicts"),
+        Some(&json!(["nested/conflict.md"]))
+    );
+    assert!(supplied.diagnostics().is_empty(), "{:?}", supplied.diagnostics());
+}
+
+#[test]
 fn corrupt_index_degrades_only_merge_conflicts_and_preserves_siblings() {
     let repo = init_repo("fixture/preserved", true);
     fs::write(repo.path().join(".git/index"), b"corrupt index bytes")

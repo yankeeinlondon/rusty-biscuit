@@ -165,6 +165,7 @@ if requirements.contains(ContextGroup::Git) {
 }
 let evidence = ContextCaptureEvidence::new(invocation_environment)
     .with_git(git_info)
+    .with_merge_conflicts(conflicted_paths)
     .with_repository(repository_root, repo_info)
     .with_file_changes(file_changes);
 let context = ComposeContext::capture_with_evidence(
@@ -261,6 +262,13 @@ distinguish **not supplied** from an explicitly observed absence (`None` or an
 empty vector). `with_documents_for_source` derives the canonical best matching
 skill from a supplied repository root/topology and source directory without
 performing Git or topology discovery.
+
+`ctx.merge_conflicts` comes only from `with_merge_conflicts` (Sniff's
+`FilesystemObservation::detect_merge_conflicts`, an index-only read). It is
+never derived from `GitInfo.file_changes`, which a summary Git request leaves
+empty; deriving it that way once made every embedded compose report no
+conflicts. With the Git group requested and a repository supplied through
+`with_git`, an unsupplied slot is a `git.merge_conflicts` partial capture.
 
 Supplied capture is fail-closed. If a requested fact was not supplied,
 Darkmatter emits the existing `PartialRuntimeCapture` diagnostic and populates
