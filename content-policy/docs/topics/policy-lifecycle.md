@@ -3,9 +3,8 @@
 **Status: in progress.** Every rule is built end to end: the time and
 constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil`)
 and `FileChanged`, through the library's frontmatter reader, evaluation,
-renewal, the `policy` CLI, and the editor schema. Darkmatter incorporating the
-editor schema into its base document schema is **planned**; its section
-describes the agreed design.
+renewal, the `policy` CLI, and the editor schema, which Darkmatter's base
+document schema uses to type `content_policy` in every Markdown document.
 
 Use content policies to tell an application when a Markdown document needs a
 refresh or should leave active use. A document can carry both kinds of rule:
@@ -924,45 +923,92 @@ types:
 | `long_form` | A `{rule, action}` entry, where `action` is `refresh`, `archive`, or `remove` |
 | `policy` | One list entry in either form |
 
-With it, the editor suggests rule forms (dates only) and flags an unknown rule
-or action, such as `Duration(3mo)`, `ValidFor(3w)`, or `action: delete`,
-before the document is ever checked. The schema is a convenience; evaluation
-is the authority and checks more. The schema checks a date's shape but not
-whether the day exists (`2026-02-30` passes). A `{rule, action}` entry needs
-both fields: a missing or null `rule` or `action` is flagged, as evaluation
-rejects it. For
-`FileChanged` it flags the one-argument form and a path with `,`, `)`, `\`,
-surrounding spaces, or a leading `/`, `~`, `@`, `%`, or `{{`; it cannot see a
-drive letter, a `vault:` or URL prefix, a `{{` later in the path, or whether
-the path stays inside the boundary.
+Darkmatter's base frontmatter schema imports this file and declares
 
-Today a schema cannot type a whole list of `policy` entries, so the schema
-applies to one entry per property. A document can use it through an inline
-`$schema` map that names each property, for example while writing or testing a
-policy:
+```yaml
+content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"
+```
+
+so in every Markdown document, with no `$schema` of its own, `content_policy`
+is optional but, when present, must be a non-empty list of `policy` entries.
+The same checks run in DMLS, in `md compose`, and in `md schema validate`.
+Darkmatter compiles the schema in, so an installed `md` or `dmls` applies it
+outside a checkout. A document whose own `$schema` declares `content_policy`
+replaces this typing.
+
+The schema flags, before the document is ever evaluated:
+
+- an unknown rule or action, such as `Duration(3mo)`, `ValidFor(3w)`, or
+  `action: delete`;
+- the wrong shape: a single rule instead of a list
+  (`content_policy: ValidFor(3mo)`), an empty list (`[]`), or a `null` item
+  (`[null]`); a missing `content_policy` is fine;
+- a `{rule, action}` entry that lacks either field, sets one to `null`, or
+  carries any other key, because both fields are required and the entry is
+  closed;
+- for `FileChanged`, the one-argument form and a path with `,`, `)`, `\`,
+  surrounding spaces, or a leading `/`, `~`, `@`, `%`, or `{{`.
+
+Each problem names the entry it belongs to. With
+`[ValidFor(3mo), {rule: null, action: archive}]`, the problem's path is
+`/content_policy/1/rule` and its line and column point at the `null`; with
+`{action: archive}` as the second entry, the missing `rule` is reported on
+the entry itself, `/content_policy/1`, at the start of its mapping.
+
+The schema is a convenience; evaluation is the authority and checks more.
+These values pass the schema but fail evaluation:
+
+| Value | Why evaluation rejects it |
+| --- | --- |
+| `ValidUntil(2027-02-30)` | The schema checks a date's shape, not whether the day exists |
+| `ValidFor(99999999999999999999d)` | The duration overflows |
+| `FileChanged(vault:notes.md, @fp)`, `FileChanged(https://example.com/a.md, @fp)` | The schema cannot see a `vault:` or URL prefix, or a drive letter |
+| `FileChanged(docs/{{HOME}}.md, @fp)` | The schema sees `{{` only at the start of a path |
+| `[Evergreen, "ValidFor(3mo)"]` | `Evergreen` must be the only entry; the schema judges each entry on its own |
+| `content_policy: null`, or `content_policy:` with no value | The schema treats an explicit `null` as an absent, optional list |
+
+Some unusual paths are accepted by both: `FileChanged(notes/a(b.md, @fp)`,
+`FileChanged(&Cargo.toml, @fp)`, and `FileChanged(^README.md, @fp)`. Neither
+the schema nor the parser checks whether the file exists or stays inside the
+boundary: `FileChanged(does/not/exist.md, @fp)` passes both, and only
+evaluation reports it.
+
+Schema checks are passive. They never read the watched file, compare a
+fingerprint, renew a baseline, or stamp `last_updated`, and they leave the
+document's bytes unchanged.
+
+Templates are checked when they have a value. `md compose` checks a
+`content_policy` written with `{{ … }}` after interpolation resolves it, and
+DMLS does not report a `{{ … }}` value at all. Output of a frontmatter shell
+command, `$(…)`, is not checked again after it runs, so a command that prints
+an invalid policy passes `md compose`; this holds for every property the base
+schema types.
+
+In the editor, DMLS completes inside a compact entry, after `rule:` and
+`action:`, and the keys of a `{rule, action}` entry, and hovering a rule shows
+the description of the rule form it matches. Of the seven example rules the
+schema suggests, only `Evergreen` is offered today: Darkmatter allows one
+`suggest(...)` list per property and keeps a suggestion only when the
+alternative carrying the list accepts it, and all seven sit on the `Evergreen`
+alternative.
+
+Setting a document's `$schema` to the file itself validates nothing, because
+the file declares types and no properties. A document can type a property of
+its own with the same entries:
 
 ```yaml
 ---
 $schema:
-  first: "policy@./content-policy.yaml"
-  second: "policy@./content-policy.yaml"
-first: ValidFor(3mo)
-second: {rule: "ValidUntil(2027-01-01)", action: archive}
+  review_policy: "policy[](min(1))@./content-policy.yaml"
+review_policy:
+  - ValidFor(3mo)
 ---
 ```
-
-Setting a document's `$schema` to the file itself validates nothing, because
-the file declares types and no properties.
 
 A caller that wants these checks in its own schema does not need the file on
 disk: the library exports its text as `content_policy::EDITOR_SCHEMA`, with no
 optional feature, so the caller compiles in the version that matches the
 parser it links.
-
-Darkmatter is **planned** to compile it into its base document schema and type
-`content_policy` as a list of `policy` entries, so that every Markdown document
-gets these checks with no `$schema` of its own, in the editor and from
-`md schema validate`.
 
 ## Library Ownership
 
