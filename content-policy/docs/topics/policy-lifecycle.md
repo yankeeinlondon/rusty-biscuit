@@ -979,18 +979,21 @@ document's bytes unchanged.
 
 Templates are checked when they have a value. `md compose` checks a
 `content_policy` written with `{{ … }}` after interpolation resolves it, and
-DMLS does not report a `{{ … }}` value at all. Output of a frontmatter shell
-command, `$(…)`, is not checked again after it runs, so a command that prints
-an invalid policy passes `md compose`; this holds for every property the base
-schema types.
+DMLS does not report a `{{ … }}` value at all. A whole-value frontmatter shell
+command, `$(…)`, is checked after it runs: `content_policy: "$(cat policy.txt)"`
+fails `md compose` when the command prints anything other than a valid policy
+list, with or without `--no-trigger-schemas`. Shell text that compose never
+runs, such as `$(…)` inside a list item, is judged as written.
 
 In the editor, DMLS completes inside a compact entry, after `rule:` and
 `action:`, and the keys of a `{rule, action}` entry, and hovering a rule shows
-the description of the rule form it matches. Of the seven example rules the
-schema suggests, only `Evergreen` is offered today: Darkmatter allows one
-`suggest(...)` list per property and keeps a suggestion only when the
-alternative carrying the list accepts it, and all seven sit on the `Evergreen`
-alternative.
+the description of the rule form it matches. A compact entry and a `rule:`
+value both offer the seven example rules the schema suggests: `Evergreen`,
+`TimeSensitive`, `ValidFor(3mo)`, `ValidFor(3mo, @last_updated)`,
+`ValidFor(3mo, 2026-09-28)`, `ValidUntil(2027-01-01)`, and
+`FileChanged(src/config.rs, @config_fingerprint)`. The list is stored once, on
+the `Evergreen` alternative, and Darkmatter keeps each suggestion that any rule
+form accepts.
 
 Setting a document's `$schema` to the file itself validates nothing, because
 the file declares types and no properties. A document can type a property of
