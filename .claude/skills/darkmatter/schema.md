@@ -476,9 +476,9 @@ For grammar or schema changes, cover:
 ## Authored global catalog
 
 The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
-It declares all globals, including `doc`, and imports types from `partials/`.
+It declares all globals, including `fm` (typed by `partials/fm.yaml`), and imports types from `partials/`.
 Runtime migration is pending: do not confuse the existing embedded document
 baseline with this global catalog. The planned document baseline is its resolved
-`doc` definition; `ctx` and `current` share a context type, and there is no
+`fm` definition; `ctx` and `current` share a context type, and there is no
 `current_env`. Register the global catalog explicitly rather than auto-applying
 its root as frontmatter properties.

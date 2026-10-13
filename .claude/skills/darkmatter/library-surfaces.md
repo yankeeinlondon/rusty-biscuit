@@ -29,7 +29,7 @@ behavior.
   `FileResolutionContext` (built by `build_resolution_context` from a
   `RequestSnapshot`) and `Deref`s to `ComposeOptions`, which carries remote
   policy, cache, schemas, and rendering options but no context.
-- `EffectiveContext` and the expression runtime expose `ctx.*`, `doc.*`, and
+- `EffectiveContext` and the expression runtime expose `ctx.*`, `fm.*`, and
   `env.*` without ambient recapture.
 - Expression descriptors are typed catalogs used by both library callers and
   CLI documentation. Add a function once in the registry and keep parsing,
@@ -52,9 +52,9 @@ behavior.
   its nextest drift test fail on a stale table. It stores `AiCli` variant
   names as strings, so a stale table cannot block building the generator
   (claudine-gen depends on this crate).
-- `reserved_root_descriptors()` lists `doc`, `ctx`, `env` and the lazy mirrors
-  `current` (of `ctx`) and `current_env` (of `env`). The evaluator reserves all
-  five: `context/current.rs` resolves the two lazy roots ahead of frontmatter,
+- `reserved_root_descriptors()` lists exactly `fm`, `ctx`, `env`, and the lazy
+  mirror `current` (of `ctx`). The evaluator reserves all four:
+  `context/current.rs` resolves the lazy root ahead of frontmatter,
   external state, and injected globals. Public surface:
   `CurrentProvider`/`CurrentRefresh` (the invocation's per-key capability),
   `CurrentAuthority`, `ComposeOptions::with_current_provider`,

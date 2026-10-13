@@ -293,7 +293,7 @@ directives of a pathless source run in `context.cwd()`
 (`resolve_working_directory(opts, source, &context)`), never the process
 directory.
 
-### Lazy reserved roots (`current`, `current_env`)
+### Lazy reserved root (`current`)
 
 `context/current.rs` owns the request's refresh authority. Three pieces:
 
@@ -340,17 +340,16 @@ the document lookup first, and refuses to register a global under one
   through the provider.
 - A key the provider does not hold is `null` plus one `PartialRuntimeCapture`
   diagnostic — never the stale `ctx` value and never ambient discovery.
-- `current_env.<KEY>` is `std::env::var` at reference time, with `env`'s
-  missing-value semantics.
-- Bare `current` enumerates the descriptor names with null values; bare
-  `current_env` resolves to nothing, as bare `env` does.
-- Any other path (`current.ctx.x`, `current.env.x`, `current_env.ctx.x`,
-  `current.<typo>`) raises the authoring-fatal
-  `ExpressionError::ReservedRootPathUnknown`.
+- Bare `current` enumerates the descriptor names with null values.
+- Any other path (`current.ctx.x`, `current.env.x`, `current.<typo>`) raises
+  the authoring-fatal `ExpressionError::ReservedRootPathUnknown`.
+- `current_env` is not reserved: it is an ordinary frontmatter property
+  (absent → `null` plus `dm.expression.undeclared_property`). No expression
+  reads the live process environment; `env` is the request's one captured map.
 
 `DeferredCapabilities` (`capture/capabilities.rs`) is the planning twin of
-`ContextRequirements`: it names the `current` keys, `current_env` names, and
-cataloged function calls a source can reach, and observes none of them. A
+`ContextRequirements`: it names the `current` keys and cataloged function
+calls a source can reach, and observes none of them. A
 `current.*` reference adds no eager requirement, and an eager requirement never
 answers a `current.*` read. `ComposePreflightReport::deferred_context` carries
 the union across the walked graph.
@@ -478,20 +477,21 @@ optional-target idiom is condition-aware and warning-free:
 | `{{ foo }}` | Frontmatter value |
 | `{{ user.name }}` | Nested object path |
 | `{{ spec-name }}` | A kebab-case key; `-` joins mid-identifier only before an identifier character, so `a - b`, `4-2`, `foo--bar` stay subtraction and `iteration-1` is a key |
-| `{{ doc['foo--bar'] }}` | Bracket access for a key the identifier form cannot spell (`.`, `--`, leading digit, trailing `-`) |
-| `{{ doc }}` | The whole frontmatter object |
-| `{{ doc.build }}` | A frontmatter property by the `doc.*` namespace (a property literally named `doc` is `doc.doc`); intercepted before any `ctx.*` fallback |
+| `{{ fm['foo--bar'] }}` | Bracket access for a key the identifier form cannot spell (`.`, `--`, leading digit, trailing `-`) |
+| `{{ fm }}` | A snapshot of the whole effective frontmatter object at evaluation time |
+| `{{ fm.build }}` | A frontmatter property by the `fm.*` namespace (a property literally named `fm` is `fm.fm`); missing is `null`, never a fallback. A key named after a reserved root is read only this way: `{{ env }}` is the environment, `{{ fm.env }}` the property. `doc` is an ordinary property name |
 | `{{ ctx.today }}` | Runtime context, captured once per request |
 | `{{ env.HOME }}` | Environment variable, from the snapshot frozen at capture |
 | `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
-| `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
+| `{{ current_env.HOME }}` | Member `HOME` of an ordinary frontmatter property `current_env` (it was a live-environment root; use `env.HOME`) |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
 | `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | `GlobReference::list_files` in the document's context: every match merged across the prefix's roots, most local first (a bare glob: document folder, then repository root), absolute paths, `[]` when nothing matches. Unfiltered (`_completed/` included). Skipped out-of-tree file symlinks go to the request's `GlobWarningSink` (`dm.glob.skipped_symlink`, drained by the root pipeline); parse/root failures are `ExpressionError::GlobReference`. Use it to see ambiguity, which `%` (most local match) hides |
 | `{{ try_frontmatter(file) }}` | `frontmatter(file)` as `{ok, value, error}`: a missing, unreadable, or unparsable file is `ok: false` with the reason instead of failing the composition |
 
-Read-side functions and `doc.*` resolve identically on every surface
+Read-side functions and `fm.*` resolve identically on every surface
 (frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
-claudine loop/hook). Every frontmatter surface (both interpolation passes and
+claudine loop). Claudine hook expressions have no frontmatter; they read the
+hook payload through the hook-only `hook` root. Every frontmatter surface (both interpolation passes and
 the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
@@ -693,7 +693,7 @@ Numeric strings auto-convert for comparisons.
 {{ round(3.7) }}             // Round to integer (4)
 {{ round(value, 0) }}        // With default
 
-{{ link(doc.path) }}         // Markdown link using relative text and absolute destination
+{{ link(fm.path) }}          // Markdown link using relative text and absolute destination
 {{ link("https://example.com", "Example") }}  // Link with explicit description
 {{ code_link(plan) }}        // Same link, text as inline code: [`plans/foo.md`](/abs/plans/foo.md)
 {{ code_link(url, "a]b") }}  // Code-span text is literal; never wrap {{ link(x) }} in backticks
@@ -1157,7 +1157,7 @@ darkmatter/lib/src/
     │   ├── functions/   # domain-owned registrations and dispatch
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
-    │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
+    │   ├── fm_namespace.rs  # Reserved fm / fm.* namespace resolution
     │   └── resolve_ctx.rs   # ResolutionContext (cwd, base_dir() tree root, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports
