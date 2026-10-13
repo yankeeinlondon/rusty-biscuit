@@ -506,8 +506,7 @@ impl ElevenLabsProvider {
             .clone()
             .unwrap_or_else(|| self.default_model_id.clone());
 
-        // Build the request body
-        // Build voice settings if speed is not normal
+        // Voice settings are sent only when the speed is not normal.
         let voice_settings = Self::resolve_speed(config.speed).map(|speed| VoiceSettings {
             speed: Some(speed),
             ..Default::default()
@@ -521,7 +520,6 @@ impl ElevenLabsProvider {
             ..Default::default()
         };
 
-        // Build the request
         let request = CreateSpeechRequest::new(voice_id.clone(), body);
 
         tracing::debug!(
@@ -543,12 +541,14 @@ impl ElevenLabsProvider {
 
     /// List available voices from the ElevenLabs API with full response details.
     ///
-    /// This fetches ALL pages of voices (the API is paginated) and returns
-    /// a consolidated response. Results are cached by the biscuit-speaks cache system.
+    /// Every call fetches ALL pages of voices (the API is paginated) and returns
+    /// a consolidated response; nothing here is cached. Paging stops when a
+    /// page reports no more voices or gives no next-page token.
     ///
     /// ## Returns
     ///
-    /// A list of available voice information with ElevenLabs-specific metadata.
+    /// The voices of every page, with `total_count` from the first page,
+    /// `has_more` false, and no `next_page_token`.
     ///
     /// ## Errors
     ///
