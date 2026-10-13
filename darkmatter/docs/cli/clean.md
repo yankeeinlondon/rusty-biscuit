@@ -117,6 +117,21 @@ schema-proven string quoting. Bytes outside
 accepted edits are preserved. Non-deterministic findings, including duplicate
 keys and suspicious values, are report-only and never mutate the document.
 
+A report-only schema finding ends with its instance path, the validator's JSON
+Pointer, in both the stderr suggestion and the JSON
+`message`. The span cannot stand in for it: a node in a flow collection
+(`content_policy: [TimeSensitive, Duration(3mo)]`) has no located span and
+reports the document start.
+
+```text
+- schema.shape-repair. "Duration(3mo)" is not valid under any of the schemas
+  listed in the 'anyOf' keyword (at `/content_policy/1`)
+```
+
+A missing or unknown key's path is its parent object's, and the message names
+the key; a missing or unknown top-level key has an empty pointer and so no
+suffix.
+
 For a non-empty frontmatter block, the effective schema is assembled in this
 order, with later layers taking precedence:
 

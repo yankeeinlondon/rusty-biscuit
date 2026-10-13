@@ -184,6 +184,27 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. |
 | `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value communication field, stack action operand, or `proxy … with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
+Every schema-validation diagnostic (`dm.schema.type_mismatch`,
+`dm.schema.constraint`, `dm.schema.missing_required`, `dm.schema.unknown_key`,
+`dm.schema.invalid_file_reference`, and the `type-definition`/`schema`
+meta-type `dm.schema.invalid_type_definition`/`invalid_schema_shape`) carries
+the validator's JSON Pointer in `data.instance_path`, beside its range. The
+range alone does not say which list item or field failed: a list item shares
+its line with its first field, and a missing key ranges its parent mapping.
+
+```yaml
+content_policy:
+  - TimeSensitive
+  - rule: TimeSensitive
+    action: delete   # dm.schema.constraint, data: {"instance_path": "/content_policy/1/action"}
+  - action: archive  # data: {"instance_path": "/content_policy/2"}
+```
+
+The pointer is the same one `md schema validate --format json` reports as
+`path`: a missing or unknown key's pointer names the parent object, and the
+message names the key. A file-reference failure carries both keys,
+`{"instance_path": "/spec", "resolution_failure": "NoMatch"}`.
+
 Two Layer-2 behaviors reach beyond the Markdown document under edit:
 
 - **Standalone schema documents own their problems.** When a schema YAML file

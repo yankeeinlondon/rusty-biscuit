@@ -337,9 +337,26 @@ binding as described above.
 
 ### The shell-deferral contract
 
-A property whose value still contains an unresolved `$(...)` shell expression has not been computed yet at validation time. Such a problem is **deferred** — the downstream consumer (e.g. claudine's `prepare_*_with_schema`) re-validates the post-shell frontmatter. If *every* problem is deferred, compose proceeds; any schema problem that does not depend on shell expansion still fails fast. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+A property whose value a later stage will compute has not been computed yet at validation time. Such a problem is **deferred**: once shell expansion and the second interpolation pass have run, compose validates the resolved frontmatter against the same effective schema and reports what remains. Deferral follows what a later stage will actually resolve, not what the text looks like:
 
-`md compose` itself does not check the shell output again. A baseline property such as `content_policy: "$(cat policy.txt)"` that expands to an invalid policy therefore passes `md compose` on its own; only a consumer that re-validates catches it. A `{{ … }}` template, by contrast, has resolved by the time the stage runs, so its value is checked like any authored value.
+| Value before shell expansion | First pass |
+| --- | --- |
+| `rule: "$(echo TimeSensitive)"` — a whole-value command, run in the shell stage | deferred |
+| `content_policy: ["{{ rule }}"]` or `"{{ [rule] }}"`, reading that command's value | deferred, then judged as `[TimeSensitive]` |
+| `content_policy: ["$(echo X)", TimeSensitive]` — `$(...)` inside a list is never run | judged as written, so rejected |
+| `title: "see $(date)"` — `$(...)` after other text is never run | judged as written |
+
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing: no later stage resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+
+The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--no-trigger-schemas` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
+
+```yaml
+content_policy: "$(cat policy.txt)"   # policy.txt holds ["Duration(3mo)"]
+```
+
+fails `md compose` and `md compose --no-trigger-schemas` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--no-baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
+
+A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{ … }}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
 
 ### Error rendering
 
@@ -386,7 +403,7 @@ Coercion also never *parses into* a constrained string type: a number landing in
 ### Where coercion runs
 
 - **Library validation** coerces a *working copy* of the instance, then validates it. It reports post-coercion validity but performs **no document mutation** — `md schema validate` does not rewrite files.
-- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values still holding `$(...)` are skipped here and coerced at the post-shell re-validation point. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
+- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values deferred to the post-shell check are skipped here and coerced there. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 

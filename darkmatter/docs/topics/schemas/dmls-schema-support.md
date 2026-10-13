@@ -263,13 +263,6 @@ reads no other file and adds no dependency.
 - When a named type and its use site both declare `suggest(...)`, the "at
   most one `suggest`" error is ranged on the whole `$schema`, because the
   inherited candidate's span belongs to another file.
-- Rule completion for `content_policy` suggests only `Evergreen`. Content
-  Policy's schema lists seven example rules on its `Evergreen` alternative, and
-  a property may carry only one `suggest(...)` list, whose candidates are
-  linted against the alternative that carries it (see
-  [Completing inside a union value](./definition.md#completing-inside-a-union-value)).
-  The other six fail that alternative's pattern and are dropped. Validation and
-  hover cover every rule form.
 - A frontmatter value holding a `{{ … }}` template is not diagnosed, because
   its value is known only after interpolation. `md compose` checks it then;
   DMLS reports nothing for it, including an invalid `content_policy` entry such
