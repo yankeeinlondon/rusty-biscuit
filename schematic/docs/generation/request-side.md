@@ -7,9 +7,9 @@ the headers, and the body, where the encoding happens, and where the
 client's credential is added.
 
 Generated code only describes a request. Sending it is the job of the
-hand-written [`schematic-runtime`](../../runtime/) crate, whose crate
-documentation (`runtime/src/lib.rs`) covers the response envelope, transport
-errors, redirects, deadlines, and hooks.
+hand-written [`schematic-runtime`](../../runtime/README.md) crate; the
+[runtime docs](../runtime/README.md) cover the response envelope, transport
+errors, credentials, redirects, deadlines, and hooks.
 
 You can:
 

@@ -354,7 +354,7 @@ stream, not a library response.
 
 - [thiserror](https://github.com/dtolnay/thiserror) _v2.0_
 
-    _Derive macro for std::error::Error trait._
+    _Derives the WebSocket error type in `ws_shared.rs`; REST errors are the runtime's._
 
     _Tags: errors, macros_
 
@@ -366,7 +366,7 @@ stream, not a library response.
 
 - [schematic-define](../define) _v0.1.0_
 
-    _Local dependency for `Headers`, `AuthPolicy`, `SensitiveString`, and the other runtime types generated clients use._
+    _Local dependency used only by the WebSocket modules (`Headers`, `ApiKeyEnv`, `EnvMapping`, `EnvList`, and the `websocket` types); the REST modules take their runtime types from `schematic-runtime`._
 
     _Tags: workspace_
 
@@ -384,7 +384,7 @@ stream, not a library response.
 
 - [urlencoding](https://github.com/kornelski/rust_urlencoding) _v2.1_ [📄](https://docs.rs/urlencoding)
 
-    _Percent-encodes path parameters and query pairs._
+    _Percent-encodes path parameters, and the WebSocket modules' query pairs; the runtime encodes REST query pairs._
 
     _Tags: url, encoding_
 
