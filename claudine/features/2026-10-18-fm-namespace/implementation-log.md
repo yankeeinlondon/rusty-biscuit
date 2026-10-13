@@ -353,3 +353,16 @@ Gates (macOS, 2026-10-12):
   event-driven schedule covers Linux on the PR.
 - Input robustness matrix: not applicable (see the inventory).
 - No pre-existing failures observed.
+
+### Phase 1 re-verification (2026-10-12)
+
+A second Phase 1 run found both Wave 1 tasks already complete and checked
+off (committed in `dda140c7c`). No code, docs, or skills changed in this run.
+Gates re-run on macOS:
+
+- `cargo nextest run -p darkmatter --test l1 an_environment_only_replacement` — 1 passed.
+- `claudine/`: `just test` — 8699 passed, 9 skipped; `just lint` — exit 0
+  (one unrelated macOS linker note about `__eh_frame` size).
+
+The approval ruling is still unresolved; `human_review` stays `true`, and the
+`message_to_agent` above still applies to Phase 2.

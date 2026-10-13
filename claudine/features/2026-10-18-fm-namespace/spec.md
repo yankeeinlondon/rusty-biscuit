@@ -35,6 +35,7 @@ related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-24-sequence-containers
     - 2026-10-27-darkmatter-lifecycle-ownership
+implemented: true
 ---
 
 # The `fm` Frontmatter Namespace
