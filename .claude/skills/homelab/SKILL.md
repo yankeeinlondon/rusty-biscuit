@@ -83,6 +83,7 @@ Named device routes (`{name}` = device name from `~/homey.json`):
 | Crate | Version | Used In |
 |-------|---------|---------|
 | `reqwest` | 0.13.2 | lib (Sony HTTP) |
+| `schematic-schema` | local | lib (Eversolo and Samsung TV REST clients), eversolo-integration, WebSocket integrations |
 | `axum` | 0.8 | server |
 | `tower` / `tower-http` | 0.5 / 0.6 | server middleware |
 | `clap` + `clap_complete` | 4.5 | cli |
@@ -94,6 +95,7 @@ Named device routes (`{name}` = device name from `~/homey.json`):
 
 - **Sony receiver** uses `serde_json::Value` for all response parsing due to API inconsistencies (see [sony-quirks.md](sony-quirks.md))
 - **Arcam amplifier** uses a binary protocol over TCP port 50000
+- **Eversolo and Samsung TV REST** use schematic-generated clients through `lib/src/rest.rs`: `device_builder` sets the base URL, a 5 s connect timeout, and a 10 s request timeout; `rest::send` maps every non-2xx, malformed body, and transport failure to `RestError` (wrapped as `EversoloError::Api` / `SamsungTvError::Api`). `Eversolo::new`, `SamsungTv::new`, and `SamsungTv::with_https` return `Result` because the builder rejects a host that forms no base URL; invalid TLS certificates are accepted only by `with_https(.., true)`
 - **Server** uses `~/homey.json` for multi-device config with named devices; legacy ENV vars auto-migrate on first run
 - **Server state** stores devices in `Arc<RwLock<HashMap<String, Device>>>` for concurrent access; CRUD ops auto-save to disk
 - **CLI** uses dual output: rich `biscuit-terminal` rendering or `--json` for machine consumption
