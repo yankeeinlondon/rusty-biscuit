@@ -39,7 +39,7 @@ process by its generic program name.
 ## ElevenLabs HTTP
 
 The library reaches ElevenLabs only through `schematic-schema`'s generated
-`ElevenLabsClient`, which re-exports the `schematic_runtime` types it needs, so
+`ElevenLabs` client, whose crate re-exports the `schematic_runtime` types it needs, so
 the library itself declares no HTTP client. `reqwest` remains a dev dependency
 for the ignored live diagnostic that prints the raw `/v2/voices` JSON when a
 response stops deserializing.

@@ -199,8 +199,8 @@ let voices = provider.list_voices().await?;
 
 ### ElevenLabs
 
-**API**: HTTP-based via the schematic-generated `ElevenLabsClient`
-(`schematic_runtime::Client<ElevenLabs>`). Every endpoint, including the
+**API**: HTTP-based via the schematic-generated `ElevenLabs` client struct
+(which wraps a `schematic_runtime::Client`). Every endpoint, including the
 paginated `/v2/voices` listing behind `list_voices_raw`, is a typed `send`;
 the provider has no hand-rolled HTTP path. A 402 reply maps to
 `TtsError::PaidPlanRequired`; any other failure maps to `TtsError::HttpError`.
