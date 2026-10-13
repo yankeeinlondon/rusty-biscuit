@@ -459,8 +459,9 @@ fn a_process_standing_in_the_worktree_blocks_removal_before_the_report() {
     let _ = holder.wait();
     assert
         .code(4)
-        .stderr(predicate::str::contains("is in use by another program: sleep (pid"))
-        .stderr(predicate::str::contains(pid.as_str()))
+        .stderr(predicate::str::contains("is in use by another program:"))
+        .stderr(predicate::str::contains(format!("pid {pid}, started")))
+        .stderr(predicate::str::contains("sleep 60"))
         .stderr(predicate::str::contains("Branch").not());
     assert!(wt.join("README.md").exists());
     assert!(fixture.branch_exists("feat/busy"));
