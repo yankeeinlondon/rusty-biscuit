@@ -62,12 +62,24 @@ facts and traps, not user docs.
   Without it the thread's Git calls silently drop out of a `git_calls` count
   (scopes are per thread). Any new helper that starts Git calls
   `calls::started()` once, after a successful spawn, or uses `calls::output`.
+- **Build every Git process with `git::command()`**, never
+  `Command::new("git")`, in production code and test fixtures alike
+  (`crate::git::command()` inside the library, `worktree::git::command()`
+  elsewhere). On Windows it starts the real `git.exe` behind Git for Windows'
+  `cmd\git.exe` launcher with the environment the launcher would set, so
+  each call is one process creation instead of two (`lib/src/git/program.rs`;
+  the os skill's `windows.md` has the launcher facts). Counting is the
+  caller's job as before.
 - **Read repository metadata through `git_metadata`, not a git process.**
-  Origin URL, default branch, branch-name validity, `core.sshCommand`, and ref
-  targets are read in-process with `gix`, falling back to git only when `gix`
+  Origin URL, default branch, branch-name validity, `core.sshCommand`, ref
+  targets and branch tips, `branch.<name>.*`, and the common directory are
+  read in-process with `gix`, falling back to git only when `gix`
   cannot read the repository. A git process costs ~47 ms on Windows, and a
   dozen redundant ones once pushed the refresh worker past `wt list`'s 3 s
-  wait there. A new read gets a parity test against the git command it
+  wait there. Branch tips (`RefTips::read_in`) and every graph history
+  question (`graph::topology::Commits`) are read in-process too; count and
+  fail them through `crate::questions`, not the process `recorder`
+  ([git-graph.md](git-graph.md)). A new read gets a parity test against the git command it
   replaces ([performance-testing](../../../worktree/docs/performance-testing.md#git-processes)).
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.

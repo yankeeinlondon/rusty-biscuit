@@ -67,7 +67,7 @@ deletion engine decides which are the operation's own.
     Name a new native test `native_*` (any `remove::…` module) or put it in
     `fsevents/tests.rs` so the group's filter selects it.
 - **Windows (`read_directory_changes.rs`)** opens two overlapped
-  `ReadDirectoryChangesW` handles, the parent with the subtree flag (1 MiB
+  `ReadDirectoryChangesExW` handles, the parent with the subtree flag (1 MiB
   buffer, 64 KiB on a share that refuses more) and the admin directory, read by
   one thread `wt-read-directory-changes` feeding `EventQueue`. Facts that
   shape it:
@@ -91,6 +91,16 @@ deletion engine decides which are the operation's own.
     is not reported at all ([os skill](../os/windows.md#directory-change-notifications)).
     The shared tests encode these with `METADATA_IS_DISTINCT` and
     `MOVE_ACROSS_DIRECTORIES_IS_A_RENAME`.
+  - **Nothing inside the watched trees is opened**, not even to stat an
+    entry: a handle inside the tree, however brief, makes the move fail
+    with `ERROR_ACCESS_DENIED`. That once made
+    `the_watch_does_not_block_the_move_or_the_deletion` fail about 1 in 100
+    under parallel load ([os skill](../os/windows.md#directory-change-notifications)).
+    Reads use `ReadDirectoryChangesExW` with the extended class, and an
+    event's `directory` comes from `FileAttributes`. A volume that refuses
+    the class (ReFS, with `ERROR_INVALID_FUNCTION`; maybe a share) is read in
+    the plain class with `directory: None`
+    (`an_entry_type_is_known_without_opening_the_entry`, NTFS only).
   - Neither handle is inside the checkout, so `handles()` is empty and Sniff
     does not refuse (`read_directory_changes::tests::sniff_sees_nothing_of_the_session`).
   - The overflow test holds a test-only `gate` mutex the thread takes before

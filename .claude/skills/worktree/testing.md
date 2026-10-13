@@ -130,8 +130,9 @@ The variable turns a missing-backend skip into a failure.
   a finished attempt and receipt in the real per-user stores, or stays silent
   (`finishes: false`) for timeout cases. `Repo` removes every
   `<repo hash>.*` cache file on drop.
-- Assert through the returned `Listing` and counters: `git status` walks,
-  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and
+- Assert through the returned `Listing` and counters: `git status` walks and
+  `merge-tree` calls (via `recorder`), ref reads and history questions (via
+  `crate::questions`, since both are answered in-process), and
   `Listing::regathered`; never a timing. The timing shape per path, the
   `git_calls` coverage, and timings on/off doing the same work live in
   `pipeline/timings.rs` (stage paths, decoded through `Timings::from_json`).
@@ -139,7 +140,12 @@ The variable turns a missing-backend skip into a failure.
   dirtiness, graph, and verbose labels with a from-scratch gather after the
   run.
 - Fail the Nth ref read with `recorder::fail_matching` plus an `AtomicUsize`
-  (`for-each-ref` is the only call it matches in a listing).
+  (`for-each-ref` is the only question it matches in a listing).
+- A table of cases that each build a repository and list it is one `#[test]`
+  per case (`pipeline.rs`'s `case_tests!`, `list::wait`'s
+  `receipt_matrix_tests!`, `commands::list`'s `origin_change_tests!`), with a
+  guard test comparing the listed labels with the table, so a new row cannot
+  go untested. A loop over them took 5–16 s on Windows.
 - `recorder` and `git::calls` are different counts. The recorder logs every
   **requested** call into one process-global log, *before* spawning, so an
   injected failure or a failed spawn is still logged; it needs `count-git`
@@ -170,6 +176,20 @@ nudge sets answers only then
 (`list_prs::a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_the_fixture_goes`).
 A teardown that skips the wait never releases the reply, so the worker
 outlives the fixture and the test fails. Never use a fixed sleep there.
+
+### Holding the worker's request
+
+`FakeGitea::hold` keeps the worker's PR request open until the test
+releases it (or `WorkerReaper` does at teardown). The worker's own request
+deadline (`REFRESH_DEADLINE`, 10 s) would otherwise end the hold on a
+loaded host before the test probed the worker's lock:
+`a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` once
+got `Failed(Other)` instead of `Contended` at load average 63 on macOS.
+`MixedFixture::wt_command_via_gitea` (and every builder on it) therefore
+sets `WT_TEST_REFRESH_DEADLINE_MS` to `HELD_REQUEST_DEADLINE` (60 s), past
+`TEARDOWN_WAIT` and every test's own wait. Never set it lower than the
+production deadline: a test that needs a request to time out belongs with
+the perf gates.
 
 ### Shortening a held listing's wait
 

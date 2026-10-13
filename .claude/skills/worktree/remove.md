@@ -210,8 +210,11 @@ must call it before any inventory.
   the link with `replace_with_link` (a junction on Windows, which needs no
   privilege).
 
-- **Association** (`admin_entry::admin_entry_for`): the common dir comes from
-  `rev-parse --path-format=absolute --git-common-dir`. Every directory under
+- **Association** (`admin_entry::admin_entry_for`): the common dir is
+  `admin_entry::common_git_dir`, read in-process (`git_metadata::common_dir`,
+  symlinks resolved as `rev-parse --path-format=absolute --git-common-dir`
+  does; native separators on Windows) with that command as the fallback.
+  Every directory under
   `worktrees/` is read, and an unreadable or linked record refuses the whole
   association. Exactly one record must match. Compare the **checkout
   directories** (`canonical_worktree_path`, which canonicalizes the longest
@@ -413,7 +416,9 @@ the ones that cost time.
 
 The decisive check before the move: `check_usage(source, checkout, own)`
 queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
-options; tests inject reports) and `assess` applies the policy. Any evidence
+options; tests inject reports) and `assess` applies the policy. The one
+exception is a second query when only Windows Search held files
+([lifecycle.md](lifecycle.md#order-do-not-reorder)). Any evidence
 left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is
 `UsageRefusal::Unverified`. Both are exit 3. No match clears, whatever the
 coverage, and `UsageClearance` keeps the whole report.
@@ -502,11 +507,28 @@ recovery record between the two calls ([lifecycle.md](lifecycle.md)).
 
 See [observation.md](observation.md). The final unregister
 (`quarantine::unregister::unregister_quarantine`) drains once more, confirms
-both paths are empty, re-binds the index and HEAD with
-`missing::IndexBinding` (taken by `bind_index` before the move), releases the
-admin watch, and calls `missing::remove_missing_record` for the quarantine's
-registration. That deletes the copy record keyed by the quarantine path, not
-the original's; the lifecycle removes the original's copy record.
+both paths are empty, lists the worktrees once (the quarantine exactly once,
+`Missing`), releases the admin watch, and calls
+`missing::remove_listed_record` with the `missing::IndexBinding` taken by
+`bind_index` before the move: the association, recorded HEAD, absence, and
+both index digests are checked once, against that binding, right before
+`git worktree remove` (a mismatch is `UnregisterError::IndexChanged`). It
+used to `inspect_missing` first and then `remove_missing_record`, reading
+every fact twice in a row. That deletes the copy record keyed by the
+quarantine path, not the original's; the lifecycle removes the original's
+copy record.
+
+**Git processes.** A clean removal starts 18 (36 before 2026-10-12): see
+`worktree/docs/performance-testing.md#git-processes` for what each one is
+and the two tests that pin them. The tips `wt remove` compares
+(`remove::branch_tip`, `missing::recorded_head`, `default_target`), origin's
+URL (`remote::origin_url`), and `branch.<name>.*` are read in-process and
+fresh on every call, so a recheck still sees a concurrent change; Git runs
+only when that read cannot answer (a missing branch keeps Git's own error).
+The CLI lists the worktrees once to find `base` and resolve the name
+(`lifecycle::resolve_target_in`), in both runs of a handoff. Every other
+listing and index read in the lifecycle is a deliberate re-read; do not
+merge one into another without the spec's say-so.
 
 ## Tests
 

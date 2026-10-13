@@ -35,6 +35,23 @@ drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
 `delete_content` → `unregister_quarantine` → original's copy record → branch
 actions → `Operation::complete`.
 
+- **`check_usage` has one bounded exception to "no retry"** (author decision
+  2026-10-12): when every holder `is_windows_search` (image path, from
+  Sniff's process record, exactly `<system dir>\{SearchProtocolHost,
+  SearchFilterHost,SearchIndexer}.exe`, ASCII-case-insensitive, `\\?\`
+  stripped; no path, an uncertain identity, or the name elsewhere is an
+  ordinary holder), it calls `UsageSource::pause(SEARCH_RECHECK_WAIT)`
+  (500 ms) and queries exactly once more; that query decides. Any other
+  holder refuses without waiting. `UsageSource::system_directory` is
+  `GetSystemDirectoryW` on Windows and `None` elsewhere, so other OSes never
+  recheck. It is the only any-holder decision: the first attempt and the
+  `Quarantined` retry both go through `check_usage`; the `Diagnostic`
+  queries after a stop only name processes. The recheck lands in
+  `UsageClearance::search_recheck` / `InUse::search_recheck`;
+  `preflight_runs` records the first report as a `WindowsSearchHold`
+  discovery run before the `Preflight` one, and the `Discovery` timeline
+  event carries `SearchRecheck::summary` (the retry pushes that event only
+  when it rechecked). `REPORT_VERSION` 4 added the purpose.
 - **The recheck runs `git status`, which may rewrite the index**, so its admin
   events are drained before `bind_index` and allowed; any admin event after
   the binding refuses (before the move) or stops (after it).
@@ -86,11 +103,29 @@ registration from the admin `gitdir` (`registration_state`), then:
   from the quarantine (`consent_state(base, quarantine, branch)`), starts the
   observer with `moved = true`, takes a fresh inventory, queries usage of the
   quarantine, rechecks, binds the index, then `RecoveryStore::reopen`, which
-  keeps the old journal as `journal-<n>.jsonl` and starts a new one with the
-  fresh inventory. `ContentRemoved` needs a `RecordApproval` (the
+  copies the old journal to `journal-<n>.jsonl`, builds the new one (fresh
+  inventory) under a hidden name, and renames it over `journal.jsonl`.
+  **Never rename or delete `journal.jsonl` before its replacement is
+  published:** `recover` reads only that file, so that gap once made a
+  pending operation unrecoverable. `store::fault::inject` stops `reopen` at
+  each `ReopenStep` in tests; the `*_stopped_while_replacing_*` lifecycle
+  tests drive every caller through it. `ContentRemoved` needs a `RecordApproval` (the
   `inspect_missing` result shown to the user) and goes through
   `remove_missing_record`. `CheckoutRemoved` runs only the branch actions in
   the request; saved approvals are never reused.
+- **A retry's report covers the whole operation.** `Resumed::attempt`
+  carries the saved `report.json` into `earlier_attempts`
+  (`OperationReport::continue_from`), and `Operation::journal_entries` /
+  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`. An
+  archive keeps only `deleted`, `externally_absent`, and `uncertain` entries,
+  and decides whether an unconfirmed entry was still present from the **next
+  generation's inventory**, never the filesystem now; that is what keeps a
+  retried entry from being counted twice or an uncertain one from turning
+  into a deletion. So registration and branch-only retries reopen with
+  `DeletionInventory::empty`: copying the old inventory would make every
+  unconfirmed entry look present and drop it. `complete(report,
+  journal_reported)` deletes the journals only once `report.journal_entries`
+  lists them all.
 - **A completed record** is `StoreError::Completed` from `inspect`,
   `resume`, and `reopen`, and `pending()` skips it.
 
@@ -122,12 +157,28 @@ registration from the admin `gitdir` (`registration_state`), then:
 - **Output:** `Removal::Refused` → `recovery::refusal_error` (usage refusals
   through `usage::usage_refusal`); `Finished` with `ExitClass::Success` → the
   old completion lines; anything else → `WorktreeError::RemovalFailed`
-  with `recovery::stopped_markup`. Nothing reaches stdout, so no `cd:` or
+  with `recovery::stopped_markup`. `stopped_markup` and
+  `inspection_markup` reuse `usage::coverage_note` for every limited
+  process check (the latest preflight, falling back to an earlier
+  attempt's, each diagnostic run, and the record's saved `discovery`); a
+  complete check adds no line, and the success path never calls them, so
+  `remove.rs`'s "no `Discovery`" assertion guards the no-chatter rule.
+  Nothing reaches stdout, so no `cd:` or
   `remove-handoff:` follows a failure. The handoff's second run sets
   `Facts::reported` from the verified fresh state, then runs the same
   `execute`, so the decisive usage query is in the second run.
-- **`Environment::interrupted` is `|| false`:** no Ctrl-C handler is installed
-  (no signal crate is a dependency of `worktree-cli`).
+- **`Environment::interrupted` is the CLI's `interrupt::Window`**
+  (`cli/src/commands/remove/interrupt.rs`), opened in `execute` around
+  `remove_checkout`/`resume` only, so consent prompts keep their own Ctrl-C.
+  `ctrlc` (with `termination`) allows one handler per process: it is
+  installed on the first open, sets a static flag while a window is open, and
+  exits 130 once the window has closed. The lifecycle polls the flag once
+  just before the move (`Refusal::Interrupted`, exit 1, record discarded) and
+  at every deletion entry boundary (`Stop::Interrupted`, stopped report).
+  The handler runs on `ctrlc`'s own thread, so a test cannot assume the flag
+  is set when `kill` returns: `cli/tests/remove_recovery.rs`'s
+  `interrupter` shim waits for the handler's `Interrupted:` line on `wt`'s
+  stderr (redirected to a file) before letting the Git call return.
 - **Binary tests:** `cli/tests/remove_recovery.rs` stops a real removal with a
   `git` shim on `PATH` that writes once a `.wt-remove-*` sibling exists (Git
   runs association and verification calls right after the move). A writer at
@@ -142,7 +193,10 @@ registration from the admin `gitdir` (`registration_state`), then:
 
 - Policy cases use `Observers` (injected observer per start; the last
   `Injector` is reachable) and `Usage` (a fake `UsageSource` with a holder,
-  an outcome, `exhausted`, and `fail_after`).
+  an outcome, `exhausted`, and `fail_after`; `Usage::search_first(first,
+  then)` answers `then` after the first query, sets a fake system directory,
+  and records `pause` calls instead of sleeping). Its `system_directory`
+  defaults to `None` on every host, so no other case rechecks on Windows.
 - **Crash injection:** `run_with(.., hook)` returns `Err(Crashed)` when the
   hook returns `true` at a `Boundary` (`Begun`, `Moved`, `ContentRemoved`,
   `Unregistered`, `BranchesDone`). `DeletionBatch(n)` cannot crash in-process;
