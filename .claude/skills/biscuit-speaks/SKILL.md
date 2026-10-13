@@ -84,6 +84,7 @@ OS-specific default stacks (highest quality first):
 | Variable | Purpose |
 |----------|---------|
 | `ELEVENLABS_API_KEY` / `ELEVEN_LABS_API_KEY` | ElevenLabs API authentication |
+| `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` | Non-secret per-account label; required for network-free detached reuse of a default ElevenLabs voice |
 | `KOKORO_MODEL` | Path to `kokoro-v1.0.onnx` model file |
 | `KOKORO_VOICES` | Path to `voices-v1.0.bin` voice embeddings |
 | `TTS_PROVIDER` | Override default provider selection |
@@ -111,8 +112,10 @@ Echogarden engine default, failed ElevenLabs listing). A *fresh* `Speak` with
 the same resolved settings hits the same file (Claudine's pre-warm relies on
 it); `with_volume` keeps preparation, other `with_*` setters clear it.
 ElevenLabs default-voice records sit beside the capability cache file, trusted
-24 h, keyed by selection inputs + non-secret account context
-(`BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT`); `prepare` always re-lists voices.
+24 h, keyed by selection inputs + non-secret account context, and exist only
+while `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` is a non-blank per-account label
+(unset/blank: a fresh detached call misses and the helper re-lists voices);
+`prepare` always re-lists voices.
 
 ## Playback and detached preparation
 
@@ -202,7 +205,11 @@ these tests are Unix-only: Windows resolves a bare program name only to an
 `.exe`. ElevenLabs tests inject `fake::FakeTransport`/`FakeClock` through the
 crate-private `ElevenLabsProvider::with_transport` instead of making network
 calls; `with_account_context` turns on its default-voice records, which live
-beside the `BISCUIT_SPEAKS_CACHE` file. An in-crate fixture that isolates the
+beside the `BISCUIT_SPEAKS_CACHE` file. Tests that need the production context
+calculation build through `new`/`with_base_url` and swap transport and clock
+(`production_provider`); one that sets and drops key or label variables first
+takes `EnvGuard::remove_safe` guards for them (`without_api_keys`), because
+dropping a `set_safe` guard restores the developer's own value, not absence. An in-crate fixture that isolates the
 audio cache must set `TMP` and `TEMP` as well as `TMPDIR`: Windows'
 `temp_dir()` ignores `TMPDIR`, and a `TMPDIR`-only fixture wrote into, and then
 hit, the Windows host's real temp directory.

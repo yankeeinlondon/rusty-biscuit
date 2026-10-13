@@ -297,9 +297,12 @@ listing is recorded:
 - **What:** the chosen voice and model, the inputs that chose them (gender,
   language, model, and the configured fallback voice), an account context, and
   the time it was written. The account context is the API address, the name
-  of the environment variable the key came from, and the optional
+  of the environment variable the key came from, and the
   `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` label. No API key or other credential is
   stored or hashed.
+- **When:** only while `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` holds a non-blank,
+  non-secret label that differs per account. Without it no record is written
+  or trusted (see below).
 - **Trust window:** 24 hours from when it was written. A missing, unreadable,
   mismatched, or expired record is a cache miss, and the detached helper
   selects the voice through the API as before.
@@ -307,5 +310,19 @@ listing is recorded:
   even when the record is fresh. Ordinary playback also rewrites it.
 
 The record never changes which voice is selected; it only remembers what the
-selection chose. Two API keys read from the same environment variable share
-records unless `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` tells them apart.
+selection chose.
+
+Because the key is never stored, nothing local tells two API keys under the
+same environment variable apart except the label. So with the label unset,
+empty, or blank, a fresh `play_detached` call for a default voice always
+misses, and the helper lists the voices through the API; the audio cache still
+reuses the file for the voice that listing selects, so speech is not
+synthesized again. Set a distinct label per account to make the lookup
+network-free:
+
+```sh
+export ELEVENLABS_API_KEY=...            # the work account's key
+export BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT=work
+```
+
+A requested voice never needs the record or the label.

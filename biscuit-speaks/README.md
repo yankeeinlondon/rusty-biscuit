@@ -189,11 +189,13 @@ Speak::new("the build is green").with_config(config).play().await?;
   run with your original configuration. `SpecificProvider` never switches.
 - Under `PLAYA_DRY_RUN`, `prepare` returns the builder unchanged before looking
   at any provider.
-- ElevenLabs' default voice comes from the account's voice list, so each
-  selection is recorded beside the capability cache file and trusted for 24
-  hours. That lets a later `play_detached` find the prepared file with no
-  network request. Every `prepare` re-checks the voice list. The record holds
-  no API key.
+- ElevenLabs' default voice comes from the account's voice list. When
+  `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` names the account, each selection is
+  recorded beside the capability cache file and trusted for 24 hours, which
+  lets a later `play_detached` find the prepared file with no network request.
+  Without that label a fresh `play_detached` resolves the default voice through
+  the API (the prepared audio is still reused). Every `prepare` re-checks the
+  voice list. The record holds no API key.
 
 See [TTS Caching](docs/tts-caching.md) for the full rules.
 
@@ -220,7 +222,7 @@ These providers are often found on hosts and may be added to this library in the
 | `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
 | `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
-| `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` | Optional label that keeps ElevenLabs default-voice records apart when different API keys use the same environment variable |
+| `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` | Non-secret label, distinct per ElevenLabs account, that enables network-free reuse of a prepared default voice; unset or blank, a fresh detached request resolves the default voice through the API |
 | `PLAYA_DRY_RUN` | `1`, `true`, `TRUE`, or `yes` skips synthesis, preparation, playback, cache, and detached-spool side effects |
 
 ## API Overview

@@ -240,7 +240,11 @@ let sfx = provider.create_sound_effect("dog barking", Some(3.0)).await?;
 account's voice list is written to `.biscuit-speaks-elevenlabs-voice-{hash}.json`
 beside the capability cache file. It holds voice, model, selection inputs, a
 non-secret account context, and the write time, and is trusted for 24 hours so
-a fresh `play_detached` finds prepared audio with no API request. `prepare`
+a fresh `play_detached` finds prepared audio with no API request. Records exist
+only while `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` holds a non-blank label distinct
+per account (`snapshot::account_context` is `None` otherwise): the key is never
+stored, so nothing else tells two keys under one variable apart, and without
+the label the helper re-lists voices (the audio cache still hits). `prepare`
 always re-lists voices and rewrites it; a failed listing makes `prepare` a
 no-op.
 
