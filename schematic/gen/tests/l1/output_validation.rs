@@ -14,6 +14,7 @@ use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
+use schematic_gen::codegen::endpoint_methods::{endpoint_method_renames, resolve_names};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::export::postman::{write_postman, write_postman_grouped};
@@ -573,6 +574,46 @@ fn live_definitions_declare_no_duplicate_routes() {
         .filter(|d| d.feature == Feature::DuplicateMethodPath)
         .collect();
     assert!(duplicates.is_empty(), "{duplicates:#?}");
+}
+
+/// The endpoint-method renames of the shipped definitions, one rendered line
+/// each. A definition change that adds a collision changes this list, so the
+/// rename shows up in review instead of silently in generated names.
+const SHIPPED_ENDPOINT_METHOD_RENAMES: &[&str] = &[];
+
+#[test]
+fn live_definitions_endpoint_method_renames_are_pinned() {
+    let apis = resolve_all_apis();
+    let refs: Vec<&RestApi> = apis.iter().collect();
+
+    // Control: every shipped API resolves a name for each of its endpoints, so
+    // an empty rename list is a result, not a skipped input.
+    assert_eq!(refs.len(), 18, "shipped REST APIs");
+    for api in &refs {
+        let names = resolve_names(api);
+        assert_eq!(names.endpoints.len(), api.endpoints.len(), "{}", api.name);
+        assert!(!names.endpoints.is_empty(), "{} has no endpoints", api.name);
+        assert!(names.conflicts.is_empty(), "{}: {:#?}", api.name, names.conflicts);
+    }
+
+    let renames: Vec<String> = endpoint_method_renames(&refs)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(renames, SHIPPED_ENDPOINT_METHOD_RENAMES);
+
+    // The validator reports exactly the same renames, and no name collision.
+    let diagnostics = validate_rust_client(&refs);
+    let reported = diagnostics
+        .iter()
+        .filter(|d| d.feature == Feature::EndpointMethodRename)
+        .count();
+    assert_eq!(reported, SHIPPED_ENDPOINT_METHOD_RENAMES.len());
+    let collisions: Vec<&ValidationDiagnostic> = diagnostics
+        .iter()
+        .filter(|d| d.feature == Feature::GeneratedNameCollision)
+        .collect();
+    assert!(collisions.is_empty(), "{collisions:#?}");
 }
 
 #[test]

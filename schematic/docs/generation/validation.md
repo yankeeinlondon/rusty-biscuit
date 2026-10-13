@@ -259,7 +259,9 @@ severity=error api=Widgets endpoint=GetApikey feature=generated-name-collision o
 
 The same list is available to code as
 `schematic_gen::codegen::endpoint_methods::endpoint_method_renames`. None of
-the shipped definitions needs a rename today.
+the shipped definitions needs a rename today. A `schematic-gen` test pins that
+list for the shipped definitions, so a definition change that causes a rename
+fails the test and the new name is reviewed rather than appearing silently.
 
 ### OpenAPI documents of a module group
 
