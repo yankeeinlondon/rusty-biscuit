@@ -455,8 +455,7 @@ pub struct StackExecutionContext<'a> {
     pub err: Option<&'a LifecycleErrorInfo>,
     /// The `timing` global snapshot.
     pub timing: Option<&'a LifecycleTiming>,
-    /// The invocation's refresh authority for Darkmatter's lazy `current` /
-    /// `current_env` roots.
+    /// The invocation's refresh authority for Darkmatter's lazy `current` root.
     ///
     /// `None` fails closed: every `current.<key>` renders `null` and records a
     /// `PartialRuntimeCapture` diagnostic rather than probing the host. Only a
@@ -994,8 +993,7 @@ impl StackExecutionContext<'_> {
     /// composition-start snapshot when available, otherwise a demand-driven
     /// re-capture against `scan_hint`. `err`/`timing` are the event-time
     /// globals (supplied separately by [`Self::bindings`]);
-    /// `current.*`/`current_env.*` are the reserved roots this state's refresh
-    /// authority serves.
+    /// `current.*` is the reserved root this state's refresh authority serves.
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
         let frontmatter: HashMap<String, Value> =
             fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -1104,7 +1102,7 @@ impl StackExecutionContext<'_> {
     /// order). These strings are deferred lifecycle keys (raw `{{ … }}` through
     /// main compose), so each is interpolated **at event-time** against the live
     /// document state plus the event's lifecycle globals (`err`/`timing`/`group`)
-    /// and the late-binding roots (`current`/`current_env`).
+    /// and the late-binding root `current`.
     ///
     /// Fails closed (C4): a resolution raise (malformed span, unknown function,
     /// unavailable global) becomes an

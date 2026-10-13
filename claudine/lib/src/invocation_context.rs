@@ -1669,8 +1669,7 @@ impl InvocationContext {
         // The live process environment, not the frozen launch snapshot: `agent`
         // and `model` derive from `AGENT`/`MODEL`, and the whole point of the
         // lazy mirror is that a wrapper stage which re-exported them since
-        // launch is observable. This matches `current_env.<KEY>`, which rereads
-        // the process environment for the same reason.
+        // launch is observable.
         let evidence = ContextCaptureEvidence::new(std::env::vars().collect());
         let repository = &self.inner.launch_repository;
         let repository_root = self.launch_repository_root_spelling();

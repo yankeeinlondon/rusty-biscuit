@@ -10,7 +10,7 @@ pub(crate) const AMBIENT_VARIABLE_NAMES: &[&str] = &[
 ];
 
 /// Expression roots that cannot be interpreted as frontmatter properties.
-pub(crate) const EXPRESSION_RESERVED_ROOTS: &[&str] = &["true", "false", "doc", "env"];
+pub(crate) const EXPRESSION_RESERVED_ROOTS: &[&str] = &["true", "false", "fm", "env"];
 
 /// Frontmatter properties that loop set actions cannot mutate.
 pub(crate) const SET_ACTION_BLOCKLIST: &[&str] = &["loop", "replace"];

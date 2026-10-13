@@ -5,7 +5,8 @@ use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
-    is_reserved_namespace, is_truthy, parse_condition,
+    fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
+    resolve_fm_namespace_in_object,
 };
 use serde_json::{Map, Value};
 
@@ -50,9 +51,9 @@ impl LoopAmbient {
 ///
 /// Resolution order:
 ///
-/// 1. Reserved `doc` namespace (bare `doc` → the whole frontmatter object;
-///    `doc.<path>` → dotted traversal into it). Intercepted first so a missing
-///    `doc.<path>` never collapses into a same-named ambient/env/frontmatter key.
+/// 1. Reserved `fm` namespace (bare `fm` → the whole frontmatter object;
+///    `fm.<path>` → dotted traversal into it). Intercepted first so a missing
+///    `fm.<path>` never collapses into a same-named ambient/env/frontmatter key.
 /// 2. Prepared `ctx.NAME` and `env.NAME` from the document epoch, when supplied
 /// 3. Ambient `env.NAME` compatibility lookup
 /// 4. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
@@ -125,8 +126,8 @@ impl<'a> LoopExpressionLookup<'a> {
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        if path == "doc" || path.starts_with("doc.") {
-            return resolve_doc(self.frontmatter, path);
+        if fm_namespace_path(path).is_some() {
+            return resolve_fm_namespace_in_object(path, self.frontmatter);
         }
 
         // A reserved namespace is never a document property, so a miss inside
@@ -220,27 +221,6 @@ pub fn evaluate_condition(
         LoopCondition::While(_) => truthy,
         LoopCondition::Until(_) => !truthy,
     })
-}
-
-/// Resolve the reserved `doc` namespace against the loop frontmatter, which is
-/// the document's root object. Bare `doc` yields the whole object; `doc.<path>`
-/// traverses it. A `doc.<path>` that does not resolve returns `None` and must
-/// not fall back to another namespace.
-fn resolve_doc(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
-    match path.strip_prefix("doc.") {
-        Some(rest) => {
-            let mut current = Value::Object(frontmatter.clone());
-            for segment in rest.split('.') {
-                current = match current {
-                    Value::Object(map) => map.get(segment).cloned()?,
-                    _ => return None,
-                };
-            }
-            Some(current)
-        }
-        // path == "doc": the whole frontmatter object.
-        None => Some(Value::Object(frontmatter.clone())),
-    }
 }
 
 fn resolve_env(context: &biscuit_file::FileResolutionContext, name: &str) -> Option<Value> {
@@ -420,29 +400,26 @@ mod tests {
     }
 
     #[test]
-    fn resolves_doc_namespace_against_frontmatter() {
+    fn resolves_fm_namespace_against_frontmatter() {
         let fm = map(json!({
             "build": "from-frontmatter",
             "config": {"retries": 3},
-            "doc": {"child": "literal-doc"},
+            "fm": {"child": "literal-fm"},
+            "doc": {"child": "ordinary-doc"},
         }));
         let ambient = ambient();
         let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
 
-        // doc.<path> traverses the frontmatter object.
-        assert_eq!(lookup.get("doc.build"), Some(json!("from-frontmatter")));
-        assert_eq!(lookup.get("doc.config.retries"), Some(json!(3)));
+        assert_eq!(lookup.get("fm.build"), Some(json!("from-frontmatter")));
+        assert_eq!(lookup.get("fm.config.retries"), Some(json!(3)));
+        assert_eq!(lookup.get("fm"), Some(Value::Object(fm.clone())));
+        assert_eq!(lookup.get("fm.fm.child"), Some(json!("literal-fm")));
+        // Missing fm.* values do not fall back to env/ambient.
+        assert_eq!(lookup.get("fm.missing"), None);
 
-        // bare doc returns the whole frontmatter object.
-        let obj = lookup.get("doc").expect("bare doc resolves");
-        assert!(obj.is_object());
-        assert_eq!(obj.get("build"), Some(&json!("from-frontmatter")));
-
-        // a literal property named `doc` is reached as doc.doc.
-        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
-
-        // missing doc.* values do not fall back to env/ambient.
-        assert_eq!(lookup.get("doc.missing"), None);
+        // `doc` is an ordinary frontmatter property.
+        assert_eq!(lookup.get("doc.child"), Some(json!("ordinary-doc")));
+        assert_eq!(lookup.get("doc"), Some(json!({"child": "ordinary-doc"})));
     }
 
     #[test]

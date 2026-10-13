@@ -242,27 +242,27 @@ fn err_in_blocked_failure_finalize_is_allowed() {
 }
 
 #[test]
-fn doc_err_escape_hatch_is_allowed_everywhere() {
-    // `doc.err` reaches a literal frontmatter property, not the lifecycle
+fn fm_err_escape_hatch_is_allowed_everywhere() {
+    // `fm.err` reaches a literal frontmatter property, not the lifecycle
     // global, so it is permitted even in no-error events.
     for event in ["initialize", "start", "success", "loop"] {
         let fm = if event == "loop" {
             json!({
                 "loop": {
                     "while": "true",
-                    "stack": [{"action": {"say": "doc.err"}}]
+                    "stack": [{"action": {"say": "fm.err"}}]
                 }
             })
         } else {
             json!({
-                event: {"stack": [{"action": {"say": "doc.err"}}]}
+                event: {"stack": [{"action": {"say": "fm.err"}}]}
             })
         };
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         let result = validate_no_err_in_no_error_events(&fm, &config, dummy_path());
         assert!(
             result.is_ok(),
-            "doc.err should be allowed in {event}, got: {:?}",
+            "fm.err should be allowed in {event}, got: {:?}",
             result.err()
         );
     }

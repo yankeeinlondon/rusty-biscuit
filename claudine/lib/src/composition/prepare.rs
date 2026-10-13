@@ -828,8 +828,8 @@ fn effective_surface(
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
-    // executed command. Late-binding references (`err`/`timing`/`current`/
-    // `current_env`) are rejected with a typed error.
+    // executed command. Late-binding references (`err`/`timing`/`current`)
+    // are rejected with a typed error.
     super::preflight::resolve_lifecycle_shell_commands(
         &mut lifecycle,
         effective_frontmatter,

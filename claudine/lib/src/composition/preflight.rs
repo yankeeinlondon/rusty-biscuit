@@ -296,9 +296,9 @@ pub(super) fn approve_discovered_commands(
 /// communication/action surfaces — which interpolate at event-time (C2) —
 /// `shell` commands are approved at pre-flight, before any event fires, and so
 /// resolve in the lifecycle shell approval scope of the binding catalog
-/// ([`LifecycleScope::LifecycleShellApproval`]): `doc.*`, `ctx.*`, `env.*`,
+/// ([`LifecycleScope::LifecycleShellApproval`]): `fm.*`, `ctx.*`, `env.*`,
 /// document properties, and read-side functions. A late-binding reference
-/// (`err`, `timing`, `group`, `current`, `current_env`) is rejected with
+/// (`err`, `timing`, `group`, `current`) is rejected with
 /// [`CompositionError::LifecycleShellResolution`], in any branch, because its
 /// value does not yet exist.
 ///
@@ -448,7 +448,7 @@ fn resolve_set_shell_value(
 /// Only string-literal expressions carrying an interpolation span are touched.
 /// The command is first checked passively against the lifecycle shell approval
 /// scope, in every branch, so a late global (`err`, `timing`, `group`) or a
-/// late namespace (`current`, `current_env`) is refused by name before
+/// late namespace (`current`) is refused by name before
 /// anything is evaluated; the bytes are then resolved through a session in the
 /// same scope.
 fn resolve_shell_command_expr(
@@ -474,7 +474,7 @@ fn resolve_shell_command_expr(
             Some(root) => format!(
                 "late-binding reference `{root}` is not available in shell commands; \
                  shell commands are resolved at pre-flight (before any event fires), so only \
-                 early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
+                 early-binding values (`fm.*`, `ctx.*`, `env.*`, read-side functions) may be \
                  used here"
             ),
             None => diagnostic.error.to_string(),

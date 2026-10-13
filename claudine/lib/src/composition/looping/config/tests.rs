@@ -509,8 +509,8 @@ fn extract_control_variables_empty_identity() {
 }
 
 #[test]
-fn extract_control_variables_lifts_doc_namespace_head() {
-    let config = control_config("doc.counter < doc.total", vec![]);
+fn extract_control_variables_lifts_fm_namespace_head() {
+    let config = control_config("fm.counter < fm.total", vec![]);
     assert_eq!(
         extract_control_variables(&config),
         vec!["counter".to_string(), "total".to_string()]
@@ -518,8 +518,8 @@ fn extract_control_variables_lifts_doc_namespace_head() {
 }
 
 #[test]
-fn extract_control_variables_dotted_doc_path_lifts_head_only() {
-    let config = control_config("doc.config.retries > 0", vec![]);
+fn extract_control_variables_dotted_fm_path_lifts_head_only() {
+    let config = control_config("fm.config.retries > 0", vec![]);
     assert_eq!(
         extract_control_variables(&config),
         vec!["config".to_string()]
@@ -527,8 +527,8 @@ fn extract_control_variables_dotted_doc_path_lifts_head_only() {
 }
 
 #[test]
-fn extract_control_variables_bare_doc_lifts_nothing() {
-    let config = control_config("doc && counter < 3", vec![]);
+fn extract_control_variables_bare_fm_lifts_nothing() {
+    let config = control_config("fm && counter < 3", vec![]);
     assert_eq!(
         extract_control_variables(&config),
         vec!["counter".to_string()]
@@ -536,9 +536,9 @@ fn extract_control_variables_bare_doc_lifts_nothing() {
 }
 
 #[test]
-fn extract_control_variables_doc_and_action_target_merge() {
+fn extract_control_variables_fm_and_action_target_merge() {
     let config = control_config(
-        "doc.counter < doc.total",
+        "fm.counter < fm.total",
         vec![LoopAction::Increment("counter".into())],
     );
     assert_eq!(

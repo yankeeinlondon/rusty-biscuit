@@ -18,11 +18,11 @@
 //! "Lexical" is the group rule: an established group supplies its variables
 //! (an empty object included); known absence is unavailable with
 //! `claudine.outside-group`; unknown membership is execution-dependent during
-//! passive checks. `doc.<name>` always reads the document.
+//! passive checks. `fm.<name>` always reads the document.
 //!
-//! `current` and `current_env` are Darkmatter reserved namespaces, not
-//! lifecycle globals, so a view cannot declare them. The approval scopes refuse
-//! them separately ([`approval_diagnostics`]).
+//! `current` is a Darkmatter reserved namespace, not a lifecycle global, so a
+//! view cannot declare it. The approval scopes refuse it separately
+//! ([`approval_diagnostics`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ pub const PREFLIGHT_UNAVAILABLE: &str = "claudine.preflight-unavailable";
 pub const OUTSIDE_GROUP: &str = "claudine.outside-group";
 
 /// The reserved namespaces whose values exist only once an event fires.
-const LATE_NAMESPACES: [&str; 2] = ["current", "current_env"];
+const LATE_NAMESPACES: [&str; 1] = ["current"];
 
 /// One place lifecycle expressions are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -212,8 +212,8 @@ pub fn runtime_bindings(
 /// approval `scope`, in source order.
 ///
 /// Darkmatter's passive validation reports each definitely unavailable global
-/// and unknown function in every branch; each read of a late namespace
-/// (`current`, `current_env`) follows as an unavailable binding.
+/// and unknown function in every branch; each read of the late namespace
+/// `current` follows as an unavailable binding.
 /// Nothing is evaluated and no provider runs.
 ///
 /// ## Errors

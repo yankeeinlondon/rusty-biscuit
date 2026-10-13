@@ -29,7 +29,7 @@ impl Document {
 
 impl EvaluationLookup for Document {
     fn get(&self, path: &str) -> Option<Value> {
-        let path = path.strip_prefix("doc.").unwrap_or(path);
+        let path = path.strip_prefix("fm.").unwrap_or(path);
         let mut segments = path.split('.');
         let mut current = self.0.get(segments.next()?)?;
         for segment in segments {
@@ -172,11 +172,11 @@ fn runtime_resolution_follows_the_matrix_and_never_reads_the_document() {
                     }
                     Expect::Deferred => unreachable!(),
                 }
-                // `doc.<root>` always reads the document, whatever the global.
+                // `fm.<root>` always reads the document, whatever the global.
                 assert_eq!(
-                    evaluate(&parse(&format!("doc.{root}")).unwrap(), &session).unwrap(),
+                    evaluate(&parse(&format!("fm.{root}")).unwrap(), &session).unwrap(),
                     json!(format!("document {root}")),
-                    "{scope:?}: `doc.{root}`"
+                    "{scope:?}: `fm.{root}`"
                 );
             }
         }
@@ -226,14 +226,15 @@ fn approval_diagnostics_name_late_globals_and_namespaces_in_any_branch() {
         (LifecycleScope::LifecycleShellApproval, "echo {{ group.label }}", "group"),
         (LifecycleScope::LifecycleShellApproval, "echo {{ current.branch }}", "current"),
         (LifecycleScope::SequenceShellApproval, "echo {{ outputs[0] }}", "outputs"),
-        (LifecycleScope::SequenceShellApproval, "echo {{ x || current_env.HOME }}", "current_env"),
+        (LifecycleScope::SequenceShellApproval, "echo {{ x || current.os }}", "current"),
     ] {
         let diagnostics = approval_diagnostics(raw, scope).expect("parses");
         let roots: Vec<_> = diagnostics.iter().filter_map(|d| unavailable_root(&d.error)).collect();
         assert_eq!(roots, vec![root], "{scope:?}: `{raw}`");
     }
-    // Document data, `doc.*`, and namespaces with values at approval pass.
-    for raw in ["echo {{ doc.err }} {{ ctx.repo }} {{ env.HOME }} {{ plan }}"] {
+    // Document data, `fm.*`, and namespaces with values at approval pass;
+    // `current_env` is ordinary document data, not a late namespace.
+    for raw in ["echo {{ fm.err }} {{ ctx.repo }} {{ env.HOME }} {{ plan }} {{ current_env.HOME }}"] {
         for scope in [LifecycleScope::LifecycleShellApproval, LifecycleScope::SequenceShellApproval] {
             assert!(approval_diagnostics(raw, scope).unwrap().is_empty(), "{scope:?}: `{raw}`");
         }

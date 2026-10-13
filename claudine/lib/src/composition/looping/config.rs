@@ -136,9 +136,9 @@ pub fn resolve_loop_config(
 /// - every identifier referenced inside action-value templates.
 ///
 /// Reserved namespaces are excluded because they are supplied by the
-/// runtime rather than resolved from frontmatter: `doc.<head>` references
-/// lift `<head>` as a control variable (the `doc` namespace traverses the
-/// loop's frontmatter state), while bare `doc`, `env`, boolean literals,
+/// runtime rather than resolved from frontmatter: `fm.<head>` references
+/// lift `<head>` as a control variable (the `fm` namespace traverses the
+/// loop's frontmatter state), while bare `fm`, `env`, boolean literals,
 /// and any identifier starting with `_loop_` remain excluded.
 pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
     let mut names = BTreeSet::new();
@@ -183,10 +183,10 @@ fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
         Expr::Variable(path) => {
             let mut segments = path.split('.');
             let head = segments.next().unwrap_or(path);
-            if head == "doc" {
-                // `doc.<path>` traverses the frontmatter object the loop
-                // owns, so lift the first segment after `doc` as a control
-                // variable. Bare `doc` (the whole object) has no single key
+            if head == darkmatter::markdown::compose::expression::FRONTMATTER_ROOT {
+                // `fm.<path>` traverses the frontmatter object the loop
+                // owns, so lift the first segment after `fm` as a control
+                // variable. Bare `fm` (the whole object) has no single key
                 // to own.
                 if let Some(segment) = segments.next() {
                     names.insert(segment.to_string());

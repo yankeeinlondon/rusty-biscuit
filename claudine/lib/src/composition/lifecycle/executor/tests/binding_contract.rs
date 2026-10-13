@@ -170,12 +170,12 @@ fn an_unavailable_global_fails_with_its_reason_and_never_reads_the_document() {
     }
 
     let (outcome, events, ..) = run(
-        json!({"start": {"stack": [{"action": {"message": "{{ doc.err.msg }}/{{ doc.group.label }}"}}]}}),
+        json!({"start": {"stack": [{"action": {"message": "{{ fm.err.msg }}/{{ fm.group.label }}"}}]}}),
         LifecycleSignal::Start,
         json!({"err": {"msg": "document"}, "group": {"label": "g"}}),
     );
     assert!(outcome.evaluation_error.is_none());
-    assert_eq!(events, vec![Emitted::Message("document/g".into())], "`doc.*` reads the document");
+    assert_eq!(events, vec![Emitted::Message("document/g".into())], "`fm.*` reads the document");
 }
 
 #[test]
@@ -321,4 +321,124 @@ fn event_time_values_follow_the_shared_missing_property_table() {
         assert!(outcome.evaluation_error.is_none(), "`{}`: {:?}", case.name, outcome.evaluation_error);
         assert_eq!(document.get("out"), Some(&case.expected), "`{}`", case.name);
     }
+}
+
+/// Acceptance criterion 4: in a lifecycle event the declared globals `err`,
+/// `timing`, and `group` shadow same-named frontmatter keys, which stay
+/// readable as `fm.err`, `fm.timing`, and `fm.group`.
+#[test]
+fn lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads() {
+    let config = parse_lifecycle_config(
+        &json!({"failure": {"stack": [{"action": {"message":
+            "{{ err.msg }}|{{ timing.document_ms }}|{{ group.label }}|\
+             {{ fm.err.msg }}|{{ fm.timing.document_ms }}|{{ fm.group.label }}"}}]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let frontmatter = map(json!({
+        "err": {"msg": "document err"},
+        "timing": {"document_ms": "document timing"},
+        "group": {"label": "document group"}
+    }));
+    let err = LifecycleErrorInfo {
+        kind: "ClaudineError",
+        variant: "Io".to_string(),
+        msg: "real failure".to_string(),
+        snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
+    };
+    let timing = crate::composition::lifecycle::context::LifecycleTiming {
+        document_ms: Some(42),
+        ..Default::default()
+    };
+    let group = map(json!({"label": "real group"}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = StackExecutionContext {
+        timing: Some(&timing),
+        group: Some(&group),
+        ..ctx(
+            LifecycleSignal::Failure,
+            &frontmatter,
+            Some(&err),
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        )
+    };
+    let outcome = context.execute_event(&config);
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Message(
+            "real failure|42|real group|document err|document timing|document group".into()
+        )]
+    );
+
+    // Unmeasured timing is the global's `null`, never the document's value.
+    let (outcome, events, ..) = run(
+        json!({"start": {"stack": [{"action": {"message":
+            "{{ timing || 'unmeasured' }}/{{ fm.timing.document_ms }}"}}]}}),
+        LifecycleSignal::Start,
+        json!({"timing": {"document_ms": "document timing"}}),
+    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(events, vec![Emitted::Message("unmeasured/document timing".into())]);
+}
+
+/// Acceptance criterion 4: frontmatter keys named after the reserved roots
+/// never replace the roots in a lifecycle event; `fm.<name>` reads them.
+#[test]
+fn reserved_roots_shadow_same_named_frontmatter_keys_in_a_lifecycle_event() {
+    let (outcome, events, ..) = run(
+        json!({"start": {"stack": [{"action": {"message":
+            "{{ fm.fm }}|{{ fm.ctx }}|{{ fm.env }}|{{ fm.current }}|{{ fm['fm'] }}|\
+             {{ fm == 'literal' }}|{{ ctx == 'document ctx' }}|{{ env == 'document env' }}"}}]}}),
+        LifecycleSignal::Start,
+        json!({
+            "fm": "literal",
+            "ctx": "document ctx",
+            "env": "document env",
+            "current": "document current"
+        }),
+    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(
+        events,
+        vec![Emitted::Message(
+            "literal|document ctx|document env|document current|literal|false|false|false".into()
+        )]
+    );
+}
+
+/// Acceptance criterion 2: after a lifecycle `set`, bare `fm` and qualified
+/// `fm.x`/`fm['x']` read the updated value, while a bare `fm` object
+/// evaluated before the write keeps its snapshot.
+#[test]
+fn a_set_is_read_by_bare_and_qualified_fm_and_an_earlier_snapshot_is_unchanged() {
+    let (outcome, events, document, _) = run(
+        json!({"start": {"stack": [
+            {"action": {"set": {"before": "{{ fm }}"}}},
+            {"action": {"set": {"x": "new"}}},
+            {"action": {"message": "{{ fm.x }}|{{ fm['x'] }}|{{ x }}|{{ fm.before.x }}"}},
+            {"action": {"set": {"after": "{{ fm }}"}}}
+        ]}}),
+        LifecycleSignal::Start,
+        json!({"x": "old"}),
+    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(events, vec![Emitted::Message("new|new|new|old".into())]);
+    // A mapping `set` destination absent before the write is a known `null`
+    // binding while its own value evaluates, so the snapshot names it.
+    let earlier = json!({"x": "old", "before": null});
+    assert_eq!(document.get("before"), Some(&earlier), "the earlier snapshot");
+    let after = document.get("after").and_then(Value::as_object).expect("bare fm is an object");
+    assert_eq!(after.get("x"), Some(&json!("new")));
+    assert_eq!(after.get("before"), Some(&earlier));
 }

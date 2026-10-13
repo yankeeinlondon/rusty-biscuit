@@ -5616,7 +5616,7 @@ mod byte_parity {
             "seq.md",
             &[
                 ("group", json!({"label": "document"})),
-                ("sequence", json!([{"name": "alpha", "shell": "echo {{ doc.group.label }}"}])),
+                ("sequence", json!([{"name": "alpha", "shell": "echo {{ fm.group.label }}"}])),
             ],
             "Document body.\n",
         );

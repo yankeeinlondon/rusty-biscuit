@@ -366,7 +366,7 @@ fn iter_with_value_expressions<'a>(
 /// authored surface — top-level communication fields and the stack surfaces
 /// [`iter_stack_expression_surfaces`] yields — is prepared from its authored
 /// text and checked against that view. Group membership is not known yet, so
-/// `group` is deferred to runtime. `doc.err` reads the document everywhere.
+/// `group` is deferred to runtime. `fm.err` reads the document everywhere.
 /// Nothing is evaluated and no provider runs.
 ///
 /// A surface whose authored text does not parse is left to the event-time

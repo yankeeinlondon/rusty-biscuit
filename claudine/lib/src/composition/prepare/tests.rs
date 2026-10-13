@@ -1121,47 +1121,61 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
     }
 }
 
-/// The two lazy reserved roots are late-binding for the shell gate too.
+/// The lazy reserved root `current` is late-binding for the shell gate too.
 ///
 /// A lifecycle `shell` command is approved at preflight against early-binding
-/// surfaces only, so a command naming `current.*` or `current_env.*` would be
-/// approved as one string and executed observing another. The rejection is
-/// what keeps the approved bytes and the executed bytes identical (R33).
+/// surfaces only, so a command naming `current.*` would be approved as one
+/// string and executed observing another. The rejection is what keeps the
+/// approved bytes and the executed bytes identical (R33).
 #[test]
-fn lazy_reserved_roots_in_a_lifecycle_shell_command_are_rejected_at_prepare() {
-    for (root, reference) in [
-        ("current", "{{current.branch}}"),
-        ("current_env", "{{current_env.HOME}}"),
-    ] {
-        let dir = TempDir::new().unwrap();
-        let command = format!("rm {reference}");
-        let source = make_source(
-            &dir,
-            &[(
-                "failure",
-                json!({"stack": [{"action": {"shell": command.clone()}}]}),
-            )],
-            "Do the work.",
-        );
+fn the_lazy_current_root_in_a_lifecycle_shell_command_is_rejected_at_prepare() {
+    let dir = TempDir::new().unwrap();
+    let command = "rm {{current.branch}}".to_string();
+    let source = make_source(
+        &dir,
+        &[("failure", json!({"stack": [{"action": {"shell": command.clone()}}]}))],
+        "Do the work.",
+    );
 
-        let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
-            .expect_err("a lazy reserved root cannot be approved at preflight");
-        match err {
-            CompositionError::LifecycleShellResolution { raw, message, .. } => {
-                assert_eq!(raw, command);
-                assert!(
-                    message.contains(root),
-                    "message names the rejected root `{root}`: {message}"
-                );
-            }
-            other => panic!("expected LifecycleShellResolution for `{root}`, got: {other:?}"),
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
+        .expect_err("a lazy reserved root cannot be approved at preflight");
+    match err {
+        CompositionError::LifecycleShellResolution { raw, message, .. } => {
+            assert_eq!(raw, command);
+            assert!(message.contains("current"), "message names the rejected root: {message}");
         }
+        other => panic!("expected LifecycleShellResolution, got: {other:?}"),
     }
+}
+
+/// `current_env` is an ordinary frontmatter property, so lifecycle shell
+/// approval reads the document's value and stamps it into the approved bytes
+/// instead of refusing it as a late root.
+#[test]
+fn current_env_in_a_lifecycle_shell_command_reads_the_frontmatter() {
+    use darkmatter::markdown::compose::expression::Expr;
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            ("current_env", json!({"HOME": "userland"})),
+            ("start", json!({"stack": [{"action": {"shell": "echo {{ current_env.HOME }}"}}]})),
+        ],
+        "Do the work.",
+    );
+
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
+        .expect("an ordinary property is approvable");
+    assert_eq!(
+        first_shell_command(&prepared.lifecycle, crate::composition::LifecycleSignal::Start),
+        Expr::StringLiteral("echo userland".to_string())
+    );
 }
 
 /// Lifecycle shell approval — what a sequence's referenced prompt goes through
 /// at its turn — refuses `group` like every late global, even in a branch that
-/// never runs, and carries Darkmatter's typed cause. `doc.group` reads the
+/// never runs, and carries Darkmatter's typed cause. `fm.group` reads the
 /// document, and its resolved bytes are what was stamped for execution.
 #[test]
 fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_the_document() {
@@ -1200,7 +1214,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
         &dir,
         &[
             ("group", json!({"label": "document"})),
-            ("start", json!({"stack": [{"action": {"shell": "echo {{ doc.group.label }}"}}]})),
+            ("start", json!({"stack": [{"action": {"shell": "echo {{ fm.group.label }}"}}]})),
         ],
         "Do the work.",
     );

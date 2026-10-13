@@ -253,14 +253,14 @@ fn seeded_loop_reports_honest_error_for_non_numeric_control_variable() {
 }
 
 #[test]
-fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
+fn seeded_loop_fm_namespace_condition_retains_readonly_control_value() {
     let source = make_source_with_body(
         &[
             ("counter", json!(0)),
             ("total", json!(2)),
             (
                 "loop",
-                json!({"while": "doc.counter < doc.total", "action": "increment(counter)"}),
+                json!({"while": "fm.counter < fm.total", "action": "increment(counter)"}),
             ),
         ],
         "Step {{ counter }} of {{ total }}",
@@ -298,7 +298,7 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
     .unwrap();
 
     assert!(result.error.is_none(), "expected clean run, got {result:?}");
-    // `doc.counter < doc.total` from 0 runs with counter 0, 1, 2.
+    // `fm.counter < fm.total` from 0 runs with counter 0, 1, 2.
     assert_eq!(result.iteration_count, 3);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
 

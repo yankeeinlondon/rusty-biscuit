@@ -735,7 +735,7 @@ fn run_loop_gate(
 ///
 /// `timing` is the lifecycle stack-only global; the caller owns it (captured
 /// fresh per event so it outlives this borrowed context). `current` is the
-/// invocation's refresh authority for the lazy `current`/`current_env` roots.
+/// invocation's refresh authority for the lazy `current` root.
 #[allow(clippy::too_many_arguments)]
 fn build_loop_stack_context<'a>(
     signal: LifecycleSignal,

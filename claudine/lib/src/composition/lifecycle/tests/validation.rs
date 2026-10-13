@@ -136,11 +136,11 @@ fn err_span_inside_object_literal_key_is_text_not_a_read() {
 }
 
 #[test]
-fn doc_err_inside_container_literal_is_still_allowed() {
+fn fm_err_inside_container_literal_is_still_allowed() {
     let fm = json!({
         "start": {
             "stack": [
-                {"when": "{ err: doc.err }", "action": {"say": "fine"}}
+                {"when": "{ err: fm.err }", "action": {"say": "fine"}}
             ]
         }
     });

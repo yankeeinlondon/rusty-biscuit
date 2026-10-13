@@ -97,7 +97,7 @@ const ALLOWLIST: &[Allowance] = &[
         "invocation_context.rs",
         "std::env::vars",
         1,
-        "lazy `current.agent`/`current.model` read the live environment at reference time, like `current_env`",
+        "lazy `current.agent`/`current.model` read the live environment at reference time",
     ),
     ambient(
         "invocation_context.rs",

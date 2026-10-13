@@ -750,49 +750,32 @@ fn an_event_without_a_refresh_capability_emits_empty_rather_than_probing() {
     );
 }
 
-/// `current_env.<KEY>` rereads the live process environment at the moment the
-/// event reaches it — the contract that replaced the removed `current.env.*`.
+/// `current_env` is an ordinary frontmatter property at event time: the
+/// document's value renders, never the process environment.
 #[test]
-#[serial_test::serial(env_lifecycle_current)]
-fn current_env_rereads_the_process_environment_at_event_time() {
-    let key = "CLAUDINE_TEST_EVENT_TIME_CURRENT_ENV";
+fn current_env_at_event_time_reads_the_frontmatter_property() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"action": "info", "message": format!("v={{{{ current_env.{key} }}}}")}}]}}),
+        &json!({"success": {"stack": [{"action": {"action": "info", "message": "v=[{{ current_env.HOME }}]"}}]}}),
         Path::new("t.md"),
     )
     .unwrap();
-    let fm = map(json!({}));
+    let fm = map(json!({"current_env": {"HOME": "userland"}}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
-    let event = || {
-        ctx(
-            LifecycleSignal::Success,
-            &fm,
-            None,
-            &engine,
-            &shell,
-            &recorder,
-            &harness,
-            Path::new("t.md"),
-        )
-        .execute_event(&config)
-    };
 
-    // SAFETY: serialized via #[serial]; no other thread reads this var.
-    unsafe { std::env::set_var(key, "before") };
-    event();
-    unsafe { std::env::set_var(key, "after") };
-    event();
-    unsafe { std::env::remove_var(key) };
+    ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    )
+    .execute_event(&config);
 
-    assert_eq!(
-        recorder.events(),
-        vec![
-            Emitted::Info("v=before".to_string()),
-            Emitted::Info("v=after".to_string()),
-        ],
-        "a parent-process environment change between events is observable"
-    );
+    assert_eq!(recorder.events(), vec![Emitted::Info("v=[userland]".to_string())]);
 }

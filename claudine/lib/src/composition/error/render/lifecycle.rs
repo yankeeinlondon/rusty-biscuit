@@ -782,7 +782,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .hint(
                     "Use `err` only in `blocked`, `failure`, or `finalize` (where it is \
                      optional). To reference a frontmatter property named `err`, write \
-                     `doc.err` explicitly.",
+                     `fm.err` explicitly.",
                 )
         }
         CompositionError::InvalidFileReference { context, source } => {

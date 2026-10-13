@@ -1154,7 +1154,7 @@ pub enum CompositionError {
     /// (`blocked`, `failure`, and the optional-error `finalize`). Elsewhere the
     /// lifecycle binding catalog declares it unavailable, and Darkmatter's
     /// passive validation rejects a read in any branch at preparation. The
-    /// `doc.err` escape hatch is exempt — it reads the document.
+    /// `fm.err` escape hatch is exempt — it reads the document.
     #[error(
         "lifecycle property `{property}` references `err` in the `{event}` event, \
          which never carries an error ({source_path})",
@@ -1177,13 +1177,13 @@ pub enum CompositionError {
     ///
     /// Shell commands live inside the deferred lifecycle subtree, so they are
     /// unresolved after main compose. Pre-flight resolves each one via DM2 in
-    /// the lifecycle shell approval scope (`doc.*`, `ctx.*`, `env.*`, document
+    /// the lifecycle shell approval scope (`fm.*`, `ctx.*`, `env.*`, document
     /// properties, read-side functions) and stamps the resolved bytes back so
     /// the approved command equals the executed command. This variant covers
     /// every failure DM2 surfaces: malformed expressions, unknown functions,
-    /// and late-binding references (`err`/`timing`/`group`/`current`/
-    /// `current_env`), which are rejected because shell commands are approved
-    /// at pre-flight time, before any event fires.
+    /// and late-binding references (`err`/`timing`/`group`/`current`), which
+    /// are rejected because shell commands are approved at pre-flight time,
+    /// before any event fires.
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
@@ -1856,14 +1856,13 @@ pub enum CompositionError {
     #[error(
         "shell command `{command}` in {task} references `{root}`, which is not available at \
          preflight; shell commands are approved before the sequence starts, so only \
-         early-binding values (`state`, `params`, `doc.*`, `ctx.*`, `env.*`) may be used. \
+         early-binding values (`state`, `params`, `fm.*`, `ctx.*`, `env.*`) may be used. \
          Route work that consumes prior output through a `prompt` or `side_effect` task"
     )]
     SequenceShellLateBinding {
         /// The authored command.
         command: String,
-        /// The offending root (`outputs`, `err`, `timing`, `group`, `current`,
-        /// `current_env`).
+        /// The offending root (`outputs`, `err`, `timing`, `group`, `current`).
         root: String,
         /// A label locating the task.
         task: String,

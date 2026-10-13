@@ -900,8 +900,8 @@ impl<'a> Loader<'a> {
         }
         // The sequence approval scope declares every value that does not
         // exist yet unavailable — `outputs` (the accumulator later tasks push
-        // onto), `err`, `timing`, and `group` — and `current`/`current_env`
-        // are refused with them, in any branch. A parse failure is left to the
+        // onto), `err`, `timing`, and `group` — and `current` is refused with
+        // them, in any branch. A parse failure is left to the
         // resolution below, which reports it typed.
         let scope = LifecycleScope::SequenceShellApproval;
         if let Ok(diagnostics) = approval_diagnostics(raw, scope)
