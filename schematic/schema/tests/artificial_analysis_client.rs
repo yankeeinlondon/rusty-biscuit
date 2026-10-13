@@ -16,8 +16,7 @@ mod common;
 use common::EnvGuard;
 use schematic_schema::artificial_analysis::{
     CritPtEvaluateBody, CritPtEvaluateResponse, CritPtMessage, CritPtSubmission,
-    EvaluateCritPtRequest, ListImageEditingModelsRequest, ListLlmModelsRequest,
-    ListTextToImageModelsRequest, LlmModelsResponse, MediaModelsResponse,
+    LlmModelsResponse, MediaModelsResponse,
 };
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, NoDeclaredError, Outcome};
@@ -40,14 +39,12 @@ fn critpt_client(base_url: &str) -> ArtificialAnalysisCritPt {
         .expect("client builds")
 }
 
-/// The decoded success value of a send, failing the test on a transport
-/// error or a failure outcome.
-fn ok<T>(sent: Result<Response<T, NoDeclaredError>, TransportError>) -> T {
-    let response = sent.expect("a response head arrived");
-    let status = response.meta.status;
-    match response.into_result() {
+/// The decoded success value of an awaited call, failing the test with the
+/// call error, which names the endpoint and any status.
+fn ok<T>(awaited: Result<T, CallError<NoDeclaredError>>) -> T {
+    match awaited {
         Ok(value) => value,
-        Err(error) => panic!("expected success, got {error} with status {status}"),
+        Err(error) => panic!("expected success, got {error}"),
     }
 }
 
@@ -206,7 +203,7 @@ fn media_models_response_one_without_optionals() -> serde_json::Value {
     })
 }
 
-/// Data API exercise of `ListTextToImageModelsRequest` with the
+/// Data API exercise of `list_text_to_image_models` with the
 /// `include_categories=true` query parameter.
 #[tokio::test]
 async fn list_text_to_image_models_emits_include_categories_query() {
@@ -222,16 +219,16 @@ async fn list_text_to_image_models_emits_include_categories_query() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let request = ListTextToImageModelsRequest::default().with_include_categories(true);
-    let body: MediaModelsResponse = ok(client.send(request, &CallOptions::default()).await);
+    let body: MediaModelsResponse =
+        ok(client.list_text_to_image_models().include_categories(true).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
     assert!(body.data.is_empty());
 }
 
-/// `ListLlmModelsRequest::default()` hits `GET /data/llms/models` with no
-/// query string at all.
+/// `list_llm_models()` with no optional values hits `GET /data/llms/models`
+/// with no query string at all.
 #[tokio::test]
 async fn list_llm_models_uses_no_query_string() {
     let mock_server = MockServer::start().await;
@@ -247,7 +244,7 @@ async fn list_llm_models_uses_no_query_string() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let body: LlmModelsResponse = ok(client.send(ListLlmModelsRequest::default(), &CallOptions::default()).await);
+    let body: LlmModelsResponse = ok(client.list_llm_models().await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 1);
@@ -257,7 +254,8 @@ async fn list_llm_models_uses_no_query_string() {
 
 /// With no client credential and `ARTIFICIAL_ANALYSIS_API_KEY` unset, the
 /// request goes out without `x-api-key`, and the provider's 401 comes back
-/// as an envelope failure with its status and raw body.
+/// as an envelope failure with its status and raw body, which an awaited call
+/// returns as `CallError::Api`.
 #[tokio::test]
 #[serial_test::serial]
 async fn missing_credential_sends_anonymously_and_returns_the_401() {
@@ -270,13 +268,14 @@ async fn missing_credential_sends_anonymously_and_returns_the_401() {
         .respond_with(
             ResponseTemplate::new(401).set_body_raw(rejection.as_slice(), "application/json"),
         )
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
     let client = data_client(&mock_server.uri());
     let response = client
-        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .list_llm_models()
+        .full()
         .await
         .expect("a 401 is a response, not a transport error");
 
@@ -293,11 +292,21 @@ async fn missing_credential_sends_anonymously_and_returns_the_401() {
         }
         Outcome::Success(_) => panic!("a 401 must not decode as success"),
     }
+    match client.list_llm_models().await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Undeclared), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), rejection.as_slice());
+            assert_eq!(meta.status.as_u16(), 401);
+            assert_eq!(meta.request.auth, AuthMethod::Anonymous);
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
     let received = mock_server
         .received_requests()
         .await
         .expect("recording is on");
     assert!(received[0].headers.get("x-api-key").is_none());
+    assert!(received[1].headers.get("x-api-key").is_none());
 }
 
 /// A client-level `Credential::api_key` beats a non-empty env-var fallback.
@@ -322,7 +331,8 @@ async fn client_api_key_overrides_env_fallback() {
         .build()
         .expect("client builds");
     let response = client
-        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .list_llm_models()
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -348,7 +358,8 @@ async fn env_api_key_is_used_when_no_explicit_key() {
 
     let client = data_client(&mock_server.uri());
     let response = client
-        .send(ListLlmModelsRequest::default(), &CallOptions::default())
+        .list_llm_models()
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -403,7 +414,7 @@ async fn critpt_evaluate_serializes_populated_batch_metadata() {
         batch_metadata: serde_json::json!({ "run_id": "abc" }),
     };
 
-    let body: CritPtEvaluateResponse = ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
+    let body: CritPtEvaluateResponse = ok(client.evaluate_crit_pt(body).await);
 
     assert_eq!(body.accuracy, 0.0);
     assert_eq!(body.timeout_rate, 0.0);
@@ -451,7 +462,7 @@ async fn critpt_evaluate_omits_null_batch_metadata() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
+    ok(client.evaluate_crit_pt(body).await);
 
     let received = mock_server
         .received_requests()
@@ -480,7 +491,7 @@ async fn list_llm_models_decodes_populated_response() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let body: LlmModelsResponse = ok(client.send(ListLlmModelsRequest::default(), &CallOptions::default()).await);
+    let body: LlmModelsResponse = ok(client.list_llm_models().await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.prompt_options.parallel_queries, 4);
@@ -517,8 +528,8 @@ async fn list_text_to_image_models_decodes_populated_categories() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let request = ListTextToImageModelsRequest::default().with_include_categories(true);
-    let body: MediaModelsResponse = ok(client.send(request, &CallOptions::default()).await);
+    let body: MediaModelsResponse =
+        ok(client.list_text_to_image_models().include_categories(true).await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, Some(true));
@@ -555,8 +566,7 @@ async fn list_image_editing_models_decodes_response_without_optional_fields() {
         .await;
 
     let client = data_client(&mock_server.uri());
-    let body: MediaModelsResponse =
-        ok(client.send(ListImageEditingModelsRequest::default(), &CallOptions::default()).await);
+    let body: MediaModelsResponse = ok(client.list_image_editing_models().await);
 
     assert_eq!(body.status, 200);
     assert_eq!(body.include_categories, None);
@@ -602,7 +612,7 @@ async fn critpt_evaluate_decodes_realistic_response() {
         batch_metadata: serde_json::Value::Null,
     };
 
-    let body: CritPtEvaluateResponse = ok(client.send(EvaluateCritPtRequest::new(body), &CallOptions::default()).await);
+    let body: CritPtEvaluateResponse = ok(client.evaluate_crit_pt(body).await);
 
     assert_eq!(body.accuracy, 0.5);
     assert_eq!(body.timeout_rate, 0.25);

@@ -12,7 +12,7 @@ mod common;
 
 use common::EnvGuard;
 use schematic_schema::github::{
-    GetIssueRequest, GetRepositoryContentRawRequest, GetRepositoryRequest, GetTagReferenceRequest,
+    GetIssueRequest, GetRepositoryCall, GetRepositoryContentRawRequest, GetRepositoryRequest, GetTagReferenceRequest,
     ListOrgReposRequest, ListPullRequestsRequest,
 };
 use schematic_schema::prelude::*;
@@ -55,7 +55,7 @@ fn authorization(request: &Request) -> Option<String> {
 }
 
 /// Every generated GitHub request names `GitHubApi` as its API, which is what
-/// lets `GitHub::send` accept it; a request of another API sent through
+/// lets the generic `GitHub::send` accept it; a request of another API sent through
 /// this client is rejected at compile time (proven over real generated output
 /// by schematic-gen's `slow_generated_types_reject_misuse_at_compile_time`).
 #[test]
@@ -86,10 +86,8 @@ async fn success_metadata_carries_request_id_status_and_headers() {
         .await;
 
     let response = client_without_env(&mock_server.uri())
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -114,7 +112,8 @@ async fn success_metadata_carries_request_id_status_and_headers() {
 }
 
 /// A failure exposes the same metadata as a success, and no request id when
-/// the reply carries none.
+/// the reply carries none. Awaited directly, the failure is a
+/// `CallError::Api` carrying that metadata.
 #[tokio::test]
 async fn failure_metadata_carries_request_id_status_and_headers() {
     let mock_server = MockServer::start().await;
@@ -126,7 +125,7 @@ async fn failure_metadata_carries_request_id_status_and_headers() {
                 .insert_header("x-ratelimit-remaining", "58")
                 .set_body_json(serde_json::json!({ "message": "Not Found" })),
         )
-        .up_to_n_times(1)
+        .up_to_n_times(2)
         .mount(&mock_server)
         .await;
     Mock::given(method("GET"))
@@ -137,10 +136,8 @@ async fn failure_metadata_carries_request_id_status_and_headers() {
 
     let client = client_without_env(&mock_server.uri());
     let response = client
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -161,11 +158,23 @@ async fn failure_metadata_carries_request_id_status_and_headers() {
         ErrorKind::Undeclared
     ));
 
+    match client.get_repository("octo", "widgets").await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Undeclared), "kind: {}", error.kind);
+            assert_eq!(
+                error.body.as_ref(),
+                br#"{"message":"Not Found"}"#.as_slice()
+            );
+            assert_eq!(meta.request_id.as_deref(), Some("EEEE:404"));
+            assert_eq!(meta.status.as_u16(), 404);
+            assert_eq!(meta.request.endpoint_id, "GetRepository");
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
+
     let without_id = client
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
     assert_eq!(without_id.meta.status.as_u16(), 500);
@@ -197,30 +206,30 @@ async fn credential_precedence_per_call_client_env_anonymous() {
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
-    let per_call = CallOptions::new().credential(Credential::access_token("call-token"));
-    let request = || GetRepositoryRequest::new("octo", "widgets");
+    let per_call = with_client_credential
+        .get_repository("octo", "widgets")
+        .credential(Credential::access_token("call-token"));
 
     let mut sources = Vec::new();
-    for (client, options) in [
-        (&with_client_credential, &per_call),
-        (&with_client_credential, &CallOptions::default()),
-        (&without_client_credential, &CallOptions::default()),
+    for call in [
+        per_call,
+        with_client_credential.get_repository("octo", "widgets"),
+        without_client_credential.get_repository("octo", "widgets"),
     ] {
-        let response = client
-            .send(request(), options)
-            .await
-            .expect("a response head arrived");
+        let response = call.full().await.expect("a response head arrived");
         sources.push(response.meta.request.auth.clone());
     }
     env.remove("GITHUB_TOKEN");
     let response = without_client_credential
-        .send(request(), &CallOptions::default())
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
     sources.push(response.meta.request.auth.clone());
     env.remove("GH_TOKEN");
     let response = without_client_credential
-        .send(request(), &CallOptions::default())
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
     sources.push(response.meta.request.auth.clone());
@@ -276,10 +285,8 @@ async fn no_credential_sends_anonymously_and_returns_the_401() {
         .base_url(mock_server.uri())
         .build()
         .expect("client builds")
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a 401 is a response, not a transport error");
 
@@ -300,39 +307,47 @@ async fn no_credential_sends_anonymously_and_returns_the_401() {
     assert_eq!(authorization(&received[0]), None);
 }
 
-/// `CallOptions::anonymous()` sends no credential although both a client
-/// credential and the env fallback are available.
+/// A call chained with `.anonymous()` sends no credential although both a
+/// client credential and the env fallback are available, and awaits to the
+/// decoded data.
 #[tokio::test]
 #[serial]
-async fn anonymous_call_options_send_no_credential_despite_client_and_env() {
+async fn anonymous_call_sends_no_credential_despite_client_and_env() {
     let env = EnvGuard::clear(&TOKEN_VARS);
     env.set("GITHUB_TOKEN", "env-primary");
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(REPO_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(repository_json()))
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
-    let response = GitHub::new()
+    let client = GitHub::new()
         .base_url(mock_server.uri())
         .credentials(Credential::access_token("client-token"))
         .build()
-        .expect("client builds")
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::anonymous(),
-        )
+        .expect("client builds");
+    let response = client
+        .get_repository("octo", "widgets")
+        .anonymous()
+        .full()
         .await
         .expect("a response head arrived");
+    let repository = client
+        .get_repository("octo", "widgets")
+        .anonymous()
+        .await
+        .expect("a 200 decodes to the repository");
 
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
+    assert_eq!(repository.full_name, "octo/widgets");
     let received = mock_server
         .received_requests()
         .await
         .expect("recording is on");
     assert_eq!(authorization(&received[0]), None);
+    assert_eq!(authorization(&received[1]), None);
 }
 
 /// Under GitHub's `same_origin` policy, an absolute link on the base origin
@@ -415,10 +430,8 @@ async fn redirects_follow_the_same_origin_policy() {
         .expect("client builds");
 
     let followed = client
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
     assert_eq!(followed.meta.status.as_u16(), 200);
@@ -438,10 +451,8 @@ async fn redirects_follow_the_same_origin_policy() {
     );
 
     let refused = client
-        .send(
-            GetRepositoryRequest::new("octo", "moved"),
-            &CallOptions::default(),
-        )
+        .get_repository("octo", "moved")
+        .full()
         .await
         .expect("the refused redirect is a response");
     assert_eq!(refused.meta.status.as_u16(), 302);
@@ -469,7 +480,8 @@ async fn redirects_follow_the_same_origin_policy() {
 
 /// A 2xx whose body does not decode is a `MalformedSuccess` failure with the
 /// exact body bytes and the 200 status kept; a JSON endpoint receiving
-/// non-JSON content lands here too.
+/// non-JSON content lands here too. Awaited directly, it is a
+/// `CallError::Api`, not a transport error.
 #[tokio::test]
 async fn undecodable_success_body_is_malformed_success_with_raw_bytes() {
     let mock_server = MockServer::start().await;
@@ -480,11 +492,10 @@ async fn undecodable_success_body_is_malformed_success_with_raw_bytes() {
         .mount(&mock_server)
         .await;
 
-    let response = client_without_env(&mock_server.uri())
-        .send(
-            GetRepositoryRequest::new("octo", "widgets"),
-            &CallOptions::default(),
-        )
+    let client = client_without_env(&mock_server.uri());
+    let response = client
+        .get_repository("octo", "widgets")
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -507,4 +518,87 @@ async fn undecodable_success_body_is_malformed_success_with_raw_bytes() {
     );
     assert!(error.is_decode_failure());
     assert_eq!(error.body.as_ref(), body.as_slice());
+
+    match client.get_repository("octo", "widgets").await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::MalformedSuccess), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), body.as_slice());
+            assert_eq!(meta.status.as_u16(), 200);
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
+}
+
+/// The endpoint method and the generic `send` of the same request object
+/// (kept for code that is generic over requests) reach the same URL and
+/// decode the same data, with only the API struct and the request imported.
+#[tokio::test]
+async fn endpoint_method_and_generic_send_of_its_request_agree() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octo/widgets/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .expect(2)
+        .mount(&mock_server)
+        .await;
+    let client = client_without_env(&mock_server.uri());
+
+    let by_method = client
+        .list_pull_requests("octo", "widgets")
+        .state("closed".to_string())
+        .per_page(5)
+        .await
+        .expect("the endpoint method decodes the list");
+    let by_request = client
+        .send(
+            ListPullRequestsRequest::new("octo", "widgets")
+                .with_state("closed".to_string())
+                .with_per_page(5),
+        )
+        .await
+        .expect("the generic send decodes the list");
+
+    assert!(by_method.is_empty());
+    assert!(by_request.is_empty());
+    let received = mock_server
+        .received_requests()
+        .await
+        .expect("recording is on");
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[0].url, received[1].url);
+    let query = received[0].url.query().expect("a query");
+    assert!(query.contains("state=closed"), "query: {query}");
+    assert!(query.contains("per_page=5"), "query: {query}");
+}
+
+/// A built call does no network work, is `Clone`, and each awaited copy sends
+/// its own request.
+#[tokio::test]
+async fn a_built_call_sends_nothing_until_awaited_and_sends_once_per_copy() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(REPO_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repository_json()))
+        .expect(2)
+        .mount(&mock_server)
+        .await;
+    let client = client_without_env(&mock_server.uri());
+
+    let built: GetRepositoryCall<'_> = client
+        .get_repository("octo", "widgets")
+        .build()
+        .expect("the request encodes");
+    assert!(
+        mock_server
+            .received_requests()
+            .await
+            .expect("recording is on")
+            .is_empty(),
+        "build must not send"
+    );
+
+    let first = built.clone().await.expect("first send");
+    let second = built.await.expect("second send");
+    assert_eq!(first.full_name, "octo/widgets");
+    assert_eq!(second.full_name, "octo/widgets");
 }

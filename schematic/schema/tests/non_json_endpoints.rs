@@ -1,17 +1,15 @@
-//! Text, binary, and empty endpoints decode through the same `send` as JSON
-//! ones, and `send_raw` returns a reply without decoding it.
+//! Text, binary, and empty endpoints decode through endpoint methods exactly
+//! as JSON ones do, and `send_raw`, which stays on request objects, returns a
+//! reply without decoding it.
 //!
-//! Each test uses a real generated request whose definition declares the
+//! Each test uses a real generated endpoint whose definition declares the
 //! codec under test: GitHub `GetRepositoryContentRaw` (text), Bitbucket
 //! `GetSource` (binary), and Samsung Smart TV `LaunchApplicationById` (empty).
-//! Clients use `CallOptions::anonymous()` so a host credential never reaches
-//! the mock.
+//! Calls are anonymous so a host credential never reaches the mock.
 
 use bytes::Bytes;
 use schematic_schema::bitbucket::GetSourceRequest;
-use schematic_schema::github::GetRepositoryContentRawRequest;
 use schematic_schema::prelude::*;
-use schematic_schema::samsung_smart_tv::LaunchApplicationByIdRequest;
 use schematic_schema::schematic_runtime::{Method, RawCompletion};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -38,13 +36,9 @@ async fn text_endpoint_decodes_into_string() {
         .build()
         .expect("client builds");
     let text: String = client
-        .send(
-            GetRepositoryContentRawRequest::new("octo", "widgets", "docs/README.md"),
-            &CallOptions::anonymous(),
-        )
+        .get_repository_content_raw("octo", "widgets", "docs/README.md")
+        .anonymous()
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("success");
 
     assert_eq!(text, "# Widgets\n");
@@ -67,26 +61,24 @@ async fn binary_endpoint_decodes_into_bytes() {
         .build()
         .expect("client builds");
     let body: Bytes = client
-        .send(
-            GetSourceRequest::new("team", "app", "abc123", "logo.png").with_pagelen(10),
-            &CallOptions::anonymous(),
-        )
+        .get_source("team", "app", "abc123", "logo.png")
+        .pagelen(10)
+        .anonymous()
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("success");
 
     assert_eq!(body.as_ref(), PNG_PREFIX);
 }
 
-/// The empty endpoint succeeds with `()` and reads past any body it gets.
+/// The empty endpoint succeeds with `()` and reads past any body it gets,
+/// both awaited directly and through `.full()`.
 #[tokio::test]
 async fn empty_endpoint_decodes_into_unit() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v2/applications/111299001912"))
         .respond_with(ResponseTemplate::new(200).set_body_raw("true", "application/json"))
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
@@ -94,11 +86,15 @@ async fn empty_endpoint_decodes_into_unit() {
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
+    let () = client
+        .launch_application_by_id("111299001912")
+        .anonymous()
+        .await
+        .expect("success");
     let response = client
-        .send(
-            LaunchApplicationByIdRequest::new("111299001912"),
-            &CallOptions::anonymous(),
-        )
+        .launch_application_by_id("111299001912")
+        .anonymous()
+        .full()
         .await
         .expect("a response head arrived");
 

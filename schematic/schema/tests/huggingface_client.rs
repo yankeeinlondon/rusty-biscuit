@@ -10,10 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::EnvGuard;
-use schematic_schema::huggingface::{
-    CreateRepoBody, CreateRepoRequest, GetModelReadmeRequest, GetModelRequest, GetUserRequest,
-    ListModelsRequest, WhoAmIRequest,
-};
+use schematic_schema::huggingface::{CreateRepoBody, WhoAmIRequest};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{
     AuthMethod, ErrorKind, HookError, Outcome, ResponseMeta,
@@ -43,7 +40,8 @@ async fn list_models_request() {
         .await;
 
     let response = client(&mock_server.uri())
-        .send(ListModelsRequest::default(), &CallOptions::default())
+        .list_models()
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -67,13 +65,8 @@ async fn get_model_path_parameter() {
         .await;
 
     let model = client(&mock_server.uri())
-        .send(
-            GetModelRequest::new("bert-base-uncased"),
-            &CallOptions::default(),
-        )
+        .get_model("bert-base-uncased")
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("success");
 
     assert_eq!(model.model_id, "bert-base-uncased");
@@ -104,10 +97,8 @@ async fn create_repo_request_body() {
         ..Default::default()
     };
     let repo = client(&mock_server.uri())
-        .send(CreateRepoRequest::new(body), &CallOptions::default())
+        .create_repo(body)
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("success");
 
     assert_eq!(repo.url, "https://huggingface.co/test-user/my-test-model");
@@ -134,7 +125,8 @@ async fn auth_header_present_from_env_fallback() {
         .await;
 
     let response = client(&mock_server.uri())
-        .send(WhoAmIRequest::default(), &CallOptions::default())
+        .who_am_i()
+        .full()
         .await
         .expect("a response head arrived");
 
@@ -145,8 +137,9 @@ async fn auth_header_present_from_env_fallback() {
     assert_eq!(response.into_result().expect("success").name, "testuser");
 }
 
-/// A 404 is a response, not an error from `send`: the envelope carries the
-/// status and the provider's body unchanged.
+/// A 404 is a response, not a transport error: the envelope carries the
+/// status and the provider's body unchanged, and an awaited call returns
+/// them as `CallError::Api`.
 #[tokio::test]
 async fn not_found_is_an_envelope_failure_with_status_and_body() {
     let mock_server = MockServer::start().await;
@@ -158,11 +151,10 @@ async fn not_found_is_an_envelope_failure_with_status_and_body() {
         .mount(&mock_server)
         .await;
 
-    let response = client(&mock_server.uri())
-        .send(
-            GetModelRequest::new("nonexistent-model"),
-            &CallOptions::default(),
-        )
+    let client = client(&mock_server.uri());
+    let response = client
+        .get_model("nonexistent-model")
+        .full()
         .await
         .expect("a 404 is a response, not a transport error");
 
@@ -175,6 +167,16 @@ async fn not_found_is_an_envelope_failure_with_status_and_body() {
     );
     assert_eq!(error.body.as_ref(), body.as_slice());
     assert!(!response.is_decode_failure());
+
+    match client.get_model("nonexistent-model").await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Undeclared), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), body.as_slice());
+            assert_eq!(meta.status.as_u16(), 404);
+            assert_eq!(meta.request.endpoint_id, "GetModel");
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
 }
 
 /// The client-global `pre_response_json` hook reshapes a successful JSON body
@@ -202,10 +204,8 @@ async fn pre_response_json_reshapes_body_before_decode() {
         .build()
         .expect("client builds");
     let user = client
-        .send(WhoAmIRequest::default(), &CallOptions::default())
+        .who_am_i()
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("the hook made the body decodable");
 
     assert_eq!(user.name, "wrapped-user");
@@ -239,25 +239,16 @@ async fn mutate_response_runs_only_for_its_endpoint() {
         .build()
         .expect("client builds");
 
-    let whoami = client
-        .send(WhoAmIRequest::default(), &CallOptions::default())
-        .await
-        .expect("a response head arrived")
-        .into_result()
-        .expect("success");
-    let other = client
-        .send(GetUserRequest::new("someone"), &CallOptions::default())
-        .await
-        .expect("a response head arrived")
-        .into_result()
-        .expect("success");
+    let whoami = client.who_am_i().await.expect("success");
+    let other = client.get_user("someone").await.expect("success");
 
     assert_eq!(whoami.fullname.as_deref(), Some("Mutated Name"));
     assert_eq!(other.fullname.as_deref(), Some("Original Name"));
 }
 
 /// A hook that refuses the body turns the outcome into `ErrorKind::Hook` and
-/// keeps the original body bytes.
+/// keeps the original body bytes; awaited directly, that is a
+/// `CallError::Api` although the status is 200.
 #[tokio::test]
 async fn refusing_hook_yields_hook_failure_with_original_body() {
     let mock_server = MockServer::start().await;
@@ -275,11 +266,20 @@ async fn refusing_hook_yields_hook_failure_with_original_body() {
         .build()
         .expect("client builds");
     let response = client
-        .send(WhoAmIRequest::default(), &CallOptions::default())
+        .who_am_i()
+        .full()
         .await
         .expect("a response head arrived");
 
     assert_eq!(response.meta.status.as_u16(), 200);
+    match client.who_am_i().await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Hook), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), body.as_slice());
+            assert_eq!(meta.status.as_u16(), 200);
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
     match &response.outcome {
         Outcome::Failure(error) => {
             assert!(
@@ -323,17 +323,13 @@ async fn pre_response_json_skips_error_replies_and_text_endpoints() {
         .expect("client builds");
 
     let missing = client
-        .send(GetModelRequest::new("missing"), &CallOptions::default())
+        .get_model("missing")
+        .full()
         .await
         .expect("a response head arrived");
     let readme = client
-        .send(
-            GetModelReadmeRequest::new("some-model", "main"),
-            &CallOptions::default(),
-        )
+        .get_model_readme("some-model", "main")
         .await
-        .expect("a response head arrived")
-        .into_result()
         .expect("a text endpoint decodes any content type");
 
     assert_eq!(missing.meta.status.as_u16(), 404);
