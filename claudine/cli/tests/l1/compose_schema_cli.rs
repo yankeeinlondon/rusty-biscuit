@@ -1285,11 +1285,13 @@ fn compose_frozen_clarify_reads_its_ordinary_doc_property() {
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     // The eager `spec` file normalizes to an absolute path, so each line is
-    // matched by its fixed text and the file name it ends with.
+    // matched by its fixed text and the file name it ends with. The frozen
+    // prompt's specification line carries trailing whitespace, so both ends
+    // are trimmed.
     let line_with = |prefix: &str| {
         stdout
             .lines()
-            .map(str::trim_start)
+            .map(str::trim)
             .find(|line| line.starts_with(prefix))
             .unwrap_or_else(|| panic!("no line starting {prefix:?}:\n{stdout}"))
     };
