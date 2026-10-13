@@ -22,16 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::support::{Call, Item, SENTINEL, TestApi, builder, closed_port_url, listener, read_head, write_all};
-
-/// Aborts a mock server task when the test ends, however it ends.
-struct AbortOnDrop(JoinHandle<()>);
-
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
+use crate::support::{AbortOnDrop, Call, Item, SENTINEL, TestApi, builder, closed_port_url, listener, read_head, write_all};
 
 /// Serves each accepted connection with `handle`, one at a time, in accept
 /// order.
@@ -90,15 +81,15 @@ fn item() -> Call<Json<Item>> {
 
 /// A test-only streaming decoder: its output owns the live body under stream
 /// bounds and yields each line as it arrives.
-struct Lines;
+pub(crate) struct Lines;
 
-struct LineStream {
+pub(crate) struct LineStream {
     body: LiveBody,
     pending: Vec<u8>,
 }
 
 impl LineStream {
-    async fn next_line(&mut self) -> Option<Result<String, BodyReadError>> {
+    pub(crate) async fn next_line(&mut self) -> Option<Result<String, BodyReadError>> {
         loop {
             if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = self.pending.drain(..=end).collect();

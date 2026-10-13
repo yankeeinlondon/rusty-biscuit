@@ -4,6 +4,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod builder;
+mod client_settings;
 mod compile_fail;
 mod credential_resolution;
 mod decode_boundary;
@@ -17,3 +18,4 @@ mod send;
 mod support;
 mod test_layout;
 mod timing;
+mod whole_send_elapsed;

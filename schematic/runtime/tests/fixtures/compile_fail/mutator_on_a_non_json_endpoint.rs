@@ -30,7 +30,7 @@ impl<D: Decode + Send> EndpointSpec for Get<D> {
 }
 
 fn main() {
-    let _ = Client::<Fixture>::builder(ApiDefinition::new("https://x.invalid"))
+    let _ = Client::<Fixture>::new(ApiDefinition::new("https://x.invalid"))
         .mutate_response::<Get<Text>, _>(|_, text| {
             text.push('!');
             Ok(())

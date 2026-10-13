@@ -133,11 +133,11 @@ note: expected this to be `Github`
   |
   |     type Api = Gitea;
   |                ^^^^^
-note: required by a bound in `ClientBuilder::<A>::mutate_response`
+note: required by a bound in `Client::<A>::mutate_response`
  --> src/client.rs
   |
-  |     pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
   |            --------------- required by a bound in this associated function
   |     where
   |         R: EndpointSpec<Api = A>,
-  |                         ^^^^^^^ required by this bound in `ClientBuilder::<A>::mutate_response`
+  |                         ^^^^^^^ required by this bound in `Client::<A>::mutate_response`

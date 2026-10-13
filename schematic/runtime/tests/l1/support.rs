@@ -1,4 +1,4 @@
-//! Fixtures shared by the managed-send suites: API markers, a configurable
+//! Fixtures shared by the managed-send suites: API tags, a configurable
 //! endpoint, a declared error body, and raw-socket mock helpers.
 //!
 //! Raw-socket mocks cover what wiremock cannot: a cut-off body, a stalled
@@ -9,12 +9,13 @@ use std::net::SocketAddr;
 
 use http::Method;
 use schematic_runtime::{
-    Api, ApiDefinition, Client, ClientBuilder, Decode, EndpointSpec, ErrorBody, InvalidArgument, NoDeclaredError,
+    Api, ApiDefinition, Client, Decode, EndpointSpec, ErrorBody, InvalidArgument, NoDeclaredError,
     RequestParts,
 };
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinHandle;
 
 /// A value that must never appear in stored metadata or `Display` text.
 pub const SENTINEL: &str = "SENTINEL-7f3a9c";
@@ -91,8 +92,8 @@ where
 }
 
 /// A builder for a [`TestApi`] client of `definition`, pointed at `base_url`.
-pub fn builder(definition: ApiDefinition, base_url: &str) -> ClientBuilder<TestApi> {
-    Client::<TestApi>::builder(definition).base_url(base_url)
+pub fn builder(definition: ApiDefinition, base_url: &str) -> Client<TestApi> {
+    Client::<TestApi>::new(definition).base_url(base_url)
 }
 
 /// A client with no authentication pointed at `base_url`.
@@ -126,6 +127,15 @@ pub async fn read_head(stream: &mut TcpStream) -> String {
 pub async fn write_all(stream: &mut TcpStream, bytes: &[u8]) {
     let _ = stream.write_all(bytes).await;
     let _ = stream.flush().await;
+}
+
+/// Aborts a mock server task when the test ends, however it ends.
+pub struct AbortOnDrop(pub JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// A port on loopback that nothing listens on.

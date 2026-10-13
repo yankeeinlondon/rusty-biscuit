@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use http::Method;
 use schematic_runtime::{
-    Api, ApiDefinition, Binary, CallOptions, Client, ClientBuilder, Empty, EndpointSpec, ErrorKind, HookError,
+    Api, ApiDefinition, Binary, CallOptions, Client, Empty, EndpointSpec, ErrorKind, HookError,
     InvalidArgument, Json, NoDeclaredError, RequestParts, ResponseMeta, Text,
 };
 use serde::Deserialize;
@@ -37,7 +37,7 @@ async fn serve(routes: &[(&str, u16, &'static str, &str)]) -> MockServer {
     server
 }
 
-fn base(server: &MockServer) -> ClientBuilder<TestApi> {
+fn base(server: &MockServer) -> Client<TestApi> {
     builder(ApiDefinition::new("https://api.example.invalid"), &server.uri())
 }
 
@@ -279,7 +279,7 @@ impl<A: Api> EndpointSpec for List<A> {
 }
 
 fn tagging<A: Api>(server: &MockServer, transport: &schematic_runtime::SharedTransport) -> Client<A> {
-    Client::<A>::builder(ApiDefinition::new(server.uri()))
+    Client::<A>::new(ApiDefinition::new(server.uri()))
         .transport(transport)
         .mutate_response::<List<A>, _>(|_, listing| {
             listing.seen_by.push(A::NAME.to_owned());
@@ -296,7 +296,7 @@ async fn apis_sharing_an_endpoint_id_never_run_each_others_mutators() {
     let transport = schematic_runtime::SharedTransport::builder().build().expect("transport");
     let alpha = tagging::<Alpha>(&server, &transport);
     let beta = tagging::<Beta>(&server, &transport);
-    let beta_without_hooks = Client::<Beta>::builder(ApiDefinition::new(server.uri())).transport(&transport).build().expect("client");
+    let beta_without_hooks = Client::<Beta>::new(ApiDefinition::new(server.uri())).transport(&transport).build().expect("client");
 
     let from_alpha = alpha.send(List::<Alpha>(std::marker::PhantomData), &CallOptions::new()).await.expect("head");
     let from_beta = beta.send(List::<Beta>(std::marker::PhantomData), &CallOptions::new()).await.expect("head");

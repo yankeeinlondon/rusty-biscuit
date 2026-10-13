@@ -27,7 +27,7 @@ impl EndpointSpec for ListIds {
 }
 
 fn main() {
-    let _ = Client::<Fixture>::builder(ApiDefinition::new("https://x.invalid"))
+    let _ = Client::<Fixture>::new(ApiDefinition::new("https://x.invalid"))
         .mutate_response::<ListIds, _>(|_, ids: &mut String| {
             ids.clear();
             Ok(())

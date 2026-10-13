@@ -38,6 +38,6 @@ async fn misuse(client: Client<Github>) {
 
 fn main() {
     let _ = misuse;
-    let _ = Client::<Github>::builder(ApiDefinition::new("https://x.invalid"))
+    let _ = Client::<Github>::new(ApiDefinition::new("https://x.invalid"))
         .mutate_response::<GiteaListRepos, _>(|_, _repos| Ok(()));
 }

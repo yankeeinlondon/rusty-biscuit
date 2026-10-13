@@ -48,7 +48,7 @@ async fn item_server() -> MockServer {
 }
 
 /// Aborts the wrapped server task when the test ends, pass or fail.
-struct ServerTask(JoinHandle<()>);
+pub(crate) struct ServerTask(JoinHandle<()>);
 
 impl Drop for ServerTask {
     fn drop(&mut self) {
@@ -58,7 +58,7 @@ impl Drop for ServerTask {
 
 /// A keep-alive HTTP/1.1 mock that answers every request on a connection with
 /// an `Item` and counts accepted connections.
-async fn counting_server() -> (String, Arc<AtomicUsize>, ServerTask) {
+pub(crate) async fn counting_server() -> (String, Arc<AtomicUsize>, ServerTask) {
     let (listener, url) = listener().await;
     let accepted = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&accepted);
@@ -221,6 +221,9 @@ async fn a_client_attached_to_a_shared_transport_refuses_every_connection_option
         ("proxy", attached().proxy("http://127.0.0.1:2")),
         ("add_root_certificate", attached().add_root_certificate(b"-----BEGIN CERTIFICATE-----".to_vec())),
         ("danger_accept_invalid_certificates", attached().danger_accept_invalid_certificates()),
+        // Only ownership and delivery (`transport::tests`) of the connect
+        // timeout are tested; a hanging connect cannot be produced portably on
+        // loopback, and enforcing the bound is the HTTP library's job.
         ("connect_timeout", attached().connect_timeout(Duration::from_secs(1))),
     ];
     for (option, conflicting) in cases {
@@ -415,7 +418,7 @@ async fn send_item(client: &Client<TestApi>) -> Result<u16, TransportErrorKind> 
 
 #[cfg_attr(
     windows,
-    ignore = "native Windows: reqwest's built-in rustls client intermittently aborts the process (0xc0000409) against a loopback TLS server under load; see the os skill, windows.md"
+    ignore = "native Windows: aws-lc's CPU-jitter entropy setup aborts the process (0xc0000409) under parallel load; tracked by fix 2026-10-12-windows-aws-lc-entropy-abort"
 )]
 #[tokio::test]
 async fn an_added_pem_root_lets_the_client_reach_a_server_it_signed() {
@@ -432,7 +435,7 @@ async fn an_added_pem_root_lets_the_client_reach_a_server_it_signed() {
 
 #[cfg_attr(
     windows,
-    ignore = "native Windows: reqwest's built-in rustls client intermittently aborts the process (0xc0000409) against a loopback TLS server under load; see the os skill, windows.md"
+    ignore = "native Windows: aws-lc's CPU-jitter entropy setup aborts the process (0xc0000409) under parallel load; tracked by fix 2026-10-12-windows-aws-lc-entropy-abort"
 )]
 #[tokio::test]
 async fn an_added_der_root_lets_the_client_reach_a_server_it_signed() {
@@ -446,7 +449,7 @@ async fn an_added_der_root_lets_the_client_reach_a_server_it_signed() {
 
 #[cfg_attr(
     windows,
-    ignore = "native Windows: reqwest's built-in rustls client intermittently aborts the process (0xc0000409) against a loopback TLS server under load; see the os skill, windows.md"
+    ignore = "native Windows: aws-lc's CPU-jitter entropy setup aborts the process (0xc0000409) under parallel load; tracked by fix 2026-10-12-windows-aws-lc-entropy-abort"
 )]
 #[tokio::test]
 async fn without_the_added_root_the_handshake_fails_as_a_tls_error() {
@@ -460,7 +463,7 @@ async fn without_the_added_root_the_handshake_fails_as_a_tls_error() {
 
 #[cfg_attr(
     windows,
-    ignore = "native Windows: reqwest's built-in rustls client intermittently aborts the process (0xc0000409) against a loopback TLS server under load; see the os skill, windows.md"
+    ignore = "native Windows: aws-lc's CPU-jitter entropy setup aborts the process (0xc0000409) under parallel load; tracked by fix 2026-10-12-windows-aws-lc-entropy-abort"
 )]
 #[tokio::test]
 async fn accepting_invalid_certificates_reaches_a_self_signed_server_that_the_default_rejects() {
